@@ -14,9 +14,8 @@ use crate::objects::{
     cache_block_info::CacheBlockInfo,
     command_line::{CommandLine, SavedCommandLine, StaticCommandLine},
     config::Config,
-    cpu::SecondaryCpuStore,
     cpu_capabilities::CpuCapabilities,
-    cpu_control::{BootCurrentCpu, CurrentTaskSlot, LocalInterruptControl, RawSpinLock},
+    cpu_control::{CurrentTaskSlot, LocalInterruptControl, RawSpinLock},
     cpu_group::CpuGroup,
     cpu_hotplug::CpuHotplugState,
     devfs::DevFs,
@@ -124,10 +123,6 @@ pub struct Context {
     pub lds: Lds,
 
     pub interrupt_stream: InterruptStream,
-    pub boot_current_cpu: BootCurrentCpu,
-    pub secondary_cpus: SecondaryCpuStore,
-    pub boot_cpu_local_interrupt: LocalInterruptControl,
-    pub boot_cpu_current_task: CurrentTaskSlot,
     pub kernel_image: KernelImage,
     pub cpu_group: CpuGroup,
     pub boot_task: BootTask,
@@ -348,10 +343,6 @@ impl Context {
             static_objects: StaticObjects::new(),
             lds: Lds::new(),
             interrupt_stream: InterruptStream::new(),
-            boot_current_cpu: BootCurrentCpu::new(),
-            secondary_cpus: SecondaryCpuStore::new(),
-            boot_cpu_local_interrupt: LocalInterruptControl::new(),
-            boot_cpu_current_task: CurrentTaskSlot::new(),
             kernel_image: KernelImage::new(),
             cpu_group: CpuGroup::new(),
             boot_task: BootTask::new(),
@@ -551,6 +542,31 @@ impl Context {
         }
     }
 
+    pub fn boot_cpu_local_interrupt(&self) -> &LocalInterruptControl {
+        self.cpu_group
+            .boot_cpu_local_interrupt()
+            .expect("CpuGroup.cpus[0] must exist before local interrupt access")
+    }
+
+    pub fn boot_cpu_current_task(&self) -> &CurrentTaskSlot {
+        self.cpu_group
+            .boot_cpu_current_task()
+            .expect("CpuGroup.cpus[0] must exist before current-task access")
+    }
+
+    pub fn current_cpu(&self) -> Option<crate::objects::cpu_group::CurrentCpu> {
+        let current_task_ref = self.boot_cpu_current_task().current();
+        let cpu_ref = self.scheduler.effective_cpu_ref(
+            current_task_ref,
+            &self.kernel_init_flow,
+            &self.user_app_flow,
+            &self.kthreadd_flow,
+            &self.boot_idle_flow,
+            &self.user_task_set,
+        )?;
+        self.cpu_group.current_cpu_ref(cpu_ref)
+    }
+
     #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn setup_smoke_scheduler_task(&mut self, entry: extern "C" fn() -> !) -> EventResult {
         self.scheduler.setup_smoke_scheduler_task(entry)
@@ -607,17 +623,45 @@ impl Context {
     }
 
     pub fn schedule_current(&mut self) -> EventResult {
-        self.scheduler.schedule(
-            &self.cpu_group,
-            &mut self.kernel_init_task,
-            &mut self.kernel_init_flow,
-            &self.user_app_flow,
-            &mut self.kthreadd_task,
-            &mut self.kthreadd_flow,
-            &self.boot_idle_flow,
-            &mut self.user_task_set,
-            &mut self.boot_cpu_local_interrupt,
-            &mut self.boot_cpu_current_task,
+        let Some(current_cpu) = self.current_cpu() else {
+            return crate::objects::state::failed_condition(
+                crate::objects::state::LifecycleEvent::Setup,
+                crate::objects::state::State::Online,
+                crate::objects::state::State::Online,
+                crate::objects::state::State::Online,
+            );
+        };
+        let Self {
+            scheduler,
+            cpu_group,
+            kernel_init_task,
+            kernel_init_flow,
+            user_app_flow,
+            kthreadd_task,
+            kthreadd_flow,
+            boot_idle_flow,
+            user_task_set,
+            ..
+        } = self;
+        let Some((local_interrupt, current_task_slot)) = cpu_group.boot_cpu_controls_mut() else {
+            return crate::objects::state::failed_condition(
+                crate::objects::state::LifecycleEvent::Setup,
+                crate::objects::state::State::Base,
+                crate::objects::state::State::Online,
+                crate::objects::state::State::Online,
+            );
+        };
+        scheduler.schedule(
+            current_cpu,
+            kernel_init_task,
+            kernel_init_flow,
+            user_app_flow,
+            kthreadd_task,
+            kthreadd_flow,
+            boot_idle_flow,
+            user_task_set,
+            local_interrupt,
+            current_task_slot,
         )
     }
 
@@ -629,10 +673,14 @@ impl Context {
     ) -> EventResult {
         self.scheduler
             .replace_user_task_on_runqueue(&self.cpu_group, previous, next, next_pid)?;
+        let current_task_slot = self
+            .cpu_group
+            .boot_cpu_current_task()
+            .expect("boot CPU current-task slot");
         self.scheduler.prepare_simulated_task_switch(
             previous,
             next,
-            &self.boot_cpu_current_task,
+            current_task_slot,
             &self.kernel_init_task,
             &self.kthreadd_task,
             &self.user_task_set,
@@ -641,26 +689,45 @@ impl Context {
     }
 
     pub fn finish_task_switch(&mut self, next: crate::objects::task::TaskRef) -> EventResult {
-        self.scheduler.continue_task_after_switch(
+        let Self {
+            scheduler,
+            cpu_group,
+            kernel_init_task,
+            kernel_init_flow,
+            user_app_flow,
+            kthreadd_task,
+            kthreadd_flow,
+            boot_idle_flow,
+            user_task_set,
+            ..
+        } = self;
+        let current_task_slot = cpu_group
+            .boot_cpu_current_task_mut()
+            .expect("boot CPU current-task slot");
+        scheduler.continue_task_after_switch(
             next,
-            &mut self.boot_cpu_current_task,
-            &mut self.kernel_init_task,
-            &mut self.kernel_init_flow,
-            &self.user_app_flow,
-            &mut self.kthreadd_task,
-            &mut self.kthreadd_flow,
-            &self.boot_idle_flow,
-            &mut self.user_task_set,
+            current_task_slot,
+            kernel_init_task,
+            kernel_init_flow,
+            user_app_flow,
+            kthreadd_task,
+            kthreadd_flow,
+            boot_idle_flow,
+            user_task_set,
         )
     }
 
     #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn smoke_identity_switch(&mut self) -> EventResult {
-        let current = self.boot_cpu_current_task.current();
+        let current = self.boot_cpu_current_task().current();
+        let current_task_slot = self
+            .cpu_group
+            .boot_cpu_current_task()
+            .expect("boot CPU current-task slot");
         self.scheduler.prepare_simulated_task_switch(
             current,
             current,
-            &self.boot_cpu_current_task,
+            current_task_slot,
             &self.kernel_init_task,
             &self.kthreadd_task,
             &self.user_task_set,
@@ -713,14 +780,18 @@ impl Context {
                 crate::objects::state::State::Online,
             );
         }
-        let previous = self.boot_cpu_current_task.current();
+        let previous = self.boot_cpu_current_task().current();
         if previous.same_identity(next) {
             return Ok(());
         }
+        let current_task_slot = self
+            .cpu_group
+            .boot_cpu_current_task()
+            .expect("boot CPU current-task slot");
         self.scheduler.prepare_simulated_task_switch(
             previous,
             next,
-            &self.boot_cpu_current_task,
+            current_task_slot,
             &self.kernel_init_task,
             &self.kthreadd_task,
             &self.user_task_set,
@@ -731,14 +802,18 @@ impl Context {
     #[cfg_attr(not(app_user_boot), allow(dead_code))]
     pub fn commit_kernel_init_dispatch(&mut self) -> EventResult {
         let next = crate::objects::task::TaskRef::KERNEL_INIT;
-        let previous = self.boot_cpu_current_task.current();
+        let previous = self.boot_cpu_current_task().current();
         if previous.same_identity(next) {
             return Ok(());
         }
+        let current_task_slot = self
+            .cpu_group
+            .boot_cpu_current_task()
+            .expect("boot CPU current-task slot");
         self.scheduler.prepare_simulated_task_switch(
             previous,
             next,
-            &self.boot_cpu_current_task,
+            current_task_slot,
             &self.kernel_init_task,
             &self.kthreadd_task,
             &self.user_task_set,

@@ -98,7 +98,7 @@ pub fn run() -> SmokeResult {
     if !ctx.sched_clock.setup_local_irq_disable_enable_used()
         || !ctx
             .sched_clock
-            .setup_local_irq_guard_used_by(&ctx.boot_cpu_local_interrupt)
+            .setup_local_irq_guard_used_by(ctx.boot_cpu_local_interrupt())
     {
         printk::write_str("sched clock local irq guard facts invalid\n");
         return SmokeResult::Failed;

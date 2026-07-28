@@ -12,6 +12,9 @@ Rootfs/user fixture、发行版 smoke、BusyBox-init scripted interaction 和 pa
 统一 Task carrier、独立 TaskFlow 生命周期、exec handoff 与 fresh child identity 的测试规则见
 [`task-taskflow.md`](task-taskflow.md)。
 
+CPU/CpuGroup 唯一所有权、CpuRef、CurrentCPU selector 与迁移/Flow handoff 的测试规则见
+[`cpu.md`](cpu.md)。
+
 运行期 `declare` 的 parser/checker/derive/JSON/view、128 次声明点压力与差分门禁见
 [`dynamic-instance-declaration.md`](dynamic-instance-declaration.md)。
 
@@ -26,7 +29,7 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
 `tools2` 本轮以完整 `spec/model/main.spec` 和既有最小 fixture 共同验收。独立入口是
 `make -C tools2 test`，不得加入根目录默认 `make test`。测试必须覆盖：
 
-- 每类 schema/version/producer 校验，含 version 5、拒绝 tools2 v1/v2/v3/v4/老工具/旧 snapshot 和老工具不被
+- 每类 schema/version/producer 校验，含 version 6、拒绝 tools2 v1/v2/v3/v4/v5、老工具/旧 snapshot 和老工具不被
   tools2 产物误用的边界；
 - Transition/Action 调用规范化、命名 payload 绑定、受控值/系统引用类型错误和带 span unsupported；
 - self、向下、向上、同级、跨分支坐标，默认 `3/3`、整数、`all`、分支预算独立和 frontier truncation；
@@ -59,12 +62,12 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
 - until fixture 覆盖根发送前、同步 drives 发送前、emits 入队前、有序候选选择后、动态 receiver、已有
   FIFO、未提交祖先和重复目标；目标不得拥有 Signal ID、`signal_sent`、enqueue/receive/handler 事件，
   boundary snapshot 必须精确等于发送前稳定状态。
-- reached 返回 0并生成带 provenance 的 v5 snapshot；既有 completed response 保持 completed，未提交
+- reached 返回 0并生成带 provenance 的 v6 snapshot；既有 completed response 保持 completed，未提交
   ancestor 和未处理 FIFO 变为 stopped，summary 不产生 pending；failed/bounded/unreached 返回 1且不
   生成 snapshot。
 - 提交的 `tools2/scenarios/Kernel.Enable.snapshot.json` 必须与从仓库根运行
   `tools2/bin/pyveri -u Kernel.Enable --snapshot-out /tmp/kernel-enable-presend.snapshot.json` 得到的 canonical
-  bytes 逐字节一致，并验证 v5、稳定 model fingerprint、发送前 boundary provenance、关键状态、
+  bytes 逐字节一致，并验证 v6、稳定 model fingerprint、发送前 boundary provenance、关键状态、
   Linux RV64 boot spec 采纳及其 a0/a1/satp/物理 PMD 要求、image 文件构造事实、精确 a0/a1/satp
   交接、ordered boot/DTB 和 BootTaskRef 事实。该边界必须有 `task_concurrency_closed()`，但尚未有
   `interrupt_concurrency_closed()`、`context_is(SystemExclusive)` 或旧的 firmware SIE 事实。
@@ -84,46 +87,53 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
   `Kernel` 为 `Ready`，`Config/Lds` 为 `Online`，`BootInitFlow` 仍为 `Base`；初态即 Online 的
   `BootArgs/BootCpuRegisters` 与 `LinuxRiscv64KernelBootSpec` 仍可访问，snapshot 还必须包含精确的
   a0/a1/satp 交接、物理 PMD 对齐及 image 构造叶事实；不得提前包含 Kernel 入口才建立的中断关闭事实。
-  前 13 个 Signal 的创建顺序必须精确保留三个 Human 创建的 Computer Signal、三个子 System 的三次
+  前 15 个 Signal 的创建顺序必须精确保留三个 Human 创建的 Computer Signal、三个子 System 的三次
   Preset、三次 Setup、Config 先于 Lds Enable，以及 `Computer -> Riscv64Platform -> OpenSBI` 的异步
-  FIFO 交接；13 个 Signal 的 identity、delivery、cause、handler 和 target before/after state 必须逐项
-  固定。三个 Computer Signal 的 source/delivery 必须分别为 Human/drives、Human/drives、Human/emits，
-  均无共同 cause_id；三个 emits 必须逐个 position=1 入队并以 remaining=0 出队。边界处 Kernel.Enable
-  不得已有 Signal ID 或收发/handler 事件，且不得出现 `BootArgs` 或 `BootCpuRegisters` 生命周期 Signal。
+  FIFO 交接，以及 OpenSBI 同步驱动 CpuGroup 原子发布 `CpuGroup.cpus[0]`；15 个 Signal 的 identity、
+  delivery、cause、handler 和 target before/after state 必须逐项固定。三个 Computer Signal 的
+  source/delivery 必须分别为 Human/drives、Human/drives、Human/emits，均无共同 cause_id；三个 emits
+  必须逐个 position=1 入队并以 remaining=0 出队。边界处 CpuGroup 与 CPU0 均为 Prepared，并恰有一个
+  `indexed_instance_declared` 事件；Kernel.Enable 不得已有 Signal ID 或收发/handler 事件，且不得出现
+  `BootArgs` 或 `BootCpuRegisters` 生命周期 Signal。
   同一次 derive 的 model/derive/view fingerprint 必须一致；compact、verbose 和 animation v3 都只能消费
   该推导，不得各自重建或重排 Signal。
 - 主模型的 `tools2/bin/pyveri -u BootInitFlow.Preset` 必须同样从默认 Human 外部编排开始，并证明实际
-  sender 是 OpenSBI：前 13 个 Signal 后，`sig-0014 OpenSBI -> Kernel.Enable` 必须以 emits/cause 0013
+  sender 是 OpenSBI：前 15 个 Signal后，`sig-0016 OpenSBI -> Kernel.Enable` 必须以 emits/cause 0013
   入队、出队和 receive，全部 Kernel 入口 guard 成功并开始 `Kernel.Transition::Enable@Ready`；随后
-  `sig-0015 Kernel -> Kernel.AcceptEnable` 必须以 drives/cause 0014 完成 Action 并提交
-  `kernel_enable_accepted(Kernel)`。在下一个 `BootInitFlow.Preset` 创建前 reached 时，0014 因未提交
+  `sig-0017 Kernel -> Kernel.AcceptEnable` 与 `sig-0018 Kernel -> BootInitFlow.AssignCpuRef` 必须以
+  drives/cause 0016 完成 Action，分别提交 `kernel_enable_accepted(Kernel)` 和
+  `BootInitFlow.cpu_ref = BootCPURef`。在下一个 `BootInitFlow.Preset` 创建前 reached 时，0016 因未提交
   ancestor 显示 stopped 而不是 rejected/failed，Kernel 仍为 Ready、BootInitFlow 仍为 Base；boundary
-  snapshot 必须等于 0015 after snapshot，且不得存在 BootInitFlow Signal identity、send/receive/handler
-  事件。该验收不得用显式 `-t Kernel.Enable` 的 Human 根 source 证明真实 sender。
+  snapshot 必须等于 0018 after snapshot，且不得存在 BootInitFlow lifecycle Signal identity、
+  send/receive/handler 事件。该验收不得用显式 `-t Kernel.Enable` 的 Human 根 source 证明真实 sender。
 - 提交的 `tools2/scenarios/BootInitFlow.Setup.snapshot.json` 必须与从模型初态执行
   `tools2/bin/pyveri -u BootInitFlow.Setup --snapshot-out /tmp/boot-init-flow-setup-presend.snapshot.json`
   得到的 canonical bytes 逐字节一致，并从仓库根与其它 cwd 重建出相同结果。当前正式模型下其
-  SHA-256 固定为 `9a321a12075d3d078fa4356ee0a250de6bea74f7389a6f5880dc6701413ff250`，model
-  fingerprint 固定为 `sha256:0c95ef3df8785912443c07f9a30797f31d4ce781878b27b49affc5e49a490faa`。
+  SHA-256 固定为 `fb84ff255d720c8844cb467e07432f4fb91582d955c26edcd080101138e21c1f`，model
+  fingerprint 固定为 `sha256:321ebcd7a70ed559c8c2c61d3f907988b10047e21c56c6048567ea0d3826c8c0`。
   `tools2/bin/pyveri -t BootInitFlow.Setup` 必须自动采用该第 3 组入口 scenario；显式 `-s` 仍优先，
   其它模型必须因 stale fingerprint 拒绝，缺失 canonical scenario 必须在 derive 前返回 2。
-- `-u BootInitFlow.Setup` 的真实上游推导必须精确包含 50 个 Signal，并逐项固定
-  `sig-0014..sig-0050` 在 charter 因果账本中的 source、target、canonical name、delivery、cause、
-  handler kind/id、target before/after state 和创建顺序。0014 必须是唯一 stopped Signal；0015–0050
-  必须是 36 个 completed drives，完整 summary 必须为 49 completed、1 stopped、0 failed/rejected/
-  truncated/pending。0016 只允许一对 `SingleTaskContext` enter/exit，enter 位于首个 child send 前、
-  exit 位于最后一个 child response 后和 0016 commit 前；不得出现 Lock 或 fresh-instance event。
+- `-u BootInitFlow.Setup` 的真实上游推导必须精确包含 49 个 Signal，并逐项固定
+  `sig-0016..sig-0049` 在 charter 因果账本中的 source、target、canonical name、delivery、cause、
+  handler kind/id、target before/after state 和创建顺序。0016 必须是唯一 stopped Signal；0017–0049
+  必须是 33 个 completed drives，完整 summary 必须为 48 completed、1 stopped、0 failed/rejected/
+  truncated/pending。0019 只允许一对 `SingleTaskContext` enter/exit，enter 位于首个 child send 前、
+  exit 位于最后一个 child response 后和 0019 commit 前；第 1 组只有 CPU0 的一个 indexed declaration，
+  第 2 组不得出现 Lock 或其它 fresh-instance event。
 - `BootInitFlow.Setup` 发送前 boundary 必须来自 `spec/model/systems/kernel.spec` 中 Kernel.Enable 的真实
-  drives 位置，source/target 为 `Kernel -> BootInitFlow`、delivery 为 drives、cause 为 0014，snapshot
-  精确等于 0016 after snapshot。Kernel 必须保持 Ready、BootInitFlow 必须为 Prepared；入口关键对象
+  drives 位置，source/target 为 `Kernel -> BootInitFlow`、delivery 为 drives、cause 为 0016，snapshot
+  精确等于 0019 after snapshot。Kernel 必须保持 Ready、BootInitFlow 必须为 Prepared；入口关键对象
   状态必须与 charter 账本一致，`task_flow_started(BootInitFlow)`、中断关闭、物理/虚拟 `tp/sp/gp`、
-  early event、DTB/fixmap、VM translation 和 Soc early-platform 事实必须存在。边界不得创建、发送、
-  接收或处理 BootInitFlow.Setup。compact text 必须显示 reached/before-send 与 0014 stopped，verbose
-  text 必须保留真实 Human root、0016 identity、handler 和 reached boundary，结构化 event 必须保留
-  context，且两种 text render 都不得改变 derive/view/snapshot。
-- 同一 `BootInitFlow.Setup` 边界的 animation v3 必须精确包含 50 request、46 feedback、3 settle、
-  1 terminal，共 100 moments。0014 terminal 表示已 receive 的 stopped emits ancestor；0016 feedback
-  必须晚于 0017–0050 的全部嵌套 feedback，0011–0013 仍各自 settle，边界 Signal 不得产生 moment。
+  early event、DTB/fixmap、VM translation 和 Soc early-platform 事实必须存在。结构化 Signal 必须把
+  `CurrentCPU` resolution 固定为 source flow `BootInitFlow`、source ref `BootCPURef` 与 canonical target
+  `CpuGroup.cpus[0]`，并证明不存在 `BootCurrentCPU` state/instance。边界不得创建、发送、接收或处理
+  BootInitFlow.Setup。compact text 必须显示 reached/before-send 与 0016 stopped，verbose text 必须保留
+  真实 Human root、0019 identity、handler 和 reached boundary，结构化 event 必须保留 context，且两种
+  text render 都不得改变 derive/view/snapshot。
+- 同一 `BootInitFlow.Setup` 边界的 animation v3 必须精确包含 49 request、45 feedback、3 settle、
+  1 terminal，共 98 moments，并显示 28 个唯一 system 节点及一个 Human external 节点。0016 terminal
+  表示已 receive 的 stopped emits ancestor；0019 feedback 必须晚于 0020–0049 的全部嵌套 feedback，
+  0011–0013 仍各自 settle，边界 Signal 不得产生 moment。
 - 第 2 组负例必须从 canonical 快照删除单个真实前提并验证首个失败边界：缺失 Kernel acceptance、
   BootTask `OnCpu/Live/Invalid` 或 initial-flow binding 时不得创建第一个入口 child；缺失入口
   a0/a1/satp 或 VM 条件时不得越过消费它的 handler；缺失任一所选早期对象 guard 时，失败 child 后
@@ -152,8 +162,8 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
   request reveal；虚拟 `$root` 和任意 parent 的 sibling order 稳定按 `first_seen` 升序，feedback/settle/
   terminal 不得改变首次出现或同级顺序。至少四层 parent 树不得因层级方向或当前 Signal 重排；重复生成、
   sibling 稳定性与任意前后往返必须恢复完全相同的 frame 和 sibling order。
-- 主模型 `-u Kernel.Enable` 的 animation v3 必须精确包含 13 个 Signal、26 个 moment：13 request、
-  10 feedback、3 settle。request 顺序服从实际 receive/FIFO，Preset/Setup 的父 feedback 位于同步子
+- 主模型 `-u Kernel.Enable` 的 animation v3 必须精确包含 15 个 Signal、30 个 moment：15 request、
+  12 feedback、3 settle。request 顺序服从实际 receive/FIFO，Preset/Setup/CpuGroup Preset 的父 feedback 位于同步子
   feedback 之后；Computer、Riscv64Platform、OpenSBI 的 Enable 分别在 emits settle 提交且不得伪装成
   feedback。Preset 三个
   子系统依次 Prepared 后 Computer 才变为 Prepared；Setup 的平台、OpenSBI、Kernel（含 Config/Lds）
@@ -227,7 +237,7 @@ smoke 测试生成时必须先判定测试目标类别，再决定是否依赖�
 
 `KernelEnvironmentBound` 用于 `MemBlock`、`CpuGroup`、`Scheduler` 这类启动路径中的真实对象或事实集合。它们通常只出现一次，或脱离内核环境后测试意义不足。生成的 smoke case 可以直接读取 `Context` 中的生产对象，并验证阶段事实、对象事实和关键派生行为。
 
-`CpuGroup` 相关 smoke 必须归类为 `KernelEnvironmentBound`。测试目标是启动路径建立的真实 CPU 拓扑事实，而不是本地构造一个假的 CPU 组。生成测试应直接观察 `Context` 中的生产 `CpuGroup`、CPU 实例事实和 checkpoint facts，并至少断言：logical id `0` 通过 `BootCPURef` 指向 `BootCPU`；boot CPU 处于 possible/present/online；secondary CPU 在 bringup 前处于 possible/present/not-online；logical id 与 hartid 唯一；possible/present/online 集合元素是 CPU 引用而不是额外 CPU 本体对象。测试不得为了这些断言增加 `test_*` CPU API。
+`CpuGroup` 相关 smoke 必须归类为 `KernelEnvironmentBound`。测试目标是启动路径建立的真实 CPU 拓扑事实，而不是本地构造一个假的 CPU 组。生成测试应直接观察 `Context` 中的生产 `CpuGroup`、CPU 实例事实和 checkpoint facts，并至少断言：logical id `0` 通过 `BootCPURef` 指向 canonical `CpuGroup.cpus[0]`，`BootCPU` 只作为该元素的角色别名；boot CPU 处于 possible/present/online；secondary CPU 在 bringup 前处于 possible/present/not-online；logical id 与 hartid 唯一且可双向定位；possible/present/online 集合元素是 CpuRef 而不是额外 CPU 本体或 view。测试不得为了这些断言增加 `test_*` CPU API。
 
 ## 场景三段体
 

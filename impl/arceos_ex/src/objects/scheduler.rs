@@ -4,7 +4,7 @@ use super::{
     cpu_control::{
         CurrentTaskSlot, LocalInterruptControl, PreemptionControl, RawSpinLock, RcuReadSide,
     },
-    cpu_group::CpuGroup,
+    cpu_group::{CpuGroup, CurrentCpu},
     default_sched_root_domain::DefaultSchedRootDomain,
     init_mm::InitMm,
     mutex::{Mutex, MutexLockOutcome, MutexOwner},
@@ -653,13 +653,16 @@ impl Scheduler {
 
     pub fn setup(
         &mut self,
-        cpu_group: &CpuGroup,
+        cpu_group: &mut CpuGroup,
         per_cpu_storage: &PerCpuStorage,
         boot_task: &mut BootTask,
         init_mm: &InitMm,
-        local_interrupt: &mut LocalInterruptControl,
-        current_task_slot: &mut CurrentTaskSlot,
     ) -> EventResult {
+        let Some(boot_cpu) = cpu_group.boot_cpu() else {
+            return self.failed_setup();
+        };
+        let boot_cpu_ref = boot_cpu.cpu_ref();
+        let boot_cpu_hartid = boot_cpu.hartid();
         if self.lifecycle.state() != State::Prepared
             || self.default_root_domain.state() != State::Ready
             || self.bit_wait_queue_table.state() != State::Prepared
@@ -669,31 +672,49 @@ impl Scheduler {
             || per_cpu_storage.state() != State::Ready
             || boot_task.state() != State::OnCpu
             || init_mm.state() != State::Ready
-            || local_interrupt.state() != State::Ready
-            || current_task_slot.state() != State::Ready
+            || cpu_group
+                .boot_cpu_local_interrupt()
+                .map(|control| control.state() != State::Ready)
+                .unwrap_or(true)
+            || cpu_group
+                .boot_cpu_current_task()
+                .map(|slot| slot.state() != State::Ready)
+                .unwrap_or(true)
         {
             return self.failed_setup();
         }
 
-        self.boot_runqueue.setup(
-            cpu_group,
-            per_cpu_storage,
-            &self.default_root_domain,
-            &*boot_task,
-            local_interrupt,
-            &mut self.boot_init_preemption,
-        )?;
+        {
+            let Some(local_interrupt) = cpu_group.boot_cpu_local_interrupt_mut() else {
+                return self.failed_setup();
+            };
+            self.boot_runqueue.setup(
+                boot_cpu_ref,
+                boot_cpu_hartid,
+                per_cpu_storage,
+                &self.default_root_domain,
+                &*boot_task,
+                local_interrupt,
+                &mut self.boot_init_preemption,
+            )?;
+        }
         self.setup_cpu_runqueue_metadata(cpu_group)?;
-        self.boot_idle_setup_state.setup(
-            boot_task,
-            init_mm,
-            &mut self.boot_runqueue,
-            &mut self.boot_idle_rcu_read_side,
-            cpu_group,
-            local_interrupt,
-            &mut self.boot_idle_preemption,
-            current_task_slot,
-        )?;
+        {
+            let Some((local_interrupt, current_task_slot)) = cpu_group.boot_cpu_controls_mut()
+            else {
+                return self.failed_setup();
+            };
+            self.boot_idle_setup_state.setup(
+                boot_task,
+                init_mm,
+                &mut self.boot_runqueue,
+                &mut self.boot_idle_rcu_read_side,
+                boot_cpu_ref,
+                local_interrupt,
+                &mut self.boot_idle_preemption,
+                current_task_slot,
+            )?;
+        }
         if !self.setup_facts_hold(cpu_group) {
             return self.failed_setup();
         }
@@ -730,7 +751,7 @@ impl Scheduler {
     #[allow(clippy::too_many_arguments)]
     pub fn schedule(
         &mut self,
-        cpu_group: &CpuGroup,
+        current_cpu: CurrentCpu,
         kernel_init_task: &mut KernelInitTask,
         kernel_init_flow: &mut KernelInitFlow,
         user_app_flow: &UserAppFlow,
@@ -767,9 +788,12 @@ impl Scheduler {
             self.scheduler_rcu_context_switch_count =
                 self.scheduler_rcu_context_switch_count.wrapping_add(1);
             let current_rq = self.resolve_current_runqueue_ref(
-                cpu_group,
-                kernel_init_task,
-                kthreadd_task,
+                current_cpu,
+                kernel_init_flow,
+                user_app_flow,
+                kthreadd_flow,
+                boot_idle_flow,
+                user_task_set,
                 prev_ref,
             )?;
             self.boot_runqueue
@@ -846,7 +870,7 @@ impl Scheduler {
     #[allow(clippy::too_many_arguments)]
     pub fn schedule_idle(
         &mut self,
-        cpu_group: &CpuGroup,
+        current_cpu: CurrentCpu,
         kernel_init_task: &mut KernelInitTask,
         kernel_init_flow: &mut KernelInitFlow,
         user_app_flow: &UserAppFlow,
@@ -866,7 +890,7 @@ impl Scheduler {
         }
 
         self.schedule(
-            cpu_group,
+            current_cpu,
             kernel_init_task,
             kernel_init_flow,
             user_app_flow,
@@ -885,22 +909,32 @@ impl Scheduler {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn resolve_current_runqueue_ref(
         &mut self,
-        cpu_group: &CpuGroup,
-        kernel_init_task: &mut KernelInitTask,
-        kthreadd_task: &mut KthreaddTask,
+        current_cpu: CurrentCpu,
+        kernel_init_flow: &KernelInitFlow,
+        user_app_flow: &UserAppFlow,
+        kthreadd_flow: &KthreaddFlow,
+        boot_idle_flow: &BootIdleFlow,
+        user_task_set: &UserTaskSet,
         current_task_ref: TaskRef,
     ) -> Result<CurrentRunQueueRef, EventError> {
-        let Some(cpu_id) =
-            self.current_task_cpu_id(current_task_ref, kernel_init_task, kthreadd_task)
-        else {
+        let Some(cpu_ref) = self.effective_cpu_ref(
+            current_task_ref,
+            kernel_init_flow,
+            user_app_flow,
+            kthreadd_flow,
+            boot_idle_flow,
+            user_task_set,
+        ) else {
             return Err(self.failed_schedule_condition());
         };
-
-        let Some(runqueue_ref) = self.resolve_runqueue_ref_for_cpu(cpu_group, cpu_id) else {
+        if current_cpu.cpu_ref() != cpu_ref {
             return Err(self.failed_schedule_condition());
-        };
+        }
+        let cpu_id = cpu_ref.logical_id();
+        let runqueue_ref = CurrentRunQueueRef::cpu_owned(cpu_id);
         if cpu_id != runqueue_ref.cpu_id() {
             return Err(self.failed_schedule_condition());
         }
@@ -909,28 +943,36 @@ impl Scheduler {
         Ok(runqueue_ref)
     }
 
-    fn current_task_cpu_id(
+    pub fn effective_cpu_ref(
         &self,
         current_task_ref: TaskRef,
-        kernel_init_task: &mut KernelInitTask,
-        kthreadd_task: &mut KthreaddTask,
-    ) -> Option<usize> {
+        kernel_init_flow: &KernelInitFlow,
+        user_app_flow: &UserAppFlow,
+        kthreadd_flow: &KthreaddFlow,
+        boot_idle_flow: &BootIdleFlow,
+        user_task_set: &UserTaskSet,
+    ) -> Option<CpuRef> {
         if current_task_ref == TaskRef::BOOT {
-            Some(BootTask::canonical_cpu_id())
+            boot_idle_flow.cpu_ref()
         } else if current_task_ref == TaskRef::KERNEL_INIT {
-            Some(kernel_init_task.cpu_id())
+            let user_cpu_ref = user_app_flow.cpu_ref();
+            if user_cpu_ref.is_none() {
+                kernel_init_flow.cpu_ref()
+            } else {
+                user_cpu_ref
+            }
         } else if current_task_ref == TaskRef::KTHREADD {
-            Some(kthreadd_task.cpu_id())
+            kthreadd_flow.cpu_ref()
         } else if current_task_ref == TaskRef::SMOKE_SCHEDULER {
-            Some(self.smoke_scheduler_task.cpu_id())
+            self.smoke_scheduler_task.cpu_ref()
         } else if current_task_ref == TaskRef::SMOKE_MUTEX {
-            Some(self.smoke_mutex_task.cpu_id())
+            self.smoke_mutex_task.cpu_ref()
         } else if current_task_ref == TaskRef::SMOKE_RWSEM {
-            Some(self.smoke_rwsem_task.cpu_id())
+            self.smoke_rwsem_task.cpu_ref()
         } else if current_task_ref == TaskRef::SMOKE_RWLOCK {
-            Some(self.smoke_rwlock_task.cpu_id())
+            self.smoke_rwlock_task.cpu_ref()
         } else if current_task_ref.is_user() {
-            Some(self.boot_runqueue.cpu_id())
+            user_task_set.cpu_ref_for_task(current_task_ref)
         } else {
             None
         }
@@ -1219,7 +1261,7 @@ impl Scheduler {
                 current_task_slot.commit_switch_to(task_ref)
             }
             _ if task_ref.is_user() => {
-                user_task_set.continue_task(task_ref)?;
+                user_task_set.continue_task(task_ref, self.boot_runqueue.cpu_ref())?;
                 current_task_slot.commit_switch_to(task_ref)
             }
             _ => self.failed_switch_to(),
@@ -1615,29 +1657,6 @@ impl Scheduler {
             && self.boot_runqueue.contains_task_ref(previous)
     }
 
-    fn resolve_runqueue_ref_for_cpu(
-        &self,
-        cpu_group: &CpuGroup,
-        cpu_id: usize,
-    ) -> Option<CurrentRunQueueRef> {
-        let cpu = cpu_group.cpu(cpu_id)?;
-        let runqueue = self.cpu_runqueue(cpu_id)?;
-        if cpu_group.state() == State::Ready
-            && cpu_group.possible_contains(cpu.cpu_ref())
-            && self.default_root_domain.covers_cpu_ref(cpu.cpu_ref())
-            && runqueue.state() == State::Ready
-            && runqueue.is_boot_backed()
-            && runqueue.cpu_ref() == cpu.cpu_ref()
-            && runqueue.cpu_id() == cpu.logical_id()
-            && runqueue.cpu_hartid() == cpu.hartid()
-            && self.boot_runqueue_matches_metadata()
-        {
-            Some(CurrentRunQueueRef::cpu_owned(runqueue.cpu_id()))
-        } else {
-            None
-        }
-    }
-
     fn resolve_selected_runqueue_ref_for_cpu(
         &self,
         cpu_group: &CpuGroup,
@@ -1674,6 +1693,7 @@ impl Scheduler {
     pub fn enable_smp(
         &mut self,
         kernel_init_task: &mut KernelInitTask,
+        kernel_init_flow: &KernelInitFlow,
         cpu_group: &CpuGroup,
     ) -> EventResult {
         if self.lifecycle.state() != State::Online
@@ -1715,7 +1735,7 @@ impl Scheduler {
         self.sched_domains_mutex
             .unlock_owner(MutexOwner::KernelInitTask)?;
 
-        if !kernel_init_task.release_boot_cpu_affinity(cpu_group) {
+        if !kernel_init_task.release_boot_cpu_affinity(kernel_init_flow, cpu_group) {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
@@ -2192,7 +2212,11 @@ impl SmokeSchedulerTask {
     }
 
     pub const fn cpu_id(&self) -> usize {
-        self.task.cpu_id()
+        self.flow.cpu_id()
+    }
+
+    pub const fn cpu_ref(&self) -> Option<CpuRef> {
+        self.flow.cpu_ref()
     }
 
     pub const fn enqueued(&self) -> bool {
@@ -2264,7 +2288,7 @@ impl SmokeSchedulerTask {
         if self.task.adopt_setup().is_err() {
             return false;
         }
-        if !self.task.set_task_cpu(cpu_id) {
+        if !self.flow.bind_cpu_ref(CpuRef::new(cpu_id)) {
             return false;
         }
         true
@@ -2608,9 +2632,11 @@ impl BootRunQueue {
     // Formal RunQueue.Event::Setup implementation boundary. Scheduler.setup()
     // drives it for the production boot path; local subject tests may call the
     // same lifecycle API without creating a test-only entry point.
+    #[allow(clippy::too_many_arguments)]
     pub fn setup(
         &mut self,
-        cpu_group: &CpuGroup,
+        boot_cpu_ref: CpuRef,
+        boot_cpu_hartid: usize,
         _per_cpu_storage: &PerCpuStorage,
         root_domain: &DefaultSchedRootDomain,
         boot_task: &BootTask,
@@ -2619,8 +2645,6 @@ impl BootRunQueue {
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || self.lock.state() != State::Base
-            || cpu_group.state() != State::Ready
-            || !cpu_group.possible_cpu_boundary_ready()
             || root_domain.state() != State::Ready
             || boot_task.state() != State::OnCpu
             || local_interrupt.state() != State::Ready
@@ -2629,13 +2653,7 @@ impl BootRunQueue {
             return self.failed_setup();
         }
 
-        let Some(boot_cpu) = cpu_group.boot_cpu() else {
-            return self.failed_setup();
-        };
-        if !boot_cpu.cpu_ref().is_boot_cpu()
-            || !cpu_group.possible_contains(boot_cpu.cpu_ref())
-            || !root_domain.covers_cpu_ref(boot_cpu.cpu_ref())
-        {
+        if !boot_cpu_ref.is_boot_cpu() || !root_domain.covers_cpu_ref(boot_cpu_ref) {
             return self.failed_setup();
         }
 
@@ -2643,8 +2661,8 @@ impl BootRunQueue {
             .setup_with_checkpoint(Checkpoint::BootRunQueueLockReady)?;
         boot_init_preemption
             .setup_disabled_with_checkpoint(boot_task, Checkpoint::BootInitPreemptionReady)?;
-        self.cpu_ref = boot_cpu.cpu_ref();
-        self.cpu_hartid = boot_cpu.hartid();
+        self.cpu_ref = boot_cpu_ref;
+        self.cpu_hartid = boot_cpu_hartid;
         self.curr_task_id = 0;
         self.idle_task_id = 0;
         self.cfs_ready = true;
@@ -3011,7 +3029,7 @@ impl BootIdleSetupState {
     }
 
     pub fn cpu_id(&self) -> usize {
-        BootTask::canonical_cpu_id()
+        self.cpu_ref.logical_id()
     }
 
     pub const fn init_held_pi_lock(&self) -> bool {
@@ -3033,7 +3051,7 @@ impl BootIdleSetupState {
     pub fn view(&self) -> Option<CpuIdleTaskView> {
         if self.lifecycle.state() != State::Ready
             || self.cpu_ref == CpuRef::invalid()
-            || BootTask::canonical_cpu_id() == usize::MAX
+            || self.cpu_ref.logical_id() == usize::MAX
         {
             return None;
         }
@@ -3042,7 +3060,7 @@ impl BootIdleSetupState {
             state: self.lifecycle.state(),
             task_id: BootTask::canonical_pid(),
             cpu_ref: self.cpu_ref,
-            cpu_id: BootTask::canonical_cpu_id(),
+            cpu_id: self.cpu_ref.logical_id(),
             uses_current_init_task: self.uses_current_init_task,
             lazy_tlb_mm_ready: self.lazy_tlb_mm_ready,
             no_set_affinity: self.no_set_affinity,
@@ -3082,7 +3100,7 @@ impl BootIdleSetupState {
         init_mm: &InitMm,
         boot_runqueue: &mut BootRunQueue,
         boot_idle_rcu_read_side: &mut RcuReadSide,
-        cpu_group: &CpuGroup,
+        boot_cpu_ref: CpuRef,
         local_interrupt: &mut LocalInterruptControl,
         boot_idle_preemption: &mut PreemptionControl,
         current_task_slot: &mut CurrentTaskSlot,
@@ -3099,10 +3117,7 @@ impl BootIdleSetupState {
             || local_interrupt.state() != State::Ready
             || boot_idle_preemption.state() != State::Base
             || current_task_slot.state() != State::Ready
-            || cpu_group
-                .boot_cpu()
-                .map(|cpu| boot_runqueue.cpu_ref() != cpu.cpu_ref())
-                .unwrap_or(true)
+            || boot_runqueue.cpu_ref() != boot_cpu_ref
         {
             return failed_condition(
                 LifecycleEvent::Setup,

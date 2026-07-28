@@ -44,14 +44,23 @@ def _snapshot(value: dict[str, Any]) -> dict[str, Any]:
         "states": dict(sorted(value["states"].items())),
         "facts": sorted(set(value["facts"])),
         "references": dict(sorted(value["references"].items())),
+        "instances": {
+            key: deepcopy(item)
+            for key, item in sorted(value.get("instances", {}).items())
+        },
     }
 
 
 def _fact_argument(value: Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
-    if isinstance(value, str) and not value.replace("_", "").replace("-", "").replace("::", "").isalnum():
-        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    if isinstance(value, str):
+        symbolic = re.fullmatch(
+            r"(?:dynamic:[^\s,()]+|[A-Za-z_][A-Za-z0-9_:@-]*(?:\[[^\[\]]+\])?(?:\.[A-Za-z_][A-Za-z0-9_:@-]*(?:\[[^\[\]]+\])?)*)",
+            value,
+        )
+        if symbolic is None:
+            return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
     return str(value)
 
 
@@ -133,11 +142,25 @@ def load_scenario(
     states = value.get("states", value.get("state", {}))
     if not isinstance(states, dict):
         raise ProtocolError("scenario states must be an object")
+    instances = value.get("instances", {}) if trusted_snapshot else {}
+    if not isinstance(instances, dict):
+        raise ProtocolError("snapshot instances must be an object")
     for target, state in states.items():
-        if target not in model["systems"]:
+        if target not in model["systems"] and target not in instances:
             raise ProtocolError(f"scenario has unknown system state target {target}")
-        system = model["systems"][target]
-        if state != system.get("initial_state") and state not in system["states"]:
+        if target in model["systems"]:
+            system = model["systems"][target]
+            allowed_states = set(system["states"]) | {system.get("initial_state")}
+        else:
+            instance_type = instances[target].get("declared_type")
+            type_decl = model.get("types", {}).get(instance_type, {})
+            lifecycle = model.get("types", {}).get(
+                type_decl.get("effective_lifecycle_type", instance_type), {}
+            )
+            allowed_states = set(lifecycle.get("states", {})) | {
+                lifecycle.get("initial_state")
+            }
+        if state not in allowed_states:
             raise ProtocolError(f"scenario has unknown state {target}.State::{state}")
         result["states"][target] = state
     facts = value.get("facts", [])
@@ -158,14 +181,27 @@ def load_scenario(
         if "." not in reference:
             raise ProtocolError(f"scenario reference must be System.field: {reference}")
         owners = [
-            name for name in model["systems"] if reference.startswith(f"{name}.")
+            name
+            for name in (*model["systems"], *instances)
+            if reference.startswith(f"{name}.")
         ]
         if not owners:
+            if trusted_snapshot:
+                result["references"][reference] = target
+                continue
             owner, field = reference.split(".", 1)
             raise ProtocolError(f"scenario has unknown reference owner {owner}")
         owner = max(owners, key=len)
         field = reference[len(owner) + 1 :]
+        if owner in instances:
+            if target not in model["systems"] and target not in instances:
+                raise ProtocolError(f"scenario has unknown reference target {target}")
+            result["references"][reference] = target
+            continue
         if field not in model["systems"][owner]["reference_types"]:
+            if trusted_snapshot and target in instances:
+                result["references"][reference] = target
+                continue
             raise ProtocolError(f"scenario has unknown reference {reference}")
         if target not in model["systems"] and not trusted_snapshot:
             raise ProtocolError(f"scenario has unknown reference target {target}")
@@ -175,6 +211,8 @@ def load_scenario(
                 f"scenario reference {reference} expects {expected}, got {target}"
             )
         result["references"][reference] = target
+    if trusted_snapshot:
+        result["instances"] = deepcopy(instances)
     return _snapshot(result)
 
 
@@ -194,8 +232,9 @@ class Engine:
         max_breadth: int | None,
     ) -> None:
         self.document = model_document
-        self.model = model_document["model"]
-        self.systems = self.model["systems"]
+        self.model = deepcopy(model_document["model"])
+        self.systems = deepcopy(self.model["systems"])
+        self.model["systems"] = self.systems
         self.source = source
         self.root_target = root_target
         self.root_name = root_name
@@ -204,6 +243,8 @@ class Engine:
         self.until_name = until_name
         self.initial_snapshot = _snapshot(initial_snapshot)
         self.current = _snapshot(initial_snapshot)
+        for identity, metadata in self.current.get("instances", {}).items():
+            self._install_runtime_system(identity, metadata)
         self.max_depth = max_depth
         self.max_breadth = max_breadth
         self.signals: list[dict[str, Any]] = []
@@ -218,10 +259,134 @@ class Engine:
         self.failure_reason: str | None = None
         self.next_signal = 1
         self.next_event = 1
+        self.next_instance = len(self.current.get("instances", {})) + 1
         self.active_requests: set[tuple[str, str, bytes]] = set()
         self.active_predicates: set[tuple[str, tuple[str, ...]]] = set()
         for fact in self.initial_snapshot["facts"]:
             self.event("initial_fact_established", fact=fact, source="initial_state_invariant")
+
+    def _runtime_handler(self, handler: dict[str, Any], identity: str) -> dict[str, Any]:
+        result = deepcopy(handler)
+        result["owner"] = identity
+        location = result.get("source_state") or "process"
+        result["id"] = f"{identity}.{result['kind']}::{result['name']}@{location}"
+        return result
+
+    def _runtime_fields(self, declared_type: str) -> dict[str, list[dict[str, Any]]]:
+        fields: dict[str, dict[str, dict[str, Any]]] = {}
+        for declaration in reversed(self._type_chain(declared_type)):
+            for kind, items in declaration.get("fields", {}).items():
+                indexed = fields.setdefault(kind, {})
+                for item in items:
+                    indexed[item["name"]] = deepcopy(item)
+        return {
+            kind: list(indexed.values()) for kind, indexed in sorted(fields.items())
+        }
+
+    def _install_runtime_system(
+        self, identity: str, metadata: dict[str, Any]
+    ) -> dict[str, Any]:
+        if identity in self.systems:
+            return self.systems[identity]
+        declared_type = metadata.get("declared_type")
+        type_decl = self.model.get("types", {}).get(declared_type)
+        if type_decl is None:
+            raise DerivationProblem(f"unknown runtime declared type {declared_type}")
+        lifecycle_name = type_decl.get("effective_lifecycle_type")
+        lifecycle = self.model.get("types", {}).get(lifecycle_name)
+        if lifecycle is None or lifecycle.get("initial_state") is None:
+            raise DerivationProblem(f"runtime type {declared_type} has no lifecycle")
+
+        states: dict[str, dict[str, Any]] = {}
+        handlers_by_name: dict[str, list[dict[str, Any]]] = {}
+        for state_name, raw_state in lifecycle.get("states", {}).items():
+            handlers = [
+                self._runtime_handler(item, identity)
+                for item in raw_state.get("handlers", [])
+            ]
+            for handler in handlers:
+                handlers_by_name.setdefault(handler["name"], []).append(handler)
+            states[state_name] = {
+                **deepcopy(raw_state),
+                "handlers": handlers,
+                "lifecycle_owner": lifecycle_name,
+            }
+
+        processes = [
+            self._runtime_handler(item, identity)
+            for item in type_decl.get("effective_processes", [])
+            if item.get("source_state") is None
+        ]
+        for process in processes:
+            handlers_by_name.setdefault(process["name"], []).append(process)
+        fields = self._runtime_fields(declared_type)
+        associations = fields.get("associations", [])
+        references = {
+            item["name"]: str(item["value"]).replace("self", identity, 1)
+            for item in associations
+            if item.get("value") is not None
+        }
+        system = {
+            "name": identity,
+            "declaration_kind": "runtime_indexed"
+            if metadata.get("indexed")
+            else "runtime",
+            "declared_type": declared_type,
+            "parent": metadata.get("parent"),
+            "initial_state": lifecycle["initial_state"],
+            "properties": {},
+            "fields": fields,
+            "reference_types": {
+                item["name"]: item["type"]
+                for item in associations
+                if item.get("type")
+            },
+            "references": references,
+            "initial_facts": [
+                *deepcopy(type_decl.get("invariant", [])),
+                *deepcopy(states[lifecycle["initial_state"]].get("invariant", [])),
+            ],
+            "states": states,
+            "processes": processes,
+            "handlers_by_name": handlers_by_name,
+            "boundaries": [],
+            "span": deepcopy(metadata.get("span", type_decl.get("span", {}))),
+            "runtime_instance": deepcopy(metadata),
+        }
+        self.systems[identity] = system
+        return system
+
+    def _activate_static_system(self, name: str, *, signal: dict[str, Any]) -> None:
+        if name in self.current["states"]:
+            return
+        system = self.systems[name]
+        self.current["states"][name] = system["initial_state"]
+        activation_signal = {**signal, "target": name, "_self_value": name}
+        for field, target in system.get("references", {}).items():
+            self.current["references"][f"{name}.{field}"] = target
+        for expression in system.get("initial_facts", []):
+            if expression.get("kind") == "fact":
+                values = [
+                    self.value(item, signal=activation_signal, bindings={})
+                    for item in expression.get("arguments", [])
+                ]
+                self.current["facts"].append(_fact(expression["name"], values))
+            elif expression.get("kind") in {"assertion", "reference_condition"}:
+                rendered = re.sub(
+                    r"\bself\b",
+                    name,
+                    expression.get("expression", expression.get("text", "")),
+                )
+                self.current["facts"].append(_assertion(rendered))
+        self.current = _snapshot(self.current)
+        for child_name, child in sorted(self.systems.items()):
+            if child.get("parent") == name:
+                field_name = child_name.rsplit(".", 1)[-1]
+                self.current["references"][f"{name}.{field_name}"] = child_name
+                system["reference_types"][field_name] = (
+                    child.get("declared_type") or "System"
+                )
+                self._activate_static_system(child_name, signal=signal)
 
     def event(self, kind: str, **fields: Any) -> None:
         self.events.append({"sequence": self.next_event, "kind": kind, **fields})
@@ -424,7 +589,9 @@ class Engine:
     ) -> Any:
         parts = path.split(".")
         first = parts[0]
-        if first == "self":
+        if first == "CurrentCPU":
+            value = self._current_cpu_target(signal)
+        elif first == "self":
             value: Any = self.self_value(signal)
         elif first in bindings:
             value = bindings[first]
@@ -444,6 +611,40 @@ class Engine:
                 raise DerivationProblem(f"unbound system reference {key}")
             value = self.current["references"][key]
         return value
+
+    def _effective_flow(self, signal: dict[str, Any]) -> str | None:
+        target = signal.get("target")
+        current = target
+        seen: set[str] = set()
+        while current in self.systems and current not in seen:
+            seen.add(str(current))
+            if _matches_system_type(self.model, str(current), "TaskFlow"):
+                return str(current)
+            current = self.systems[str(current)].get("parent")
+        inherited = signal.get("_effective_flow")
+        return str(inherited) if inherited in self.systems else None
+
+    def _current_cpu_target(self, signal: dict[str, Any]) -> str:
+        flow = self._effective_flow(signal)
+        if flow is None:
+            raise DerivationProblem("CurrentCPU requires an effective TaskFlow")
+        reference = self.current["references"].get(f"{flow}.cpu_ref")
+        if reference is None:
+            raise DerivationProblem(f"CurrentCPU source Flow {flow} has no CpuRef")
+        target = self._deref(reference)
+        if target not in self.systems or target not in self.current["states"]:
+            raise DerivationProblem(
+                f"CurrentCPU CpuRef {reference} targets no published CPU element"
+            )
+        if not _matches_system_type(self.model, str(target), "CPU"):
+            raise DerivationProblem(f"CurrentCPU CpuRef {reference} targets non-CPU {target}")
+        signal["_selector_resolution"] = {
+            "selector": "CurrentCPU",
+            "target": str(target),
+            "source_flow": flow,
+            "source_cpu_ref": reference,
+        }
+        return str(target)
 
     def _deref(self, value: Any) -> Any:
         if value in self.systems:
@@ -580,7 +781,9 @@ class Engine:
     ) -> str:
         parts = path.split(".")
         first = parts[0]
-        if first == "self":
+        if first == "CurrentCPU":
+            value = self._current_cpu_target(signal)
+        elif first == "self":
             value: Any = self.self_value(signal)
         elif first in bindings:
             value = bindings[first]
@@ -610,10 +813,12 @@ class Engine:
         if kind == "path":
             path = expression["value"]
             first = path.split(".", 1)[0]
-            if first == "self" or first in bindings:
+            if first == "CurrentCPU" or first == "self" or first in bindings:
                 try:
                     return self.resolve_path(path, signal=signal, bindings=bindings)
                 except DerivationProblem:
+                    if first == "CurrentCPU":
+                        raise
                     base = self.self_value(signal) if first == "self" else bindings[first]
                     suffix = path.split(".", 1)[1] if "." in path else ""
                     return str(base) + (f".{suffix}" if suffix else "")
@@ -710,6 +915,13 @@ class Engine:
             bindings[name] = value
             payload.append({"name": name, "type": expected_type, "value": value})
         signal["payload"] = payload
+        for parameter in parameters:
+            if parameter["type"] == "TaskFlow" and parameter["name"] == "current_flow":
+                candidate_flow = bindings.get(parameter["name"])
+                if candidate_flow in self.systems and _matches_system_type(
+                    self.model, candidate_flow, "TaskFlow"
+                ):
+                    signal["_effective_flow"] = candidate_flow
         if handler.get("return_type"):
             result_value = f"{handler['return_type']}Result@{signal['id']}"
             bindings["result"] = result_value
@@ -857,6 +1069,16 @@ class Engine:
         return left == right if operator == "==" else left != right
 
     def _builtin_fact(self, name: str, values: list[Any]) -> bool:
+        if name == "task_flow_cpu_ref_is" and len(values) == 2:
+            return self.current["references"].get(f"{values[0]}.cpu_ref") == values[1]
+        if name == "task_flow_cpu_ref_targets" and len(values) == 2:
+            reference = self.current["references"].get(f"{values[0]}.cpu_ref")
+            return reference is not None and self._deref(reference) == values[1]
+        if name == "task_flow_cpu_ref_read_only_while_executing" and len(values) == 1:
+            return self.current["references"].get(f"{values[0]}.cpu_ref") is not None
+        if name == "cpu_ref_dereference_requires_published_element" and len(values) == 1:
+            target = self._deref(values[0])
+            return target in self.systems and target in self.current["states"]
         if name == "has_slot" and len(values) == 2:
             return self._declares_slot(values[0], values[1])
         if name == "initcall_entry_declared" and len(values) == 1:
@@ -1250,15 +1472,90 @@ class Engine:
                 context_stack=context_stack,
             )
             return
+        if call.get("kind") == "declare_indexed":
+            signal["_indexed_transaction"] = True
+            owner = self.resolve_receiver(
+                call["owner_receiver"], signal=signal, bindings=bindings
+            )
+            if owner != signal["target"]:
+                raise DerivationProblem(
+                    "indexed-owned elements may be declared only by their owner handler: "
+                    f"{signal['target']} cannot publish {owner}.{call['field']}"
+                )
+            field = self._field_in_groups(
+                self.systems[owner].get("fields", {}), call["field"]
+            )
+            if field is None or not field.get("indexed"):
+                raise DerivationProblem(
+                    f"{owner}.{call['field']} is not an indexed-owned collection"
+                )
+            if field.get("type") != call["declared_type"]:
+                raise DerivationProblem(
+                    f"indexed declaration {owner}.{call['field']} expects "
+                    f"{field.get('type')}, got {call['declared_type']}"
+                )
+            key = self.value(call["key"], signal=signal, bindings=bindings)
+            key_type = field.get("key_type")
+            if key_type in {"LogicId", "Int", "usize", "u32", "u16", "u8"} and (
+                isinstance(key, bool) or not isinstance(key, int) or key < 0
+            ):
+                raise DerivationProblem(
+                    f"indexed declaration key for {owner}.{call['field']} expects {key_type}"
+                )
+            identity = f"{owner}.{call['field']}[{key}]"
+            reference_key = identity
+            if reference_key in self.current["references"] or identity in self.current["instances"]:
+                raise DerivationProblem(f"duplicate indexed key {identity}")
+            metadata = {
+                "declared_type": call["declared_type"],
+                "parent": owner,
+                "indexed": True,
+                "owned_field": call["field"],
+                "key": key,
+                "span": deepcopy(call["span"]),
+            }
+            self.current["instances"][identity] = metadata
+            self.current["references"][reference_key] = identity
+            self._install_runtime_system(identity, metadata)
+            self._activate_static_system(identity, signal=signal)
+            self.event(
+                "indexed_instance_declared",
+                signal_id=signal["id"],
+                identity=identity,
+                owner=owner,
+                field=call["field"],
+                key=key,
+                declared_type=call["declared_type"],
+                context=list(context_stack),
+                span=call["span"],
+                snapshot=_snapshot(self.current),
+            )
+            return
         if call.get("kind") == "declare":
-            bindings[call["alias"]] = f"dynamic:{signal['id']}:{call['alias']}"
+            identity = (
+                f"dynamic:{signal['id']}:{self.next_instance}:{call['alias']}"
+            )
+            self.next_instance += 1
+            metadata = {
+                "declared_type": call["declared_type"],
+                "parent": signal["target"],
+                "indexed": False,
+                "alias": call["alias"],
+                "span": deepcopy(call["span"]),
+            }
+            self.current["instances"][identity] = metadata
+            self._install_runtime_system(identity, metadata)
+            self._activate_static_system(identity, signal=signal)
+            bindings[call["alias"]] = identity
             self.event(
                 "dynamic_declared",
                 signal_id=signal["id"],
                 alias=call["alias"],
                 declared_type=call["declared_type"],
+                identity=identity,
                 context=list(context_stack),
                 span=call["span"],
+                snapshot=_snapshot(self.current),
             )
             return
         if call.get("kind") != "call":
@@ -1266,12 +1563,18 @@ class Engine:
                 f"invalid process call at {call.get('span', {}).get('source_file')}:{call.get('span', {}).get('start_line')}: "
                 f"{call.get('text')}"
             )
+        signal.pop("_selector_resolution", None)
         target = self.resolve_receiver(call["receiver"], signal=signal, bindings=bindings)
+        selector_resolution = signal.pop("_selector_resolution", None)
         receiver_value = self.value(
             {"kind": "path", "value": call["receiver"]},
             signal=signal,
             bindings=bindings,
         )
+        if selector_resolution is None:
+            selector_resolution = signal.pop("_selector_resolution", None)
+        else:
+            signal.pop("_selector_resolution", None)
         coordinate = self.coordinate(signal["target"], target, signal["coordinate"])
         child = self.new_signal(
             source=signal["target"],
@@ -1284,6 +1587,11 @@ class Engine:
             compat_process_kind=call["process_kind"],
             call_span=call.get("span"),
         )
+        effective_flow = self._effective_flow(signal)
+        if effective_flow is not None:
+            child["_effective_flow"] = effective_flow
+        if selector_resolution is not None:
+            child["selector_resolution"] = deepcopy(selector_resolution)
         child["contexts"] = list(context_stack)
         if receiver_value != target:
             child["_receiver_value"] = receiver_value
@@ -1605,6 +1913,9 @@ class Engine:
         self.event("response_started", signal_id=signal["id"], handler=handler["id"])
         pending_emits: list[dict[str, Any]] = []
         pending_effects: list[dict[str, Any]] = []
+        transaction_snapshot = _snapshot(self.current)
+        transaction_system_names = set(self.systems)
+        transaction_next_instance = self.next_instance
         try:
             self._execute_members(
                 handler["body"],
@@ -1706,6 +2017,17 @@ class Engine:
                 )
             raise
         except DerivationProblem as exc:
+            if signal.get("_indexed_transaction"):
+                self.current = transaction_snapshot
+                for name in set(self.systems) - transaction_system_names:
+                    del self.systems[name]
+                self.next_instance = transaction_next_instance
+                self.event(
+                    "indexed_transaction_rolled_back",
+                    signal_id=signal["id"],
+                    reason=str(exc),
+                    snapshot=_snapshot(self.current),
+                )
             if signal["outcome"] not in {"failed", "rejected"}:
                 self.fail(signal, str(exc))
         finally:
@@ -1800,6 +2122,9 @@ class Engine:
             signal.pop("_budget_breadth", None)
             signal.pop("_receiver_value", None)
             signal.pop("_self_value", None)
+            signal.pop("_effective_flow", None)
+            signal.pop("_selector_resolution", None)
+            signal.pop("_indexed_transaction", None)
         return {
             "root_request": {
                 "source": self.source,
@@ -1843,7 +2168,12 @@ class Engine:
 
 
 def initial_snapshot(model: dict[str, Any]) -> dict[str, Any]:
-    result: dict[str, Any] = {"states": {}, "facts": [], "references": {}}
+    result: dict[str, Any] = {
+        "states": {},
+        "facts": [],
+        "references": {},
+        "instances": {},
+    }
 
     def initial_value(item: dict[str, Any], owner: str) -> Any:
         if item["kind"] == "path":
@@ -1888,6 +2218,9 @@ def initial_snapshot(model: dict[str, Any]) -> dict[str, Any]:
                 add_predicate(match.group(1), values, active)
 
     for name, system in sorted(model["systems"].items()):
+        parent = system.get("parent")
+        if parent is not None and parent not in model["systems"]:
+            continue
         result["states"][name] = system["initial_state"]
         for reference, target in sorted(system["references"].items()):
             result["references"][f"{name}.{reference}"] = target

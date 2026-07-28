@@ -32,6 +32,18 @@ impl BootInitFlow {
         &mut self.flow
     }
 
+    pub(crate) const fn core(&self) -> &TaskFlow {
+        &self.flow
+    }
+
+    pub fn bind_cpu_ref(&mut self, cpu_ref: crate::objects::cpu::CpuRef) -> bool {
+        self.flow.bind_cpu_ref(cpu_ref)
+    }
+
+    pub const fn cpu_ref(&self) -> Option<crate::objects::cpu::CpuRef> {
+        self.flow.cpu_ref()
+    }
+
     pub fn accept_initial_start_signal(&self, owner: &Task) -> EventResult {
         if self.flow.state() != State::Base
             || !owner.initial_flow().same_identity(self.flow.flow_ref())
@@ -258,18 +270,7 @@ fn schedule() -> ! {
     }
 
     let ctx = crate::context::context();
-    let schedule_result = ctx.scheduler.schedule(
-        &ctx.cpu_group,
-        &mut ctx.kernel_init_task,
-        &mut ctx.kernel_init_flow,
-        &ctx.user_app_flow,
-        &mut ctx.kthreadd_task,
-        &mut ctx.kthreadd_flow,
-        &ctx.boot_idle_flow,
-        &mut ctx.user_task_set,
-        &mut ctx.boot_cpu_local_interrupt,
-        &mut ctx.boot_cpu_current_task,
-    );
+    let schedule_result = ctx.schedule_current();
     crate::phases::shutdown_on_error(schedule_result, "arceos_ex first schedule failed\n");
     boot_task_restored()
 }
@@ -304,8 +305,8 @@ pub fn dispatch_ready() -> bool {
         && ctx.scheduler.current_runqueue_resolve_passes() != 0
         && ctx.scheduler.pick_next_task_passes() != 0
         && ctx.scheduler.switch_to_passes() != 0
-        && ctx.boot_cpu_current_task.switch_committed_count() != 0
-        && ctx.boot_cpu_current_task.current_is_kernel_init()
+        && ctx.boot_cpu_current_task().switch_committed_count() != 0
+        && ctx.boot_cpu_current_task().current_is_kernel_init()
         && ctx.scheduler.kernel_init_stack_switch_started_count() == 1
 }
 

@@ -120,7 +120,7 @@ _start:
     li a0, {trace_bss_zeroed}
     call {head_checkpoint}
 
-    # BootCurrentCPU.Preset / BootCPU.Preset: publish the boot hart id for Rust-side adoption.
+    # CpuGroup.cpus[0].Preset: publish the boot hart id for Rust-side adoption.
     la t0, {head_boot_hartid}
     sd s0, 0(t0)
     li a0, {trace_boot_cpu_preset}
@@ -252,6 +252,18 @@ extern "C" fn boot_init_flow_preset_rust_entry(hartid: usize, dtb_pa: usize) -> 
         crate::phases::prepare::adopt_head_prefix(&boot_args),
         "arceos_ex prepare event failed\n",
     );
+    let ctx = crate::context::context();
+    crate::phases::shutdown_on_error(
+        ctx.cpu_group.preset(&boot_args),
+        "arceos_ex cpu group preset failed\n",
+    );
+    crate::checkpoint::checkpoint(Checkpoint::CpuGroupPrepared);
+    let Some(boot_cpu_ref) = ctx.cpu_group.boot_cpu_ref() else {
+        crate::arch::riscv64::sbi::system_shutdown()
+    };
+    if !ctx.boot_init_flow.bind_cpu_ref(boot_cpu_ref) {
+        crate::arch::riscv64::sbi::system_shutdown()
+    }
     crate::phases::shutdown_on_error(
         crate::systems::kernel::accept_enable_at_entry(&boot_args),
         "arceos_ex kernel enable failed\n",
@@ -293,7 +305,7 @@ fn adopt_preset_dependencies(boot_args: &BootArgs) -> EventResult {
 /// - `KernelImage.Preset`
 /// - BootInitFlow.Preset private FPU/vector disable action
 /// - `KernelImage.Setup`
-/// - `BootCurrentCPU.Preset`
+/// - `CpuGroup.cpus[0].Preset`
 /// - `BootTaskEntryBinding.Preset` while BootTask remains Online
 /// - `InitStack.Preset`
 ///
@@ -345,13 +357,42 @@ fn adopt_head_prefix(ctx: &mut Context, boot_args: &BootArgs) -> EventResult {
     }
     ctx.kernel_image
         .adopt_head_setup(&ctx.lds, head_bss_clear_completed())?;
-    ctx.boot_current_cpu.adopt_head_preset(boot_args)?;
-    ctx.boot_cpu_local_interrupt.setup()?;
-    ctx.boot_cpu_current_task.setup()?;
-    ctx.boot_current_cpu.setup()?;
-    ctx.cpu_group.preset(&ctx.boot_current_cpu)?;
-    crate::checkpoint::checkpoint(Checkpoint::CpuGroupPrepared);
-    ctx.boot_current_cpu.enable(&ctx.cpu_group)?;
+    ctx.cpu_group
+        .setup_boot_cpu(ctx.cpu_group.boot_hartid() == Some(boot_args.boot_hartid()))?;
+    let Some(local_interrupt) = ctx.cpu_group.boot_cpu_local_interrupt_mut() else {
+        return failed_condition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Base,
+            State::Ready,
+        );
+    };
+    local_interrupt.setup()?;
+    let Some(current_task) = ctx.cpu_group.boot_cpu_current_task_mut() else {
+        return failed_condition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Base,
+            State::Ready,
+        );
+    };
+    current_task.setup()?;
+    let Some(current_cpu) = ctx.cpu_group.current_cpu(ctx.boot_init_flow.core()) else {
+        return failed_condition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Prepared,
+            State::Ready,
+        );
+    };
+    if current_cpu.logical_id() != 0 {
+        return failed_condition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Prepared,
+            State::Ready,
+        );
+    }
     adopt_boot_task_entry_binding_physical(ctx)?;
     ctx.init_stack
         .adopt_head_preset(&ctx.kernel_image, &ctx.lds)
@@ -549,14 +590,17 @@ pub(super) fn entry_objects_ready(ctx: &Context) -> bool {
         && ctx.init_stack.state() == State::Ready
         && ctx.vm.state() == State::Ready
         && ctx.vm.entry_prelude_ready()
-        && ctx.boot_current_cpu.state() == State::Online
-        && ctx.boot_current_cpu.owns_boot_cpu()
-        && ctx.boot_current_cpu.registered_in_cpu_group()
-        && ctx.boot_current_cpu.logical_id() == 0
-        && ctx.boot_current_cpu.bootstrap_role_ready()
-        && ctx.boot_cpu_local_interrupt.state() == State::Ready
-        && ctx.boot_cpu_local_interrupt.disabled()
-        && ctx.boot_cpu_current_task.state() == State::Ready
+        && ctx.boot_init_flow.cpu_ref() == ctx.cpu_group.boot_cpu_ref()
+        && ctx
+            .cpu_group
+            .boot_cpu_local_interrupt()
+            .map(|control| control.state() == State::Ready && control.disabled())
+            .unwrap_or(false)
+        && ctx
+            .cpu_group
+            .boot_cpu_current_task()
+            .map(|slot| slot.state() == State::Ready)
+            .unwrap_or(false)
         && ctx.cpu_group.state() == State::Prepared
-        && ctx.cpu_group.boot_cpu_state() == State::Prepared
+        && ctx.cpu_group.boot_cpu_state() == State::Ready
 }

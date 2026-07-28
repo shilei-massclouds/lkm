@@ -350,7 +350,7 @@ type CpuGroupGenerationWorkflow {
         guidance_cpu_group_codegen_must_generate_unified_cpu_instances();
 
         /*
-         * Generated CpuGroup code must expose CpuGroup.Cpu[logical_id] as the
+         * Generated CpuGroup code must expose CpuGroup.cpus[logical_id] as the
          * stable CPU reference view, and possible/present/online membership as
          * set views over those references.
          */

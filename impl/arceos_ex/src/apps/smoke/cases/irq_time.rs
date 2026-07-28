@@ -20,8 +20,8 @@ pub fn run() -> SmokeResult {
             .interrupt_stream
             .supervisor_external_input_gate_defined()
         || !ctx.interrupt_stream.supervisor_external_input_gate_open()
-        || ctx.boot_cpu_local_interrupt.state() != State::Ready
-        || !ctx.boot_cpu_local_interrupt.enabled()
+        || ctx.boot_cpu_local_interrupt().state() != State::Ready
+        || !ctx.boot_cpu_local_interrupt().enabled()
         || !csr::supervisor_interrupts_enabled()
     {
         printk::write_str("irq time phase did not open boot CPU interrupts\n");

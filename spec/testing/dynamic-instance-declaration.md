@@ -28,8 +28,16 @@ model semantics.
 - Object views show declaration sites as templates. Trace views show each
   concrete occurrence separately and must not merge nodes merely because their
   lexical aliases match.
-- Failure after a declaration preserves the created instance in diagnostics;
-  tests must not expect implicit rollback or Cleanup.
+- Failure after an ordinary non-indexed declaration preserves the created
+  instance in diagnostics; tests must not expect implicit rollback or Cleanup.
+- An `indexed` owned declaration is instead a parent-handler publication
+  transaction. Tests must prove that the child identity/index and parent update
+  become stable together, and that child or parent failure rolls back the whole
+  unpublished transaction without leaving an element or occupied key.
+- Indexed coverage must include a valid dynamic create, duplicate key, wrong key
+  type, out-of-bounds key, insertion by a non-owner, missing-element target,
+  indexed Signal target and snapshot round-trip with canonical identity
+  `Parent.collection[key]`.
 
 ## Task and Flow scenarios
 

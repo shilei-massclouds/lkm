@@ -95,6 +95,15 @@ pub fn run() -> SmokeResult {
             previous += 1;
         }
 
+        if cpu_group
+            .logical_id_for_hartid(cpu.hartid())
+            .map(|id| id.get())
+            != Some(logical_id)
+        {
+            printk::write_str("CpuGroup hartid reverse mapping is invalid\n");
+            return SmokeResult::Failed;
+        }
+
         logical_id += 1;
     }
 
@@ -105,11 +114,6 @@ pub fn run() -> SmokeResult {
         printk::write_str("CpuGroup exposes CPU outside possible boundary\n");
         return SmokeResult::Failed;
     }
-    if !ctx.secondary_cpus.all_match_cpu_group_views(cpu_group) {
-        printk::write_str("CpuGroup secondary CPU views diverge from store\n");
-        return SmokeResult::Failed;
-    }
-
     printk::write_fmt(format_args!(
         "CpuGroup topology:\n  Possible CPUs : {}\n  Secondary CPUs: {}\n  Boot hartid   : {}\n",
         count,

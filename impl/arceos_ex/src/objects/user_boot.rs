@@ -2783,6 +2783,10 @@ impl UserAppFlow {
         self.flows[self.active_flow_slot].flow_ref()
     }
 
+    pub const fn cpu_ref(&self) -> Option<super::cpu::CpuRef> {
+        self.flows[self.observation_slot()].cpu_ref()
+    }
+
     pub const fn task_ref_owner(&self) -> super::task::TaskRef {
         self.flows[self.active_flow_slot].owner()
     }
@@ -3485,6 +3489,13 @@ impl UserTaskSet {
         self.active_flow_ref().generation()
     }
 
+    pub const fn cpu_ref_for_task(&self, task_ref: TaskRef) -> Option<super::cpu::CpuRef> {
+        let Some(slot) = self.slot_for_ref(task_ref) else {
+            return None;
+        };
+        slot.flows[slot.active_flow_slot].cpu_ref()
+    }
+
     pub const fn task_ref_valid(&self, task_ref: TaskRef) -> bool {
         self.slot_for_ref(task_ref).is_some()
     }
@@ -3588,7 +3599,7 @@ impl UserTaskSet {
         Some(task_ref)
     }
 
-    pub fn continue_task(&mut self, task_ref: TaskRef) -> EventResult {
+    pub fn continue_task(&mut self, task_ref: TaskRef, cpu_ref: super::cpu::CpuRef) -> EventResult {
         let Some(index) = task_ref.user_slot() else {
             return failed_condition(
                 LifecycleEvent::Continue,
@@ -3610,6 +3621,14 @@ impl UserTaskSet {
         task.continue_on_cpu()?;
         let flow_index = slot.active_flow_slot;
         if !task.active_flow().is_valid() && flows[flow_index].state() == State::Base {
+            if !flows[flow_index].bind_cpu_ref(cpu_ref) {
+                return failed_condition(
+                    LifecycleEvent::Continue,
+                    flows[flow_index].state(),
+                    State::Base,
+                    State::Base,
+                );
+            }
             flows[flow_index].start_initial(task, None, None)
         } else if task
             .active_flow()
@@ -3796,6 +3815,7 @@ impl UserTaskSet {
             let flow_index = slot.active_flow_slot;
             let UserTaskStorageSlot { task, flows, .. } = slot;
             if task.continue_on_cpu().is_err()
+                || !flows[flow_index].bind_cpu_ref(super::cpu::CpuRef::new(0))
                 || flows[flow_index].start_initial(task, None, None).is_err()
                 || flows[flow_index].cleanup_active_for_exit(task).is_err()
                 || task.disable().is_err()
@@ -3831,7 +3851,10 @@ impl UserTaskSet {
             .slot_for_ref(recycled_ref)
             .map(|slot| slot.task.initial_flow())
             .unwrap_or(TaskFlowRef::NONE);
-        if self.continue_task(recycled_ref).is_err() {
+        if self
+            .continue_task(recycled_ref, super::cpu::CpuRef::new(0))
+            .is_err()
+        {
             return Err("start recycled initial flow");
         }
         if recycled_ref.slot() != task_refs[0].slot()

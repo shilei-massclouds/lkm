@@ -257,12 +257,13 @@ impl RcuCore {
     pub fn scheduler_start(
         &mut self,
         scheduler: &Scheduler,
-        cpu_group: &CpuGroup,
+        cpu_group_ready: bool,
+        boot_cpu_online: bool,
         local_interrupt: &mut LocalInterruptControl,
     ) -> EventResult {
         if self.lifecycle.state() != State::Ready
             || scheduler.state() != State::Online
-            || cpu_group.state() != State::Ready
+            || !cpu_group_ready
             || local_interrupt.state() != State::Ready
         {
             return failed_condition(
@@ -273,7 +274,7 @@ impl RcuCore {
             );
         }
 
-        self.scheduler_start_single_online_cpu = cpu_group.boot_cpu_state() == State::Online;
+        self.scheduler_start_single_online_cpu = boot_cpu_online;
         if !self.scheduler_start_single_online_cpu || !self.gp_threads_deferred {
             return failed_condition(
                 LifecycleEvent::Setup,

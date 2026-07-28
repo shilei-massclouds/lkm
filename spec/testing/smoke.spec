@@ -379,8 +379,9 @@ type SmokeTestGenerationMust {
          * CPU index and reference facts:
          *
          * CpuGroup smoke coverage must assert that logical id 0 is the boot
-         * CPU entry, that CpuGroup.Cpu[0] resolves through BootCPURef, and that
-         * the reference targets BootCPU.
+         * CPU entry, that CpuGroup.cpus[0] resolves through BootCPURef, and that
+         * the reference targets canonical CpuGroup.cpus[0]. BootCPU is only a
+         * role alias and owns no separate state.
          */
         testing_cpu_group_smoke_must_cover_boot_cpu_index_zero();
         testing_cpu_group_smoke_must_cover_cpu_ref_targets();

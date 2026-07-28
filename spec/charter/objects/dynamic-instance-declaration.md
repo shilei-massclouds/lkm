@@ -18,6 +18,25 @@ drives {
 }
 ```
 
+owned collection 元素使用同一执行语义的 indexed declaration：
+
+```text
+owned {
+    indexed cpus[key: LogicId]: CPU;
+}
+
+drives {
+    declare self.cpus[0] of CPU;
+    self.cpus[0].Transition::Preset;
+}
+```
+
+indexed declaration 不建立词法 alias；canonical identity 就是完整 indexed path。key 必须满足字段
+声明的类型，只有 collection owner 的 handler 可以插入，且重复 key 必须拒绝。child declaration、
+同一父 handler 内随后的 child transitions、父状态变化和 invariant 共同形成一个 candidate；任一
+步骤失败时整次 handler 不发布 child 或 key。这个原子发布规则只适用于 indexed-owned insertion，
+不改变下述普通 fresh alias declaration 在后续失败时保留诊断实例的规则。
+
 - `declare name of Type;` 只允许出现在 transition/action 以及其嵌套 `within` 的 `drives` 中；
   不支持顶层动态声明。
 - 声明是有顺序的可执行语句。执行到该语句时才创建一个所属 Type 的 fresh、独立 instance；
@@ -80,7 +99,7 @@ object。derive/trace view 展示每次实际创建的 runtime instance 及其�
 后续 process 节点；多个 occurrence 不得折叠成一个 alias 节点。诊断可以附带源码文件和行号，
 但展示层不能用行号替代稳定 identity。
 
-## 首轮范围
+## 当前范围
 
-首轮只支持已有顺序 process/`within` 控制流的多次推导执行，不新增循环语法、并发声明调度或
-通用垃圾回收；也不同时引入 Signal 新语法或全仓 Stream -> Flow 迁移。
+当前支持已有顺序 process/`within` 控制流和 indexed-owned insertion，不新增循环语法、并发声明
+调度或通用垃圾回收；也不同时引入其它 Signal 新语法或全仓 Stream -> Flow 迁移。

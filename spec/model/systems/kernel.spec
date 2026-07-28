@@ -351,14 +351,17 @@ object Kernel: KernelObject {
                     );
                     BootTask.state == State::OnCpu;
                     BootInitFlow.state == State::Base;
+                    CpuGroup.state == State::Prepared;
+                    CpuGroup.cpus[0].state == State::Prepared;
                 }
 
                 drives {
                     Kernel.Action::AcceptEnable;
+                    BootInitFlow.Action::AssignCpuRef(BootCPURef);
                     BootInitFlow.Transition::Preset;
                     BootInitFlow.Transition::Setup;
                     BootInitFlow.Transition::Enable;
-                    Scheduler.Action::Schedule;
+                    Scheduler.Action::Schedule(BootIdleFlow);
                     KernelInitFlow.Transition::Setup;
                     KernelInitFlow.Transition::Enable;
                 }

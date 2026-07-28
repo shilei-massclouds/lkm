@@ -212,29 +212,6 @@ impl TaskThreadContext {
     }
 }
 
-pub struct TaskCpuState {
-    cpu_id: usize,
-}
-
-impl TaskCpuState {
-    pub const fn new() -> Self {
-        Self { cpu_id: usize::MAX }
-    }
-
-    pub const fn cpu_id(&self) -> usize {
-        self.cpu_id
-    }
-
-    pub fn set_task_cpu(&mut self, cpu_id: usize) -> bool {
-        if cpu_id == usize::MAX {
-            return false;
-        }
-
-        self.cpu_id = cpu_id;
-        true
-    }
-}
-
 const TASK_OWNED_FLOW_CAPACITY: usize = 4;
 
 /// The one lifecycle/identity/PID/CPU/context/Flow-ownership carrier.
@@ -246,7 +223,6 @@ pub struct Task {
     entry: TaskEntry,
     pid: usize,
     kind: TaskKind,
-    cpu: TaskCpuState,
     running: bool,
     runqueue_published: bool,
     affinity_cpu_id: usize,
@@ -271,7 +247,6 @@ impl Task {
             entry: TaskEntry::None,
             pid: 0,
             kind: TaskKind::None,
-            cpu: TaskCpuState::new(),
             running: false,
             runqueue_published: false,
             affinity_cpu_id: usize::MAX,
@@ -297,7 +272,6 @@ impl Task {
             entry: TaskEntry::None,
             pid: 0,
             kind: TaskKind::None,
-            cpu: TaskCpuState::new(),
             running: true,
             runqueue_published: false,
             affinity_cpu_id: usize::MAX,
@@ -319,7 +293,7 @@ impl Task {
     pub(crate) const fn new_ap_idle_reserved(
         task_ref: TaskRef,
         flow_ref: TaskFlowRef,
-        logical_id: usize,
+        _logical_id: usize,
     ) -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Online),
@@ -329,7 +303,6 @@ impl Task {
             entry: TaskEntry::ApIdle,
             pid: 0,
             kind: TaskKind::Idle,
-            cpu: TaskCpuState { cpu_id: logical_id },
             running: true,
             runqueue_published: false,
             affinity_cpu_id: usize::MAX,
@@ -397,10 +370,6 @@ impl Task {
 
     pub const fn kind(&self) -> TaskKind {
         self.kind
-    }
-
-    pub const fn cpu_id(&self) -> usize {
-        self.cpu.cpu_id()
     }
 
     pub const fn running(&self) -> bool {
@@ -578,7 +547,6 @@ impl Task {
             || !self.on_cpu
             || self.entry != TaskEntry::ApIdle
             || self.kind != TaskKind::Idle
-            || self.cpu.cpu_id() == usize::MAX
             || !self.running
             || self.runqueue_published
             || !self.initial_flow.is_valid()
@@ -702,10 +670,6 @@ impl Task {
             .adopt_transition(LifecycleEvent::Cleanup, State::Offline, State::Destroyed)
     }
 
-    pub fn set_task_cpu(&mut self, cpu_id: usize) -> bool {
-        self.cpu.set_task_cpu(cpu_id)
-    }
-
     pub fn set_runtime_running(&mut self) -> EventResult {
         if self.lifecycle.state() != State::Ready {
             return failed_condition(
@@ -720,10 +684,7 @@ impl Task {
     }
 
     pub fn publish_runqueue_binding(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Ready
-            || !self.running
-            || self.cpu.cpu_id() == usize::MAX
-            || !self.initial_flow.is_valid()
+        if self.lifecycle.state() != State::Ready || !self.running || !self.initial_flow.is_valid()
         {
             return failed_condition(
                 LifecycleEvent::Enable,
@@ -737,10 +698,7 @@ impl Task {
     }
 
     pub fn pin_to_cpu(&mut self, cpu_id: usize) -> EventResult {
-        if self.lifecycle.state() != State::Online
-            || cpu_id == usize::MAX
-            || self.cpu.cpu_id() != cpu_id
-        {
+        if self.lifecycle.state() != State::Online || cpu_id == usize::MAX {
             return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
@@ -916,6 +874,14 @@ impl Task {
                 self.lifecycle.state(),
             );
         }
+        if !new.inherit_cpu_ref(old) {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                self.lifecycle.state(),
+                self.lifecycle.state(),
+            );
+        }
         self.active_flow = new.flow_ref();
         new.commit_active_binding(self.task_ref)
     }
@@ -935,6 +901,14 @@ impl Task {
             || !self.owns_flow(old.flow_ref())
             || !self.owns_flow(new.flow_ref())
         {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                self.lifecycle.state(),
+                self.lifecycle.state(),
+            );
+        }
+        if !new.inherit_cpu_ref(old) {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),

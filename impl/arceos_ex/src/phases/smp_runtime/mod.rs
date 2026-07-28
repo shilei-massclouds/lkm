@@ -154,8 +154,8 @@ fn mainline_ready(ctx: &crate::context::Context) -> bool {
     crate::systems::kernel::enable_in_progress()
         && crate::flows::boot_init_flow::is_online()
         && ctx.kernel_init_task.state() == State::OnCpu
-        && ctx.boot_cpu_current_task.current_is_kernel_init()
-        && ctx.boot_cpu_current_task.current() == ctx.kernel_init_task.task_ref()
+        && ctx.boot_cpu_current_task().current_is_kernel_init()
+        && ctx.boot_cpu_current_task().current() == ctx.kernel_init_task.task_ref()
         && ctx.scheduler.kernel_init_stack_switch_started_count() == 1
         && ctx.kernel_init_task.entry_started_count() == 1
         && ctx.kernel_init_task.entry_stack_verified()

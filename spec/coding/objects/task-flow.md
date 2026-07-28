@@ -15,6 +15,7 @@ Flow 的 `Base/Prepared/Ready/Online/Offline/Destroyed` 必须独立于 owner Ta
 - fresh instance/generation identity；
 - active binding 与 handoff predecessor；
 - Disable/Cleanup 完成事实。
+- compact `CpuRef` assignment（即使 Flow 暂时不处于 OnCpu 也保留）。
 
 实现不得保存 guard bool、guard lifecycle 或 `process_guard` 等平行状态。所有执行边界必须即时验证
 parent Task 处于 `OnCpu`；结构性 `bind()` 不执行 continuation，因此不要求 OnCpu。
@@ -63,6 +64,10 @@ TaskFlow slot 常量和 `USER_FLOW_SLOTS_PER_TASK` 属于本 module。通用 non
 Scheduler 切换按 `prepare -> physical save/restore -> next-stack finish` 排序。prepare 只校验双方
 authority/context/FlowRef；finish 原子发布 prev breakpoint、消费 next breakpoint、提交 CurrentTaskSlot
 后处理 strict Continue。`next.Continue` 不能由旧 Task 栈提前提交 OnCpu。
+
+入口与 scheduler commit 是 `cpu_ref` 的仅有写边界。迁移提交在激活新 Flow 前写入目标 CpuRef；
+同一 Task 的 Flow handoff 在提交 active binding 前复制 predecessor CpuRef。执行中的 Flow 及其同步
+drives 子过程只能读取；异步 emits 不继承由该字段解析出的 `CurrentCpu` capability。
 
 Task 收到严格 Continue 后按当前快照选择：initial Flow 为 Base 时只发送 `Preset`；否则只向 Online
 active Flow 发送 `Continue`。两个候选都可接受或都不可接受均为终止错误；不得丢弃、排队重试或降级。

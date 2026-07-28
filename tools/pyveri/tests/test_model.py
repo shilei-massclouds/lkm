@@ -45,7 +45,11 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertEqual(result.model.objects["Kernel"].parent, "Computer")
         self.assertEqual(result.model.objects["Computer"].parent, None)
         self.assertEqual(result.model.objects["Riscv64"].attrs, {})
-        self.assertEqual(result.model.objects["BootCpuRegisters"].parent, "BootCPU")
+        self.assertEqual(
+            result.model.objects["BootCpuRegisters"].parent, "CpuGroup.cpus[0]"
+        )
+        self.assertNotIn("BootCPU", result.model.objects)
+        self.assertNotIn("BootCurrentCPU", result.model.objects)
         self.assertEqual(result.model.objects["BootCpuRegisters"].initial_state, "Online")
         self.assertEqual(
             list(result.model.objects["BootCpuRegisters"].attrs),
@@ -95,8 +99,9 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("Computer -> Riscv64Platform [parent]", text)
         self.assertIn("Computer -> OpenSBI [parent]", text)
         self.assertIn("Computer -> Kernel [parent]", text)
-        self.assertIn("BootCurrentCPU -> BootCPU [parent]", text)
-        self.assertIn("BootCPU -> BootCpuRegisters [parent]", text)
+        self.assertIn("Soc -> CpuGroup [parent]", text)
+        self.assertIn("CpuGroup.cpus[0] -> BootCpuRegisters [parent]", text)
+        self.assertNotIn("BootCurrentCPU", text)
         self.assertIn("BootTask -> BootInitFlow [parent]", text)
         self.assertNotIn("\nEntryPreludePhase:", text)
         self.assertNotIn("drives", text)
@@ -170,7 +175,8 @@ class ModelBuilderTests(unittest.TestCase):
         svg = render_svg(view)
 
         self.assertIn("timeline view:", text)
-        self.assertIn("  - BootCurrentCPU.State::Online", text)
+        self.assertNotIn("BootCurrentCPU.State::", text)
+        self.assertNotIn("BootCPU.State::", text)
         self.assertIn("  - PhysicalMemory.State::Online", text)
         self.assertNotIn("\nEntryPreludePhase:", text)
         self.assertIn("EntrySuccessorPhase: ready (State::Ready)", text)

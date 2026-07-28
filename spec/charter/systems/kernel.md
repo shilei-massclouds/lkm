@@ -105,10 +105,12 @@ Linux 6.12 `Documentation/arch/riscv/boot.rst` 与当前 RV64 Image contract 提
 * OnEnable：只接受 OpenSBI 的真实入口交接。必须验证 `Riscv64Platform`、`OpenSBI`、`Riscv64`、
   `SbiSpec`、`BootArgs`、`LinuxRiscv64KernelBootSpec`、Config/Lds、kernel image 文件构造事实，以及
   OpenSBI 为其 `kernel_load_pa` 保持的“映像已装载待交接”和 PMD 对齐事实，
+  以及 OpenSBI Enable 已原子发布 Prepared 的 `CpuGroup` 与 `CpuGroup.cpus[0]`，
   确认静态 `BootTask` 与入口 ABI，并精确检查
   `BootCpuRegisters.a0 == BootArgs.boot_hartid`、
   `BootCpuRegisters.a1 == BootArgs.dtb_pa` 与 `BootCpuRegisters.satp == 0`；不得把整组寄存器已准备完成
-  作为前置，也不得要求 OpenSBI 已经清零 `sie/sip`。接受交接后 Kernel 在 Ready 状态内顺序驱动
+  作为前置，也不得要求 OpenSBI 已经清零 `sie/sip`。接受交接后 Kernel 先把
+  `ref(CpuGroup.cpus[0])` 绑定到 BootInitFlow，再在 Ready 状态内顺序驱动
   BootInitFlow 的 Preset/Setup/Enable、首次 Scheduler 调度和
   KernelInitFlow 的 Preset/Setup/Enable。首次调度和 PID 1 叶阶段可以由真实跨栈 continuation 承载，
   但逻辑上仍是同一个 Kernel.Enable 响应。`PayloadHandoffPreparePhase.Online` 证明 selected payload

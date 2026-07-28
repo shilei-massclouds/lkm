@@ -1,5 +1,5 @@
 {
-  "total_checkpoints": 477,
+  "total_checkpoints": 475,
   "mapping_kind_counts": [
     {
       "mapping_kind": "exact",
@@ -11,13 +11,13 @@
     },
     {
       "mapping_kind": "unmapped",
-      "count": 360
+      "count": 358
     }
   ],
   "confidence_counts": [
     {
       "confidence": "none",
-      "count": 360
+      "count": 358
     },
     {
       "confidence": "medium",
@@ -221,10 +221,6 @@
     },
     {
       "family": "ApSmpCallinPhase",
-      "count": 2
-    },
-    {
-      "family": "BootCurrentCPU",
       "count": 2
     },
     {

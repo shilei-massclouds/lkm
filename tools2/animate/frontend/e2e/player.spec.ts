@@ -372,8 +372,8 @@ test('reduced motion settles immediately and disables response movement', async 
 
 test('main Kernel boundary trace loads offline, scrolls targets, and restores every moment', async ({ page }) => {
   test.setTimeout(180_000);
-  expect(mainSignals).toBe(13);
-  expect(mainMoments).toBe(26);
+  expect(mainSignals).toBe(15);
+  expect(mainMoments).toBe(30);
   expect(statSync(mainHtml).size / mainMoments).toBeLessThan(30 * 1024);
   await page.setViewportSize({ width: 700, height: 520 });
   await page.emulateMedia({ reducedMotion: 'reduce' });

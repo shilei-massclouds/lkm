@@ -12,8 +12,9 @@
 
 Riscv64Platform.Online 只表示平台实例已经启动并把控制权交给固件；异步固件失败不回滚该状态。
 
-启动 CPU 的寄存器不属于平台，也不随平台 Enable 同步推进。`BootCpuRegisters` 是 `BootCPU` 的直接
-子对象且初态为 Online；ISA 能力条件仍引用静态 `Riscv64`。
+启动 CPU 的寄存器不属于平台，也不随平台 Enable 同步推进。`BootCpuRegisters` 是
+`CpuGroup.cpus[0]`（`BootCPU` 角色）的直接子对象且初态为 Online；ISA 能力条件仍引用静态
+`Riscv64`。
 
 ## Mapping
 

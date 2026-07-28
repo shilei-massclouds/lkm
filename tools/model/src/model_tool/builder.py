@@ -58,7 +58,8 @@ _ACTION_BIND_RE = re.compile(
     re.S,
 )
 _DECLARE_RE = re.compile(
-    r"\Adeclare\s+([a-z][A-Za-z0-9_]*)\s+of\s+([A-Z][A-Za-z0-9_]*)\Z"
+    r"\Adeclare\s+((?:[a-z][A-Za-z0-9_]*|self\.[a-z][A-Za-z0-9_]*\[[0-9]+\]))"
+    r"\s+of\s+([A-Z][A-Za-z0-9_]*)\Z"
 )
 _LOCAL_MEMBER_REF_RE = re.compile(
     r"(?<!\.)\b([a-z][A-Za-z0-9_]*)\.(?:state|Transition::|Action::)"
@@ -1516,7 +1517,13 @@ def _build_children(
                 )
             )
             continue
-        if obj.parent not in objects:
+        indexed_parent = re.fullmatch(
+            r"([A-Z][A-Za-z0-9_]*)\.[a-z][A-Za-z0-9_]*\[[0-9]+\]",
+            obj.parent,
+        )
+        if obj.parent not in objects and not (
+            indexed_parent is not None and indexed_parent.group(1) in objects
+        ):
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,
@@ -1525,7 +1532,8 @@ def _build_children(
                 )
             )
             continue
-        children[obj.parent].append(obj.name)
+        if obj.parent in children:
+            children[obj.parent].append(obj.name)
 
     reported_cycles: set[tuple[str, ...]] = set()
     for obj in objects.values():
@@ -2733,6 +2741,14 @@ def _resolve_association_receiver_type(
     receiver: str,
     bindings: dict[str, str],
 ) -> str | None:
+    if receiver == "CurrentCPU":
+        return "CPU"
+    if receiver.startswith("CurrentCPU."):
+        child = receiver.removeprefix("CurrentCPU.")
+        obj = model.objects.get(child)
+        return obj.kind if obj is not None else None
+    if receiver in bindings:
+        return _REF_TARGET_PROCESS_TYPES.get(bindings[receiver], bindings[receiver])
     parts = receiver.split(".")
     if not parts or any(not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", part) for part in parts):
         return None
@@ -3159,7 +3175,37 @@ def _check_drive_transition_entry(
     bindings: dict[str, str],
 ) -> bool:
     association_process = _ASSOCIATION_PROCESS_EXPR_RE.match(entry)
-    if association_process is not None and "." in association_process.group(1):
+    if association_process is not None and association_process.group(1).startswith(
+        "CurrentCPU."
+    ):
+        receiver, process_kind, process_name, args = association_process.groups()
+        if process_kind != "Transition":
+            return False
+        child_name = receiver.removeprefix("CurrentCPU.")
+        child_transition = _transition_def(model, child_name, process_name)
+        if child_transition is None:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"unsupported CurrentCPU child transition: {receiver}.Transition::{process_name}",
+                    span,
+                )
+            )
+            return True
+        _check_signature_arguments(
+            model,
+            child_transition.decl.parameters,
+            f"{receiver}.Transition::{process_name}",
+            args,
+            diagnostics,
+            span,
+            bindings=bindings,
+        )
+        return True
+    if association_process is not None and (
+        "." in association_process.group(1)
+        or association_process.group(1) == "CurrentCPU"
+    ):
         receiver, process_kind, process_name, args = association_process.groups()
         if process_kind != "Transition":
             return False
@@ -3325,7 +3371,10 @@ def _check_drive_action_entry(
     bindings: dict[str, str],
 ) -> bool:
     association_process = _ASSOCIATION_PROCESS_EXPR_RE.match(entry)
-    if association_process is not None and "." in association_process.group(1):
+    if association_process is not None and (
+        "." in association_process.group(1)
+        or association_process.group(1) == "CurrentCPU"
+    ):
         receiver, process_kind, process_name, args = association_process.groups()
         if process_kind != "Action":
             return False

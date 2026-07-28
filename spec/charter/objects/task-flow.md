@@ -39,6 +39,18 @@ typed association；`task_owns_flow(task, flow)` 记录 Task 曾经拥有该 Flo
 owner、active binding 和 handoff 必须通过明确 action 与事实提交；不得通过 Flow 存储位置、调用栈
 归属、角色名或 application persona 推导。Task 只保留这些受控协作事实，不复制 Flow lifecycle。
 
+## CpuRef 与 CurrentCPU
+
+TaskFlow 是任务执行路径中唯一保存 `cpu_ref` 的对象；Task 不保存同义 CPU assignment 字段。
+架构入口 adoption 和 Scheduler 的真实 switch/migration commit 可以写 `cpu_ref`，Flow 的普通
+lifecycle/action 以及它同步 `drives` 的子树只能读取。Flow 即使离开 OnCpu 也保留最后归属 CpuRef；
+调度 prepare 不得预写 next Flow，只有 switch commit 或正式 migration commit 可以改变它。
+
+Flow handoff 在激活新 Flow 前必须把旧 Flow 的 CpuRef 复制给新 Flow。initial Flow 首次启动则从实际
+入口或调度提交取得 CpuRef。`CurrentCPU` 只是在执行上下文中对 effective Flow 的 cpu_ref 解引用；
+同步 drives 子孙继承这一解析来源，异步 emits 不继承。完整 CPU ownership、别名和解引用规则见
+[`CPU`](cpu.md) 与 [`CpuGroup`](cpu-group.md)。
+
 ## TaskFlowRef 与 lifecycle
 
 `TaskFlowRef` 使用 private storage slot 加非零 generation。静态 Flow 使用固定 slot 和固定

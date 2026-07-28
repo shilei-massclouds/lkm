@@ -1,4 +1,4 @@
-"""Validate tools2 v5 inputs and project causal animation v3 moments."""
+"""Validate tools2 v6 inputs and project causal animation v3 moments."""
 
 from __future__ import annotations
 
@@ -34,6 +34,7 @@ def _validate_snapshot(value: Any, *, label: str) -> dict[str, Any]:
     states = value.get("states")
     facts = value.get("facts")
     references = value.get("references")
+    instances = value.get("instances")
     if not isinstance(states, dict) or not all(
         isinstance(name, str) and (isinstance(state, str) or state is None)
         for name, state in states.items()
@@ -43,6 +44,8 @@ def _validate_snapshot(value: Any, *, label: str) -> dict[str, Any]:
         raise ProtocolError(f"{label}.facts must be a string list")
     if not isinstance(references, dict):
         raise ProtocolError(f"{label}.references must be an object")
+    if instances is not None and not isinstance(instances, dict):
+        raise ProtocolError(f"{label}.instances must be an object")
     return value
 
 
@@ -53,11 +56,44 @@ def _require_snapshot_equal(
         raise ProtocolError(f"{label} snapshot does not match the causal replay state")
 
 
-def _validate_systems(model: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def _validate_systems(
+    model: dict[str, Any], view: dict[str, Any]
+) -> dict[str, dict[str, Any]]:
     payload = model.get("model")
-    systems = payload.get("systems") if isinstance(payload, dict) else None
-    if not isinstance(systems, dict):
+    raw_systems = payload.get("systems") if isinstance(payload, dict) else None
+    if not isinstance(raw_systems, dict):
         raise ProtocolError("model.model.systems must be an object")
+    systems = deepcopy(raw_systems)
+    snapshots = [
+        view.get("initial_snapshot", {}),
+        view.get("last_stable_snapshot", {}),
+        *[
+            snapshot
+            for signal in view.get("signals", [])
+            if isinstance(signal, dict)
+            for snapshot in (
+                signal.get("before_snapshot", {}),
+                signal.get("after_snapshot", {}),
+            )
+        ],
+    ]
+    instances: dict[str, dict[str, Any]] = {}
+    for snapshot in snapshots:
+        if isinstance(snapshot, dict) and isinstance(snapshot.get("instances"), dict):
+            instances.update(snapshot["instances"])
+    types = payload.get("types", {}) if isinstance(payload, dict) else {}
+    for identity, metadata in sorted(instances.items()):
+        declared_type = metadata.get("declared_type")
+        declaration = types.get(declared_type, {})
+        lifecycle = types.get(
+            declaration.get("effective_lifecycle_type", declared_type), {}
+        )
+        systems[identity] = {
+            "parent": metadata.get("parent"),
+            "states": deepcopy(lifecycle.get("states", {})),
+            "initial_state": lifecycle.get("initial_state"),
+            "declared_type": declared_type,
+        }
     for name, system in systems.items():
         if not isinstance(name, str) or not name or not isinstance(system, dict):
             raise ProtocolError("model systems must use non-empty names and object values")
@@ -208,6 +244,15 @@ def _validate_events(
         if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence != event_index + 1:
             raise ProtocolError(f"{label}.sequence must be the next contiguous event sequence")
         kind = _required_string(event, "kind", label=label)
+        if kind in {
+            "indexed_instance_declared",
+            "dynamic_declared",
+            "indexed_transaction_rolled_back",
+        } and "snapshot" in event:
+            replay = deepcopy(
+                _validate_snapshot(event["snapshot"], label=f"{label}.snapshot")
+            )
+            continue
         if kind == "signal_sent":
             signal_id = _required_string(event, "signal_id", label=label)
             signal = by_id.get(signal_id)
@@ -423,7 +468,7 @@ def _build_frames(
 
 def build_animation(model: dict[str, Any], view: dict[str, Any]) -> dict[str, Any]:
     """Build animation v3 moments without deriving any new Signal behavior."""
-    systems = _validate_systems(model)
+    systems = _validate_systems(model, view)
     source, model_fingerprint = _validate_identity(model, view)
     root_request = view.get("root_request")
     if not isinstance(root_request, dict):

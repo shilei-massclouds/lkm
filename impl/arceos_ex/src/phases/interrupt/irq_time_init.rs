@@ -42,8 +42,8 @@ fn preset_dependencies_ready(ctx: &Context) -> bool {
         && ctx.randomness.state() == State::Prepared
         && ctx.interrupt_stream.state() == State::Ready
         && ctx.interrupt_stream.early_boot_irqs_disabled()
-        && ctx.boot_cpu_local_interrupt.state() == State::Ready
-        && ctx.boot_cpu_local_interrupt.disabled()
+        && ctx.boot_cpu_local_interrupt().state() == State::Ready
+        && ctx.boot_cpu_local_interrupt().disabled()
         && !crate::arch::riscv64::csr::supervisor_interrupts_enabled()
         && !ctx.cpu_group.smp_concurrency_open()
 }
@@ -431,8 +431,8 @@ fn irq_time_init_phase_ready(ctx: &Context) -> bool {
         && ctx.interrupt_stream.state() == State::Ready
         && !ctx.interrupt_stream.boot_cpu_local_interrupts_enabled()
         && ctx.interrupt_stream.early_boot_irqs_disabled()
-        && ctx.boot_cpu_local_interrupt.state() == State::Ready
-        && ctx.boot_cpu_local_interrupt.disabled()
+        && ctx.boot_cpu_local_interrupt().state() == State::Ready
+        && ctx.boot_cpu_local_interrupt().disabled()
         && !crate::arch::riscv64::csr::supervisor_interrupts_enabled()
         && printk::is_ready()
         && (earlycon::is_online() || printk::console_handoff_complete())

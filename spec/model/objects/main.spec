@@ -105,6 +105,9 @@ enum RunQueueRuntimeState {
     Some,
 }
 
+include "cpu.spec";
+include "cpu_group.spec";
+
 /* Build-time selected payload. Exactly one value is bound by Config. */
 enum SelectedPayloadKind {
     Hello,
@@ -377,12 +380,9 @@ predicate wait_queue_wake_one_committed<T>(queue: T) -> bool;
 predicate wait_queue_wake_all_committed<T>(queue: T) -> bool;
 predicate wait_queue_waiter_enqueued<T>(queue: T) -> bool;
 predicate wait_queue_waiter_finished<T>(queue: T) -> bool;
-predicate current_cpu_self_identity_ready<T>(current_cpu: T) -> bool;
-predicate current_cpu_hartid_ready<T>(current_cpu: T, hartid: HartId) -> bool;
-predicate current_cpu_logical_id_ready<T, U>(current_cpu: T, logical_id: U) -> bool;
-predicate current_cpu_owns_cpu<T, U>(current_cpu: T, cpu: U) -> bool;
-predicate current_cpu_registered_in_cpu_group<T, U>(current_cpu: T, cpu_group: U) -> bool;
-predicate current_cpu_bootstrap_role_ready<T, U>(current_cpu: T, cpu: U) -> bool;
+predicate current_cpu_resolved_target_is<F, R, C>(flow: F, cpu_ref: R, cpu: C) -> bool;
+predicate current_cpu_inherited_by_sync_drives<F, C>(flow: F, child: C) -> bool;
+predicate current_cpu_not_inherited_by_async_emits<F, C>(flow: F, child: C) -> bool;
 predicate cpu_hartid_ready<T>(cpu: T, hartid: HartId) -> bool;
 predicate cpu_logical_id_ready<T, U>(cpu: T, logical_id: U) -> bool;
 predicate cpu_bootstrap_role<T>(cpu: T) -> bool;
@@ -499,7 +499,6 @@ predicate task_state_new<T>(task: T) -> bool;
 predicate task_state_running<T>(task: T) -> bool;
 predicate task_not_enqueued<T>(task: T) -> bool;
 predicate task_enqueued_on_runqueue<T, U>(task: T, runqueue: U) -> bool;
-predicate task_cpu_ref_is<T, U>(task: T, cpu_ref: U) -> bool;
 predicate task_pid_lookup_under_rcu_read<T, U, V>(task: T, pid_ns: U, read_side: V) -> bool;
 predicate task_pid_lookup_rcu_guard_used<T, U>(task: T, read_side: U) -> bool;
 predicate task_runtime_state_transition_allowed<T>(task: T, state: TaskRuntimeState) -> bool;
@@ -1034,10 +1033,11 @@ type BufferObject {
  */
 type SchedulerObject: KernelObject {
     processes {
-        Action::Schedule {
+        Action::Schedule(current_flow: TaskFlow) {
             state_effect: StateEffect::None;
             depends_on {
                 scheduler_schedule_event_available(self);
+                task_flow_cpu_ref_read_only_while_executing(current_flow);
             }
             within SchedulePreemptionContext {
                 within ScheduleLocalInterruptContext {
@@ -1047,15 +1047,15 @@ type SchedulerObject: KernelObject {
                             boot_task_idle_role_ready(BootTask, BootRunQueue);
                             task_ref_targets(CurrentTaskRef, BootTask);
                             task_ref_ready(CurrentTaskRef);
-                            current_task_ref_private_to_cpu(CurrentTaskRef, BootCurrentCPU);
-                            current_task_ref_targets_cpu_task(CurrentTaskRef, BootCurrentCPU, BootTask);
-                            current_task_ref_from_cpu_view(CurrentTaskRef, BootCurrentCPU, BootTask);
-                            task_cpu_ref_is(BootTask, BootCPURef);
+                            current_task_ref_private_to_cpu(CurrentTaskRef, CurrentCPU);
+                            current_task_ref_targets_cpu_task(CurrentTaskRef, CurrentCPU, BootTask);
+                            current_task_ref_from_cpu_view(CurrentTaskRef, CurrentCPU, BootTask);
+                            task_flow_cpu_ref_targets(BootInitFlow, CpuGroup.cpus[0]);
                             runqueue_ref_ready(CurrentRunQueueRef);
                             runqueue_ref_targets(CurrentRunQueueRef, BootRunQueue);
                             runqueue_ref_cpu_is(CurrentRunQueueRef, BootCPURef);
-                            current_runqueue_ref_private_to_cpu(CurrentRunQueueRef, BootCurrentCPU);
-                            current_runqueue_ref_from_current_task(CurrentRunQueueRef, BootCurrentCPU, CurrentTaskRef, BootTask, BootCPURef);
+                            current_runqueue_ref_private_to_cpu(CurrentRunQueueRef, CurrentCPU);
+                            current_runqueue_ref_from_current_task(CurrentRunQueueRef, CurrentCPU, CurrentTaskRef, BootTask, BootCPURef);
                         }
 
                         drives {
@@ -1096,8 +1096,8 @@ type SchedulerObject: KernelObject {
                                 KernelInitTaskRef
                             );
                             task_ref_targets(KernelInitTaskRef, KernelInitTask);
-                            task_ref_loaded_into_current_cpu(KernelInitTaskRef, BootCurrentCPU);
-                            current_task_ref_updated_by_switch(BootCurrentCPU, CurrentTaskRef, KernelInitTaskRef);
+                            task_ref_loaded_into_current_cpu(KernelInitTaskRef, CurrentCPU);
+                            current_task_ref_updated_by_switch(CurrentCPU, CurrentTaskRef, KernelInitTaskRef);
                             current_task_slot_current(BootCpuCurrentTask, KernelInitTask);
                             BootTask.state == State::Online;
                             KernelInitTask.state == State::OnCpu;
@@ -1139,8 +1139,8 @@ type SchedulerObject: KernelObject {
                 scheduler_switch_mm_or_lazy_tlb_deferred(self);
                 scheduler_membarrier_switch_barrier_deferred(self);
                 task_ref_targets(KernelInitTaskRef, KernelInitTask);
-                task_ref_loaded_into_current_cpu(KernelInitTaskRef, BootCurrentCPU);
-                current_task_ref_updated_by_switch(BootCurrentCPU, CurrentTaskRef, KernelInitTaskRef);
+                task_ref_loaded_into_current_cpu(KernelInitTaskRef, CurrentCPU);
+                current_task_ref_updated_by_switch(CurrentCPU, CurrentTaskRef, KernelInitTaskRef);
                 current_task_slot_current(BootCpuCurrentTask, KernelInitTask);
                 BootTask.state == State::Online;
                 KernelInitTask.state == State::OnCpu;
@@ -1171,7 +1171,7 @@ type SchedulerObject: KernelObject {
                 scheduler_idle_schedule_committed_to_runnable(self, KernelInitTaskRef);
                 boot_idle_schedule_idle_loop_until_resched_clear(self);
                 boot_idle_need_resched_drained_after_schedule(BootTask);
-                task_ref_loaded_into_current_cpu(KernelInitTaskRef, BootCurrentCPU);
+                task_ref_loaded_into_current_cpu(KernelInitTaskRef, CurrentCPU);
             }
         }
 
@@ -1204,8 +1204,8 @@ type SchedulerObject: KernelObject {
                 scheduler_finish_task_switch_restores_preempt_count(self, next_ref);
                 scheduler_switch_mm_or_lazy_tlb_deferred(self);
                 scheduler_membarrier_switch_barrier_deferred(self);
-                task_ref_loaded_into_current_cpu(next_ref, BootCurrentCPU);
-                current_task_ref_updated_by_switch(BootCurrentCPU, prev_ref, next_ref);
+                task_ref_loaded_into_current_cpu(next_ref, CurrentCPU);
+                current_task_ref_updated_by_switch(CurrentCPU, prev_ref, next_ref);
                 scheduler_continue_signal_pending(self, next_ref);
             }
         }
@@ -1306,7 +1306,7 @@ type RunQueue: ResourceObject {
                 runqueue_ref_targets(CurrentRunQueueRef, self);
                 runqueue_ref_ready(CurrentRunQueueRef);
                 runqueue_ref_cpu_is(CurrentRunQueueRef, BootCPURef);
-                current_runqueue_ref_private_to_cpu(CurrentRunQueueRef, BootCurrentCPU);
+                current_runqueue_ref_private_to_cpu(CurrentRunQueueRef, CurrentCPU);
                 task_ref_ready(prev_ref);
             }
             ensures {
@@ -1315,35 +1315,6 @@ type RunQueue: ResourceObject {
                 task_ref_ready(KernelInitTaskRef);
                 task_ref_targets_online_task(KernelInitTaskRef);
                 scheduler_pick_next_task_selects_runnable(Scheduler, self, KernelInitTaskRef);
-            }
-        }
-    }
-}
-
-type CurrentCPU {
-    owned {
-        cpu: CPUObject;
-    }
-
-    lifecycle {
-        Transition::Preset {
-            state_effect: StateEffect::Always;
-            ensures {
-                current_cpu_self_identity_ready(self);
-            }
-        }
-
-        Transition::Setup {
-            state_effect: StateEffect::Always;
-            ensures {
-                current_cpu_self_identity_ready(self);
-            }
-        }
-
-        Transition::Enable {
-            state_effect: StateEffect::Always;
-            ensures {
-                current_cpu_registered_in_cpu_group(self, CpuGroup);
             }
         }
     }

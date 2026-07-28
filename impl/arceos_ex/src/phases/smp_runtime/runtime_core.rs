@@ -34,8 +34,11 @@ fn preset_start() -> EventResult {
 }
 
 fn preset_objects(ctx: &mut Context) -> EventResult {
-    ctx.scheduler
-        .enable_smp(&mut ctx.kernel_init_task, &ctx.cpu_group)?;
+    ctx.scheduler.enable_smp(
+        &mut ctx.kernel_init_task,
+        &ctx.kernel_init_flow,
+        &ctx.cpu_group,
+    )?;
     ctx.workqueue
         .setup_topology(&ctx.scheduler, &ctx.cpu_group)?;
     ctx.async_core_deferred.setup(&ctx.workqueue)?;

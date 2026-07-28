@@ -5,7 +5,7 @@ use crate::{
     objects::{
         boot_task::BootTask,
         cpu_control::{CurrentTaskSlot, LocalInterruptControl},
-        cpu_group::CpuGroup,
+        cpu_group::{CpuGroup, CurrentCpu},
         rest_init::{
             KernelInitFlow, KernelInitTask, KthreaddFlow, KthreaddReadyGate, KthreaddTask,
         },
@@ -135,6 +135,10 @@ impl BootIdleFlow {
 
     pub const fn state(&self) -> State {
         self.flow.state()
+    }
+
+    pub const fn cpu_ref(&self) -> Option<crate::objects::cpu::CpuRef> {
+        self.flow.cpu_ref()
     }
 
     pub const fn first_schedule_committed(&self) -> bool {
@@ -456,7 +460,7 @@ impl BootIdleFlow {
     pub fn run_idle_loop(
         &mut self,
         scheduler: &mut Scheduler,
-        cpu_group: &CpuGroup,
+        current_cpu: CurrentCpu,
         kernel_init_task: &mut KernelInitTask,
         kernel_init_flow: &mut KernelInitFlow,
         user_app_flow: &UserAppFlow,
@@ -480,7 +484,7 @@ impl BootIdleFlow {
 
         self.do_idle_cycle(
             scheduler,
-            cpu_group,
+            current_cpu,
             kernel_init_task,
             kernel_init_flow,
             user_app_flow,
@@ -500,7 +504,7 @@ impl BootIdleFlow {
     fn do_idle_cycle(
         &mut self,
         scheduler: &mut Scheduler,
-        cpu_group: &CpuGroup,
+        current_cpu: CurrentCpu,
         kernel_init_task: &mut KernelInitTask,
         kernel_init_flow: &mut KernelInitFlow,
         user_app_flow: &UserAppFlow,
@@ -527,7 +531,7 @@ impl BootIdleFlow {
         self.observe_need_resched(boot_task)?;
         self.schedule_if_need_resched(
             scheduler,
-            cpu_group,
+            current_cpu,
             kernel_init_task,
             kernel_init_flow,
             user_app_flow,
@@ -616,7 +620,7 @@ impl BootIdleFlow {
     fn schedule_if_need_resched(
         &mut self,
         scheduler: &mut Scheduler,
-        cpu_group: &CpuGroup,
+        current_cpu: CurrentCpu,
         kernel_init_task: &mut KernelInitTask,
         kernel_init_flow: &mut KernelInitFlow,
         user_app_flow: &UserAppFlow,
@@ -645,7 +649,7 @@ impl BootIdleFlow {
 
         self.idle_schedule_requested = true;
         scheduler.schedule_idle(
-            cpu_group,
+            current_cpu,
             kernel_init_task,
             kernel_init_flow,
             user_app_flow,

@@ -81,13 +81,13 @@ class ViewToolTests(unittest.TestCase):
                         ("Riscv64Platform", "Riscv64"),
                         ("OpenSBI", "BootArgs"),
                         ("Kernel", "Config"),
-                        ("BootCurrentCPU", "BootCPU"),
-                        ("BootCPU", "BootCpuRegisters"),
+                        ("Soc", "CpuGroup"),
+                        ("CpuGroup.cpus[0]", "BootCpuRegisters"),
                     )
                 )
             )
             declaration_sites = data["metadata"]["declaration_sites"]
-            self.assertEqual(len(declaration_sites), 4)
+            self.assertEqual(len(declaration_sites), 12)
             self.assertTrue(
                 all(data["nodes"][site["id"]]["kind"] == "DeclarationSite" for site in declaration_sites)
             )
@@ -271,16 +271,15 @@ class ViewToolTests(unittest.TestCase):
                 for cell in metadata["trace_cells"]
                 if cell["label"] == "BootCpuRegisters.State::Online"
             )
-            boot_cpu_cell = next(
-                cell
-                for cell in metadata["trace_cells"]
-                if cell["label"] == "BootCPU.State::Online"
+            self.assertGreaterEqual(boot_cpu_registers_cell["column"], 0)
+            self.assertGreaterEqual(boot_task_cell["column"], 0)
+            self.assertGreaterEqual(riscv64_cell["column"], 0)
+            self.assertFalse(
+                any(
+                    cell["label"].startswith(("BootCPU.State::", "BootCurrentCPU.State::"))
+                    for cell in metadata["trace_cells"]
+                )
             )
-            self.assertGreater(
-                boot_cpu_registers_cell["column"], boot_cpu_cell["column"]
-            )
-            self.assertEqual(boot_task_cell["column"], boot_cpu_cell["column"])
-            self.assertEqual(riscv64_cell["column"], boot_cpu_cell["column"])
             self.assertFalse(
                 any(
                     cell["kind"] == "transition_span"

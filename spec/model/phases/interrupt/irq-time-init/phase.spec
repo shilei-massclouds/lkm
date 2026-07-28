@@ -436,7 +436,7 @@ object RiscvIntc: InterruptObject {
 
                 ensures {
                     riscv_intc_domain_ready(RiscvIntc, IrqController, DeviceTree);
-                    riscv_intc_boot_cpu_local_causes_ready(RiscvIntc, BootCPU);
+                    riscv_intc_boot_cpu_local_causes_ready(RiscvIntc, CpuGroup.cpus[0]);
                     riscv_intc_timer_pin_ready(RiscvIntc);
                     riscv_intc_software_pin_ready(RiscvIntc);
                     riscv_intc_external_pin_ready(RiscvIntc);
@@ -459,7 +459,7 @@ object RiscvIntc: InterruptObject {
     state State::Ready {
         invariant {
             riscv_intc_domain_ready(RiscvIntc, IrqController, DeviceTree);
-            riscv_intc_boot_cpu_local_causes_ready(RiscvIntc, BootCPU);
+            riscv_intc_boot_cpu_local_causes_ready(RiscvIntc, CpuGroup.cpus[0]);
             riscv_intc_timer_pin_ready(RiscvIntc);
             riscv_intc_software_pin_ready(RiscvIntc);
             riscv_intc_external_pin_ready(RiscvIntc);
@@ -513,7 +513,7 @@ object IrqDispatchTree: InterruptObject {
                     irq_dispatch_external_route_uses_plic_irq_domain(IrqDispatchTree, PlicIrqDomain);
                     irq_dispatch_external_route_claims_before_dispatch(IrqDispatchTree, Plic);
                     irq_dispatch_external_route_completes_after_handler(IrqDispatchTree, Plic);
-                    irq_dispatch_boot_cpu_route_ready(IrqDispatchTree, BootCPU);
+                    irq_dispatch_boot_cpu_route_ready(IrqDispatchTree, CpuGroup.cpus[0]);
                 }
             }
         }
@@ -531,7 +531,7 @@ object IrqDispatchTree: InterruptObject {
             irq_dispatch_external_route_uses_plic_irq_domain(IrqDispatchTree, PlicIrqDomain);
             irq_dispatch_external_route_claims_before_dispatch(IrqDispatchTree, Plic);
             irq_dispatch_external_route_completes_after_handler(IrqDispatchTree, Plic);
-            irq_dispatch_boot_cpu_route_ready(IrqDispatchTree, BootCPU);
+            irq_dispatch_boot_cpu_route_ready(IrqDispatchTree, CpuGroup.cpus[0]);
         }
     }
 }

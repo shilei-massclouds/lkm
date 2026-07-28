@@ -39,8 +39,8 @@ fn preset_dependencies_ready(ctx: &Context) -> bool {
         && ctx.interrupt_stream.state() == State::Online
         && ctx.interrupt_stream.boot_cpu_local_interrupts_enabled()
         && !ctx.interrupt_stream.early_boot_irqs_disabled()
-        && ctx.boot_cpu_local_interrupt.state() == State::Ready
-        && ctx.boot_cpu_local_interrupt.enabled()
+        && ctx.boot_cpu_local_interrupt().state() == State::Ready
+        && ctx.boot_cpu_local_interrupt().enabled()
         && csr::supervisor_interrupts_enabled()
         && ctx.irq_dispatch_tree.state() == State::Ready
         && ctx.sbi_ipi.state() == State::Ready
@@ -68,13 +68,32 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
     ctx.console.preset(&ctx.static_objects)?;
     ctx.irq_open_prepare_trimmed_paths
         .preset(&ctx.config, &ctx.console, &ctx.page_allocator)?;
-    ctx.sched_clock.setup(
-        &ctx.hrtimer_core,
-        &ctx.timekeeper,
-        &ctx.riscv_timer_provider,
-        &ctx.static_branch,
-        &mut ctx.boot_cpu_local_interrupt,
-    )?;
+    {
+        let Context {
+            sched_clock,
+            hrtimer_core,
+            timekeeper,
+            riscv_timer_provider,
+            static_branch,
+            cpu_group,
+            ..
+        } = ctx;
+        let Some(local_interrupt) = cpu_group.boot_cpu_local_interrupt_mut() else {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                State::Base,
+                State::Base,
+                State::Ready,
+            );
+        };
+        sched_clock.setup(
+            hrtimer_core,
+            timekeeper,
+            riscv_timer_provider,
+            static_branch,
+            local_interrupt,
+        )?;
+    }
     ctx.delay_loop
         .setup(&ctx.riscv_timer_provider, &ctx.cpu_group)?;
     ctx.irq_open_prepare_trimmed_paths
@@ -151,8 +170,8 @@ fn irq_open_prepare_phase_ready(ctx: &Context) -> bool {
         && ctx.interrupt_stream.state() == State::Online
         && ctx.interrupt_stream.boot_cpu_local_interrupts_enabled()
         && !ctx.interrupt_stream.early_boot_irqs_disabled()
-        && ctx.boot_cpu_local_interrupt.state() == State::Ready
-        && ctx.boot_cpu_local_interrupt.enabled()
+        && ctx.boot_cpu_local_interrupt().state() == State::Ready
+        && ctx.boot_cpu_local_interrupt().enabled()
         && csr::supervisor_interrupts_enabled()
         && ctx.irq_dispatch_tree.state() == State::Ready
         && ctx.sbi_ipi.state() == State::Ready
@@ -244,7 +263,7 @@ fn irq_open_prepare_phase_ready(ctx: &Context) -> bool {
         && ctx.sched_clock.setup_local_irq_disable_enable_used()
         && ctx
             .sched_clock
-            .setup_local_irq_guard_used_by(&ctx.boot_cpu_local_interrupt)
+            .setup_local_irq_guard_used_by(ctx.boot_cpu_local_interrupt())
         && ctx.delay_loop.state() == State::Ready
         && ctx.delay_loop.lpj_fine() != 0
         && ctx.delay_loop.boot_cpu_loops_per_jiffy() == ctx.delay_loop.lpj_fine()

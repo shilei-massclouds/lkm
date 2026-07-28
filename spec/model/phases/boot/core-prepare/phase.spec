@@ -1079,11 +1079,11 @@ object PerCpuStorage: MemoryObject {
 /*
  * CpuHotplugState 表示 CPUObject 下的通用 hotplug 状态对象类型。
  * 当前 DSL 尚未表达“每个 CPUObject 一份”的实例集合，因此此处先声明
- * BootCPU 实例；后续 SecondaryCPU bringup/teardown 复用同类子状态。
+ * CpuGroup.cpus[0] 实例；后续 SecondaryCPU bringup/teardown 复用同类子状态。
  */
 object CpuHotplugState: HardwareObject {
     initial_state: State::Base;
-    parent: BootCPU;
+    parent: CpuGroup.cpus[0];
 
     /*
      * Base 表示 boot CPU 的 hotplug 状态尚未初始化。
@@ -1095,16 +1095,16 @@ object CpuHotplugState: HardwareObject {
              */
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    BootCPU.state == State::Online;
+                    CpuGroup.cpus[0].state == State::Online;
                     PerCpuStorage.state == State::Ready;
                 }
 
                 ensures {
-                    cpu_hotplug_state_ready(CpuHotplugState, BootCPU);
-                    cpu_hotplug_state_current(CpuHotplugState, BootCPU, Online);
-                    cpu_hotplug_state_target(CpuHotplugState, BootCPU, Online);
-                    cpu_hotplug_ap_sync_state_online(CpuHotplugState, BootCPU);
-                    boot_cpu_recorded_booted_once(CpuHotplugState, BootCPU);
+                    cpu_hotplug_state_ready(CpuHotplugState, CpuGroup.cpus[0]);
+                    cpu_hotplug_state_current(CpuHotplugState, CpuGroup.cpus[0], Online);
+                    cpu_hotplug_state_target(CpuHotplugState, CpuGroup.cpus[0], Online);
+                    cpu_hotplug_ap_sync_state_online(CpuHotplugState, CpuGroup.cpus[0]);
+                    boot_cpu_recorded_booted_once(CpuHotplugState, CpuGroup.cpus[0]);
                 }
             }
         }
@@ -1115,11 +1115,11 @@ object CpuHotplugState: HardwareObject {
      */
     state State::Ready {
         invariant {
-            cpu_hotplug_state_ready(CpuHotplugState, BootCPU);
-            cpu_hotplug_state_current(CpuHotplugState, BootCPU, Online);
-            cpu_hotplug_state_target(CpuHotplugState, BootCPU, Online);
-            cpu_hotplug_ap_sync_state_online(CpuHotplugState, BootCPU);
-            boot_cpu_recorded_booted_once(CpuHotplugState, BootCPU);
+            cpu_hotplug_state_ready(CpuHotplugState, CpuGroup.cpus[0]);
+            cpu_hotplug_state_current(CpuHotplugState, CpuGroup.cpus[0], Online);
+            cpu_hotplug_state_target(CpuHotplugState, CpuGroup.cpus[0], Online);
+            cpu_hotplug_ap_sync_state_online(CpuHotplugState, CpuGroup.cpus[0]);
+            boot_cpu_recorded_booted_once(CpuHotplugState, CpuGroup.cpus[0]);
         }
     }
 }
@@ -1370,7 +1370,7 @@ object CorePreparePhase: PhaseObject {
                     Params.state == State::Prepared;
                     EarlyParam.state == State::Ready;
                     CommandLine.state == State::Prepared;
-                    BootCPU.state == State::Online;
+                    CpuGroup.cpus[0].state == State::Online;
                     BootCpuLocalInterrupt.state == State::Ready;
                     PrintkBuffer.state == State::Prepared;
                     ExceptionStream.state == State::Prepared;

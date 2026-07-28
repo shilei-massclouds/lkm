@@ -1,7 +1,8 @@
 # Task
 
 `Task` 是内核中唯一的 task_struct-like carrier 类型。调度器调度 Task；Task 物理拥有稳定身份、PID、
-CPU 归属、调度状态、任务资源引用和 `TaskThreadContext`。`BootTask`、`KernelInitTask`、
+调度状态、任务资源引用和 `TaskThreadContext`。CPU 归属只保存在当前/可恢复 `TaskFlow.cpu_ref`；
+Task 不保存同义 CPU assignment 字段。`BootTask`、`KernelInitTask`、
 `KthreaddTask` 以及用户 child 都是同一 `Task` 类型的独立实例，不再建立并行的 task kind、
 process persona 或 idle-task carrier 类型。
 
@@ -55,7 +56,8 @@ Task lifecycle 之外必须保存两组正交状态：
   active Flow context 并再次发布 Valid。
 
 `TaskThreadContext` 固定物理保存 RISC-V `ra/sp/s0..s11`、breakpoint state、经 slot/generation 校验的
-`TaskFlowRef` 以及真实 save/restore 观察计数。`tp`、CPU identity 和 `CurrentTaskSlot` 均是独立的
+`TaskFlowRef` 以及真实 save/restore 观察计数。`tp`、由 effective TaskFlow 解析的 CPU identity 和
+`CurrentTaskSlot` 均是独立的
 identity/current 机制，不属于可恢复寄存器现场。Valid context 必须绑定恰好一个仍由该 Task 拥有的
 FlowRef；Prepared/Invalid context 不得被 Scheduler 恢复。
 
@@ -99,7 +101,8 @@ Scheduler 是普通 `Task.Continue` 与 `Task.Suspend` 的唯一发送者。一�
 switch、finish：prepare 校验 prev `OnCpu/Live/Invalid`、prev active Flow 与 next
 `Online/None/Valid` 的 FlowRef/generation；架构 switch 保存 prev、恢复 next 的 `ra/sp/s0..s11` 并从
 next Task identity 单独建立 `tp`；next 栈上的 finish 原子提交 prev `Online/None/Valid`、next
-`OnCpu/Live/Invalid`、CurrentTaskSlot 与观察事实，然后严格 Startup/Continue next Flow。若 prev 是
+`OnCpu/Live/Invalid`、next Flow CpuRef、CurrentTaskSlot 与观察事实，然后严格 Startup/Continue
+next Flow。若 prev 是
 终止 Task，finish 提交 `OnCpu --Disable--> Offline`，context 保持 Invalid，并在 next 侧 Cleanup，
 不得先制造不可恢复的 Online。`prev == next` 是无动作路径：不发送 Suspend/Continue，不保存/恢复
 context，也不改变 lifecycle、authority、Flow binding 或计数。CurrentTaskSlot 是唯一 OnCpu Task 的

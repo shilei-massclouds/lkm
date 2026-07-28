@@ -40,6 +40,15 @@ carrier and its independently-lived `TaskFlow` instances.
 - TaskFlow trace coverage must observe exactly one Setup and one Enable completion
   Signal for each Flow lifecycle, preserve BootInitFlow's entry-object order, and
   continue through rest-init, first dispatch and later Flow startup.
+- Every executable TaskFlow test must observe its sole `cpu_ref` association;
+  the parent Task must not expose a synonymous CPU field. Entry acceptance and
+  scheduler migration commit are the only writers. Flow handlers and their
+  synchronous `drives` descendants may read the inherited effective CpuRef,
+  while asynchronous `emits` handlers must fail if they attempt to inherit it.
+- A Flow leaving OnCpu retains its assigned/last-owner CpuRef. Migration tests
+  must change it exactly at scheduler commit. Flow handoff tests must copy the
+  old Flow's CpuRef to the successor before the active binding changes or the
+  successor can be enabled.
 - KernelInitTask, KthreaddTask and clone-child Setup must leave a Prepared context and their initial
   Flow in Base. Enable binds the context to the exact initial FlowRef and publishes Online/Valid without
   sending Startup. The first real switch must validate/consume it and start the initial Flow.

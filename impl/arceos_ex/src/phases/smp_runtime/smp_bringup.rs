@@ -86,20 +86,17 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
     }
     ctx.secondary_cpu_startup_ack.setup(
         &ctx.cpu_start_provider,
-        &ctx.cpu_group,
+        &mut ctx.cpu_group,
         &mut ctx.cpu_hotplug_sync,
         &mut ctx.cpu_running_wait_lock,
-        &mut ctx.boot_cpu_local_interrupt,
         &mut ctx.scheduler,
     )?;
     ctx.secondary_cpu_online_ack.setup(
         &ctx.secondary_cpu_startup_ack,
         &mut ctx.cpu_hotplug_sync,
         &mut ctx.cpu_group,
-        &mut ctx.secondary_cpus,
         &ctx.sbi_ipi,
         &mut ctx.done_up_wait_lock,
-        &mut ctx.boot_cpu_local_interrupt,
         &mut ctx.scheduler,
     )?;
     ctx.smp_bringup_boundary

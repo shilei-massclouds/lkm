@@ -70,7 +70,7 @@ fn check_switch_to_exit(
     let name = "scheduler_action.switch_to_exit";
     sink.start_case(total, "", name, checkpoint);
     let next_ref = ctx.scheduler.switch_to_exit_next_ref();
-    let current_ref = ctx.boot_cpu_current_task.current();
+    let current_ref = ctx.boot_cpu_current_task().current();
     let current_is_first_boot_task =
         current_ref == TaskRef::KERNEL_INIT || current_ref == TaskRef::KTHREADD;
 
@@ -83,7 +83,7 @@ fn check_switch_to_exit(
         || !current_is_first_boot_task
         || ctx.scheduler.switch_to_exit_committed_count()
             <= ctx.scheduler.switch_to_entry_committed_count()
-        || ctx.boot_cpu_current_task.switch_committed_count()
+        || ctx.boot_cpu_current_task().switch_committed_count()
             != ctx.scheduler.switch_to_exit_committed_count()
     {
         sink.fail(total, "", name, "SwitchTo exit facts invalid");
@@ -103,7 +103,7 @@ fn check_schedule_exit(
     let name = "scheduler_action.schedule_exit";
     sink.start_case(total, "", name, checkpoint);
     let next_ref = ctx.scheduler.schedule_exit_next_ref();
-    let current_ref = ctx.boot_cpu_current_task.current();
+    let current_ref = ctx.boot_cpu_current_task().current();
     let current_is_first_boot_task =
         current_ref == TaskRef::KERNEL_INIT || current_ref == TaskRef::KTHREADD;
 
@@ -117,9 +117,9 @@ fn check_schedule_exit(
         || current_ref != next_ref
         || !current_is_first_boot_task
         || ctx.scheduler.schedule_exit_saved_interrupt_count()
-            != ctx.boot_cpu_local_interrupt.saved_and_disabled_count()
+            != ctx.boot_cpu_local_interrupt().saved_and_disabled_count()
         || ctx.scheduler.schedule_exit_restored_interrupt_count()
-            != ctx.boot_cpu_local_interrupt.restored_count()
+            != ctx.boot_cpu_local_interrupt().restored_count()
         || ctx.scheduler.schedule_exit_saved_interrupt_count()
             != ctx.scheduler.schedule_exit_restored_interrupt_count()
     {
@@ -149,7 +149,7 @@ fn check_switch_to_entry(
         || !next_is_first_boot_task
         || ctx.scheduler.switch_to_entry_current_ref() != TaskRef::BOOT
         || ctx.scheduler.switch_to_entry_committed_count()
-            >= ctx.boot_cpu_current_task.switch_committed_count()
+            >= ctx.boot_cpu_current_task().switch_committed_count()
     {
         sink.fail(total, "", name, "SwitchTo entry facts invalid");
         return CheckpointOutcome::FailAndShutdown;

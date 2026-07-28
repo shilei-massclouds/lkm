@@ -32,8 +32,8 @@ fn preset_start(ctx: &Context) -> EventResult {
         || !crate::phases::interrupt::irq_time_init::is_online()
         || ctx.interrupt_stream.state() != State::Ready
         || !ctx.interrupt_stream.early_boot_irqs_disabled()
-        || ctx.boot_cpu_local_interrupt.state() != State::Ready
-        || !ctx.boot_cpu_local_interrupt.disabled()
+        || ctx.boot_cpu_local_interrupt().state() != State::Ready
+        || !ctx.boot_cpu_local_interrupt().disabled()
         || csr::supervisor_interrupts_enabled()
         || ctx.cpu_group.smp_concurrency_open()
         || ctx.task_creation_core.state() != State::Base
@@ -44,8 +44,20 @@ fn preset_start(ctx: &Context) -> EventResult {
 }
 
 fn preset_objects(ctx: &mut Context) -> EventResult {
-    ctx.interrupt_stream
-        .enable(&mut ctx.boot_cpu_local_interrupt)
+    let Context {
+        interrupt_stream,
+        cpu_group,
+        ..
+    } = ctx;
+    let Some(local_interrupt) = cpu_group.boot_cpu_local_interrupt_mut() else {
+        return failed_condition(
+            LifecycleEvent::Enable,
+            State::Base,
+            State::Ready,
+            State::Online,
+        );
+    };
+    interrupt_stream.enable(local_interrupt)
 }
 
 fn adopt_prepared_with_check(ctx: &Context) -> EventResult {
@@ -144,8 +156,8 @@ fn local_irq_enable_phase_ready(ctx: &Context) -> bool {
             .supervisor_external_input_enable_deferred()
         && ctx.interrupt_stream.boot_cpu_local_interrupts_enabled()
         && !ctx.interrupt_stream.early_boot_irqs_disabled()
-        && ctx.boot_cpu_local_interrupt.state() == State::Ready
-        && ctx.boot_cpu_local_interrupt.enabled()
+        && ctx.boot_cpu_local_interrupt().state() == State::Ready
+        && ctx.boot_cpu_local_interrupt().enabled()
         && csr::supervisor_interrupts_enabled()
         && ctx.plic_irq_domain.state() == State::Ready
         && ctx.plic_irq_domain.enable_deferred()

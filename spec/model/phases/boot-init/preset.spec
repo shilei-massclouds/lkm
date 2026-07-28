@@ -243,7 +243,7 @@ object EventStream: FlowObject {
                     BootCpuRegisters.stvec == phys_addr(EventStream.early_event_entry);
                     early_event_entry_phys_safe(EventStream.early_event_entry);
                     event_stream_early_entry_available(EventStream, EventStream.early_event_entry);
-                    cpu_event_stream_ready(BootCPU, EventStream);
+                    cpu_event_stream_ready(CpuGroup.cpus[0], EventStream);
                 }
             }
         }
@@ -259,7 +259,7 @@ object EventStream: FlowObject {
             valid_function_symbol(early_event_entry);
             early_event_entry_phys_safe(EventStream.early_event_entry);
             event_stream_early_entry_available(EventStream, EventStream.early_event_entry);
-            cpu_event_stream_ready(BootCPU, EventStream);
+            cpu_event_stream_ready(CpuGroup.cpus[0], EventStream);
         }
 
         transitions {
@@ -284,9 +284,9 @@ object EventStream: FlowObject {
                     BootCpuRegisters.stvec == virt_addr(EventStream.formal_event_entry, EarlyVm, KernelImageMap);
                     BootCpuRegisters.sscratch == 0;
                     event_stream_dispatch_ready(EventStream, ExceptionStream, InterruptStream);
-                    cpu_event_stream_ready(BootCPU, EventStream);
-                    cpu_exception_stream_ready(BootCPU, ExceptionStream);
-                    cpu_interrupt_stream_ready(BootCPU, InterruptStream);
+                    cpu_event_stream_ready(CpuGroup.cpus[0], EventStream);
+                    cpu_exception_stream_ready(CpuGroup.cpus[0], ExceptionStream);
+                    cpu_interrupt_stream_ready(CpuGroup.cpus[0], InterruptStream);
                 }
             }
         }
@@ -302,9 +302,9 @@ object EventStream: FlowObject {
             BootCpuRegisters.stvec == virt_addr(EventStream.formal_event_entry, EarlyVm, KernelImageMap);
             BootCpuRegisters.sscratch == 0;
             event_stream_dispatch_ready(EventStream, ExceptionStream, InterruptStream);
-            cpu_event_stream_ready(BootCPU, EventStream);
-            cpu_exception_stream_ready(BootCPU, ExceptionStream);
-            cpu_interrupt_stream_ready(BootCPU, InterruptStream);
+            cpu_event_stream_ready(CpuGroup.cpus[0], EventStream);
+            cpu_exception_stream_ready(CpuGroup.cpus[0], ExceptionStream);
+            cpu_interrupt_stream_ready(CpuGroup.cpus[0], InterruptStream);
         }
     }
 }
@@ -319,7 +319,7 @@ object EventStream: FlowObject {
  * 可以在生命周期 transition中驱动 BootCpuLocalInterrupt，但不得绕过它直接改变总开关。
  *
  * 当前具名 InterruptStream 是 boot CPU 的中断流实例，并通过 parent EventStream
- * 间接关联到 BootCPU。
+ * 间接关联到 CpuGroup.cpus[0]。
  */
 object InterruptStream: FlowObject {
     initial_state: State::Base;
@@ -422,7 +422,7 @@ object InterruptStream: FlowObject {
 
                 ensures {
                     cpu_local_interrupts_enabled(BootCpuLocalInterrupt);
-                    boot_cpu_local_interrupts_enabled(BootCPU);
+                    boot_cpu_local_interrupts_enabled(CpuGroup.cpus[0]);
                     interrupt_dispatch_ready(InterruptStream);
                 }
             }
@@ -436,7 +436,7 @@ object InterruptStream: FlowObject {
     state State::Online {
         invariant {
             cpu_local_interrupts_enabled(BootCpuLocalInterrupt);
-            boot_cpu_local_interrupts_enabled(BootCPU);
+            boot_cpu_local_interrupts_enabled(CpuGroup.cpus[0]);
             interrupt_dispatch_ready(InterruptStream);
         }
     }
@@ -1666,240 +1666,13 @@ object SwapperVm: AddressSpaceObject {
 }
 
 /*
- * BootCurrentCPU 表示 BP 启动时天然存在的当前 CPU 自我身份入口。它独立于
- * CpuGroup，拥有当前启动 CPU 对象；过渡期内该 CPU 对象仍由 BootCPU 承载，
- * BootCPU 作为 CurrentCPU.cpu 的 bootstrap role/alias 保留。
- */
-object BootCurrentCPU: CurrentCPU {
-    initial_state: State::Base;
-
-    state State::Base {
-        transitions {
-            /*
-             * Preset 记录 BP 的自我身份入口和入口 hartid 来源。
-             */
-            on Transition::Preset -> State::Prepared {
-                depends_on {
-                    BootArgs.state == State::Online;
-                    BootCPU.state == State::Base;
-                }
-
-                drives {
-                    BootCPU.Transition::Preset;
-                    BootCpuLocalInterrupt.Transition::Setup;
-                    BootCpuCurrentTask.Transition::Setup;
-                }
-
-                ensures {
-                    current_cpu_self_identity_ready(BootCurrentCPU);
-                    current_cpu_hartid_ready(BootCurrentCPU, BootArgs.boot_hartid);
-                    current_cpu_owns_cpu(BootCurrentCPU, BootCPU);
-                    current_cpu_bootstrap_role_ready(BootCurrentCPU, BootCPU);
-                    cpu_hartid_ready(BootCPU, BootArgs.boot_hartid);
-                    cpu_bootstrap_role(BootCPU);
-                    cpu_local_interrupt_control_ready(BootCpuLocalInterrupt, BootCPU);
-                    current_task_slot_ready(BootCpuCurrentTask, BootCPU);
-                }
-            }
-        }
-    }
-
-    state State::Prepared {
-        invariant {
-            current_cpu_self_identity_ready(BootCurrentCPU);
-            current_cpu_hartid_ready(BootCurrentCPU, BootArgs.boot_hartid);
-            current_cpu_owns_cpu(BootCurrentCPU, BootCPU);
-            current_cpu_bootstrap_role_ready(BootCurrentCPU, BootCPU);
-            cpu_hartid_ready(BootCPU, BootArgs.boot_hartid);
-            cpu_bootstrap_role(BootCPU);
-        }
-
-        transitions {
-            /*
-             * Setup 确认 BP 的 logical CPU id。当前启动闭环固定为 0。
-             */
-            on Transition::Setup -> State::Ready {
-                ensures {
-                    current_cpu_logical_id_ready(BootCurrentCPU, 0);
-                    current_cpu_owns_cpu(BootCurrentCPU, BootCPU);
-                    cpu_logical_id_ready(BootCPU, 0);
-                    cpu_bootstrap_role(BootCPU);
-                }
-            }
-        }
-    }
-
-    state State::Ready {
-        invariant {
-            current_cpu_hartid_ready(BootCurrentCPU, BootArgs.boot_hartid);
-            current_cpu_logical_id_ready(BootCurrentCPU, 0);
-            current_cpu_owns_cpu(BootCurrentCPU, BootCPU);
-            current_cpu_bootstrap_role_ready(BootCurrentCPU, BootCPU);
-            cpu_hartid_ready(BootCPU, BootArgs.boot_hartid);
-            cpu_logical_id_ready(BootCPU, 0);
-            cpu_bootstrap_role(BootCPU);
-        }
-
-        transitions {
-            /*
-             * Enable 在 CpuGroup 建立后，把 CurrentCPU 拥有的 CPU 对象注册到
-             * CpuGroup 的引用集合。CpuGroup 不拥有 CPU 本体。
-             */
-            on Transition::Enable -> State::Online {
-                depends_on {
-                    CpuGroup.state == State::Prepared;
-                }
-
-                ensures {
-                    current_cpu_registered_in_cpu_group(BootCurrentCPU, CpuGroup);
-                    boot_cpu_managed_by_cpu_group(CpuGroup, BootCPU);
-                    cpu_group_uses_logical_id_index(CpuGroup);
-                    cpu_group_boot_cpu_index_zero(CpuGroup, BootCPU);
-                }
-            }
-        }
-    }
-
-    state State::Online {
-        invariant {
-            current_cpu_hartid_ready(BootCurrentCPU, BootArgs.boot_hartid);
-            current_cpu_logical_id_ready(BootCurrentCPU, 0);
-            current_cpu_owns_cpu(BootCurrentCPU, BootCPU);
-            current_cpu_registered_in_cpu_group(BootCurrentCPU, CpuGroup);
-            current_cpu_bootstrap_role_ready(BootCurrentCPU, BootCPU);
-            cpu_hartid_ready(BootCPU, BootArgs.boot_hartid);
-            cpu_logical_id_ready(BootCPU, 0);
-            cpu_bootstrap_role(BootCPU);
-        }
-    }
-}
-
-/*
- * BootCPU 表示 BootCurrentCPU 拥有的启动 CPU 对象。后续它会退化为
- * BootCurrentCPU.cpu 的 bootstrap role/alias；当前迁移期保留具名对象。
- */
-object BootCPU: CPUObject {
-    initial_state: State::Base;
-    parent: BootCurrentCPU;
-
-    attrs {
-        hartid: HartId;
-    }
-
-    /*
-     * Base 表示启动 CPU 对象尚未记录入口参数中的物理 hartid。
-     */
-    state State::Base {
-        transitions {
-            /*
-             * Preset 记录 BootCPU.hartid 来自启动 ABI。
-             */
-            on Transition::Preset -> State::Prepared {
-                depends_on {
-                    BootArgs.state == State::Online;
-                }
-
-                ensures {
-                    boot_cpu_hartid_ready(BootCPU, BootArgs.boot_hartid);
-                    cpu_hartid_ready(BootCPU, BootArgs.boot_hartid);
-                    cpu_bootstrap_role(BootCPU);
-                }
-            }
-        }
-    }
-
-    /*
-     * Prepared 表示启动 CPU 已识别并记录物理 hartid，等待后继期 boot_cpu_init() 继续推进。
-     */
-    state State::Prepared {
-        invariant {
-            boot_cpu_hartid_ready(BootCPU, BootArgs.boot_hartid);
-            cpu_hartid_ready(BootCPU, BootArgs.boot_hartid);
-            cpu_bootstrap_role(BootCPU);
-        }
-
-        transitions {
-            /*
-             * Setup 对应 boot_cpu_init() 中 present/active 边界。
-             */
-            on Transition::Setup -> State::Ready {
-                depends_on {
-                    PlatformCpuInfo.state == State::Online;
-                }
-
-                ensures {
-                    platform_hart_id_valid(BootArgs.boot_hartid);
-                    cpu_possible(BootCPU);
-                    cpu_present(BootCPU);
-                    cpu_active(BootCPU);
-                    boot_cpu_present(BootCPU);
-                    boot_cpu_active(BootCPU);
-                }
-            }
-        }
-    }
-
-    /*
-     * Ready 表示启动 CPU 已标记 present/active。
-     */
-    state State::Ready {
-        invariant {
-            boot_cpu_hartid_ready(BootCPU, BootArgs.boot_hartid);
-            cpu_hartid_ready(BootCPU, BootArgs.boot_hartid);
-            cpu_bootstrap_role(BootCPU);
-            platform_hart_id_valid(BootArgs.boot_hartid);
-            cpu_possible(BootCPU);
-            cpu_present(BootCPU);
-            cpu_active(BootCPU);
-            boot_cpu_present(BootCPU);
-            boot_cpu_active(BootCPU);
-        }
-
-        transitions {
-            /*
-             * Enable 对应 boot_cpu_init() 最终 online 边界。
-             */
-            on Transition::Enable -> State::Online {
-                ensures {
-                    cpu_online(BootCPU);
-                    boot_cpu_online(BootCPU);
-                    cpu_ref_targets(BootCPURef, BootCPU);
-                    cpu_ref_ready(BootCPURef);
-                }
-            }
-        }
-    }
-
-    /*
-     * Online 表示启动 CPU 已进入本阶段需要的 online 边界。
-     */
-    state State::Online {
-        invariant {
-            boot_cpu_hartid_ready(BootCPU, BootArgs.boot_hartid);
-            cpu_hartid_ready(BootCPU, BootArgs.boot_hartid);
-            cpu_bootstrap_role(BootCPU);
-            platform_hart_id_valid(BootArgs.boot_hartid);
-            cpu_possible(BootCPU);
-            cpu_present(BootCPU);
-            cpu_active(BootCPU);
-            cpu_online(BootCPU);
-            boot_cpu_present(BootCPU);
-            boot_cpu_active(BootCPU);
-            boot_cpu_online(BootCPU);
-            cpu_ref_targets(BootCPURef, BootCPU);
-            cpu_ref_ready(BootCPURef);
-        }
-    }
-}
-
-/*
- * BootCpuRegisters 表示 BootCPU 天然存在且可访问的启动相关寄存器子集。
+ * BootCpuRegisters 表示 CpuGroup.cpus[0] 天然存在且可访问的启动相关寄存器子集。
  * Online 只保证这些寄存器属性可访问；a0/a1 由 OpenSBI 交接确定，
  * 其余寄存器由内核入口阶段逐步更新。
  */
 object BootCpuRegisters: HardwareObject {
     initial_state: State::Online;
-    parent: BootCPU;
+    parent: CpuGroup.cpus[0];
     source: hardware::boot_cpu_registers;
 
     attrs {
@@ -1924,19 +1697,19 @@ object BootCpuRegisters: HardwareObject {
 }
 
 /*
- * BootCpuLocalInterrupt 是 BootCPU 的本地中断总开关控制对象，对应 RISC-V
+ * BootCpuLocalInterrupt 是 CpuGroup.cpus[0] 的本地中断总开关控制对象，对应 RISC-V
  * sstatus.SIE。接管后只有它可以直接表示和改变 local interrupt 总开关状态；
  * InterruptStream 可以驱动它，但不能绕过它直接改变总开关。
  */
 object BootCpuLocalInterrupt: LocalInterruptControl {
     initial_state: State::Base;
-    parent: BootCPU;
+    parent: CpuGroup.cpus[0];
 
     state State::Base {
         transitions {
             on Transition::Setup -> State::Ready {
                 ensures {
-                    cpu_local_interrupt_control_ready(BootCpuLocalInterrupt, BootCPU);
+                    cpu_local_interrupt_control_ready(BootCpuLocalInterrupt, CpuGroup.cpus[0]);
                     cpu_local_interrupts_disabled(BootCpuLocalInterrupt);
                 }
             }
@@ -1945,25 +1718,25 @@ object BootCpuLocalInterrupt: LocalInterruptControl {
 
     state State::Ready {
         invariant {
-            cpu_local_interrupt_control_ready(BootCpuLocalInterrupt, BootCPU);
+            cpu_local_interrupt_control_ready(BootCpuLocalInterrupt, CpuGroup.cpus[0]);
             cpu_local_interrupts_disabled(BootCpuLocalInterrupt);
         }
     }
 }
 
 /*
- * BootCpuCurrentTask 是 BootCPU 的 current task 引用槽。它不拥有任务，只保存
+ * BootCpuCurrentTask 是 CpuGroup.cpus[0] 的 current task 引用槽。它不拥有任务，只保存
  * 当前 CPU 正在执行的 task 引用。
  */
 object BootCpuCurrentTask: CurrentTaskSlot {
     initial_state: State::Base;
-    parent: BootCPU;
+    parent: CpuGroup.cpus[0];
 
     state State::Base {
         transitions {
             on Transition::Setup -> State::Ready {
                 ensures {
-                    current_task_slot_ready(BootCpuCurrentTask, BootCPU);
+                    current_task_slot_ready(BootCpuCurrentTask, CpuGroup.cpus[0]);
                 }
             }
         }
@@ -1971,131 +1744,8 @@ object BootCpuCurrentTask: CurrentTaskSlot {
 
     state State::Ready {
         invariant {
-            current_task_slot_ready(BootCpuCurrentTask, BootCPU);
+            current_task_slot_ready(BootCpuCurrentTask, CpuGroup.cpus[0]);
         }
-    }
-}
-
-/*
- * CpuGroup 表示 SoC 下的处理器管理对象。它维护 CPU 对象引用、索引和拓扑
- * 组织关系，不拥有 CPU 本体；启动 CPU 本体由 BootCurrentCPU 拥有。
- * 核心准备期再基于正式 DeviceTree 完成 setup_smp() 对应的拓扑准备。
- */
-object CpuGroup: HardwareObject {
-    initial_state: State::Base;
-    parent: Soc;
-
-    /*
-     * Base 表示处理器管理对象尚未记录启动 CPU 引用。
-     */
-    state State::Base {
-        transitions {
-            /*
-             * Preset 注册 BootCurrentCPU 拥有的 BootCPU 引用。CpuGroup 不拥有
-             * BootCPU，只维护该引用和后续 topology/index 关系。
-             */
-            on Transition::Preset -> State::Prepared {
-                depends_on {
-                    BootCurrentCPU.state == State::Ready;
-                    BootCPU.state == State::Prepared;
-                }
-
-                ensures {
-                    current_cpu_registered_in_cpu_group(BootCurrentCPU, CpuGroup);
-                    boot_cpu_managed_by_cpu_group(CpuGroup, BootCPU);
-                    cpu_group_uses_logical_id_index(CpuGroup);
-                    cpu_group_boot_cpu_index_zero(CpuGroup, BootCPU);
-                }
-            }
-        }
-    }
-
-    /*
-     * Prepared 表示启动 CPU 已识别并挂入处理器管理对象。
-     */
-    state State::Prepared {
-        invariant {
-            current_cpu_registered_in_cpu_group(BootCurrentCPU, CpuGroup);
-            boot_cpu_managed_by_cpu_group(CpuGroup, BootCPU);
-            cpu_group_uses_logical_id_index(CpuGroup);
-            cpu_group_boot_cpu_index_zero(CpuGroup, BootCPU);
-        }
-
-        transitions {
-            /*
-             * Setup 对应 setup_smp()，建立 CPU 拓扑事实和 secondary CPU 候选集合。
-             * 它不启动 secondary CPU，也不开放多 hart 并发。
-             */
-            on Transition::Setup -> State::Ready {
-                depends_on {
-                    BootCPU.state == State::Online;
-                    DeviceTree.state == State::Ready;
-                    SBI.state == State::Ready;
-                }
-
-                ensures {
-                    boot_cpu_managed_by_cpu_group(CpuGroup, BootCPU);
-                    current_cpu_registered_in_cpu_group(BootCurrentCPU, CpuGroup);
-                    cpu_group_uses_logical_id_index(CpuGroup);
-                    cpu_group_boot_cpu_index_zero(CpuGroup, BootCPU);
-                    cpu_group_cpu_ref_at(CpuGroup, 0, BootCPURef);
-                    cpu_group_cpu_ref_targets(CpuGroup, BootCPURef, BootCPU);
-                    cpu_group_possible_set_ready(CpuGroup);
-                    cpu_group_present_set_ready(CpuGroup);
-                    cpu_group_online_set_ready(CpuGroup);
-                    cpu_group_possible_contains(CpuGroup, BootCPURef);
-                    cpu_group_present_contains(CpuGroup, BootCPURef);
-                    cpu_group_online_contains(CpuGroup, BootCPURef);
-                    cpu_group_topology_ready(CpuGroup, DeviceTree);
-                    cpu_group_boot_cpu_present(CpuGroup, BootCPU);
-                    secondary_cpus_discovered(CpuGroup, DeviceTree);
-                    secondary_cpus_have_unique_hartids(CpuGroup);
-                    secondary_cpus_exclude_boot_cpu(CpuGroup, BootCPU);
-                    secondary_cpus_possible(CpuGroup);
-                    secondary_cpus_present(CpuGroup);
-                    secondary_cpus_not_online(CpuGroup);
-                    cpu_group_secondary_cpu_entries_ready(CpuGroup);
-                    cpu_group_cpu_refs_have_unique_logical_ids(CpuGroup);
-                    cpu_group_cpu_refs_have_unique_hartids(CpuGroup);
-                    cpu_group_possible_cpu_boundary_ready(CpuGroup);
-                    cpu_group_concurrency_closed(CpuGroup);
-                }
-            }
-        }
-    }
-
-    /*
-     * Ready 表示 CPU 拓扑事实和 secondary CPU 候选集合已经建立，但 secondary CPU 尚未 online。
-     */
-    state State::Ready {
-        invariant {
-            boot_cpu_managed_by_cpu_group(CpuGroup, BootCPU);
-            current_cpu_registered_in_cpu_group(BootCurrentCPU, CpuGroup);
-            cpu_group_uses_logical_id_index(CpuGroup);
-            cpu_group_boot_cpu_index_zero(CpuGroup, BootCPU);
-            cpu_group_cpu_ref_at(CpuGroup, 0, BootCPURef);
-            cpu_group_cpu_ref_targets(CpuGroup, BootCPURef, BootCPU);
-            cpu_group_possible_set_ready(CpuGroup);
-            cpu_group_present_set_ready(CpuGroup);
-            cpu_group_online_set_ready(CpuGroup);
-            cpu_group_possible_contains(CpuGroup, BootCPURef);
-            cpu_group_present_contains(CpuGroup, BootCPURef);
-            cpu_group_online_contains(CpuGroup, BootCPURef);
-            cpu_group_topology_ready(CpuGroup, DeviceTree);
-            cpu_group_boot_cpu_present(CpuGroup, BootCPU);
-            secondary_cpus_discovered(CpuGroup, DeviceTree);
-            secondary_cpus_have_unique_hartids(CpuGroup);
-            secondary_cpus_exclude_boot_cpu(CpuGroup, BootCPU);
-            secondary_cpus_possible(CpuGroup);
-            secondary_cpus_present(CpuGroup);
-            secondary_cpus_not_online(CpuGroup);
-            cpu_group_secondary_cpu_entries_ready(CpuGroup);
-            cpu_group_cpu_refs_have_unique_logical_ids(CpuGroup);
-            cpu_group_cpu_refs_have_unique_hartids(CpuGroup);
-            cpu_group_possible_cpu_boundary_ready(CpuGroup);
-            cpu_group_concurrency_closed(CpuGroup);
-        }
-
     }
 }
 

@@ -242,188 +242,21 @@ require an exact number of BootIdle, Kthreadd or context-switch iterations.
 Counter observations may prove that a boundary was reached; they are not
 default `make run` acceptance criteria.
 
-#### CPU instance model
+#### CPU and CpuGroup ownership
 
-The implementation must realize the model as one reusable CPU object
-type with one instance per logical CPU. BootCPU is the logical-id-0
-CPU instance with a bootstrap role, not a separate CPU type.
+Generated Rust must implement one `CpuGroup` with `[Option<Cpu>; MAX_CPUS]` as the sole authoritative CPU instance store. `CpuGroup.cpus[logic_id]` is the canonical identity; `BootCPU` and AP names are role aliases only. `CpuView`, parallel `cpu_refs`, `SecondaryCpuStore`, and an independently owned boot CPU are forbidden. Logical ID is derived from the array index, hartid is stored in `Cpu`, and possible/present/active/online masks are derived caches rather than identity stores. Insertion validates key type, bounds, duplicate keys and hartid uniqueness before publishing the child and parent update atomically.
 
-#### CpuGroup indexing
+`CpuRef` lowers to a compact logical ID and dereference must validate that the indexed element exists. `TaskFlow` is the sole owner of CPU assignment; `Task` has no synonymous CPU field. Only entry and scheduler commit boundaries write `TaskFlow.cpu_ref`. A Flow retains its assigned/last CPU when it is not OnCpu; migration changes the ref at commit, and handoff copies it before the successor Flow becomes active.
 
-CpuGroup must expose a logical-id indexed CPU reference view:
-CpuGroup.Cpu[0] targets BootCPU and later entries target secondary
-CPU instances. Generated code must not create a separate CpuIdMap
-object; CpuGroup itself carries the index and possible CPU boundary.
+`CurrentCpu` is a stateless capability created by dereferencing the effective `TaskFlow.cpu_ref` against `CpuGroup`. It is not stored as an object and has no lifecycle. Synchronous helper/drives calls may borrow it; asynchronous emits receive no inherited capability. Trace output must name both canonical target and source Flow/CpuRef. `Context` owns `CpuGroup` only; CPU-local interrupt control, CurrentTaskSlot, registers and scheduler-local state are reached through the selected `Cpu`.
 
-#### CpuGroup ownership
-
-CpuGroup organizes CpuRef indexes, topology and possible/present/
-online set views. It must not own CPU bodies, and generated code
-must not model PossibleCpu/PossibleRunQueue as separate owning CPU
-objects. A set element is a CPU reference.
-
-#### CPU state facts
-
-hartid, logical_id, possible, present, active and online belong to
-the CPU instance. CpuGroup maintains set views over CPU references
-for possible/present/online membership.
-
-#### AP CurrentCPU boundary
-
-A secondary CPU may be present in CpuGroup's possible/present views
-before bringup, but generated code must not create a live AP
-CurrentCPU, LocalInterruptControl, CurrentTaskSlot or
-PreemptionControl chain before that AP enters secondary entry.
-Once generated, those live AP facts must be tied to
-ApEntryPreludePhase/ApSmpCallinPhase/ApOnlineIdlePhase, not to
-possible/present membership or BP HSM request issuance alone.
-
-#### DefaultSchedRootDomain coverage
-
-DefaultSchedRootDomain must be generated as the scheduler's default
-root-domain coverage view. It must derive covered_cpus from
-CpuGroup.possible_cpus, store/resolve entries as CpuRef values, and
-must not own CPU bodies or define a separate CPU identity table.
-Naked possible CPU counts are insufficient as the formal model fact.
-
-#### RunQueue root-domain attach
-
-RunQueue setup for each possible CPU must attach to
-DefaultSchedRootDomain only after the runqueue CPU reference is known
-to be covered by DefaultSchedRootDomain.covered_cpus. The boot
-runqueue must expose or resolve BootCPURef as its CPU reference.
-Secondary runqueue metadata may be prepared before AP online, but
-that must not create a live AP CurrentCPU or runnable AP flow.
-
-#### sched_init wait-bit/radix/maple synchronization facts
-
-BitWaitQueueTable lowering must expose wait_bit_init() as a scoped
-boot initialization of every bit_wait_table bucket's wait_queue_head:
-the bucket count matches WAIT_TABLE_SIZE, bucket wait queues are
-ready, their internal spinlocks are initialized, and their lists are
-empty. These facts must be guarded in the model with a
-within BitWaitQueueTableInitContext block rather than represented as
-loose, unscoped ensures. RadixTree and MapleTree setup must keep
-their runtime call_rcu() node-free callbacks explicitly deferred;
-node_api_ready must not be read as meaning those callbacks executed
-during radix_tree_init()/maple_tree_init().
-
-#### sched_init workqueue early synchronization facts
-
-workqueue_init_early() must be represented as the first workqueue
-stage only: system workqueues and queue/cancel data structures are
-prepared, but workers do not run. The lowering must register
-KMEM_CACHE(pool_workqueue, SLAB_PANIC) as a PoolWorkqueue named
-cache in SlubCacheRegistry. It must model wq_pool_mutex and
-workqueue_struct->mutex as explicit guard scopes using
-within WorkqueuePoolMutexContext { ... } and nested
-within WorkqueueStructMutexContext { ... }. Worker attach/detach,
-mayday/rescuer locking and manager_wait behavior remain deferred to
-the later worker-runtime phases.
-
-#### sched_init softirq/RCU/tracing boundaries
-
-Softirq.Preset in SchedInitPhase must only create the action-table
-and per-CPU pending-bit shell needed by rcu_init(); Linux
-softirq_init(), tasklet queues, TIMER_SOFTIRQ and HRTIMER_SOFTIRQ
-registration occur after early_irq_init() and are driven by
-IrqTimeInitPhase. RcuCore.setup() must explicitly register
-RCU_SOFTIRQ against Softirq instead of treating action_table_ready
-as sufficient. It must expose rcu_init()'s TREE_RCU node tree
-locks/waitqueues/work, per-CPU rcu_data binding, kfree_rcu batch
-workqueue/shrinker setup, PM notifier registration, and
-tasks_cblist_init_generic() per-flavor/per-CPU callback-list,
-lock, work, and barrier-head facts. RCU GP kthreads, callback
-execution and full RCU read-side/context-tracking semantics remain
-deferred. The active .config enables FTRACE/TRACING, CPU_ISOLATION
-and CONTEXT_TRACKING/CONTEXT_TRACKING_IDLE, but not
-CONFIG_FTRACE_MCOUNT_RECORD or CONFIG_CONTEXT_TRACKING_USER_FORCE.
-Therefore ftrace_init() and context_tracking_init() are
-trimmed/no-op call points for the current RISC-V64 target, while
-early_trace_init()/trace_init() and housekeeping_init() remain
-explicit deferred boundaries whose Linux responsibilities must not
-be collapsed into the project checkpoint announce or ignored as
-permanently absent. The implementation must preserve the Linux call
-order inside the existing SchedInitPhase: poking_init()/ftrace_init()
-are recorded before Scheduler setup via SchedInitPreludeTrimmedPaths,
-while trace_init()/context_tracking_init() are recorded after
-rcu_init() via SchedInitTraceContextBoundaries. These are boundary
-objects, not formal subphases.
-
-#### CPU-owned RunQueue/IdleTask
-
-Generated model and code comments must present RunQueue and IdleTask
-as objects owned by the corresponding CPU instance:
-CpuGroup.Cpu[id].RunQueue and CpuGroup.Cpu[id].IdleTask. Scheduler
-may orchestrate setup and policy, but must not be treated as owning
-every CPU's runqueue or idle task body. Current Rust lowering may
-temporarily store BootRunQueue and boot-task scheduler metadata inside Scheduler fields
-only if public facts and smoke checks expose them as BootCPU views of the same `BootTask`.
-
-#### Boot scheduler lock ownership
-
-BootRunQueueLock must be lowered as the lock owned by the
-BootCPU-owned BootRunQueue object, and BootIdlePiLock must be
-lowered as the pi_lock owned by the BootCPU-owned BootTask
-object. Scheduler.setup() may orchestrate init_idle() ordering, but
-must not become the semantic owner of those locks. Public readiness
-checks may expose transitional Scheduler accessors only as
-projections back to BootRunQueue.lock and BootTask.pi_lock.
-
-#### CPU-owned scheduler view lowering
-
-While BootRunQueue and boot-task scheduler metadata are still stored inside the
-Scheduler object, generated Rust must expose a formal boot CPU view
-of that storage. CpuOwnedSchedulerView is the public implementation
-surface for CpuGroup.Cpu[0].RunQueue and CpuGroup.Cpu[0].IdleTask;
-CpuIdleTaskView is the public idle-task half of that view. These
-views must be derived from CpuGroup.Cpu[0], BootRunQueue and
-BootTask facts, must confirm BootRunQueue.curr/idle both point
-at BootTask, and must reject mismatched CPU refs or hart ids.
-They are not test-only wrappers, and smoke must check them directly.
-Core object implementations that only need the boot CPU-owned
-RunQueue/IdleTask facts must consume CpuOwnedSchedulerView instead
-of directly treating Scheduler.boot_runqueue() or
-Scheduler.boot_task_metadata() as the formal ownership source. Direct
-accessors may remain as transitional storage/debug observation
-surfaces and for BootRunQueue/BootTask-local APIs, but not as the
-primary readiness predicate in rest_init task setup/enable paths.
-RestInit phase predicates and checkpoint/KUnit handlers that verify
-boot CPU runqueue membership or task count must consume read-only
-membership/count facts projected by CpuOwnedSchedulerView, not
-re-read Scheduler.boot_runqueue() as the formal observation source.
-RestInit task-creation helpers, including TaskCreationCore.copy_process(),
-must receive enough CpuGroup context to validate the same formal
-boot CPU-owned scheduler view instead of using BootRunQueue state as
-an implicit scheduler-ready shortcut.
-Smoke tests that assert CPU-owned RunQueue/IdleTask functional facts
-must prefer CpuOwnedSchedulerView/CpuIdleTaskView observations. A
-smoke test may compare against Scheduler.boot_runqueue() or
-Scheduler.boot_task_metadata() only when the comparison is explicitly a
-transitional storage parity check.
-
-#### Transitional lowering
-
-The current Rust storage may temporarily keep boot_cpu and
-secondary_cpus fields for implementation convenience, but such a
-split is a lowering detail. Public object facts, checkpoints and
-code-generation comments must present the unified CPU instance model
-and logical-id indexed CpuGroup view.
-
-#### CPU/CpuGroup coverage
-
-Smoke/checkpoint coverage must observe CpuGroup.Cpu[0] -> BootCPU,
-boot CPU possible/present/online facts, secondary possible/present
-but not-online facts, and unique logical-id/hartid boundaries.
-Scheduler smoke must also observe the formal CpuOwnedSchedulerView
-and CpuIdleTaskView rather than only comparing private
-Scheduler.boot_runqueue()/boot_task_metadata() fields.
+AP entries may exist as possible/present before bringup, but no AP `CurrentCpu` capability exists until an AP Flow has execution authority and a valid CpuRef. `CurrentTaskSlot` remains CPU-local and task switch commits its value together with the next Flow CpuRef before activation. Smoke and checkpoint coverage must validate CPU0 ownership, AP identity, CpuRef dereference, no parallel identity stores, derived masks, logical-ID/hartid bijection, migration and Flow handoff.
 
 #### Current TaskRef scope
 
 The current CPU view must store a generation-checked `TaskRef`; the
 old role enum `CurrentTaskRef` is forbidden and has no compatibility
-alias. The BP path owns the BootCurrentCPU `CurrentTaskSlot` and must
+alias. The BP path reaches the `CpuGroup.cpus[0]` `CurrentTaskSlot` through its effective Flow and must
 not introduce a descriptive CurrentTask object or a global current
 task singleton. On task switch, next must become the TaskRef stored in
 this CPU-local slot. RISC-V64 code follows the Linux-style `tp`

@@ -88,6 +88,18 @@ impl KernelInitFlow {
         self.flow.flow_ref()
     }
 
+    pub const fn cpu_id(&self) -> usize {
+        self.flow.cpu_id()
+    }
+
+    pub const fn cpu_ref(&self) -> Option<super::cpu::CpuRef> {
+        self.flow.cpu_ref()
+    }
+
+    pub fn bind_cpu_ref(&mut self, cpu_ref: super::cpu::CpuRef) -> bool {
+        self.flow.bind_cpu_ref(cpu_ref)
+    }
+
     pub fn bind_initial(&mut self, owner: &mut KernelInitTask) -> EventResult {
         self.flow.bind(owner.task_mut(), TaskFlowRef::NONE)?;
         owner.task_mut().bind_initial_flow(&self.flow)
@@ -328,10 +340,6 @@ impl KernelInitTask {
         self.pid_lookup_rcu_guard_balanced
     }
 
-    pub const fn cpu_id(&self) -> usize {
-        self.task.cpu_id()
-    }
-
     pub const fn running(&self) -> bool {
         self.task.running()
     }
@@ -564,12 +572,16 @@ impl KernelInitTask {
         Ok(())
     }
 
-    pub fn release_boot_cpu_affinity(&mut self, cpu_group: &CpuGroup) -> bool {
+    pub fn release_boot_cpu_affinity(
+        &mut self,
+        flow: &KernelInitFlow,
+        cpu_group: &CpuGroup,
+    ) -> bool {
         if self.task.state() != State::OnCpu
             || self.task.pid() != KERNEL_INIT_PID
             || !self.task.affinity_pinned()
             || !self.task.no_setaffinity()
-            || self.cpu_id() == usize::MAX
+            || flow.cpu_id() == usize::MAX
             || !cpu_group.secondary_cpus_online()
             || !cpu_group.smp_concurrency_open()
         {
@@ -599,6 +611,18 @@ impl KthreaddFlow {
     #[cfg_attr(app_smoke, allow(dead_code))]
     pub const fn flow_ref(&self) -> TaskFlowRef {
         self.flow.flow_ref()
+    }
+
+    pub const fn cpu_id(&self) -> usize {
+        self.flow.cpu_id()
+    }
+
+    pub const fn cpu_ref(&self) -> Option<super::cpu::CpuRef> {
+        self.flow.cpu_ref()
+    }
+
+    pub fn bind_cpu_ref(&mut self, cpu_ref: super::cpu::CpuRef) -> bool {
+        self.flow.bind_cpu_ref(cpu_ref)
     }
 
     #[cfg_attr(app_smoke, allow(dead_code))]
@@ -748,10 +772,6 @@ impl KthreaddTask {
 
     pub const fn enqueued(&self) -> bool {
         self.task.runqueue_published()
-    }
-
-    pub const fn cpu_id(&self) -> usize {
-        self.task.cpu_id()
     }
 
     pub const fn running(&self) -> bool {

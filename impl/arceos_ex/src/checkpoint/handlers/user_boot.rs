@@ -425,7 +425,7 @@ fn run_selected_payload_handoff(
         && handoff.variant_setup_ready()
         && handoff.variant_prepare_ready()
         && handoff.no_return_entry_bound()
-        && ctx.boot_cpu_current_task.current_is_kernel_init()
+        && ctx.boot_cpu_current_task().current_is_kernel_init()
         && ctx.kernel_init_task.current_stack_pointer_in_range()
         && selected_variant_state_ready(ctx);
 
@@ -1456,8 +1456,8 @@ fn run_user_clone_vfork_child_handoff(
 
     let child = &ctx.user_task_set;
     let child_task_ref = child.active_task_ref();
-    let current_task_ref = ctx.boot_cpu_current_task.current();
-    let dispatch_task_ref = ctx.boot_cpu_current_task.current();
+    let current_task_ref = ctx.boot_cpu_current_task().current();
+    let dispatch_task_ref = ctx.boot_cpu_current_task().current();
     let child_flow_ref = child.active_flow_ref();
     let valid = child.vfork_clone()
         && child.vfork_child_handoff()
@@ -2080,8 +2080,8 @@ fn run_syscall_table_wait4(
     let child = &ctx.user_task_set;
     let obs = wait4_checkpoint_observation();
     let child_task_ref = child.active_task_ref();
-    let current_task_ref = ctx.boot_cpu_current_task.current();
-    let dispatch_task_ref = ctx.boot_cpu_current_task.current();
+    let current_task_ref = ctx.boot_cpu_current_task().current();
+    let dispatch_task_ref = ctx.boot_cpu_current_task().current();
     let child_flow_ref = child.active_flow_ref();
     let child_dispatch_valid = child.active_task_state() == State::OnCpu
         && current_task_ref.same_identity(child_task_ref)

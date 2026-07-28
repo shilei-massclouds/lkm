@@ -147,8 +147,8 @@ fn phase_ready(ctx: &Context) -> bool {
         && ctx.scheduler.current_runqueue_resolve_passes() == 0
         && ctx.scheduler.pick_next_task_passes() == 0
         && ctx.scheduler.switch_to_passes() == 0
-        && ctx.boot_cpu_current_task.switch_committed_count() == 0
-        && ctx.boot_cpu_current_task.current_is_boot_task()
+        && ctx.boot_cpu_current_task().switch_committed_count() == 0
+        && ctx.boot_cpu_current_task().current_is_boot_task()
         && ctx.boot_idle_flow.state() == State::Ready
         && ctx.boot_idle_flow.active()
         && ctx.boot_idle_flow.owner() == ctx.boot_task.task_ref()

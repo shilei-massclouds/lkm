@@ -30,7 +30,7 @@
 不能应用该默认。
 
 系统树是 `Computer -> {Riscv64Platform, OpenSBI, Kernel}`。启动 CPU 的局部层级片段是
-`BootCurrentCPU -> BootCPU -> BootCpuRegisters`；寄存器对象不属于 `Riscv64Platform`。
+`CpuGroup.cpus[0] -> BootCpuRegisters`；`BootCPU` 只是该元素的角色别名，寄存器对象不属于 `Riscv64Platform`。
 外部规格和构造输入通过显式 parent 归属消费它们的 System：`Riscv64 -> Riscv64Platform`、
 `SbiSpec/BootArgs -> OpenSBI`、`LinuxRiscv64KernelBootSpec/Config/Lds -> Kernel`。不包含 `Kernel` 的独立规格片段保持自己的根，
 工具不得为了凑齐主模型层级而虚构 Kernel。

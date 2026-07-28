@@ -116,6 +116,10 @@ object OpenSBI: FirmwareObject {
                     BootCpuRegisters.satp;
                 }
 
+                drives {
+                    CpuGroup.Transition::Preset;
+                }
+
                 ensures {
                     ordered_booting_enabled();
                     primary_hart_only_at_kernel_entry();
@@ -143,6 +147,9 @@ object OpenSBI: FirmwareObject {
                         BootTask,
                         TaskBreakpointState::Invalid
                     );
+                    CpuGroup.state == State::Prepared;
+                    CpuGroup.cpus[0].state == State::Prepared;
+                    cpu_group_preset_atomic_publish(CpuGroup, CpuGroup.cpus[0]);
                 }
 
                 emits {
@@ -186,6 +193,11 @@ object OpenSBI: FirmwareObject {
                 BootTask,
                 TaskBreakpointState::Invalid
             );
+            CpuGroup.state == State::Prepared;
+            CpuGroup.cpus[0].state == State::Prepared
+                || CpuGroup.cpus[0].state == State::Ready
+                || CpuGroup.cpus[0].state == State::Online;
+            cpu_group_preset_atomic_publish(CpuGroup, CpuGroup.cpus[0]);
         }
     }
 }

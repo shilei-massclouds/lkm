@@ -199,9 +199,9 @@ def _split_commas(text: str) -> list[str]:
             continue
         if char == '"':
             in_string = True
-        elif char in "(<{":
+        elif char in "(<{[":
             depth += 1
-        elif char in ")>}":
+        elif char in ")>}]":
             depth = max(0, depth - 1)
         elif char == "," and depth == 0:
             parts.append(text[start:index].strip())
@@ -474,6 +474,25 @@ def _field_block(segment: Segment, diagnostics: list[dict[str, Any]]) -> dict[st
         mutable = raw.startswith("mutable ")
         if mutable:
             raw = raw[len("mutable ") :].strip()
+        indexed_match = re.fullmatch(
+            rf"indexed\s+({_IDENT})\s*\[\s*({_IDENT})\s*:\s*(.+?)\s*\]\s*:\s*(.+)",
+            raw,
+            re.S,
+        )
+        if indexed_match is not None:
+            fields.append(
+                {
+                    "name": indexed_match.group(1),
+                    "type": indexed_match.group(4).strip(),
+                    "value": None,
+                    "mutable": mutable,
+                    "indexed": True,
+                    "key_name": indexed_match.group(2),
+                    "key_type": indexed_match.group(3).strip(),
+                    "span": member.span(),
+                }
+            )
+            continue
         name_match = re.match(rf"^({_IDENT})\b", raw)
         if name_match is None:
             diagnostics.append(_diagnostic("unsupported", "unsupported field declaration", member))
@@ -498,6 +517,9 @@ def _field_block(segment: Segment, diagnostics: list[dict[str, Any]]) -> dict[st
                 "type": type_name,
                 "value": value,
                 "mutable": mutable,
+                "indexed": False,
+                "key_name": None,
+                "key_type": None,
                 "span": member.span(),
             }
         )

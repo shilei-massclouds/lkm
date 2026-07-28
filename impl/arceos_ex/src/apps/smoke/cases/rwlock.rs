@@ -399,7 +399,7 @@ impl SmokeScenario for CooperativeWriterScenario {
         assertions.assert("scheduler online", ctx.scheduler.state() == State::Online);
         assertions.assert(
             "current kernel init",
-            ctx.boot_cpu_current_task.current_is_kernel_init(),
+            ctx.boot_cpu_current_task().current_is_kernel_init(),
         );
         assertions.assert_ok(
             "setup smoke rwlock task",
@@ -431,7 +431,7 @@ impl SmokeScenario for CooperativeWriterScenario {
             );
             assertions.assert(
                 "current returned kernel init",
-                context().boot_cpu_current_task.current() == TaskRef::KERNEL_INIT,
+                context().boot_cpu_current_task().current() == TaskRef::KERNEL_INIT,
             );
             assertions.assert_ok(
                 "kernel reader unlock",

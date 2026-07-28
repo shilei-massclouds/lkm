@@ -51,12 +51,10 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
     ctx.scheduler
         .preset(&ctx.cpu_group, &ctx.per_cpu_storage, &ctx.static_branch)?;
     ctx.scheduler.setup(
-        &ctx.cpu_group,
+        &mut ctx.cpu_group,
         &ctx.per_cpu_storage,
         &mut ctx.boot_task,
         &ctx.init_mm,
-        &mut ctx.boot_cpu_local_interrupt,
-        &mut ctx.boot_cpu_current_task,
     )?;
     ctx.scheduler.enable()?;
     checkpoint_irqs_disabled()?;
@@ -226,8 +224,8 @@ fn sched_init_phase_ready(ctx: &Context) -> bool {
         && ctx.scheduler.boot_idle_rcu_read_side().balanced()
         && ctx.scheduler.boot_idle_preemption().state() == State::Ready
         && ctx.scheduler.boot_idle_preemption().disabled()
-        && ctx.boot_cpu_current_task.state() == State::Ready
-        && ctx.boot_cpu_current_task.current_is_boot_task()
+        && ctx.boot_cpu_current_task().state() == State::Ready
+        && ctx.boot_cpu_current_task().current_is_boot_task()
         && ctx.radix_tree.state() == State::Ready
         && ctx.radix_tree.node_cache_ready()
         && ctx.radix_tree.registered_in_slub_registry()

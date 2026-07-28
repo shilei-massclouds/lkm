@@ -686,7 +686,11 @@ class ModelToolTests(unittest.TestCase):
             )
             self.assertEqual(objects["Riscv64Platform"]["children"], ["Riscv64"])
             self.assertEqual(objects["Riscv64"]["attrs"], {})
-            self.assertEqual(objects["BootCpuRegisters"]["parent"], "BootCPU")
+            self.assertEqual(
+                objects["BootCpuRegisters"]["parent"], "CpuGroup.cpus[0]"
+            )
+            self.assertNotIn("BootCPU", objects)
+            self.assertNotIn("BootCurrentCPU", objects)
             self.assertEqual(objects["BootCpuRegisters"]["initial_state"], "Online")
             self.assertEqual(
                 set(objects["BootCpuRegisters"]["attrs"]),
@@ -830,7 +834,18 @@ class ModelToolTests(unittest.TestCase):
                     "                        BootTask,\n"
                     "                        TaskBreakpointState::Invalid\n"
                     "                    )",
+                    "CpuGroup.state == State::Prepared",
+                    "CpuGroup.cpus[0].state == State::Prepared",
+                    "cpu_group_preset_atomic_publish(CpuGroup, CpuGroup.cpus[0])",
                 ],
+            )
+            self.assertEqual(
+                [
+                    entry["text"]
+                    for block in opensbi_enable["drives"]
+                    for entry in block["entries"]
+                ],
+                ["CpuGroup.Transition::Preset"],
             )
             self.assertEqual(
                 [
@@ -950,10 +965,9 @@ class ModelToolTests(unittest.TestCase):
                     "InterruptStream.Transition::Preset",
                     "KernelImage.Transition::Preset",
                     "KernelImage.Transition::Setup",
-                    "BootCurrentCPU.Transition::Preset",
-                    "BootCurrentCPU.Transition::Setup",
-                    "CpuGroup.Transition::Preset",
-                    "BootCurrentCPU.Transition::Enable",
+                    "CurrentCPU.Transition::Setup(true)",
+                    "CurrentCPU.BootCpuLocalInterrupt.Transition::Setup",
+                    "CurrentCPU.BootCpuCurrentTask.Transition::Setup",
                     "BootTaskEntryBinding.Transition::Preset",
                     "BootInitStack.Transition::Preset",
                     "EventStream.Transition::Preset",
@@ -976,10 +990,11 @@ class ModelToolTests(unittest.TestCase):
                 ],
                 [
                     "Kernel.Action::AcceptEnable",
+                    "BootInitFlow.Action::AssignCpuRef(BootCPURef)",
                     "BootInitFlow.Transition::Preset",
                     "BootInitFlow.Transition::Setup",
                     "BootInitFlow.Transition::Enable",
-                    "Scheduler.Action::Schedule",
+                    "Scheduler.Action::Schedule(BootIdleFlow)",
                     "KernelInitFlow.Transition::Setup",
                     "KernelInitFlow.Transition::Enable",
                 ],

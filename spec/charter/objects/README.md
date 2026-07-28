@@ -6,6 +6,8 @@ Object-level charter notes live here when they need a dedicated topic file.
 
 | Object | Authoritative charter |
 | --- | --- |
+| `CPU` | [`cpu.md`](cpu.md) |
+| `CpuGroup` | [`cpu-group.md`](cpu-group.md) |
 | `Task` | [`task.md`](task.md) |
 | `TaskFlow` | [`task-flow.md`](task-flow.md) |
 | Runtime Type instance / `declare` | [`dynamic-instance-declaration.md`](dynamic-instance-declaration.md) |

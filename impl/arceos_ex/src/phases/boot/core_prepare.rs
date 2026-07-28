@@ -42,8 +42,8 @@ fn preset_dependencies_ready(ctx: &Context) -> bool {
         && ctx.early_param.state() == State::Ready
         && ctx.command_line.state() == State::Prepared
         && ctx.cpu_group.boot_cpu_state() == State::Online
-        && ctx.boot_cpu_local_interrupt.state() == State::Ready
-        && ctx.boot_cpu_local_interrupt.disabled()
+        && ctx.boot_cpu_local_interrupt().state() == State::Ready
+        && ctx.boot_cpu_local_interrupt().disabled()
         && printk::is_prepared()
         && ctx.exception_stream.state() == State::Prepared
 }
@@ -62,8 +62,7 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
         &ctx.lds,
         &mut ctx.resource_lock,
     )?;
-    ctx.cpu_group
-        .setup_smp(&ctx.device_tree, &ctx.sbi, &mut ctx.secondary_cpus)?;
+    ctx.cpu_group.setup_smp(&ctx.device_tree, &ctx.sbi)?;
     ctx.cache_block_info
         .setup(&ctx.device_tree, &ctx.cpu_group)?;
     ctx.cpu_capabilities
@@ -103,12 +102,24 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
         checkpoint_print_unknown_bootoptions,
     )?;
     ctx.randomness.preset(&ctx.static_command_line)?;
-    printk::setup(
-        &ctx.memblock,
-        &ctx.per_cpu_storage,
-        &ctx.boot_param,
-        &mut ctx.boot_cpu_local_interrupt,
-    )?;
+    {
+        let Context {
+            memblock,
+            per_cpu_storage,
+            boot_param,
+            cpu_group,
+            ..
+        } = ctx;
+        let Some(local_interrupt) = cpu_group.boot_cpu_local_interrupt_mut() else {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                State::Base,
+                State::Prepared,
+                State::Ready,
+            );
+        };
+        printk::setup(memblock, per_cpu_storage, boot_param, local_interrupt)?;
+    }
     crate::checkpoint::dispatch(Checkpoint::PrintkBufferReady, ctx);
     ctx.exception_table.setup(&ctx.kernel_image, &ctx.vm)?;
     ctx.exception_stream.setup(&ctx.event_stream)
@@ -231,7 +242,7 @@ fn core_prepare_phase_ready(ctx: &Context) -> bool {
         && ctx.randomness.base_crng_lock_deferred()
         && printk::is_ready()
         && printk::setup_local_irq_save_restore_used()
-        && printk::setup_local_irq_guard_used_by(&ctx.boot_cpu_local_interrupt)
+        && printk::setup_local_irq_guard_used_by(ctx.boot_cpu_local_interrupt())
         && ctx.exception_table.state() == State::Ready
         && ctx.exception_stream.state() == State::Ready
         && ctx.exception_stream.page_fault_state() == State::Ready

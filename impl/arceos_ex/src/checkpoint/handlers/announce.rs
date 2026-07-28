@@ -88,7 +88,7 @@ pub fn announce_name_with_context(checkpoint: Checkpoint, ctx: &Context) {
     crate::arch::riscv64::sbi::putstr("checkpoint: ");
     crate::arch::riscv64::sbi::putstr(checkpoint.name());
     crate::arch::riscv64::sbi::putstr(" task=");
-    crate::arch::riscv64::sbi::putstr(ctx.boot_cpu_current_task.current().name());
+    crate::arch::riscv64::sbi::putstr(ctx.boot_cpu_current_task().current().name());
     crate::arch::riscv64::sbi::putchar(b'\n');
 }
 

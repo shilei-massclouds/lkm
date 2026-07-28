@@ -635,7 +635,7 @@ class SignalAnimationTests(unittest.TestCase):
             "Ready",
         )
 
-    def test_kernel_enable_boundary_has_13_signals_and_26_causal_moments(self) -> None:
+    def test_kernel_enable_boundary_has_15_signals_and_30_causal_moments(self) -> None:
         work = self.root / "kernel-boundary-work"
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(
@@ -670,18 +670,18 @@ class SignalAnimationTests(unittest.TestCase):
             animation["inputs"]["model_fingerprint"],
             derivation["model_fingerprint"],
         )
-        self.assertEqual(animation["trace"]["total_signals"], 13)
-        self.assertEqual(animation["trace"]["total_moments"], 26)
+        self.assertEqual(animation["trace"]["total_signals"], 15)
+        self.assertEqual(animation["trace"]["total_moments"], 30)
         self.assertEqual(
             {kind: sum(moment["kind"] == kind for moment in animation["moments"])
              for kind in ("request", "feedback", "settle")},
-            {"request": 13, "feedback": 10, "settle": 3},
+            {"request": 15, "feedback": 12, "settle": 3},
         )
         self.assertEqual(
             [moment["id"] for moment in animation["moments"] if moment["kind"] == "feedback"],
             [
                 f"sig-{index:04d}:feedback"
-                for index in (2, 3, 4, 1, 6, 7, 9, 10, 8, 5)
+                for index in (2, 3, 4, 1, 6, 7, 9, 10, 8, 5, 15, 14)
             ],
         )
         self.assertEqual(
@@ -743,7 +743,7 @@ class SignalAnimationTests(unittest.TestCase):
         ]
         self.assertEqual(stable_states, ["Base", "Prepared", "Ready", "Online"])
 
-    def test_boot_init_setup_boundary_has_50_signals_and_100_causal_moments(self) -> None:
+    def test_boot_init_setup_boundary_has_49_signals_and_98_causal_moments(self) -> None:
         work = self.root / "boot-init-setup-boundary-work"
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(
@@ -771,17 +771,17 @@ class SignalAnimationTests(unittest.TestCase):
                 derivation["model_fingerprint"],
                 view["model_fingerprint"],
             },
-            {"sha256:0c95ef3df8785912443c07f9a30797f31d4ce781878b27b49affc5e49a490faa"},
+            {"sha256:321ebcd7a70ed559c8c2c61d3f907988b10047e21c56c6048567ea0d3826c8c0"},
         )
         animation = build_animation(model, view)
-        self.assertEqual(animation["trace"]["total_signals"], 50)
-        self.assertEqual(animation["trace"]["total_moments"], 100)
+        self.assertEqual(animation["trace"]["total_signals"], 49)
+        self.assertEqual(animation["trace"]["total_moments"], 98)
         self.assertEqual(
             {
                 kind: sum(moment["kind"] == kind for moment in animation["moments"])
                 for kind in ("request", "feedback", "settle", "terminal")
             },
-            {"request": 50, "feedback": 46, "settle": 3, "terminal": 1},
+            {"request": 49, "feedback": 45, "settle": 3, "terminal": 1},
         )
         self.assertEqual(
             [moment["id"] for moment in animation["moments"] if moment["kind"] == "settle"],
@@ -789,7 +789,7 @@ class SignalAnimationTests(unittest.TestCase):
         )
         self.assertEqual(
             [moment["id"] for moment in animation["moments"] if moment["kind"] == "terminal"],
-            ["sig-0014:terminal"],
+            ["sig-0016:terminal"],
         )
         terminal = next(
             moment for moment in animation["moments"] if moment["kind"] == "terminal"
@@ -800,7 +800,7 @@ class SignalAnimationTests(unittest.TestCase):
                 terminal["signal"], terminal["outcome"], terminal["reason"],
             ),
             (
-                "sig-0014", "OpenSBI", "Kernel", "Enable", "stopped",
+                "sig-0016", "OpenSBI", "Kernel", "Enable", "stopped",
                 "until_signal_reached",
             ),
         )
@@ -819,8 +819,8 @@ class SignalAnimationTests(unittest.TestCase):
             moment["id"]: index for index, moment in enumerate(animation["moments"])
         }
         self.assertGreater(
-            moment_index["sig-0016:feedback"],
-            max(moment_index[f"sig-{index:04d}:feedback"] for index in range(17, 51)),
+            moment_index["sig-0019:feedback"],
+            max(moment_index[f"sig-{index:04d}:feedback"] for index in range(20, 50)),
         )
         self.assertEqual(
             animation["trace"]["boundary"]["normalized_signal"],
@@ -832,7 +832,7 @@ class SignalAnimationTests(unittest.TestCase):
                 for moment in animation["moments"]
             )
         )
-        feedback_index = moment_index["sig-0016:feedback"]
+        feedback_index = moment_index["sig-0019:feedback"]
         feedback_frame = animation["frames"][feedback_index]
         self.assertEqual(
             next(

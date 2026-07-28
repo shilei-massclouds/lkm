@@ -1,6 +1,7 @@
 use crate::checkpoint::Checkpoint;
 
 use super::{
+    cpu::CpuRef,
     next_generation,
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     task::{Task, TaskExecutionAuthority, TaskRef},
@@ -78,6 +79,7 @@ pub struct TaskFlow {
     predecessor: TaskFlowRef,
     disabled: bool,
     cleaned: bool,
+    cpu_ref: CpuRef,
 }
 
 impl TaskFlow {
@@ -93,6 +95,7 @@ impl TaskFlow {
             predecessor: TaskFlowRef::NONE,
             disabled: false,
             cleaned: false,
+            cpu_ref: CpuRef::invalid(),
         }
     }
 
@@ -108,6 +111,7 @@ impl TaskFlow {
             predecessor: TaskFlowRef::NONE,
             disabled: false,
             cleaned: false,
+            cpu_ref: CpuRef::invalid(),
         }
     }
 
@@ -123,6 +127,7 @@ impl TaskFlow {
             predecessor: TaskFlowRef::NONE,
             disabled: false,
             cleaned: false,
+            cpu_ref: CpuRef::invalid(),
         }
     }
 
@@ -170,6 +175,54 @@ impl TaskFlow {
         self.cleaned
     }
 
+    pub const fn cpu_ref(&self) -> Option<CpuRef> {
+        if self.cpu_ref.is_valid() {
+            Some(self.cpu_ref)
+        } else {
+            None
+        }
+    }
+
+    pub const fn cpu_id(&self) -> usize {
+        self.cpu_ref.logical_id()
+    }
+
+    /// Entry/runqueue binding boundary for a Flow that has not yet acquired
+    /// a CPU. Task deliberately carries no synonymous CPU assignment.
+    pub fn bind_cpu_ref(&mut self, cpu_ref: CpuRef) -> bool {
+        if !cpu_ref.is_valid()
+            || self.cpu_ref.is_valid()
+            || !matches!(
+                self.lifecycle.state(),
+                State::Base | State::Prepared | State::Ready
+            )
+        {
+            return false;
+        }
+        self.commit_cpu_ref(cpu_ref)
+    }
+
+    /// Scheduler commit boundary. A Flow retains its previous CpuRef while it
+    /// is not OnCpu, and changes it only when migration is committed.
+    pub fn commit_cpu_ref(&mut self, cpu_ref: CpuRef) -> bool {
+        if !cpu_ref.is_valid() || !self.declared {
+            return false;
+        }
+        self.cpu_ref = cpu_ref;
+        true
+    }
+
+    pub(crate) fn inherit_cpu_ref(&mut self, predecessor: &TaskFlow) -> bool {
+        let Some(cpu_ref) = predecessor.cpu_ref() else {
+            return false;
+        };
+        if self.cpu_ref.is_valid() && self.cpu_ref != cpu_ref {
+            return false;
+        }
+        self.cpu_ref = cpu_ref;
+        true
+    }
+
     pub fn declare(&mut self) -> EventResult {
         if self.declared
             || !matches!(self.lifecycle.state(), State::Base | State::Destroyed)
@@ -190,6 +243,7 @@ impl TaskFlow {
         self.predecessor = TaskFlowRef::NONE;
         self.disabled = false;
         self.cleaned = false;
+        self.cpu_ref = CpuRef::invalid();
         Ok(())
     }
 

@@ -64,7 +64,9 @@ _ACTION_BIND_RE = re.compile(
     re.S,
 )
 _DECLARE_RE = re.compile(
-    r"\Adeclare\s+([a-z][A-Za-z0-9_]*)\s+of\s+([A-Z][A-Za-z0-9_]*)\Z"
+    r"\Adeclare\s+((?:[a-z][A-Za-z0-9_]*|(?:self|[A-Z][A-Za-z0-9_]*)"
+    r"\.[a-z][A-Za-z0-9_]*\[[0-9]+\]))"
+    r"\s+of\s+([A-Z][A-Za-z0-9_]*)\Z"
 )
 _REF_TRANSITION_EXPR_RE = re.compile(
     r"\A([a-z][A-Za-z0-9_]*)\.Transition::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
@@ -1394,13 +1396,30 @@ class _Deriver:
             return False
 
         association_process = _ASSOCIATION_PROCESS_EXPR_RE.match(entry)
-        if association_process is not None and "." in association_process.group(1):
+        if association_process is not None and (
+            "." in association_process.group(1)
+            or association_process.group(1) == "CurrentCPU"
+        ):
             receiver, process_kind, process_name, args = association_process.groups()
             resolved = self._resolve_entity_path(
                 receiver,
                 default_receiver=transition.object_name,
                 bindings=bindings,
             )
+            if resolved in self.runtime_instances and process_kind == "Transition":
+                runtime = self.runtime_instances[resolved]
+                return self._commit_runtime_transition(
+                    {
+                        "type": str(runtime["declared_type"]),
+                        "value": resolved,
+                        "runtime_instance_id": resolved,
+                    },
+                    process_name,
+                    args,
+                    bindings,
+                    entry_span,
+                    transition,
+                )
             if resolved is not None and resolved != receiver:
                 call = f"{resolved}.{process_kind}::{process_name}"
                 if args is not None:
@@ -1453,8 +1472,17 @@ class _Deriver:
             self.declaration_occurrences[occurrence_key] = occurrence
             declaration_site = f"{owner_process}#s{source_ordinal}:{alias}"
             runtime_id = (
-                f"runtime:{root_call_path}|{owner_process}|s{source_ordinal}|"
-                f"{alias}|o{occurrence}"
+                f"{transition.object_name}{alias[len('self') :]}"
+                if alias.startswith("self.")
+                else alias
+                if re.fullmatch(
+                    r"[A-Z][A-Za-z0-9_]*\.[a-z][A-Za-z0-9_]*\[[0-9]+\]",
+                    alias,
+                )
+                else (
+                    f"runtime:{root_call_path}|{owner_process}|s{source_ordinal}|"
+                    f"{alias}|o{occurrence}"
+                )
             )
             lifecycle_type = _type_lifecycle_decl(self.model, declared_type)
             initial_state = (
@@ -2288,6 +2316,12 @@ class _Deriver:
             process = _type_process_decl(
                 self.model, declared_type, "Transition", transition_name
             )
+            if (
+                isinstance(process, ProcessDecl)
+                and process.properties.get("state_effect") == "StateEffect::Always"
+                and current is not None
+            ):
+                source_state = current
         if current != source_state:
             return self._illegal_runtime_transition(
                 runtime_id, transition_name, current, span
@@ -3194,7 +3228,11 @@ class _Deriver:
                 resolved_entry = self._resolve_predicate_expression(
                     canonical_entry, context_object
                 )
-                if _ENTITY_STATE_EXPR_RE.match(effective_entry):
+                state_disjunction = "||" in effective_entry and all(
+                    _ENTITY_STATE_EXPR_RE.match(item.strip()) is not None
+                    for item in effective_entry.split("||")
+                )
+                if _ENTITY_STATE_EXPR_RE.match(effective_entry) or state_disjunction:
                     ok = (
                         self._verify_state_expression(
                             effective_entry, entry_span, kind, transition, state
@@ -3309,6 +3347,14 @@ class _Deriver:
         bindings: dict[str, dict[str, str]],
     ) -> str | None:
         receiver = receiver.strip()
+        if receiver == "CurrentCPU":
+            receiver = "CpuGroup.cpus[0]"
+        elif receiver.startswith("CurrentCPU."):
+            child = receiver.removeprefix("CurrentCPU.")
+            if child in self.model.objects:
+                receiver = child
+            else:
+                receiver = f"CpuGroup.cpus[0].{child}"
         if receiver == "self":
             receiver = default_receiver
         elif receiver.startswith("self."):
@@ -3404,6 +3450,32 @@ class _Deriver:
         transition: TransitionDef | None,
         state: StateDef | None,
     ) -> bool:
+        if "||" in expression:
+            alternatives = [item.strip() for item in expression.split("||")]
+            parsed = [_ENTITY_STATE_EXPR_RE.match(item) for item in alternatives]
+            if parsed and all(item is not None for item in parsed):
+                context_object = _context_object(transition, state)
+                for item in parsed:
+                    assert item is not None
+                    receiver, expected_state = item.group(1), item.group(2)
+                    object_name = self._resolve_entity_path(
+                        receiver,
+                        default_receiver=context_object or receiver.partition(".")[0],
+                        bindings={},
+                    ) or receiver
+                    if self.states.get(object_name) == expected_state:
+                        self._record(
+                            DerivationStatus.PROVED,
+                            f"{kind}: {expression}",
+                            span,
+                            object_name=context_object,
+                            transition_name=(
+                                transition.name if transition is not None else None
+                            ),
+                            state_name=state.name if state is not None else None,
+                            expression=expression,
+                        )
+                        return True
         match = _ENTITY_STATE_EXPR_RE.match(expression)
         if match is None:
             return False
@@ -3549,6 +3621,20 @@ class _Deriver:
         predicate: str,
         args: tuple[str, ...],
     ) -> bool:
+        if predicate in {"task_flow_cpu_ref_is", "task_flow_cpu_ref_targets"} and len(
+            args
+        ) == 2:
+            cpu_ref = self._entity_association_value(args[0], "cpu_ref")
+            if predicate == "task_flow_cpu_ref_is":
+                return cpu_ref == args[1]
+            if cpu_ref is None:
+                return False
+            if cpu_ref == "BootCPURef" and args[1] == "CpuGroup.cpus[0]":
+                return True
+            target_fact = _fact_key(f"cpu_ref_targets({cpu_ref}, {args[1]})")
+            return target_fact in {
+                _fact_key(expression) for expression in self.proved_expressions
+            }
         if predicate == "task_ref_targets" and len(args) == 2:
             return self._dereference_entity(args[0]) == args[1]
         if predicate in {"task_initial_flow_is", "task_owns_flow"} and len(args) == 2:
@@ -5325,7 +5411,12 @@ def _split_process_args(args: str) -> list[str]:
 def _substitute_process_bindings(expression: str, bindings: dict[str, str]) -> str:
     substituted = expression
     for name, value in bindings.items():
-        substituted = re.sub(rf"\b{re.escape(name)}\b", value, substituted)
+        pattern = (
+            rf"\b{re.escape(name)}\b"
+            if name == "self"
+            else rf"(?<!\.)\b{re.escape(name)}\b"
+        )
+        substituted = re.sub(pattern, value, substituted)
     return substituted
 
 

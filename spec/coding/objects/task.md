@@ -23,11 +23,14 @@ TaskFlow 的独立 lifecycle、generation、owner/binding 与 handoff lowering �
   snapshot 都只是集合 lowering；每次成功 fork/clone 必须分配新的 logical Task identity 和 PID，
   并发布指向该 identity 的 fresh `TaskRef`；不得把存储槽地址或测试字段当作可复用 TaskRef。
 
-Rust `Task` 必须是 lifecycle、identity、PID、CPU、execution authority、`TaskThreadContext`、typed `initial_flow` 和 Flow ownership 的唯一
+Rust `Task` 必须是 lifecycle、identity、PID、execution authority、`TaskThreadContext`、typed `initial_flow` 和 Flow ownership 的唯一
 carrier。Boot/KernelInit/Kthreadd/AP/smoke/user-child 角色结构只能保存角色 metadata 或 continuation
 scratch，并委托一个 `Task` core；它们不得另存上述 carrier 字段。linker-visible
 `init_task_storage` 的首地址就是 PID 0 canonical `Task` 地址，`tp`、runqueue、current slot 和
 BootTask API 必须解析到该同一地址。
+
+CPU assignment 不属于 Task carrier。`Task` 不得保存 `cpu_id`、`CpuRef` 或同义字段；可恢复执行路径
+的 CPU 归属只存在于对应 `TaskFlow.cpu_ref`。调度器需要 CPU 时必须先解析即将提交/恢复的 Flow。
 
 ## Task 类型级 lifecycle lowering
 

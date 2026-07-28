@@ -69,7 +69,10 @@ _PROCESS_RE = re.compile(
     rf"\s*(?:\(([^{{}};]*)\))?\s*(?:->\s*({_IDENT}))?\s*\{{",
     re.S,
 )
-_DECLARE_RE = re.compile(rf"\Adeclare\s+([a-z][A-Za-z0-9_]*)\s+of\s+({_IDENT})\Z")
+_DECLARE_RE = re.compile(
+    rf"\Adeclare\s+((?:[a-z][A-Za-z0-9_]*|self\.[a-z][A-Za-z0-9_]*\[[0-9]+\]))"
+    rf"\s+of\s+({_IDENT})\Z"
+)
 _BLOCK_RE = re.compile(rf"\A({_IDENT})(?P<header>[^\{{]*)\{{", re.S)
 _PROP_RE = re.compile(rf"\A({_IDENT})\s*:\s*(.+?)\s*;\Z", re.S)
 _INCLUDE_LINE_RE = re.compile(r'\A\s*include\s+"([^"]+)"\s*;\s*\Z')

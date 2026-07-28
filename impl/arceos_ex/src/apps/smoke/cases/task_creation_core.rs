@@ -71,7 +71,7 @@ impl TaskCreationCoreFixture {
             TaskCopyProcessInputs {
                 src_task: ctx.kernel_init_task.task(),
                 src_task_ref: ctx.kernel_init_task.task_ref(),
-                current_task_slot: &ctx.boot_cpu_current_task,
+                current_task_slot: ctx.boot_cpu_current_task(),
                 root_pid_namespace: &ctx.root_pid_namespace,
                 credential_core: &ctx.credential_core,
                 signal_core: &ctx.signal_core,
@@ -217,7 +217,7 @@ impl SmokeScenario for RejectMissingEntryScenario {
                 TaskCopyProcessInputs {
                     src_task: ctx.kernel_init_task.task(),
                     src_task_ref: ctx.kernel_init_task.task_ref(),
-                    current_task_slot: &ctx.boot_cpu_current_task,
+                    current_task_slot: ctx.boot_cpu_current_task(),
                     root_pid_namespace: &ctx.root_pid_namespace,
                     credential_core: &ctx.credential_core,
                     signal_core: &ctx.signal_core,
@@ -277,7 +277,7 @@ impl SmokeScenario for RejectEntryMismatchScenario {
                 TaskCopyProcessInputs {
                     src_task: ctx.kernel_init_task.task(),
                     src_task_ref: ctx.kernel_init_task.task_ref(),
-                    current_task_slot: &ctx.boot_cpu_current_task,
+                    current_task_slot: ctx.boot_cpu_current_task(),
                     root_pid_namespace: &ctx.root_pid_namespace,
                     credential_core: &ctx.credential_core,
                     signal_core: &ctx.signal_core,

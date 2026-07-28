@@ -14,7 +14,9 @@ OpenSBI 初态为 Base：
   ordered booting，只释放 primary hart，并精确保证
 `BootCpuRegisters.a0 == BootArgs.boot_hartid` 与
 `BootCpuRegisters.a1 == BootArgs.dtb_pa`、`BootCpuRegisters.satp == 0`，同时保证 DTB 位于入口可访问
-的 RAM 且 blob 完整。提交 Online 后异步发送 `Kernel.Enable`。这条边界表达控制权交接；除上述直接
+的 RAM 且 blob 完整。提交 OpenSBI Online 后先同步驱动 `CpuGroup.Preset`，由内核入口 adoption
+原子发布 `CpuGroup.cpus[0]` 与 CpuGroup Prepared；只有该响应完成后才异步发送 `Kernel.Enable`。
+这条边界表达控制权交接；除上述直接
 入口契约外，它不表示其它启动相关寄存器已经具有 Kernel 最终值。尤其不要求 OpenSBI 预先清零
 `sie/sip`：Kernel 在 `BootInitFlow.Preset` 的第一个入口动作中自行完成防御性屏蔽。OpenSBI 不拥有
 Kernel，也不拥有 Kernel 的内部 phase。
@@ -30,6 +32,8 @@ OpenSBI.Ready 只承载规格与 firmware 构造完成事实，不提前承载 o
 页表，OpenSBI.Online 保持的是“交接时 satp 为零”的稳定 handoff 记录，不要求 live satp 永远为零。
 
 OpenSBI.Online 只表示固件实例已经启动并提交 Kernel 入口控制权；下游失败不回滚该状态。
+CpuGroup 是 Kernel 内部对象；上述同步效果由真实 Kernel 入口在接受 Enable 前采用，不要求修改外部
+OpenSBI 固件或让固件直接构造 Rust 对象。
 
 ## Mapping
 

@@ -47,10 +47,9 @@ object BootInitFlow: TaskFlow {
                         InterruptStream.Transition::Preset;
                         KernelImage.Transition::Preset;
                         KernelImage.Transition::Setup;
-                        BootCurrentCPU.Transition::Preset;
-                        BootCurrentCPU.Transition::Setup;
-                        CpuGroup.Transition::Preset;
-                        BootCurrentCPU.Transition::Enable;
+                        CurrentCPU.Transition::Setup(true);
+                        CurrentCPU.BootCpuLocalInterrupt.Transition::Setup;
+                        CurrentCPU.BootCpuCurrentTask.Transition::Setup;
                         BootTaskEntryBinding.Transition::Preset;
                         BootInitStack.Transition::Preset;
                         EventStream.Transition::Preset;
@@ -85,8 +84,7 @@ object BootInitFlow: TaskFlow {
                     Vm.state == State::Ready;
                     TrampolineVm.state == State::Destroyed;
                     EarlyVm.state == State::Online;
-                    BootCurrentCPU.state == State::Online;
-                    BootCPU.state == State::Prepared;
+                    CpuGroup.cpus[0].state == State::Ready;
                     CpuGroup.state == State::Prepared;
                     Soc.state == State::Prepared;
                     task_ref_targets(BootTaskRef, BootTask);
@@ -94,6 +92,9 @@ object BootInitFlow: TaskFlow {
                     task_owns_flow(BootTask, self);
                     task_flow_owner_is(self, BootTask);
                     task_flow_parent_is(self, BootTask);
+                    task_flow_cpu_ref_is(self, BootCPURef);
+                    task_flow_cpu_ref_targets(self, CpuGroup.cpus[0]);
+                    current_cpu_resolved_target_is(self, BootCPURef, CpuGroup.cpus[0]);
                     task_flow_started(self);
                 }
 

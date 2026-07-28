@@ -356,13 +356,13 @@ context SingleTaskContext: Context {
 
 ### CPU / CpuGroup 类型与实例
 
-`CPU` 是统一的可复用 Type。系统中每个 logical CPU 都对应一个 `CPU` 对象实例；启动 CPU 不是独立 Type，而是 logical id 为 `0`、带有 bootstrap role 的 CPU 实例，当前迁移期可继续使用具名实例 `BootCPU` 表达。secondary CPU 也复用同一 Type，只是 logical id、hartid 和启动状态事实不同。
+`CPU` 是统一的可复用 Type。系统中每个 logical CPU 都对应一个 `CPU` 对象实例；启动 CPU 不是独立 Type，而是 `CpuGroup.cpus[0]` 上带有 bootstrap role 的实例，`BootCPU` 只作为该 canonical identity 的显示/规格角色别名。secondary CPU 也复用同一 Type，只是索引、hartid 和启动状态事实不同。
 
 每个 CPU 实例自己持有或发布自身属性事实，包括 `logical_id`、`hartid`、`possible`、`present`、`active` 和 `online`。其中 `hartid` 是 CPU 实例属性，不应长期保存在 `CpuGroup` 的普通字段中；`logical_id` 是 `CpuGroup` 索引视图使用的稳定下标。`BootCPU` 的 `logical_id == 0`，其它下标对应 secondary CPU 实例。
 
-`CpuGroup` 是 `SoC` 下的 CPU 组织对象，但它不拥有 CPU 本体，也不通过结构类型区分 boot CPU 与 secondary CPU。它维护的是 CPU 实例引用、`CpuGroup.Cpu[logical_id]` 索引视图，以及 possible/present/online 等集合视图。集合元素应是 CPU 引用或等价句柄，而不是新的 CPU 本体。当前不引入独立拥有生命周期的 `PossibleCpuSet` 或 `PossibleCpu` 对象；若后续为了实现或验证需要集合对象，必须明确它只是 `CpuGroup` 的视图/索引承载，不是 CPU 实例的拥有者。
+`CpuGroup` 是 `SoC` 下唯一的 CPU 组织与拥有对象。它通过 indexed-owned collection `cpus[logical_id]: CPU` 直接拥有所有 CPU 实例，并且不通过结构类型区分 boot CPU 与 secondary CPU。possible/present/active/online 集合从 collection 元素的 CPU 状态派生；缓存位图只允许作为可重建的实现加速，不得建立 `CpuRef[]`、`CpuView[]` 或其它平行权威数组。
 
-因此，规格中的访问关系应写成：`CpuGroup.Cpu[id] -> CpuRef -> CPUObject instance`。logical-id 索引视图和 possible/present/online 集合边界都由 `CpuGroup` 直接维护，不再通过独立 `CpuIdMap` 对象中转。AP 在真实进入 secondary entry 之前，`CpuGroup` 可以知道其 possible/present 描述和 CPU 引用，但不得假定该 AP 的 live `CurrentCPU`、本地中断控制、current task slot 或抢占控制链已经存在。
+因此，规格中的 canonical identity 写成 `CpuGroup.cpus[id]`，`CpuRef` 是指向该元素的类型化稳定引用；logical id 由索引派生，hartid 属于 CPU 实例，不再通过独立 `CpuIdMap` 对象中转。`CurrentCPU` 是对 effective TaskFlow 的 `cpu_ref` 解引用得到的上下文选择器，不是 live 对象或生命周期。AP 在真实进入 secondary entry 之前可以已经是 possible/present 元素，但只有获得执行权的 TaskFlow 及其同步 drives 子树才能解析对应 `CurrentCPU`；异步 emits 不继承该选择器。
 
 ### Completion 类型
 
@@ -408,7 +408,7 @@ context SingleTaskContext: Context {
 `SmpbootThreadTemplate` 表示 Linux smpboot 框架的 per-CPU 内核线程创建策略。它不是
 task_struct-like Type，也不是全局注册表对象；模板最终为某个 CPU 创建的实际线程必须是统一
 `Task` 实例，并拥有对应的 kthread `TaskFlow`。规格中的
-`CpuGroup.Cpu[cpu].SmpbootThread[name]` 是对“由该模板创建的 Task + Flow”的索引视图，不允许
+`CpuGroup.cpus[cpu].SmpbootThread[name]` 是对“由该模板创建的 Task + Flow”的索引视图，不允许
 另存 lifecycle、PID 或 switch context。典型模板包括 `ksoftirqd/%u`、`migration/%u`、
 `rcuc/%u`、`irq_work/%u` 以及 `cpuhp/%u`；`CpuHotplugThread` 是来自 `cpuhp/%u` 模板的具名
 角色视图。
@@ -541,7 +541,7 @@ transition 与 `action` 都应带返回结果，至少区分成功与失败。�
 
 从这一意义上说，内核并不是一次性完成建立的静态结果，而是不断从低级对象建立高级对象的过程。低级对象进入 `online` 后，会成为更高一级对象的 `base`；更高一级对象完成 `online` 后，又继续成为再上一层对象的基础。由此，内核的建立与运行可被理解为一种沿对象层级不断递进的螺旋上升过程。
 
-当某个对象在通用状态模型中的状态槽位不足以表达其内部建立步骤时，优先考虑把可独立跟踪的部分拆分为子对象，而不是优先引入嵌套子状态或额外的全局状态枚举。也就是说，如果一个管理对象内部实际包含可独立建模、可被其它对象依赖的成员对象，应把这些成员对象显式放入对象树中，由父对象的 `setup` 或其它迁移过程驱动子对象推进。例如 CPU 本体状态由每个 `CPU` 实例自己跟踪；`CpuGroup` 只维护 `logical CPU id -> CpuRef` 索引和 possible/present/online 集合视图，不把 `BootCPU` 或 secondary CPU 本体作为自己拥有的子对象。嵌套子状态只作为例外机制，用于确实属于同一对象内部且不适合拆成子对象的细粒度状态。
+当某个对象在通用状态模型中的状态槽位不足以表达其内部建立步骤时，优先考虑把可独立跟踪的部分拆分为子对象，而不是优先引入嵌套子状态或额外的全局状态枚举。也就是说，如果一个管理对象内部实际包含可独立建模、可被其它对象依赖的成员对象，应把这些成员对象显式放入对象树中，由父对象的 `setup` 或其它迁移过程驱动子对象推进。例如 CPU 本体状态由 `CpuGroup` indexed-owned collection 中的每个 `CPU` 实例自己跟踪；`CpuGroup` 负责原子创建、拥有和索引这些实例，而 possible/present/active/online 集合只是元素状态的派生视图。嵌套子状态只作为例外机制，用于确实属于同一对象内部且不适合拆成子对象的细粒度状态。
 
 <p align="center">
   <img src="pic/object-state-model.svg" alt="对象的通用状态模型" width="860">
@@ -1210,13 +1210,13 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 9. `处理器管理`（`CPUGroup`）
 
-   描述：`片上系统` 的下级子对象，负责组织所有 CPU 实例引用、logical-id 索引和 possible/present/online 集合视图。当前入口前导期由 `BootCurrentCPU` 拥有启动 CPU 实例 `BootCPU`；`CPUGroup` 只注册和组织该引用，不拥有启动 CPU 本体。逻辑 `ID` 到 CPU 引用的索引视图由 `CpuGroup.Cpu[id]` 表达，不再引入独立 `CpuIdMap` 对象。
+   描述：`片上系统` 的下级子对象，通过 `cpus[logical_id]: CPU` indexed-owned collection 唯一拥有所有 CPU 实例。`BootCPU := CpuGroup.cpus[0]`，其它角色别名同样不得建立独立状态或身份。possible/present/active/online 集合从 CPU 元素状态派生。
 
-   * `preset` - 注册启动 CPU 引用
+   * `preset` - 原子建立启动 CPU
 
      * 初始状态：`BootArgs.boot_hartid` 已由 RISC-V 启动 ABI 解释出来。
-     * 执行动作：注册 `BootCurrentCPU` 拥有的 `BootCPU` 引用，并记录 `BootCPU` 是 logical id `0` 的 bootstrap CPU 实例；`BootCPU.preset()` 仍负责记录其物理 `hartid` 来自 `BootArgs.boot_hartid`。
-     * 结束状态：`BootCPU` 进入 `Prepared`，`CPUGroup` 进入 `Prepared`，表示启动 CPU 身份已被处理器管理对象索引起来；`CPUGroup` 本身不再长期保存 `boot_cpu_hartid`。启动 hartid 属于平台有效集合的检查延迟到入口后继期 `EarlyDtb.preset()` 建立 `PlatformCpuInfo` 后，再由 `BootCPU.setup()` 依赖该事实确认。
+     * 执行动作：在父 handler 内声明 `self.cpus[0]`，驱动该 CPU 的 `preset()`，并记录它的物理 `hartid` 来自 `BootArgs.boot_hartid`。父对象和子对象的更新必须作为单一原子发布单元；任一步失败都不得留下 collection 元素、索引或稳定 snapshot。
+     * 结束状态：`CpuGroup.cpus[0]` 与 `CPUGroup` 都进入 `Prepared`；`CPUGroup` 不另存 `boot_cpu_hartid`。启动 hartid 的平台有效性检查延迟到入口后继期，随后由 `CurrentCPU` 选择器推进同一 CPU 实例。
 
 10. `片上系统`（`SoC`）
 
@@ -1250,7 +1250,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 2. 执行 `内核映像.preset()`，用 `global_pointer$` 符号初始化物理地址阶段的 `gp`。
 3. 执行 `根流.preset()`，禁止在内核态执行 `FPU` 指令与 `VECTOR` 指令。
 4. 执行 `内核映像.setup()`，清零 `BSS` 段，使内核映像进入早期可运行状态。
-5. 执行 `处理器管理.preset()`，注册 `BootCurrentCPU` 拥有的 `BootCPU` 引用，并驱动 `BootCPU.preset()` 记录启动 CPU 的物理 `hartid` 来源。
+5. `OpenSBI.Enable` 同步驱动 `处理器管理.preset()`，原子创建 `CpuGroup.cpus[0]` 并驱动它进入 `Prepared`；只有该父子发布全部成功后才发送 `Kernel.Enable`。
 6. 执行 `根任务.setup()` 与 `根栈.setup()`，建立物理地址阶段的根任务指针与根栈指针。
 7. 执行 `事件流.setup()`，设置事件的临时处理入口，使 `VM` 建立过程中误入的中断或异常能够进入受控停机路径。
 8. 执行 `虚拟内存空间.preset()`，依次推进 `TrampolineVM.setup()` 与 `EarlyVM.setup()`，初始化 `静态对象集合.trampoline_pg_dir` 与 `静态对象集合.early_pg_dir`，为入口前导期的两次页表切换准备条件。
@@ -1316,7 +1316,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
     编码阶段对 `StaticBranch` 的最低要求是：提供显式 static key registry，能按 key 名或稳定 ID 查询并更新 key 值；`StaticBranch.set(key, value)` 必须要求 `StaticBranch.state == Ready` 或 `Online`，并在重复设置同一值时保持幂等；早期实现可以先用布尔值或计数值承载 key 状态，不要求立即实现指令 patch，但接口边界要保留后续替换为架构 jump-label patch 的空间。`StaticBranch.enable()` 至少要记录 sealed keys 集合，并在启用后禁止修改已 sealed 的 `ro_after_init` key。当前配置固定 `CONFIG_JUMP_LABEL=y`，因此编码规格不要求实现 `CONFIG_JUMP_LABEL=n` 的退化路径。
 13. `打印缓冲区`（`PrintkBuffer`）：代表 printk 的中间日志缓冲机制。参考 Linux 在 `setup_arch()` 前打印 banner 的时机，`arceos_ex` 也应在早期输出路径中写入自身启动 banner；该输出首先进入 printk 的静态 ring buffer，而不是立即写到后端设备。启动 banner 不应依赖面向 Unikernel 应用的 `axstd::println!`，而应通过内核启动期内部的 `printk`/`println-like` 前端，或直接通过 `PrintkBuffer.write()` action 写入。因此本子阶段应把 `PrintkBuffer.preset()` 放在 `EarlyCon.setup()` 之前，并把启动 banner 输出建模为状态内 `action`。
 14. `早期控制台`（`EarlyCon`）：代表正式 console 建立前的临时输出后端。对于当前 RISC-V64 路径，`EarlyCon.preset/setup/enable` 由 `EarlyParam.setup()` 处理 `earlycon=sbi` 时连续触发；其中 `setup` 基于 SBI DBCN 或 SBI v0.1 console 能力事实建立 SBI 输出后端，`enable` 注册并启用早期控制台，同时把 `PrintkBuffer` 中已经存在的历史输出 replay/flush 到后端。`EarlyCon.handoff/cleanup` 应留给后续正式 `Console` 注册阶段，不属于本子阶段到 `paging_init()` 完成前的核心边界。
-15. `处理器管理`（`CPUGroup`）：当前形式化模型把 `BootCPU` 视为统一 `CPU` Type 的一个实例，由 `BootCurrentCPU` 拥有；`CPUGroup` 维护对该实例和后续 secondary CPU 实例的引用、logical-id 索引和 possible/present/online 集合视图。`BootCPU.preset()` 在入口前导期生效，并记录启动 CPU 的物理 `hartid` 来自 `BootArgs.boot_hartid`；`BootCPU.logical_id == 0`，其它 logical id 对应 secondary CPU 实例。这样 `CPUGroup` 本身不再长期保存 `boot_cpu_hartid`，也不通过结构字段区分 boot/secondary CPU。入口后继期由 `EarlyDtb.preset()` 建立 `PlatformCpuInfo`，随后 `BootCPU.setup/enable` 完成启动 CPU 的 active/online 语义推进；核心准备期中 `CpuGroup.setup()` 建立 CPU 拓扑事实、`CpuGroup.Cpu[logical_id]` 索引视图和 possible/present/online 集合边界。
+15. `处理器管理`（`CPUGroup`）：`CPUGroup` 通过 `cpus[logical_id]` 唯一拥有统一 `CPU` Type 的全部实例。`BootCPU` 只是 `CpuGroup.cpus[0]` 的角色别名，不拥有状态槽。`OpenSBI.Enable` 驱动 `CpuGroup.preset()` 原子创建 CPU0 与父对象的 Prepared 状态；`Kernel.Enable` 接受后把 `ref(CpuGroup.cpus[0])` 绑定到 `BootInitFlow.cpu_ref`。入口后继期由 `BootInitFlow.Preset` 通过 `CurrentCPU` 推进同一实例到 Ready并记录入口 hartid，后续平台验证再使其 Online；核心准备期 `CpuGroup.setup()` 创建 AP 元素并建立完整拓扑。`CPUGroup` 不另存 `boot_cpu_hartid`，也不维护引用或 view 副本数组。
 
 对 `BootCPU` 而言，Linux `boot_cpu_init()` 会把启动 CPU 同时标记到 `possible`、`present`、`active` 与 `online` 四类 CPU 位图中。规格层不必照搬四个位图实现，但应保留这些语义层次：入口前导期 `BootCPU.preset()` 只记录启动 CPU 的物理 `hartid`；入口后继期 `EarlyDtb.preset()` 建立并发布 `PlatformCpuInfo`，确认该 hartid 属于平台有效集合；随后 `BootCPU.setup()` 对应 present/active 边界，`BootCPU.enable()` 对应 online 边界。
 
@@ -1328,9 +1328,9 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
   图 10 入口后继期对象分类与相互关系
 </p>
 
-图 10 用于说明入口后继期涉及对象的分类与相互关系。`入口后继期对象` 作为阶段对象接续 `BootInitFlow.Prepared`，并在 `start_kernel()` 之后编排本子阶段核心对象推进。`EarlyDtb` 基于入口前导期已经验证过的 `RawDtb` 先建立基础平台事实：`PlatformCpuInfo` 与 `PhysicalMemory`；随后它建立早期解析结果，驱动 `CommandLine.preset()` 产出 raw view `KernelCmdline`，同时触发 `MemBlock.preset()` 收集候选可用物理内存区段。`MemBlock.setup()` 再施加保留、裁剪和对齐等约束，形成可安全用于早期分配的物理内存管理状态。`Params.preset()` 再驱动 `EarlyParam` 基于 `CommandLine` 的 raw view 和静态 `early_param` handler 表解析早期参数，当前首先要求识别 `earlycon=sbi`，并在参数处理调用链内部连续驱动 `EarlyCon.preset/setup/enable`。`SwapperVM` 基于 `MemBlock` 和静态页表存储建立完整内核页表，并替换 `EarlyVM` 成为当前地址空间。`EarlyIoremap` 依赖 `FixMap.FIX_BTMAP` 临时映射区，提供 `early_ioremap()` / `early_iounmap()` 这类早期临时映射服务，但它不是 `FixMap` 的子对象。`SBI` 记录固件平台服务能力事实，供后续对象依赖；例如 `EarlyCon.setup()` 只负责使用 `SBI.dbcn_available` 或 legacy console 能力选择输出后端，而不重新探测这些能力。`PrintkBuffer` 与 `EarlyCon` 共同描述早期输出路径：启动期内部 `printk`/`println-like` 前端和应用侧 `axstd::println!` 是不同入口，但二者都应首先通过 `PrintkBuffer.write(...)` action 写入统一缓冲区，随后由 `EarlyCon` 或正式 `Console` drain/replay；后续正式 `Console` 建立时，`EarlyCon` 再退出或移交输出后端，而 `PrintkBuffer` 继续作为日志缓冲对象存在。`BootTask`、`InterruptStream` 与 `CPUGroup` 作为入口前导期承接对象出现在本图中：`BootTask` 下显式列出 `BootInitStack` 与 `InitMM` 两个子对象，分别继续建立根栈保护状态和初始化根任务地址空间元数据；`InterruptStream` 继续防御式关闭中断总开关；`BootCPU` 是 `BootCurrentCPU` 拥有的启动 CPU 实例，`CPUGroup` 维护 `CpuGroup.Cpu[0] -> BootCPURef -> BootCPU` 的索引/引用视图，并在核心准备期继续建立 secondary CPU 的索引和 possible/present/online 集合边界。
+图 10 用于说明入口后继期涉及对象的分类与相互关系。`入口后继期对象` 作为阶段对象接续 `BootInitFlow.Prepared`，并在 `start_kernel()` 之后编排本子阶段核心对象推进。`EarlyDtb` 基于入口前导期已经验证过的 `RawDtb` 先建立基础平台事实：`PlatformCpuInfo` 与 `PhysicalMemory`；随后它建立早期解析结果，驱动 `CommandLine.preset()` 产出 raw view `KernelCmdline`，同时触发 `MemBlock.preset()` 收集候选可用物理内存区段。`MemBlock.setup()` 再施加保留、裁剪和对齐等约束，形成可安全用于早期分配的物理内存管理状态。`Params.preset()` 再驱动 `EarlyParam` 基于 `CommandLine` 的 raw view 和静态 `early_param` handler 表解析早期参数，当前首先要求识别 `earlycon=sbi`，并在参数处理调用链内部连续驱动 `EarlyCon.preset/setup/enable`。`SwapperVM` 基于 `MemBlock` 和静态页表存储建立完整内核页表，并替换 `EarlyVM` 成为当前地址空间。`EarlyIoremap` 依赖 `FixMap.FIX_BTMAP` 临时映射区，提供 `early_ioremap()` / `early_iounmap()` 这类早期临时映射服务，但它不是 `FixMap` 的子对象。`SBI` 记录固件平台服务能力事实，供后续对象依赖；例如 `EarlyCon.setup()` 只负责使用 `SBI.dbcn_available` 或 legacy console 能力选择输出后端，而不重新探测这些能力。`PrintkBuffer` 与 `EarlyCon` 共同描述早期输出路径。`BootTask`、`InterruptStream` 与 `CPUGroup` 作为入口前导期承接对象出现在本图中：`BootTask` 下显式列出 `BootInitStack` 与 `InitMM`；`InterruptStream` 继续防御式关闭中断总开关；`CPUGroup` 已拥有 Prepared 的 `cpus[0]`，`BootInitFlow.cpu_ref` 指向该 canonical target，后续 CPU-local 步骤通过 `CurrentCPU` 解析。
 
-`CPUGroup` 的形式化迁移边界已经落地：入口前导期由 `BootCurrentCPU` 拥有 `BootCPU` 并记录启动 CPU 身份，`CpuGroup.Cpu[0] -> BootCPURef -> BootCPU` 作为基础索引事实随 `CpuGroup.preset()` 建立。核心准备期再由 `CpuGroup.setup()` 建立 CPU 拓扑事实、secondary CPU 索引和 possible/present/online 集合视图。这样可以避免 `BootArgs.boot_hartid` 在后续阶段被长期依赖，也避免 `CPUGroup` 同时承担 CPU 对象身份和 CPU 本体状态两类职责。
+`CPUGroup` 的形式化迁移边界已经落地：`CpuGroup.preset()` 原子建立 `CpuGroup.cpus[0]` 与父对象 Prepared；`BootInitFlow.Preset` 通过已绑定 CpuRef 解析 `CurrentCPU` 并推进 CPU0；`CpuGroup.setup()` 再原子建立 secondary 元素及完整拓扑。`CpuRef` 只引用 collection 元素，别名和派生集合不产生第二份 CPU 状态。
 
 形式化模型已经按阶段目录组织：正式入口为 `spec/model/main.spec`。顶层唯一系统树是
 `Computer -> {Riscv64Platform, OpenSBI, Kernel}`；Computer 依次驱动三个子系统的规格和构造，再由
@@ -1345,7 +1345,7 @@ Kernel 通过 BootTask/BootInitFlow 串接
 - `BootInitStack.state == Online`，表示根栈保护状态已经建立
 - `InterruptStream.state == Ready`，表示中断子开关和总开关都已经封闭
 - `BootCPU.state == Online`，表示启动 CPU 已记录物理 `hartid`，并基于 `PlatformCpuInfo` 完成 present/active/online 的语义推进
-- `CpuGroup.Cpu[0] -> BootCPURef -> BootCPU` 的基础索引事实成立，完整 secondary CPU 索引和 possible/present/online 集合边界留待 `CpuGroup.setup()`
+- `BootInitFlow.cpu_ref == ref(CpuGroup.cpus[0])`，且 trace 中 `CurrentCPU` 的实际 target 是 `CpuGroup.cpus[0]`
 - `MemBlock.state == Online`，表示候选物理内存区段已经经过保留、裁剪和对齐等约束处理，且完整线性映射可用后已经允许 `MemBlock` 元数据扩展
 - `InitMM.state == Ready`，表示 `init_mm` 已记录内核代码段、数据段和 `brk` 边界，并与 `BootTask.active_mm` 关系一致
 - `EarlyIoremap.state == Ready`，表示 `FIX_BTMAP` 临时映射槽位的服务端元数据已经初始化，后续可执行 `map/unmap` action
@@ -1419,13 +1419,13 @@ Kernel 通过 BootTask/BootInitFlow 串接
 3. `分区对象`（`Zones`）：`Zones` 对应 `misc_mem_init()` 中的 `zone_sizes_init()`，按 `Zones -> Zone -> OrderClass -> MigrationType -> FreePageSet` 五层抽象描述 zone、buddy order、迁移类型和空闲页集合边界。当前先固定三类 `ZoneKind`：`DMA32`、`NORMAL` 和 `MOVABLE`，分别代表 32-bit DMA 可寻址区、普通可管理内存区和可迁移内存策略区；三者作为逻辑 zone 总是存在，但允许某类 zone 的物理范围为空。参考 Linux/RISC-V，`DMA32` 边界来自 `CONFIG_ZONE_DMA32` 和 `dma32_phys_limit`，`NORMAL` 覆盖普通 managed memory，`MOVABLE` 先作为策略预留区，后续再由 `movablecore`、memory hotplug 或类似策略切出实际范围。这里必须区分 `ZoneKind::MOVABLE` 和 `MigrationType::MOVABLE`：前者是 zone 层的物理区段类型，后者是每个 zone 下 buddy/pageblock 层的迁移类型。完整页分配器初始化属于后续 `mm_core_init()` 阶段，不在当前核心准备期中以独立对象建模。
 4. `页元数据映射对象`（`PageMetadataMap`）：对应当前 `CONFIG_FLATMEM=y` 路径下 `misc_mem_init() -> zone_sizes_init() -> free_area_init()` 中的 `alloc_node_mem_map()` 和 `memmap_init()`。它建立 Linux `struct page` metadata 视图，使 PFN/PageRef 转换在后续 `mem_init()` 之前已经有效；当前 `CONFIG_SPARSEMEM=n`，`sparse_init()` 展开为空操作，SPARSEMEM/VMEMMAP 元数据路径不进入主线 formal。
 5. `资源树`（`ResourceTree`）：对应 `init_resources()`，根据 `MemBlock` 中的 memory/reserved 区段建立系统资源树，并登记 system RAM、reserved resources、kernel image/code/rodata/data/bss 等资源，同时约束子资源必须落在父资源范围内，重叠关系必须合法。
-6. `CPU 管理对象`（`CpuGroup` / `BootCPU` / secondary CPU instances）：`CpuGroup` 是所有 CPU 实例的引用组织者；正式索引形态是 `CpuGroup.Cpu[logical_id]`，其中 logical id `0` 总是引用 `BootCPU`，后续 logical id 引用 secondary CPU 实例。`CpuGroup` 不拥有 CPU 本体，也不通过结构类型区分 boot CPU 与 secondary CPU；每个 CPU 对象自己维护 hartid、logical id 和 possible/present/online 等状态事实。`CpuGroup` 同时维护 possible/present/online 集合视图，集合元素是 CPU 引用。当前不引入额外拥有生命周期的 `CPUSetObject`、`PossibleCpu` 或 `CpuIdMap` 中间类型。`CpuGroup.setup()` 对应 `setup_smp()`，只建立拓扑事实、secondary CPU 候选集合和 logical CPU 映射边界，不启动 secondary CPU，也不开放多 hart 并发。
+6. `CPU 管理对象`（`CpuGroup` / CPU instances）：`CpuGroup.cpus[logical_id]` 是所有 CPU 实例的唯一权威 owned collection；logical id 由索引派生，`BootCPU` 是 index 0 的角色别名。每个 CPU 自己维护 hartid 和 possible/present/active/online 状态，集合视图从这些状态派生。`CpuGroup.setup()` 对应 `setup_smp()`，原子创建 secondary CPU 候选元素并建立拓扑，不启动 secondary CPU，也不开放多 hart 并发。
 7. `RISC-V 缓存块信息`（`CacheBlockInfo`）：对应 Linux 6.12 的 `riscv_init_cbo_blocksizes()`，它是独立的平台级事实对象，不是 `CorePreparePhase` 的下级对象。当前模型从正式 `DeviceTree` 的 CPU nodes 收集 `riscv,cbom-block-size` 和 `riscv,cboz-block-size`，结合 `CpuGroup` 限定当前拓扑中的 hart，并收敛为系统级 `CBOM`/`CBOZ` block size 事实。缺失属性表示 unavailable；多个 hart 值不一致只形成诊断事实，不阻止对象进入 `Ready`。`CBOP` 虽然存在 DeviceTree binding，但 Linux 6.12 的该初始化点不发布它，暂缓建模。
 8. `CPU 能力对象`（`CpuCapabilities`）：对应 `riscv_fill_hwcap()` 的规格抽象，汇总 CPU 集合的 ISA/hwcap 能力事实，供后续 alternatives、DMA/cache policy、上下文管理和用户态 ISA 暴露路径依赖。它是独立事实对象，不是 `CorePreparePhase` 的下级对象；当前从正式 `DeviceTree` 的 CPU nodes 收集 per-hart ISA facts，结合 `CpuGroup` 形成 all-harts common capability facts，并用 `CacheBlockInfo` 校验 Zicbom/Zicboz。FPU/VECTOR 的支持事实属于本对象；入口期禁用 FPU/VECTOR 的执行状态属于 CPU execution context，不由本对象推进。
 9. `DMA/cache 策略事实对象`（暂名 `DmaCachePolicy`）：对应 `riscv_noncoherent_supported()` 与 `riscv_set_dma_cache_alignment()`。它消费 `CpuCapabilities.Ready` 与 `CacheBlockInfo.Ready`，收敛当前平台是否支持 non-coherent DMA、是否需要显式 cache maintenance、以及 `dma_cache_alignment` 的最终事实。当前 `default_config` 中 `CONFIG_RISCV_DMA_NONCOHERENT=y` 且 `CONFIG_RISCV_ISA_ZICBOM=y`；若当前 CPU 能力事实显示 Zicbom 可用，则 `riscv_noncoherent_supported()` 记录 non-coherent DMA 支持事实，否则 `riscv_set_dma_cache_alignment()` 会把 `dma_cache_alignment` 降为 1。该对象不是 DMA API 本体，也不分配 DMA bounce buffer；它只为后续 `mem_init()` 中的 SWIOTLB/bounce 决策提供前置事实。
 10. `命令行管理对象`（`CommandLine`）：对应启动命令行文本视图管理。`KernelCmdline` 是 raw view，入口后继期由 `CommandLine.preset()` 建立；`SavedCommandLine` 是 saved view，`StaticCommandLine` 是 static/work view，核心准备期由 `CommandLine.setup()` 驱动建立，对应 `setup_command_line()` 中建立命令行副本的部分。`EarlyParam`、`BootParam` 和 `PayloadParam` 属于 `Params` 管理的参数解析类对象，不并入 `CommandLine.setup()`，也不改变它们在 `PerCpuStorage` / `CpuHotplugState` 之后的原有时序。
-11. `per-cpu 存储对象`（`PerCpuStorage`）：对应 `setup_per_cpu_areas()`。它是顶层管理对象，聚合 `PerCpuStaticImage`、`PerCpuFirstChunk` 和 `PerCpuOffsetTable`。`PerCpuStaticImage` 来自 `Lds` 中的 `__per_cpu_start`、`__per_cpu_end` 和 `__per_cpu_load`：前二者定义静态 percpu 模板的运行地址范围和大小，`__per_cpu_load` 定义 first chunk 初始化时复制初始内容的加载地址。`PerCpuFirstChunk` 由 `MemBlock` 分配并在线性映射下可访问，每个 possible CPU 对应一个 unit；unit 内部布局为 `static | [reserved] | dynamic | unused tail`。static 区从 `PerCpuStaticImage.load` 复制初始化，reserved 区当前只作为可为零的布局事实保留，后续模块或 reserved percpu allocation 路径再展开；dynamic 区当前表示 first chunk 中的早期动态预留。`PerCpuOffsetTable` 基于 `CpuGroup.Cpu[logical_id]` 和 `CpuGroup.possible_cpus` 建立 logical CPU 到 unit/base offset 的映射，其表项边界和 first chunk unit 个数都基于 `CpuGroup` 中的 possible CPU 集合，而不是 online CPU 集合。当前阶段要求静态 percpu symbol 可以仿照 Linux `per_cpu_ptr()` 风格按 logical CPU 计算对应实例地址；完整动态 percpu allocator 和额外 dynamic chunks 后续再展开。
-12. `CPU hotplug 状态对象`（`CpuHotplugState`）：对应 `boot_cpu_hotplug_init()`。它是每个 `CPUObject` 的通用子对象，正式路径写作 `CpuGroup.Cpu[cpu].CpuHotplugState`，适用于 `BootCPU` 和后续 secondary CPU。`CpuHotplugState.state` 只表示对象生命周期，例如 `Prepared`、`Ready` 和后续可能的 `Online`；Linux 的 `CPUHP_*` 枚举属于独立的 hotplug step 域，不与对象生命周期状态混合。当前核心准备期只建立 BootCPU 实例，要求 `BootCPU.CpuHotplugState.state == Ready`，并将 `BootCPU.CpuHotplugState.current_step` 与 `target_step` 初始化为 `CPUHP_ONLINE`，同时记录 booted-once 事实。secondary CPU 的实例创建、step 推进和 hooks 触发留给后续 bringup/teardown 路径建模。
+11. `per-cpu 存储对象`（`PerCpuStorage`）：对应 `setup_per_cpu_areas()`。它是顶层管理对象，聚合 `PerCpuStaticImage`、`PerCpuFirstChunk` 和 `PerCpuOffsetTable`。`PerCpuStaticImage` 来自 `Lds` 中的 `__per_cpu_start`、`__per_cpu_end` 和 `__per_cpu_load`：前二者定义静态 percpu 模板的运行地址范围和大小，`__per_cpu_load` 定义 first chunk 初始化时复制初始内容的加载地址。`PerCpuFirstChunk` 由 `MemBlock` 分配并在线性映射下可访问，每个 possible CPU 对应一个 unit；unit 内部布局为 `static | [reserved] | dynamic | unused tail`。static 区从 `PerCpuStaticImage.load` 复制初始化，reserved 区当前只作为可为零的布局事实保留，后续模块或 reserved percpu allocation 路径再展开；dynamic 区当前表示 first chunk 中的早期动态预留。`PerCpuOffsetTable` 基于 `CpuGroup.cpus[logical_id]` 和 `CpuGroup.possible_cpus` 建立 logical CPU 到 unit/base offset 的映射，其表项边界和 first chunk unit 个数都基于 `CpuGroup` 中的 possible CPU 集合，而不是 online CPU 集合。当前阶段要求静态 percpu symbol 可以仿照 Linux `per_cpu_ptr()` 风格按 logical CPU 计算对应实例地址；完整动态 percpu allocator 和额外 dynamic chunks 后续再展开。
+12. `CPU hotplug 状态对象`（`CpuHotplugState`）：对应 `boot_cpu_hotplug_init()`。它是每个 `CPUObject` 的通用子对象，正式路径写作 `CpuGroup.cpus[cpu].CpuHotplugState`，适用于 `BootCPU` 和后续 secondary CPU。`CpuHotplugState.state` 只表示对象生命周期，例如 `Prepared`、`Ready` 和后续可能的 `Online`；Linux 的 `CPUHP_*` 枚举属于独立的 hotplug step 域，不与对象生命周期状态混合。当前核心准备期只建立 BootCPU 实例，要求 `BootCPU.CpuHotplugState.state == Ready`，并将 `BootCPU.CpuHotplugState.current_step` 与 `target_step` 初始化为 `CPUHP_ONLINE`，同时记录 booted-once 事实。secondary CPU 的实例创建、step 推进和 hooks 触发留给后续 bringup/teardown 路径建模。
 13. `参数解析管理对象`（`Params`）：`Params` 在入口后继期已经由 `preset` 推进到 `Prepared`，表示早期参数解析完成；核心准备期由 `Params.setup()` 驱动 `BootParam.setup()` 和 `PayloadParam.setup()`，并要求实现把 `print_unknown_bootoptions()` checkpoint 保留在二者之间。
 14. `普通启动参数对象`（`BootParam`）：对应 `parse_args("Booting kernel", ...)`。它不同于入口后继期的 `EarlyParam`，用于普通 `__param` 解析、未知选项收集以及 `--` 边界记录。
 15. `Payload 参数对象`（`PayloadParam`）：对应 `parse_args("Setting init args", after_dashes, ...)`。Linux-like 路径中它对应将来传给第一个用户态 init 的参数；Unikernel 路径中它也可作为 kernel-mode payload 的参数来源。没有 `--` 时允许为空。
@@ -1531,7 +1531,7 @@ Kernel 通过 BootTask/BootInitFlow 串接
 | `early_security_init()` | deferred | 当前配置无 early LSM 主线；若后续启用 early LSM，可映射为 `SecurityCore.preset()`，本阶段暂不推进安全对象状态。 |
 | `setup_boot_config()` | deferred | bootconfig/XBC/initrd 派生参数后续作为参数来源展开。 |
 | `setup_command_line()` | formal: `CommandLine.setup()` | 建立 saved/static 命令行视图；只处理命令行副本，不合并后续 Param 解析时序。 |
-| `setup_nr_cpu_ids()` | implementation checkpoint | Linux 中是 cpumask/per-cpu 数组上界；规格模型不需要单独 `nr_ids` 或 `CpuIdMap`。实现只检查 `CpuGroup.Cpu[0] == BootCPU` 和 possible CPU 映射边界，不推进状态。 |
+| `setup_nr_cpu_ids()` | implementation checkpoint | Linux 中是 cpumask/per-cpu 数组上界；规格模型不需要单独 `nr_ids` 或 `CpuIdMap`。实现只检查 `CpuGroup.cpus[0] == BootCPU` 和 possible CPU 映射边界，不推进状态。 |
 | `setup_per_cpu_areas()` | formal: `PerCpuStorage.setup()` | 建立 `PerCpuStaticImage`、`PerCpuFirstChunk` 和 `PerCpuOffsetTable`，完整动态 allocator 后续展开。 |
 | `smp_prepare_boot_cpu()` | deferred | RISC-V64 当前弱实现为空，不建立额外对象。 |
 | `early_numa_node_init()` | 不纳入当前规格 | 当前规格限定 SMP over UMA，不支持 NUMA；该项不是 deferred。 |
@@ -1790,16 +1790,16 @@ Linux 调用分类、图示和结束状态的第一轮整理；默认 `charter-f
 
 `DefaultSchedRootDomain` 是 `Scheduler` 在 `sched_init()` 中建立的默认调度根域，对应 Linux 默认 `root_domain` 的规格抽象。它不承担 CPU 枚举、logical-id 分配或 CPU 本体状态维护；这些身份事实仍由 `CpuGroup` 负责。`DefaultSchedRootDomain` 从调度视角维护一组 CPU 实例引用，作为后续 `RunQueue` attach、RT/DL 共享状态、负载均衡和调度拓扑边界的默认覆盖域。当前 `sched_init()` 阶段只建立默认 root domain 的最小覆盖事实：`DefaultSchedRootDomain.covered_cpus == CpuGroup.possible_cpus`，集合元素是 `CpuRef` 或等价 CPU 引用，不是新的 CPU 本体对象。
 
-因此，`CpuGroup` 与 `DefaultSchedRootDomain` 的关系不是拥有关系，而是“身份索引源”和“调度覆盖视图”的关系。`CpuGroup.Cpu[logical_id]` 提供从 logical id 到 CPU 实例引用的稳定索引，`CpuGroup.possible_cpus` 提供当前可被调度子系统准备的 CPU 引用集合；`DefaultSchedRootDomain.setup(CpuGroup)` 读取该 possible 集合并建立自身的 `covered_cpus` 视图。后续每个 possible CPU 的 `CpuGroup.Cpu[id].RunQueue.setup(DefaultSchedRootDomain)` 必须满足该 runqueue 的 `cpu_ref` 属于 `DefaultSchedRootDomain.covered_cpus`，并记录 runqueue attached 到这个 root domain。boot CPU 只是其中 logical id 为 `0` 的 CPU 实例；secondary CPU 在真正 online 前也可以作为 possible CPU 引用被 root domain 覆盖，但这不表示 AP 已经拥有 live `CurrentCPU` 或可运行任务流。
+因此，`CpuGroup` 与 `DefaultSchedRootDomain` 不是彼此拥有关系，而是“CPU 实例拥有/身份索引源”和“调度覆盖视图”的关系。`CpuGroup.cpus[logical_id]` 提供稳定 CPU identity，`CpuGroup.possible_cpus` 是从元素状态派生的引用集合；`DefaultSchedRootDomain.setup(CpuGroup)` 读取该集合并建立自身的 `covered_cpus` 视图。secondary CPU 在 online 前也可以被覆盖，但只有获得执行权且已有 CpuRef 的 TaskFlow 才能解析对应 `CurrentCPU`。
 
-参照 Linux 的 per-CPU `struct rq` 和 per-CPU idle thread 关系，规格中把 `RunQueue` 和 `IdleTask` 建模为对应 CPU 实例的子对象，而不是 `Scheduler` 全局对象直接拥有的成员。正式访问路径应写成 `CpuGroup.Cpu[id].RunQueue` 和 `CpuGroup.Cpu[id].IdleTask`；其中 `RunQueue.cpu_ref == CpuGroup.Cpu[id].ref`，`RunQueue.idle == CpuGroup.Cpu[id].IdleTask`，`IdleTask.cpu_ref == CpuGroup.Cpu[id].ref`。`Scheduler` 的职责是编排这些 CPU-owned 对象的 setup/enable/action，并维护全局调度事实、调度类和选择策略；它不拥有每个 CPU 的 runqueue 或 idle task 本体。
+参照 Linux 的 per-CPU `struct rq` 和 per-CPU idle thread 关系，规格中把 `RunQueue` 和 `IdleTask` 建模为对应 CPU 实例的子对象，而不是 `Scheduler` 全局对象直接拥有的成员。正式访问路径应写成 `CpuGroup.cpus[id].RunQueue` 和 `CpuGroup.cpus[id].IdleTask`；其中 `RunQueue.cpu_ref == CpuGroup.cpus[id].ref`，`RunQueue.idle == CpuGroup.cpus[id].IdleTask`，`IdleTask.cpu_ref == CpuGroup.cpus[id].ref`。`Scheduler` 的职责是编排这些 CPU-owned 对象的 setup/enable/action，并维护全局调度事实、调度类和选择策略；它不拥有每个 CPU 的 runqueue 或 idle task 本体。
 
-运行期解析当前 runqueue 时，也应使用 CPU-owned 关系，而不是从 boot CPU 身份硬编码出发。正式链条是：本 CPU 的 `CurrentTaskRef` 指向正在执行的 `Task`，该 task 记录自己的 CPU logical-id/`cpu_ref`，再通过 `CpuGroup.Cpu[id].RunQueue` 得到当前 runqueue。当前 UP 最小路径仍会解析到 `BootRunQueue`，但原因是 `CurrentTaskRef -> BootTask` 且 `BootTask.cpu == BootCPU`；`CpuGroup.boot_cpu()` 只能作为 boot CPU 事实校验或索引便利，不能作为 current runqueue 的 primary source。
+运行期解析当前 runqueue 时，也应使用 CPU-owned 关系，而不是从 boot CPU 身份硬编码出发。正式链条是：effective `TaskFlow.cpu_ref` 解引用为 `CurrentCPU`，再从 `CpuGroup.cpus[id].RunQueue` 得到当前 runqueue；Task 本体不保存同义 CPU 归属字段。当前 UP 最小路径解析到 `BootRunQueue`，原因是 active Flow 的 CpuRef 指向 `CpuGroup.cpus[0]`，而不是因为 `CpuGroup.boot_cpu()` 被硬编码为 primary source。
 
 ```mermaid
 flowchart LR
-    CurrentTaskRef --> Task["Task.cpu_id / cpu_ref"]
-    Task --> CpuIndex["CpuGroup.Cpu[cpu_id]"]
+    EffectiveTaskFlow --> CpuRef["TaskFlow.cpu_ref"]
+    CpuRef --> CpuIndex["CpuGroup.cpus[logical_id]"]
     CpuIndex --> RunQueue["Cpu.RunQueue"]
     CpuIndex --> IdleTask["Cpu.IdleTask"]
 ```
@@ -1839,7 +1839,7 @@ flowchart LR
 
 1. `Scheduler.preset()`：执行调度器全局前置准备。`SchedClasses` 本体暂时 deferred，但未来应由 `Scheduler.preset()` 统一驱动 `StopSchedClass.preset()`、`DeadlineSchedClass.preset()`、`RealtimeSchedClass.preset()`、`FairSchedClass.preset()` 和 `IdleSchedClass.preset()`，先形成可引用的基本对象壳。`BitWaitQueueTable.preset()` 预置 bit wait 机制使用的全局 waitqueue bucket 表。`DefaultSchedRootDomain.setup()` 建立默认的 CPU 间共享调度信息区域，供后续 `RunQueue` attach。调度类顺序检查暂不单独建 checkpoint，除非后续证明它是模型边界而不是实现细节。
 2. `Scheduler.setup()`：遍历 possible CPU，驱动 `Cpu[id].RunQueue.setup(DefaultSchedRootDomain)`。`RunQueue` 挂在对应 `Cpu` 对象下面，内部当前只显式展开 `CfsRunQueue`、`RealtimeRunQueue` 和 `DeadlineRunQueue` 三个子队列；其它 runqueue 字段先作为属性处理。`FairServer` 先作为 deferred 子结构保留。`Scheduler.setup()` 是编排者，不拥有这些 runqueue；当前实现中 `Scheduler.boot_runqueue` 只是 `BootCPU.RunQueue` 的临时 lowering。未来 `Scheduler.setup()` 还应驱动各 `SchedClass.setup()`，把 preset 阶段形成的调度类对象壳推进为正式对象。
-3. `BootIdleSetup.setup(source = BootTask/current)`：把已有的 `BootTask/current` 绑定为 boot CPU idle task，而不是新分配一个 task。该过程覆盖 `set_load_weight()`、`init_task.se.slice`、`mmgrab_lazy_tlb()`、`enter_lazy_tlb()`、`set_kthread_struct()`、`__sched_fork()` 和 `init_idle()`，并形成 `BootCPU.RunQueue.idle == BootTask`、`BootCPU.RunQueue.curr == BootTask`、`BootTask.cpu == BootCPU`、`CpuGroup.Cpu[BootCPU.id].IdleTask == BootTask` 等 checkpoints。当前默认 logical boot CPU id 为 0，但规格中优先使用 `BootCPU.id`，避免把启动 CPU 固定写死为 `Cpu[0]`。
+3. `BootIdleSetup.setup(source = BootTask/current)`：把已有的 `BootTask/current` 绑定为 boot CPU idle task，而不是新分配一个 task。该过程覆盖 `set_load_weight()`、`init_task.se.slice`、`mmgrab_lazy_tlb()`、`enter_lazy_tlb()`、`set_kthread_struct()`、`__sched_fork()` 和 `init_idle()`，并形成 `CpuGroup.cpus[0].RunQueue.idle == BootTask`、`CpuGroup.cpus[0].RunQueue.curr == BootTask`、`BootInitFlow.cpu_ref == ref(CpuGroup.cpus[0])`、`CpuGroup.cpus[0].IdleTask == BootTask` 等 checkpoints。
 4. `Scheduler.setup()` 的收尾属性动作包括初始化全局 load 更新期限、设置 `BootCPU.idle_thread_ref` / `per_cpu(idle_threads, BootCPU.id)` 指向 `BootTask`，以及将 `BootCPU.RunQueue.balance_push_enabled` 置为 `false`。
 5. `SchedClass.setup()` 当前整体 deferred。`FairSchedClass.setup()` 对应 Linux `init_sched_fair_class()`，后续可在该边界内展开；`init_sched_ext_class()`、`psi_init()`、`init_uclamp()` 和 `preempt_dynamic_init()` 在当前 `default_config` 下为空实现或配置禁用，直接从当前主线省略。
 6. `Scheduler.enable()`：设置 `scheduler_running = true`，使调度器进入当前启动范围内的 running/online 状态。
@@ -2481,7 +2481,7 @@ Boot idle 入口不构成其前置条件。
 2. `页分配器完整 GFP mask 属性`：覆盖 `gfp_allowed_mask = __GFP_BITS_MASK`。它不是独立对象，也不属于 `KernelInitTask`，而是 `PageAllocator` 的全局分配策略属性。当前建模为 `PageAllocator.open_full_gfp_mask()` action，不推进 `PageAllocator` 标准生命周期，只记录 `PageAllocator.gfp_allowed_mask == __GFP_BITS_MASK`，表示后续初始化可以执行可能阻塞的 `GFP_KERNEL` 分配。
 3. `init 内存节点访问路径`：覆盖 `set_mems_allowed(node_states[N_MEMORY])`。当前 `CONFIG_CPUSETS=n` 且 `CONFIG_NUMA=n`，该调用在头文件中折叠为空实现，按 trimmed/no-op 记录，不在本阶段展开对象建模。
 4. `cad_pid 绑定路径`：覆盖 `cad_pid = get_pid(task_pid(current))`。它属于 reboot/ctrl-alt-del 控制路径的全局引用绑定；当前启动主线不依赖它，先按 deferred 记录，后续讨论系统控制或 reboot/poweroff 路径时再决定归属。
-5. `CPU 组拓扑与 present 准备动作`：覆盖 RISC-V `smp_prepare_cpus(setup_max_cpus)`。它不建立独立的 `SmpBootPlan` 对象，而是由 `PreSmpInitPhase` 驱动 `CpuGroup` 及其下级 `CpuTopology` / CPU 子对象属性完成准备：`init_cpu_topology()` 对应 `CpuGroup.CpuTopology.setup()`；`store_cpu_topology(curr_cpuid)` 对应 action `CpuGroup.CpuTopology.record(BootCPU)`；`numa_store_cpu_info(curr_cpuid)` 和 `numa_add_cpu(curr_cpuid)` 当前 `CONFIG_NUMA=n`，按 trimmed/no-op 记录；`max_cpus == 0` 只作为 `nosmp` 条件 checkpoint；默认路径遍历 possible secondary CPU 并执行 `CpuGroup.Cpu[cpuid].set_present(true)`，只写 `present` 属性，不启动 CPU，不推进 `online`。
+5. `CPU 组拓扑与 present 准备动作`：覆盖 RISC-V `smp_prepare_cpus(setup_max_cpus)`。它不建立独立的 `SmpBootPlan` 对象，而是由 `PreSmpInitPhase` 驱动 `CpuGroup` 及其下级 `CpuTopology` / CPU 子对象属性完成准备：`init_cpu_topology()` 对应 `CpuGroup.CpuTopology.setup()`；`store_cpu_topology(curr_cpuid)` 对应 action `CpuGroup.CpuTopology.record(BootCPU)`；`numa_store_cpu_info(curr_cpuid)` 和 `numa_add_cpu(curr_cpuid)` 当前 `CONFIG_NUMA=n`，按 trimmed/no-op 记录；`max_cpus == 0` 只作为 `nosmp` 条件 checkpoint；默认路径遍历 possible secondary CPU 并执行 `CpuGroup.cpus[cpuid].set_present(true)`，只写 `present` 属性，不启动 CPU，不推进 `online`。
 6. `Workqueue 对象`：覆盖 `workqueue_init()`。它承接前序 `Workqueue.Prepared`，建模为 `Workqueue.setup()` 并推进到 `Ready`：初始化 CPU intensive 阈值和 `pwq_release_worker`，补齐 worker pool 的 node hint，为需要 rescuer 的 workqueue 创建 rescuer，创建 BH/CPU/unbound pool 的初始 worker，并初始化 WQ watchdog。Linux 内部会设置 `wq_online = true`；规格层把它映射为 `Workqueue.worker_creation_open == true` 这类内部属性，表示后续可以创建 kworker，但不等同于标准生命周期 `Workqueue.enable()`。`enable()` 仍留给后续 worker 执行、拓扑重建和运行期服务边界。
 7. `VM 统计核心对象`（暂名 `VmstatCore`）：覆盖 `init_mm_internals()` 的主线部分。由于前序没有单独创建 `VmstatCore` 的对象壳，本调用建模为 `VmstatCore.preset()` 并推进到 `Prepared`。它依赖 `Workqueue.Ready`，创建 `mm_percpu_wq`，注册 vmstat CPU hotplug state，初始化 CPU node state，并启动 shepherd delayed work/timer。`proc_create_seq("buddyinfo"/"pagetypeinfo"/"vmstat"/"zoneinfo")` 属于 procfs 可见导出；由于前序 `Procfs.setup()` 当前仍 deferred，本子阶段先记录为 `VmstatProcExports` deferred，不要求推进 procfs 对象状态。
 8. `Tasks RCU 对象`（暂名 `TasksRcu`）：覆盖 `rcu_init_tasks_generic()`。它不是重新建立 `RcuCore`，而是在前序 `tasks_cblist_init_generic()` / `TasksRcu.preset()` 已经建立 per-CPU callback-list 壳的基础上，建模为 `TasksRcu.setup()` 并推进到 `Ready`。该对象聚合按配置启用的 Tasks RCU flavor，例如 `TasksClassicRcu`、`TasksRudeRcu` 和 `TasksTraceRcu`；当前调用为已启用 flavor 设置 grace-period 参数和阶段函数，创建对应 GP kthread，并在 `CONFIG_PROVE_RCU` 启用时启动 boot self-test。未启用的 flavor 按 trimmed/no-op 记录。
@@ -2511,7 +2511,7 @@ Boot idle 入口不构成其前置条件。
 | `numa_store_cpu_info(curr_cpuid)` / `numa_add_cpu(curr_cpuid)` in `smp_prepare_cpus()` | trimmed/no-op | 当前 `CONFIG_NUMA=n`，RISC-V default_config 下不展开 NUMA 对象建模。 |
 | `if (max_cpus == 0) return` in `smp_prepare_cpus()` | checkpoint: `setup_max_cpus == 0` | 表示 `nosmp` / 禁用 secondary CPU 的条件路径；默认路径继续遍历 possible CPU。 |
 | `for_each_possible_cpu(cpuid)` / `if (cpuid == curr_cpuid) continue` in `smp_prepare_cpus()` | loop/filter over `CpuGroup.possible_set` | 遍历 possible CPU 集合，并过滤 boot CPU；它们是控制结构，不建模为对象。 |
-| `set_cpu_present(cpuid, true)` in `smp_prepare_cpus()` | property action: `CpuGroup.Cpu[cpuid].set_present(true)` | 写入每个 possible secondary CPU 子对象的 `present = true` 属性；不设置 `online`，也不启动 CPU。 |
+| `set_cpu_present(cpuid, true)` in `smp_prepare_cpus()` | property action: `CpuGroup.cpus[cpuid].set_present(true)` | 写入每个 possible secondary CPU 子对象的 `present = true` 属性；不设置 `online`，也不启动 CPU。 |
 | `numa_store_cpu_info(cpuid)` in `smp_prepare_cpus()` loop | trimmed/no-op | 同上，当前 `CONFIG_NUMA=n`。 |
 | `workqueue_init()` | formal candidate: `Workqueue.setup()` | 从 `Prepared` 推进到 `Ready`；它是 workqueue 三阶段初始化的第二步，承接前序 `workqueue_init_early()` / `Workqueue.preset()` 已建立的 early 框架。 |
 | `wq_cpu_intensive_thresh_init()` in `workqueue_init()` | action: `Workqueue.prepare_cpu_intensive_threshold()` | 创建 `pwq_release_worker`，并按 `loops_per_jiffy` 推导默认 `wq_cpu_intensive_thresh_us`；规格层记录为 `Workqueue.release_worker_ready == true` 和 `Workqueue.cpu_intensive_threshold_ready == true`，不单独建立 release worker 生命周期对象。 |
@@ -2649,22 +2649,22 @@ Boot idle 入口不构成其前置条件。
 
 `SMP Runtime Phase` 的第二个子阶段暂名 `SmpBringupPhase`，中文名为 SMP 启动期。它对应 Linux 6.12 `smp_init()` 的完整执行段，从 `idle_threads_init()` 开始，到 RISC-V 当前为空实现的 `smp_cpus_done(setup_max_cpus)` 返回为止。
 
-这个子阶段由 `KernelInitTask` 在 boot CPU 上发起，但执行结果会启动 secondary CPU 上的运行流。前序 `sched_init()` 已把 `BootTask` 绑定为 `CpuGroup.Cpu[BootCPU.id].IdleTask`；`idle_threads_init()` 只为 possible non-boot CPU 准备 `CpuGroup.Cpu[cpu].IdleTask`，不重新处理 boot CPU，并且每个 AP idle task 都必须拥有自己的 boot stack / pt_regs 栈顶事实。随后 `cpuhp_threads_init()` 初始化各 CPU 的 `CpuHotplugState` 同步门，注册 `CpuHotplugThread` 的 smpboot 模板，并只为当前 online 的 boot CPU 创建/唤醒 `CpuGroup.Cpu[BootCPU.id].CpuHotplugThread`；secondary CPU 的 `CpuHotplugThread` 内部创建/唤醒细节本轮保持 deferred。`bringup_nonboot_cpus(setup_max_cpus)` 再按 CPU hotplug 状态机启动 present CPUs。对 RISC-V 而言，`cpu_ops->cpu_start()` 是 BP/AP 分叉点：boot CPU 按 Linux `cpu_ops_sbi.cpu_start()` 发布每个 AP 的 `{ task_ptr, stack_ptr }` boot data，用 SBI HSM `hart_start(hartid, secondary_start_sbi, boot_data)` 释放目标 hart，然后等待同步 completion。AP 侧从区别于 BP `_start` 的 `secondary_start_sbi` 入口开始，依次进入 `ApEntryPreludePhase`、`ApSmpCallinPhase` 和 `ApOnlineIdlePhase`：先消费 HSM boot data 并建立 AP 当前 idle task/stack，再执行 `smp_callin()` 发布 `cpu_running`，最后进入 `CPUHP_AP_ONLINE_IDLE` 发布 `done_up`。`SecondaryCpuStartupAck` 和 `SecondaryCpuOnlineAck` 只表示 BP wait side 已观察这些 AP 事实，不能由 BP 直接模拟 AP online。`done_down` 作为同一 hotplug 协议的 teardown/rollback 同步量保留位置。
+这个子阶段由 `KernelInitTask` 在 boot CPU 上发起，但执行结果会启动 secondary CPU 上的运行流。前序 `sched_init()` 已把 `BootTask` 绑定为 `CpuGroup.cpus[BootCPU.id].IdleTask`；`idle_threads_init()` 只为 possible non-boot CPU 准备 `CpuGroup.cpus[cpu].IdleTask`，不重新处理 boot CPU，并且每个 AP idle task 都必须拥有自己的 boot stack / pt_regs 栈顶事实。随后 `cpuhp_threads_init()` 初始化各 CPU 的 `CpuHotplugState` 同步门，注册 `CpuHotplugThread` 的 smpboot 模板，并只为当前 online 的 boot CPU 创建/唤醒 `CpuGroup.cpus[BootCPU.id].CpuHotplugThread`；secondary CPU 的 `CpuHotplugThread` 内部创建/唤醒细节本轮保持 deferred。`bringup_nonboot_cpus(setup_max_cpus)` 再按 CPU hotplug 状态机启动 present CPUs。对 RISC-V 而言，`cpu_ops->cpu_start()` 是 BP/AP 分叉点：boot CPU 按 Linux `cpu_ops_sbi.cpu_start()` 发布每个 AP 的 `{ task_ptr, stack_ptr }` boot data，用 SBI HSM `hart_start(hartid, secondary_start_sbi, boot_data)` 释放目标 hart，然后等待同步 completion。AP 侧从区别于 BP `_start` 的 `secondary_start_sbi` 入口开始，依次进入 `ApEntryPreludePhase`、`ApSmpCallinPhase` 和 `ApOnlineIdlePhase`：先消费 HSM boot data 并建立 AP 当前 idle task/stack，再执行 `smp_callin()` 发布 `cpu_running`，最后进入 `CPUHP_AP_ONLINE_IDLE` 发布 `done_up`。`SecondaryCpuStartupAck` 和 `SecondaryCpuOnlineAck` 只表示 BP wait side 已观察这些 AP 事实，不能由 BP 直接模拟 AP online。`done_down` 作为同一 hotplug 协议的 teardown/rollback 同步量保留位置。
 
 当前先将 `SmpBringupPhase` 的对象和边界记录如下：
 
 1. `SMP 启动期对象`（暂名 `SmpBringupPhase`）：属于阶段对象，是 `SMP Runtime Phase` 的第二个子阶段对象。它从 `PreSmpInitPhase.Ready` 接续，由 `KernelInitTask` 驱动，按 `smp_init()` 的有效顺序推进 secondary CPU 从 present 到 online。
-2. `secondary idle 任务对象`（`CpuGroup.Cpu[cpu].IdleTask`）：覆盖 `idle_threads_init()`。它遍历 possible CPU，跳过 `BootCPU.id`，对每个 possible non-boot CPU 驱动 `CpuGroup.Cpu[cpu].IdleTask.preset/setup/enable()`：形成并初始化该 CPU 的 inactive idle task，内部对应 Linux `fork_idle(cpu)` / `init_idle(task, cpu)`，并写入 `per_cpu(idle_threads, cpu)`、`CpuGroup.Cpu[cpu].RunQueue.idle` 和 `CpuGroup.Cpu[cpu].RunQueue.curr` 等引用。这里的 Online 表示 idle task 已可作为 `rq->idle` 选择，不表示普通 runnable class queue membership。每个 AP idle task 必须有独立 task 记录和 dedicated stack；传给 SBI HSM boot data 的 `task_ptr` 指向该 AP idle task，`stack_ptr` 指向该 task 的 AP pt_regs/栈顶边界。该调用不启动 CPU，也不设置 `cpu.online`；目标 hart 从 `secondary_start_sbi` 开始执行时由架构入口直接把同一 idle Task 置为 OnCpu 并启动 initial idle Flow，不发送 Scheduler Continue。`cpu_startup_entry(CPUHP_AP_ONLINE_IDLE)` 继续负责进入可中断的 AP idle/park 路径和发布 hotplug online-idle 完成事实。
-3. `CPU hotplug 状态与线程对象`：覆盖 `cpuhp_threads_init()`。`CpuHotplugState` 是 `CpuGroup.Cpu[cpu]` 的子对象，不再作为顶层集合对象；`CpuHotplugThread` 是 smpboot 模板创建的统一 `Task + TaskFlow` 的特化角色视图，挂在对应 CPU 下，写作 `CpuGroup.Cpu[cpu].CpuHotplugThread`，但不另存 Task lifecycle、PID 或 switch context。本调用先驱动所有 possible CPU 的 `CpuHotplugState.preset_sync_gates()`，初始化 `done_up` / `done_down` completion；这两个 completion 按通用规则作为 `CpuHotplugState` 的同步子对象/属性，不单独建立 gate 对象。随后记录 `CpuHotplugThread.template.registered == true`；最后只为当前 online 的 `BootCPU` 创建并 unpark `CpuGroup.Cpu[BootCPU.id].CpuHotplugThread`。secondary CPU 的 `CpuHotplugThread` 不要求在本调用结束时存在。
-4. `CPU 组对象`（`CpuGroup`）的正式启用动作：覆盖 `bringup_nonboot_cpus(setup_max_cpus)` 的主线。`max_cpus == 0` 只作为 `nosmp` checkpoint，成立时跳过 secondary bringup。当前未启用 `CONFIG_HOTPLUG_PARALLEL`，并且 `cpuhp_bringup_cpus_parallel(max_cpus)` 折叠为 false，因此实际走串行 `cpuhp_bringup_mask(cpu_present_mask, setup_max_cpus, CPUHP_ONLINE)`。规格层把它建模为集合级 `CpuGroup.enable(mask = present_cpus, limit = setup_max_cpus, target = CPUHP_ONLINE)`，它不直接执行 arch 启动，而是逐个对目标 CPU 调用 `CpuGroup.Cpu[cpu].CpuHotplugState.advance(target = CPUHP_ONLINE)`。
-5. `CPU hotplug 单 CPU 推进动作`：覆盖 `cpu_up(cpu, CPUHP_ONLINE)` / `_cpu_up(cpu, 0, CPUHP_ONLINE)`。该动作先检查 `cpu_possible` / `cpu_present` / `cpu_bootable` 等前置条件；若目标 CPU 仍处于 `CPUHP_OFFLINE`，要求前序 `CpuGroup.Cpu[cpu].IdleTask.state == Prepared`；随后设置 `CpuHotplugState.target_step = CPUHP_ONLINE`。Linux 在 boot CPU 上只推进到 `CPUHP_BRINGUP_CPU`，超过该 step 的 AP-side callbacks 交给目标 CPU 的 `CpuHotplugThread` 继续执行。因此该动作是单 CPU 的 hotplug 状态推进入口，不等同于一次性设置 `online = true`。
+2. `secondary idle 任务对象`（`CpuGroup.cpus[cpu].IdleTask`）：覆盖 `idle_threads_init()`。它遍历 possible CPU，跳过 `BootCPU.id`，对每个 possible non-boot CPU 驱动 `CpuGroup.cpus[cpu].IdleTask.preset/setup/enable()`：形成并初始化该 CPU 的 inactive idle task，内部对应 Linux `fork_idle(cpu)` / `init_idle(task, cpu)`，并写入 `per_cpu(idle_threads, cpu)`、`CpuGroup.cpus[cpu].RunQueue.idle` 和 `CpuGroup.cpus[cpu].RunQueue.curr` 等引用。这里的 Online 表示 idle task 已可作为 `rq->idle` 选择，不表示普通 runnable class queue membership。每个 AP idle task 必须有独立 task 记录和 dedicated stack；传给 SBI HSM boot data 的 `task_ptr` 指向该 AP idle task，`stack_ptr` 指向该 task 的 AP pt_regs/栈顶边界。该调用不启动 CPU，也不设置 `cpu.online`；目标 hart 从 `secondary_start_sbi` 开始执行时由架构入口直接把同一 idle Task 置为 OnCpu 并启动 initial idle Flow，不发送 Scheduler Continue。`cpu_startup_entry(CPUHP_AP_ONLINE_IDLE)` 继续负责进入可中断的 AP idle/park 路径和发布 hotplug online-idle 完成事实。
+3. `CPU hotplug 状态与线程对象`：覆盖 `cpuhp_threads_init()`。`CpuHotplugState` 是 `CpuGroup.cpus[cpu]` 的子对象，不再作为顶层集合对象；`CpuHotplugThread` 是 smpboot 模板创建的统一 `Task + TaskFlow` 的特化角色视图，挂在对应 CPU 下，写作 `CpuGroup.cpus[cpu].CpuHotplugThread`，但不另存 Task lifecycle、PID 或 switch context。本调用先驱动所有 possible CPU 的 `CpuHotplugState.preset_sync_gates()`，初始化 `done_up` / `done_down` completion；这两个 completion 按通用规则作为 `CpuHotplugState` 的同步子对象/属性，不单独建立 gate 对象。随后记录 `CpuHotplugThread.template.registered == true`；最后只为当前 online 的 `BootCPU` 创建并 unpark `CpuGroup.cpus[BootCPU.id].CpuHotplugThread`。secondary CPU 的 `CpuHotplugThread` 不要求在本调用结束时存在。
+4. `CPU 组对象`（`CpuGroup`）的正式启用动作：覆盖 `bringup_nonboot_cpus(setup_max_cpus)` 的主线。`max_cpus == 0` 只作为 `nosmp` checkpoint，成立时跳过 secondary bringup。当前未启用 `CONFIG_HOTPLUG_PARALLEL`，并且 `cpuhp_bringup_cpus_parallel(max_cpus)` 折叠为 false，因此实际走串行 `cpuhp_bringup_mask(cpu_present_mask, setup_max_cpus, CPUHP_ONLINE)`。规格层把它建模为集合级 `CpuGroup.enable(mask = present_cpus, limit = setup_max_cpus, target = CPUHP_ONLINE)`，它不直接执行 arch 启动，而是逐个对目标 CPU 调用 `CpuGroup.cpus[cpu].CpuHotplugState.advance(target = CPUHP_ONLINE)`。
+5. `CPU hotplug 单 CPU 推进动作`：覆盖 `cpu_up(cpu, CPUHP_ONLINE)` / `_cpu_up(cpu, 0, CPUHP_ONLINE)`。该动作先检查 `cpu_possible` / `cpu_present` / `cpu_bootable` 等前置条件；若目标 CPU 仍处于 `CPUHP_OFFLINE`，要求前序 `CpuGroup.cpus[cpu].IdleTask.state == Prepared`；随后设置 `CpuHotplugState.target_step = CPUHP_ONLINE`。Linux 在 boot CPU 上只推进到 `CPUHP_BRINGUP_CPU`，超过该 step 的 AP-side callbacks 交给目标 CPU 的 `CpuHotplugThread` 继续执行。因此该动作是单 CPU 的 hotplug 状态推进入口，不等同于一次性设置 `online = true`。
 6. `CPUHP_BRINGUP_CPU` 复合过程（`CpuHotplugState.bringup_cpu(cpu)`）：覆盖 `CpuHotplugState.advance()` 内部的 `CPUHP_BRINGUP_CPU` step。它是第三层 composite，其语义是 hotplug 状态机驱动的一段跨 CPU bringup 协议。BP side 由 boot CPU 执行 `__cpu_up()` / `cpu_ops->cpu_start(cpu, tidle)`，释放目标 hart，并等待 `CpuHotplugState.cpu_running` 和 `done_up` completion；AP side 由目标 secondary CPU 自己执行 `ApEntryPreludePhase`、`ApSmpCallinPhase` 和 `ApOnlineIdlePhase`。Linux/RISC-V 实现中 `cpu_running` 是全局静态 completion；规格层把它作为本次 hotplug bringup 的 arch 同步实例约束归入 `CpuHotplugState`，不对象化为独立同步门。
-7. `AP 入口先导期`（`ApEntryPreludePhase`）：覆盖 RISC-V `secondary_start_sbi` 与 `.Lsecondary_start_common`。它是区别于 BP `BootInitFlow.Preset` 入口步骤的 AP 专属阶段：不清 BSS、不解析 boot args、不建立 `BootCurrentCPU`，而是消费 HSM boot data，验证真实 `tp` 指向预建 idle Task，在该架构入口执行权边界提交 `IdleTask.OnCpu` 并严格启动 initial idle Flow，建立 AP stack/pt_regs 栈顶指针，屏蔽本地中断，关闭 FPU/vector，切换到已存在的 `SwapperVM`，并安装正式 trap vector。该首次执行权来自 hart entry，不发送 Scheduler Continue。当前默认只支持 OpenSBI ordered booting + HSM；spinwait booting 不作为 fallback。
+7. `AP 入口先导期`（`ApEntryPreludePhase`）：覆盖 RISC-V `secondary_start_sbi` 与 `.Lsecondary_start_common`。它是区别于 BP `BootInitFlow.Preset` 入口步骤的 AP 专属阶段：不清 BSS、不解析 boot args，而是消费 HSM boot data，在提交 `IdleTask.OnCpu` 和激活 initial idle Flow 之前继承目标 CPU 的 CpuRef；随后该 Flow 才能解析 `CurrentCPU` 并访问 CPU-local 状态。该首次执行权来自 hart entry，不发送 Scheduler Continue。
 8. `AP smp_callin 期`（`ApSmpCallinPhase`）：覆盖 Linux `smp_callin()` 的最小语义。AP 在自身 CPU 视角中把 current idle task 绑定到 `init_mm`，记录 topology 和 `notify_cpu_starting()` 边界，启用该 CPU 的 IPI 接收路径，发布 `set_cpu_online()` 事实，执行本地 icache/TLB flush summary，然后 complete `cpu_running` 释放 BP side。
 9. `AP online-idle 期`（`ApOnlineIdlePhase`）：覆盖 `local_irq_enable()` 与 `cpu_startup_entry(CPUHP_AP_ONLINE_IDLE)`。AP 打开本地中断，进入 AP idle/park 运行线，并在 `cpuhp_online_idle()` 边界 complete `done_up`。本阶段明确不运行 BP payload 或用户 syscall；完整 idle loop、调度抢占和后续 AP hotplug callbacks 仍 deferred。
 10. `IPI 对象`（`SbiIpi`）的 per-CPU enable 动作：覆盖 secondary CPU 上的 `riscv_ipi_enable()`。前序 `SbiIpi.state == Ready` 已建立 IPI mux 和 hotplug hook；本阶段在每个 secondary CPU bringup 时启用该 CPU 的 IPI 接收路径。这里仍是按 CPU 的启用动作，不表示所有跨 CPU callback API 都已经进入完整运行边界。
 11. `CPU hotplug completion 实例`：覆盖 RISC-V `cpu_running` completion 与 generic `done_up` / `done_down` completion。它们都遵循 `Completion` Type；实例约束挂在 `CpuHotplugState` 下。`cpu_running` 用于 `__cpu_up()` 与 `smp_callin()` 的 arch entry 握手；`done_up` / `done_down` 用于 generic CPU hotplug 线程与 AP idle/teardown 的同步。不建立独立 `CpuRunningGate` 对象。
-12. `AP hotplug 后续回调推进动作`（`CpuHotplugState.kick_ap_if_needed(target)`）：覆盖 `bringup_cpu()` 尾部的 `cpuhp_kick_ap(cpu, st, st->target)`。它是 BP 侧条件复合 action，不是 checkpoint：若 `target <= CPUHP_AP_ONLINE_IDLE`，该动作退化为 no-op；若 `target > CPUHP_AP_ONLINE_IDLE`，BP 设置 hotplug target 和 `should_run`，唤醒 `CpuGroup.Cpu[cpu].CpuHotplugThread.run_to_target(target)`，并通过 `done_up` 等待 AP 线程结束。AP hotplug thread 通过 `cpuhp_thread_fun()` 每次执行一个 AP state callback，直到达到目标；失败时记录 reset/rollback 分支，当前不单独对象化。AP hotplug callback 的深入展开列入后续计划，不作为当前启动规格主线的阻塞项。
+12. `AP hotplug 后续回调推进动作`（`CpuHotplugState.kick_ap_if_needed(target)`）：覆盖 `bringup_cpu()` 尾部的 `cpuhp_kick_ap(cpu, st, st->target)`。它是 BP 侧条件复合 action，不是 checkpoint：若 `target <= CPUHP_AP_ONLINE_IDLE`，该动作退化为 no-op；若 `target > CPUHP_AP_ONLINE_IDLE`，BP 设置 hotplug target 和 `should_run`，唤醒 `CpuGroup.cpus[cpu].CpuHotplugThread.run_to_target(target)`，并通过 `done_up` 等待 AP 线程结束。AP hotplug thread 通过 `cpuhp_thread_fun()` 每次执行一个 AP state callback，直到达到目标；失败时记录 reset/rollback 分支，当前不单独对象化。AP hotplug callback 的深入展开列入后续计划，不作为当前启动规格主线的阻塞项。
 13. `SMP bringup 收尾路径`：覆盖 `num_online_nodes()` / `num_online_cpus()` 的日志 checkpoint 与 `smp_cpus_done(setup_max_cpus)`。RISC-V 当前 `smp_cpus_done()` 为空实现，按 trimmed/no-op 记录。
 
 <p align="center">
@@ -2675,19 +2675,19 @@ Boot idle 入口不构成其前置条件。
   图 28 SMP 启动期对象分类与相互关系
 </p>
 
-图 28 用于说明 `SMP Runtime Phase` 子阶段 2 的对象分类和依赖关系。左侧是从 `PreSmpInitPhase` 进入多核运行期的阶段边界，中间是由 `KernelInitTask` 驱动的 CPU bringup 主线对象与复合动作，右侧是 RISC-V secondary entry 中使用的 IPI、completion 实例、用户态 ISA 暴露和当前配置下裁剪的路径。图中 `CpuGroup.enable()` 表示 secondary CPU online 边界，不重新建立 CPU 拓扑对象；`bringup_cpu()` 只表示 `CpuHotplugState` 内部复合过程，不作为独立对象进入对象模型；`ApEntryPreludePhase`、`ApSmpCallinPhase` 和 `ApOnlineIdlePhase` 是目标 CPU 自己执行的 AP side phase，不由 BP 直接调用；`CpuHotplugThread.run_to_target()` 表示被 BP 唤醒后在 AP 上执行后续 hotplug callbacks 的线程动作；`SmpbootThread` 按模板索引视图挂到 `CpuGroup.Cpu[cpu]` 下，实际 carrier 是统一 Task/TaskFlow，不建立独立 `SmpbootThreadRegistry` 顶层对象；`cpu_running` / `done_up` / `done_down` 作为 `CpuHotplugState` 的 completion 实例，不作为独立 gate 对象。
+图 28 用于说明 `SMP Runtime Phase` 子阶段 2 的对象分类和依赖关系。左侧是从 `PreSmpInitPhase` 进入多核运行期的阶段边界，中间是由 `KernelInitTask` 驱动的 CPU bringup 主线对象与复合动作，右侧是 RISC-V secondary entry 中使用的 IPI、completion 实例、用户态 ISA 暴露和当前配置下裁剪的路径。图中 `CpuGroup.enable()` 表示 secondary CPU online 边界，不重新建立 CPU 拓扑对象；`bringup_cpu()` 只表示 `CpuHotplugState` 内部复合过程，不作为独立对象进入对象模型；`ApEntryPreludePhase`、`ApSmpCallinPhase` 和 `ApOnlineIdlePhase` 是目标 CPU 自己执行的 AP side phase，不由 BP 直接调用；`CpuHotplugThread.run_to_target()` 表示被 BP 唤醒后在 AP 上执行后续 hotplug callbacks 的线程动作；`SmpbootThread` 按模板索引视图挂到 `CpuGroup.cpus[cpu]` 下，实际 carrier 是统一 Task/TaskFlow，不建立独立 `SmpbootThreadRegistry` 顶层对象；`cpu_running` / `done_up` / `done_down` 作为 `CpuHotplugState` 的 completion 实例，不作为独立 gate 对象。
 
 ##### SMP Runtime Phase 子阶段 2 过程处理清单（初稿）
 
 | Linux 6.12 `smp_init()` 调用 / 规格补充动作 | 规格处理 | 备注 |
 |---|---|---|
-| `idle_threads_init()` | formal candidate: `CpuGroup.Cpu[cpu].IdleTask.preset()` | 遍历 possible CPU，跳过 boot CPU；为每个 possible non-boot CPU 通过 `fork_idle()` / `init_idle()` 准备 inactive idle task，并写入 per-CPU idle thread 与 runqueue idle 引用。不启动 CPU，不推进 `enable()`。 |
+| `idle_threads_init()` | formal candidate: `CpuGroup.cpus[cpu].IdleTask.preset()` | 遍历 possible CPU，跳过 boot CPU；为每个 possible non-boot CPU 通过 `fork_idle()` / `init_idle()` 准备 inactive idle task，并写入 per-CPU idle thread 与 runqueue idle 引用。不启动 CPU，不推进 `enable()`。 |
 | `cpuhp_threads_init()` | composite action: `CpuHotplugState.preset_sync_gates()` + `CpuHotplugThread.template.register()` + `BootCPU.CpuHotplugThread.preset/setup/enable()` | 初始化每个 possible CPU 的 hotplug 同步门，注册 `cpuhp/%u` per-CPU thread 模板，只为当前 online 的 boot CPU 创建并 unpark cpuhp thread；secondary CPU 的 `CpuHotplugThread` 留给后续 bringup/hotplug 路径。 |
 | `bringup_nonboot_cpus(setup_max_cpus)` with `setup_max_cpus == 0` | checkpoint | `nosmp` / 禁用 secondary bringup 路径；成立时不推进 `CpuGroup.enable()`。 |
 | `cpuhp_bringup_cpus_parallel(max_cpus)` | trimmed/no-op | 当前未启用 `CONFIG_HOTPLUG_PARALLEL`，该路径返回 false；后续如启用并行 bringup，再恢复为 parallel bringup 策略对象或 action。 |
 | `cpuhp_bringup_mask(cpu_present_mask, setup_max_cpus, CPUHP_ONLINE)` | formal candidate: `CpuGroup.enable(mask = present_cpus, limit = setup_max_cpus, target = CPUHP_ONLINE)` | 集合级串行驱动动作，逐个选择 present CPU 并调用该 CPU 的 hotplug 状态推进；不直接执行 arch 启动。 |
-| `cpu_up(cpu, CPUHP_ONLINE)` / `_cpu_up(cpu, 0, CPUHP_ONLINE)` | nested formal: `CpuGroup.Cpu[cpu].CpuHotplugState.advance(target = CPUHP_ONLINE)` | 检查 possible/present/bootable，要求 inactive idle task 已准备，设置目标 hotplug step，并在 BP-side 推进到 `CPUHP_BRINGUP_CPU`；之后 AP-side callbacks 由目标 CPU 的 `CpuHotplugThread` 继续执行。 |
-| `CPUHP_CREATE_THREADS` / `smpboot_create_threads(cpu)` | nested formal: `CpuGroup.Cpu[cpu].SmpbootThread[*].setup()` | 为目标 CPU 创建所有已注册 smpboot per-CPU thread 实例并 park，标准状态推进到 `Ready`，扩展状态为 `Parked`。这是 `SmpbootThread` 实例创建点，不是后续 unpark/enable。 |
+| `cpu_up(cpu, CPUHP_ONLINE)` / `_cpu_up(cpu, 0, CPUHP_ONLINE)` | nested formal: `CpuGroup.cpus[cpu].CpuHotplugState.advance(target = CPUHP_ONLINE)` | 检查 possible/present/bootable，要求 inactive idle task 已准备，设置目标 hotplug step，并在 BP-side 推进到 `CPUHP_BRINGUP_CPU`；之后 AP-side callbacks 由目标 CPU 的 `CpuHotplugThread` 继续执行。 |
+| `CPUHP_CREATE_THREADS` / `smpboot_create_threads(cpu)` | nested formal: `CpuGroup.cpus[cpu].SmpbootThread[*].setup()` | 为目标 CPU 创建所有已注册 smpboot per-CPU thread 实例并 park，标准状态推进到 `Ready`，扩展状态为 `Parked`。这是 `SmpbootThread` 实例创建点，不是后续 unpark/enable。 |
 | `CPUHP_BRINGUP_CPU` / `bringup_cpu(cpu)` | nested composite action: `CpuHotplugState.bringup_cpu(cpu)` | 位于 `CpuHotplugState.advance()` 内部；显式分为 BP side 和 AP side。BP side 调用 `__cpu_up()` / `cpu_ops->cpu_start()` 并等待 completion；AP side 从 secondary entry 汇编路径开始执行。 |
 | RISC-V `__cpu_up(cpu, idle)` | BP-side nested action | 设置目标 idle task 的 CPU，调用 `cpu_ops->cpu_start(cpu, idle)` 启动目标 hart，并等待 `cpu_running`。 |
 | RISC-V `cpu_ops->cpu_start(cpu, idle)` | fork point: `CpuStartProvider.start(cpu, idle)` | BP/AP 分叉点。SBI HSM 路径写入 boot data 后调用 `sbi_hsm_hart_start(hartid, secondary_start_sbi, boot_data)`；从该点开始，目标 secondary CPU 自己执行 AP side。 |
@@ -2695,25 +2695,25 @@ Boot idle 入口不构成其前置条件。
 | RISC-V `secondary_start_sbi` / `.Lsecondary_start_common` | AP phase: `ApEntryPreludePhase` | 目标 secondary CPU 自己执行的入口先导，可视为 BP 入口前导期的简化版。它复用 `InterruptStream`、`KernelImage`、`EventStream`、`KernelAddressSpace`、`IdleTask` / `Stack` 等对象语言，但不重新清零 BSS、不重建早期页表、不重新建立 `BootCPU`；内部屏蔽中断、加载 `gp`、绑定 `tp` / `sp`、启用 MMU、设置正式异常入口和加载 SCS，然后进入 `smp_callin()`。 |
 | RISC-V `smp_callin()` | AP phase: `ApSmpCallinPhase` | AP 侧入口 action，不建立独立对象；内部顺序覆盖 vector 检查、idle task 地址空间绑定、topology 记录、CPU hotplug starting 通知、IPI/online/ISA/flush 和 `cpu_running.complete()`。 |
 | `has_vector()` / `riscv_v_setup_vsize()` in `smp_callin()` | conditional action: `VectorContext.verify_cpu_vlen(cpu)` | 有 vector 时校验当前 hart 的 vlen，失败时 AP bringup 返回并走失败路径；无 vector 时 trimmed/no-op。 |
-| `mmgrab(&init_mm)` / `current->active_mm = &init_mm` in `smp_callin()` | action: `CpuGroup.Cpu[cpu].IdleTask.bind_active_mm(KernelAddressSpace.init_mm)` | 当前 AP 正在执行前序准备的 idle task；本动作把它绑定到内核地址空间，不新建地址空间对象。 |
+| `mmgrab(&init_mm)` / `current->active_mm = &init_mm` in `smp_callin()` | action: `CpuGroup.cpus[cpu].IdleTask.bind_active_mm(KernelAddressSpace.init_mm)` | 当前 AP 正在执行前序准备的 idle task；本动作把它绑定到内核地址空间，不新建地址空间对象。 |
 | `store_cpu_topology(curr_cpuid)` in `smp_callin()` | action: `CpuGroup.CpuTopology.record(Cpu[cpu])` | 记录 secondary CPU 的 topology 属性；前序 `smp_prepare_cpus()` 已记录 boot CPU，本处补齐 AP 侧 CPU。 |
 | `notify_cpu_starting(curr_cpuid)` in `smp_callin()` | nested composite action: `CpuHotplugState.notify_starting(cpu)` | AP 侧执行 generic CPU hotplug starting 通知；内部包含 RCU CPU starting、`booted_once` 标记和 AP starting callback range；细节列入后续计划，不阻塞当前 `smp_init()` 主线收尾。 |
 | `riscv_ipi_enable()` in `smp_callin()` | nested action: `SbiIpi.enable(cpu)` | 为当前 secondary CPU 启用 IPI 接收路径；不自动声明跨 CPU callback 全部运行期语义完成。 |
 | `numa_add_cpu(curr_cpuid)` in `smp_callin()` | trimmed/no-op | 当前 `CONFIG_NUMA=n`，不展开 NUMA 对象建模。 |
-| `set_cpu_online(curr_cpuid, true)` in `smp_callin()` | action: `CpuGroup.Cpu[cpu].mark_online()` | 写入 CPU online 状态和 online mask；它早于 AP idle 入口，因此不等同于 `IdleTask.enable()` 或 `CPUHP_AP_ONLINE_IDLE` 完成。 |
+| `set_cpu_online(curr_cpuid, true)` in `smp_callin()` | action: `CpuGroup.cpus[cpu].mark_online()` | 写入 CPU online 状态和 online mask；它早于 AP idle 入口，因此不等同于 `IdleTask.enable()` 或 `CPUHP_AP_ONLINE_IDLE` 完成。 |
 | `riscv_user_isa_enable()` in `smp_callin()` | action: `UserIsaExposure.enable(cpu)` | 当前主要按 Zicboz 支持设置 `ENVCFG_CBZE`，属于每 CPU 用户态 ISA 暴露路径。 |
-| `local_flush_icache_all()` / `local_flush_tlb_all()` in `smp_callin()` | action: `CpuGroup.Cpu[cpu].flush_entry_caches()` | CPU 从 offline 过渡到 online 时补做本地 icache/TLB 清理；不建独立对象。 |
+| `local_flush_icache_all()` / `local_flush_tlb_all()` in `smp_callin()` | action: `CpuGroup.cpus[cpu].flush_entry_caches()` | CPU 从 offline 过渡到 online 时补做本地 icache/TLB 清理；不建独立对象。 |
 | `complete(&cpu_running)` in `smp_callin()` | nested completion process: `CpuHotplugState.cpu_running.complete()` | AP 侧完成 arch entry 握手，释放 `__cpu_up()` 中的等待；该动作只推进 completion 扩展状态，不推进独立对象生命周期。 |
 | `complete_ap_thread(st, true)` in `cpuhp_online_idle()` | nested completion process: `CpuHotplugState.done_up.complete()` | AP 进入 `CPUHP_AP_ONLINE_IDLE` 后完成 generic hotplug online-idle 同步，供 `bringup_wait_for_ap_online()` 等待。 |
 | `local_irq_enable()` in `smp_callin()` | AP phase: `ApOnlineIdlePhase` | AP 侧打开 RISC-V `sstatus.SIE` 本地中断总开关；和 boot CPU 的 `InterruptStream.enable()` 同属 per-CPU 中断开放事实。 |
 | `cpu_startup_entry(CPUHP_AP_ONLINE_IDLE)` | AP phase: `ApOnlineIdlePhase` | secondary CPU 进入 AP idle 路径；内部调用 `cpuhp_online_idle()`，完成 `done_up`，此后对应 CPU 的 idle task 进入运行态。 |
 | `cpuhp_kick_ap(cpu, st, st->target)` after `bringup_wait_for_ap_online()` | conditional composite action: `CpuHotplugState.kick_ap_if_needed(target)` | 若 `target <= CPUHP_AP_ONLINE_IDLE`，退化为 no-op/checkpoint；若目标超过 online-idle，BP 设置 target/`should_run`，唤醒目标 CPU 的 `CpuHotplugThread`，并等待 AP-side callbacks 跑到目标状态。 |
-| `cpuhp_thread_fun()` on target CPU | AP-side repeated action: `CpuGroup.Cpu[cpu].CpuHotplugThread.run_to_target(target)` | AP hotplug thread 每次执行一个非空 AP state callback；典型后续 callback 包括 smpboot thread unpark、IRQ affinity online、Workqueue/Randomness/RCU per-CPU online 和 Scheduler active。perf/watchdog 等后续按配置可 deferred。 |
-| `CPUHP_AP_SMPBOOT_THREADS` / `smpboot_unpark_threads(cpu)` | nested formal: `CpuGroup.Cpu[cpu].SmpbootThread[*].enable()` | 对目标 CPU 上已 setup 且非 `selfparking` 的 smpboot thread 实例执行 unpark。当前只记录 enable 边界，不继续展开每个线程的运行逻辑。 |
+| `cpuhp_thread_fun()` on target CPU | AP-side repeated action: `CpuGroup.cpus[cpu].CpuHotplugThread.run_to_target(target)` | AP hotplug thread 每次执行一个非空 AP state callback；典型后续 callback 包括 smpboot thread unpark、IRQ affinity online、Workqueue/Randomness/RCU per-CPU online 和 Scheduler active。perf/watchdog 等后续按配置可 deferred。 |
+| `CPUHP_AP_SMPBOOT_THREADS` / `smpboot_unpark_threads(cpu)` | nested formal: `CpuGroup.cpus[cpu].SmpbootThread[*].enable()` | 对目标 CPU 上已 setup 且非 `selfparking` 的 smpboot thread 实例执行 unpark。当前只记录 enable 边界，不继续展开每个线程的运行逻辑。 |
 | `num_online_nodes()` / `num_online_cpus()` logging | checkpoint | 记录 bringup 后 online node/cpu 计数，不建立对象。 |
 | `smp_cpus_done(setup_max_cpus)` | trimmed/no-op | 当前 RISC-V 为空实现；保留架构收尾 hook 位置。 |
 
-上表中 `CpuGroup.enable(...)` 是父级 composite event。更准确的嵌套层级是：`CpuGroup.enable(...)` 驱动每个目标 CPU 的 `CpuGroup.Cpu[cpu].CpuHotplugState.advance(...)`；后者先通过 `CPUHP_CREATE_THREADS` 为目标 CPU 的 `SmpbootThread` 实例执行 `setup()`，再在 `CPUHP_BRINGUP_CPU` step 内驱动 `CpuHotplugState.bringup_cpu(cpu)`。`CpuHotplugState.bringup_cpu(cpu)` 在 `CpuStartProvider.start(cpu, idle)` 处分叉：BP side 继续等待 `CpuHotplugState.cpu_running.wait_timeout()` 和 online-idle `done_up`；AP side 由目标 CPU 自己执行 `ApEntryPreludePhase`、`ApSmpCallinPhase`、`InterruptStream.enable(cpu)`、`CpuHotplugState.done_up.complete()` 和 `ApOnlineIdlePhase`。随后若目标状态超过 `CPUHP_AP_ONLINE_IDLE`，BP 通过 `CpuHotplugState.kick_ap_if_needed(target)` 唤醒目标 CPU 的 `CpuHotplugThread.run_to_target(target)`，由 AP hotplug thread 继续执行后续 callbacks；其中 `CPUHP_AP_SMPBOOT_THREADS` 对应 `CpuGroup.Cpu[cpu].SmpbootThread[*].enable()`。这些 AP callbacks 当前只记录边界，不再深入展开实现细节。表格保留这些条目是为了展示 Linux 真实调用顺序，不表示它们与 `CpuGroup.enable()` 平级。
+上表中 `CpuGroup.enable(...)` 是父级 composite event。更准确的嵌套层级是：`CpuGroup.enable(...)` 驱动每个目标 CPU 的 `CpuGroup.cpus[cpu].CpuHotplugState.advance(...)`；后者先通过 `CPUHP_CREATE_THREADS` 为目标 CPU 的 `SmpbootThread` 实例执行 `setup()`，再在 `CPUHP_BRINGUP_CPU` step 内驱动 `CpuHotplugState.bringup_cpu(cpu)`。`CpuHotplugState.bringup_cpu(cpu)` 在 `CpuStartProvider.start(cpu, idle)` 处分叉：BP side 继续等待 `CpuHotplugState.cpu_running.wait_timeout()` 和 online-idle `done_up`；AP side 由目标 CPU 自己执行 `ApEntryPreludePhase`、`ApSmpCallinPhase`、`InterruptStream.enable(cpu)`、`CpuHotplugState.done_up.complete()` 和 `ApOnlineIdlePhase`。随后若目标状态超过 `CPUHP_AP_ONLINE_IDLE`，BP 通过 `CpuHotplugState.kick_ap_if_needed(target)` 唤醒目标 CPU 的 `CpuHotplugThread.run_to_target(target)`，由 AP hotplug thread 继续执行后续 callbacks；其中 `CPUHP_AP_SMPBOOT_THREADS` 对应 `CpuGroup.cpus[cpu].SmpbootThread[*].enable()`。这些 AP callbacks 当前只记录边界，不再深入展开实现细节。表格保留这些条目是为了展示 Linux 真实调用顺序，不表示它们与 `CpuGroup.enable()` 平级。
 
 <p align="center">
   <img src="pic/smp-bringup-sequence.svg" alt="SMP 启动期 BP 侧时序" width="900">
@@ -2733,27 +2733,27 @@ Boot idle 入口不构成其前置条件。
   图 30 SMP 启动期 AP 侧时序
 </p>
 
-图 30 展示每个目标 secondary CPU 自己执行的 AP 侧路径。它从 BP side 的 `CpuStartProvider.start(cpu, idle)` 释放目标 hart 之后开始，不从 `smp_callin()` 开始；RISC-V/SBI 路径先进入 `secondary_start_sbi` 和 `.Lsecondary_start_common`。图中第 1-4 步可视为入口前导期的 AP 简化版：沿用 BP 入口前导期的对象语言来表达中断封闭、`gp` 初始化、临时/正式事件入口、任务/栈绑定、内核地址空间切换和 SCS 加载，但 AP 复用 BP 已建立的内核页表，不重新执行清 BSS、建立 BootCPU 等 BP 专属动作。随后 AP 才进入 `CpuGroup.Cpu[cpu].smp_callin()`。AP 侧在 `smp_callin()` 内 complete `cpu_running` 释放 BP side，之后打开本地中断并进入 `cpu_startup_entry(CPUHP_AP_ONLINE_IDLE)`，在 `cpuhp_online_idle()` 中 complete online-idle `done_up`。若 BP 随后执行 `cpuhp_kick_ap()`，AP 上的 `CpuHotplugThread` 会被唤醒并继续运行 AP-side hotplug callbacks，直到达到 `CPUHP_ONLINE` 或进入失败/rollback 分支。
+图 30 展示每个目标 secondary CPU 自己执行的 AP 侧路径。它从 BP side 的 `CpuStartProvider.start(cpu, idle)` 释放目标 hart 之后开始，不从 `smp_callin()` 开始；RISC-V/SBI 路径先进入 `secondary_start_sbi` 和 `.Lsecondary_start_common`。图中第 1-4 步可视为入口前导期的 AP 简化版：沿用 BP 入口前导期的对象语言来表达中断封闭、`gp` 初始化、临时/正式事件入口、任务/栈绑定、内核地址空间切换和 SCS 加载，但 AP 复用 BP 已建立的内核页表，不重新执行清 BSS、建立 BootCPU 等 BP 专属动作。随后 AP 才进入 `CpuGroup.cpus[cpu].smp_callin()`。AP 侧在 `smp_callin()` 内 complete `cpu_running` 释放 BP side，之后打开本地中断并进入 `cpu_startup_entry(CPUHP_AP_ONLINE_IDLE)`，在 `cpuhp_online_idle()` 中 complete online-idle `done_up`。若 BP 随后执行 `cpuhp_kick_ap()`，AP 上的 `CpuHotplugThread` 会被唤醒并继续运行 AP-side hotplug callbacks，直到达到 `CPUHP_ONLINE` 或进入失败/rollback 分支。
 
 本子阶段的结束状态暂定至少包含：
 
 - `SmpBringupPhase.state == Ready`
 - `CpuGroup.state == Online`
-- `CpuGroup.Cpu[BootCPU.id].IdleTask == BootTask`，该引用已由前序 `sched_init()` / `idle_thread_set_boot_cpu()` 建立
-- `for cpu in CpuGroup.possible_secondary_cpus: CpuGroup.Cpu[cpu].IdleTask.state == Prepared`，表示 `idle_threads_init()` 已准备 inactive secondary idle task
-- `for cpu in CpuGroup.possible_cpus: CpuGroup.Cpu[cpu].CpuHotplugState.done_up/down initialized`，二者是 `Completion` 实例，归属 `CpuHotplugState`
+- `CpuGroup.cpus[BootCPU.id].IdleTask == BootTask`，该引用已由前序 `sched_init()` / `idle_thread_set_boot_cpu()` 建立
+- `for cpu in CpuGroup.possible_secondary_cpus: CpuGroup.cpus[cpu].IdleTask.state == Prepared`，表示 `idle_threads_init()` 已准备 inactive secondary idle task
+- `for cpu in CpuGroup.possible_cpus: CpuGroup.cpus[cpu].CpuHotplugState.done_up/down initialized`，二者是 `Completion` 实例，归属 `CpuHotplugState`
 - `CpuHotplugThread.template.registered == true`
 - `BootCPU.CpuHotplugThread.state == Online`
-- `for cpu in CpuGroup.online_secondary_cpus: CpuGroup.Cpu[cpu].SmpbootThread[*].state >= Ready`，表示 `CPUHP_CREATE_THREADS` 已创建并 park 目标 CPU 的 smpboot per-CPU thread 实例
-- `CPUHP_AP_SMPBOOT_THREADS` 对应的 `CpuGroup.Cpu[cpu].SmpbootThread[*].enable()` 只作为边界记录；当前不要求深入展开每个 smpboot thread 的运行逻辑
-- `for cpu in CpuGroup.online_secondary_cpus: CpuGroup.Cpu[cpu].CpuHotplugThread` 已能被 `CpuHotplugState.kick_ap_if_needed(target)` 唤醒并执行 AP-side callbacks
-- `for cpu in CpuGroup.possible_secondary_cpus: CpuGroup.Cpu[cpu].CpuHotplugThread` 不作为未上线 CPU 的本调用结束状态要求
+- `for cpu in CpuGroup.online_secondary_cpus: CpuGroup.cpus[cpu].SmpbootThread[*].state >= Ready`，表示 `CPUHP_CREATE_THREADS` 已创建并 park 目标 CPU 的 smpboot per-CPU thread 实例
+- `CPUHP_AP_SMPBOOT_THREADS` 对应的 `CpuGroup.cpus[cpu].SmpbootThread[*].enable()` 只作为边界记录；当前不要求深入展开每个 smpboot thread 的运行逻辑
+- `for cpu in CpuGroup.online_secondary_cpus: CpuGroup.cpus[cpu].CpuHotplugThread` 已能被 `CpuHotplugState.kick_ap_if_needed(target)` 唤醒并执行 AP-side callbacks
+- `for cpu in CpuGroup.possible_secondary_cpus: CpuGroup.cpus[cpu].CpuHotplugThread` 不作为未上线 CPU 的本调用结束状态要求
 - `CpuGroup.online_secondary_cpus.count == min(setup_max_cpus, present_cpu_count)`，允许平台或启动参数导致 fewer CPUs online 的情况按 Linux 错误处理路径记录
-- 每个 online secondary CPU 已执行 `CpuGroup.Cpu[cpu].smp_callin()`；其中 `IdleTask.active_mm == KernelAddressSpace.init_mm`，secondary CPU topology 已记录，`CpuHotplugState.notify_starting(cpu)` 已执行
-- 每个 online secondary CPU 已完成 `CpuGroup.Cpu[cpu].mark_online()`、`UserIsaExposure.enable(cpu)` 和 `CpuGroup.Cpu[cpu].flush_entry_caches()`
-- 每个 online secondary CPU 的 `CpuGroup.Cpu[cpu].CpuHotplugState.current_step` 已达到 `CPUHP_AP_ONLINE_IDLE`；当 `target == CPUHP_ONLINE` 时，还应已通过 `CpuHotplugThread.run_to_target(CPUHP_ONLINE)` 推进到 `CPUHP_ONLINE`
+- 每个 online secondary CPU 已执行 `CpuGroup.cpus[cpu].smp_callin()`；其中 `IdleTask.active_mm == KernelAddressSpace.init_mm`，secondary CPU topology 已记录，`CpuHotplugState.notify_starting(cpu)` 已执行
+- 每个 online secondary CPU 已完成 `CpuGroup.cpus[cpu].mark_online()`、`UserIsaExposure.enable(cpu)` 和 `CpuGroup.cpus[cpu].flush_entry_caches()`
+- 每个 online secondary CPU 的 `CpuGroup.cpus[cpu].CpuHotplugState.current_step` 已达到 `CPUHP_AP_ONLINE_IDLE`；当 `target == CPUHP_ONLINE` 时，还应已通过 `CpuHotplugThread.run_to_target(CPUHP_ONLINE)` 推进到 `CPUHP_ONLINE`
 - 每个 online secondary CPU 已执行 `SbiIpi.enable(cpu)`，并已打开本地中断
-- 每个 online secondary CPU 的 `CpuGroup.Cpu[cpu].IdleTask.state == Online`，并已进入 AP idle path
+- 每个 online secondary CPU 的 `CpuGroup.cpus[cpu].IdleTask.state == Online`，并已进入 AP idle path
 - `BootCPU` 保持 online，`KernelInitTask` 继续在 boot CPU 上进入 `RuntimeCorePhase`
 - RISC-V `cpu_running` 作为 `CpuHotplugState.cpu_running` completion 实例约束记录；不保留独立 `CpuRunningGate` 对象
 - `smp_cpus_done(setup_max_cpus)` 在当前 RISC-V 下记录为 trimmed/no-op
@@ -3803,8 +3803,10 @@ Riscv64Platform.Enable。平台 Enable emits OpenSBI.Enable；OpenSBI.Enable 选
 建立 Image 已装载待交接和该地址满足 PMD/2 MiB 对齐的事实，再为本次 handoff 建立 ordered
 boot/primary hart 事实并精确建立
 `BootCpuRegisters.a0 == BootArgs.boot_hartid` 和
-`BootCpuRegisters.a1 == BootArgs.dtb_pa`、`BootCpuRegisters.satp == 0` 后 emits Kernel.Enable；它不
-负责清零 `sie/sip`。实际字节放置可以由 QEMU/loader 完成；OpenSBI.Enable 交接域保证其结果，不虚构
+`BootCpuRegisters.a1 == BootArgs.dtb_pa`、`BootCpuRegisters.satp == 0`，随后同步驱动
+`CpuGroup.Preset` 原子发布 `CpuGroup.cpus[0]` 与 CpuGroup Prepared，再 emits Kernel.Enable；它不
+负责清零 `sie/sip`。CpuGroup 效果由真实内核入口 adoption，不要求修改外部固件。实际字节放置可以由
+QEMU/loader 完成；OpenSBI.Enable 交接域保证其结果，不虚构
 固件内部复制。Kernel 在 Ready 内 drives BootInitFlow，后者的 Preset 首先由
 InterruptStream 清零 `sie/sip` 并建立中断封闭事实，再推进首次 Scheduler 调度和 KernelInitFlow；
 `PayloadHandoffPreparePhase.Online` 后提交

@@ -63,34 +63,71 @@ fn prepare_entry(ctx: &mut Context) -> EventResult {
 }
 
 fn run_idle_loop(ctx: &mut Context) -> EventResult {
-    ctx.boot_idle_flow.run_idle_loop(
-        &mut ctx.scheduler,
-        &ctx.cpu_group,
-        &mut ctx.kernel_init_task,
-        &mut ctx.kernel_init_flow,
-        &ctx.user_app_flow,
-        &mut ctx.kthreadd_task,
-        &mut ctx.kthreadd_flow,
-        &mut ctx.user_task_set,
-        &ctx.boot_task,
-        &mut ctx.boot_cpu_local_interrupt,
-        &mut ctx.boot_cpu_current_task,
+    let Some(current_cpu) = ctx.current_cpu() else {
+        return failed_preset();
+    };
+    let Context {
+        boot_idle_flow,
+        scheduler,
+        cpu_group,
+        kernel_init_task,
+        kernel_init_flow,
+        user_app_flow,
+        kthreadd_task,
+        kthreadd_flow,
+        user_task_set,
+        boot_task,
+        ..
+    } = ctx;
+    let Some((local_interrupt, current_task_slot)) = cpu_group.boot_cpu_controls_mut() else {
+        return failed_preset();
+    };
+    boot_idle_flow.run_idle_loop(
+        scheduler,
+        current_cpu,
+        kernel_init_task,
+        kernel_init_flow,
+        user_app_flow,
+        kthreadd_task,
+        kthreadd_flow,
+        user_task_set,
+        boot_task,
+        local_interrupt,
+        current_task_slot,
     )
 }
 
 fn idle_continuation(ctx: &mut Context) -> ! {
     loop {
-        let result = ctx.scheduler.schedule_idle(
-            &ctx.cpu_group,
-            &mut ctx.kernel_init_task,
-            &mut ctx.kernel_init_flow,
-            &ctx.user_app_flow,
-            &mut ctx.kthreadd_task,
-            &mut ctx.kthreadd_flow,
-            &ctx.boot_idle_flow,
-            &mut ctx.user_task_set,
-            &mut ctx.boot_cpu_local_interrupt,
-            &mut ctx.boot_cpu_current_task,
+        let Some(current_cpu) = ctx.current_cpu() else {
+            crate::arch::riscv64::sbi::system_shutdown()
+        };
+        let Context {
+            scheduler,
+            cpu_group,
+            kernel_init_task,
+            kernel_init_flow,
+            user_app_flow,
+            kthreadd_task,
+            kthreadd_flow,
+            boot_idle_flow,
+            user_task_set,
+            ..
+        } = ctx;
+        let Some((local_interrupt, current_task_slot)) = cpu_group.boot_cpu_controls_mut() else {
+            crate::arch::riscv64::sbi::system_shutdown()
+        };
+        let result = scheduler.schedule_idle(
+            current_cpu,
+            kernel_init_task,
+            kernel_init_flow,
+            user_app_flow,
+            kthreadd_task,
+            kthreadd_flow,
+            boot_idle_flow,
+            user_task_set,
+            local_interrupt,
+            current_task_slot,
         );
         crate::phases::shutdown_on_error(result, "boot idle schedule loop failed\n");
     }
@@ -195,7 +232,7 @@ fn restore_ready(ctx: &Context) -> bool {
         && ctx.scheduler.identity_switch_passes() == 0
         && ctx.scheduler.kernel_init_stack_switch_started_count() == 1
         && ctx.scheduler.kernel_init_stack_switch_returned_count() == 1
-        && ctx.boot_cpu_current_task.current_is_boot_task()
+        && ctx.boot_cpu_current_task().current_is_boot_task()
         && ctx.boot_idle_flow.state() == State::Ready
         && ctx.boot_idle_flow.active()
         && ctx.boot_idle_flow.owner() == ctx.boot_task.task_ref()

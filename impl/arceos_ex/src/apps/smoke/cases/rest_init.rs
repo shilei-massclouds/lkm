@@ -45,7 +45,7 @@ pub fn run() -> SmokeResult {
         || ctx.boot_task.carrier_address()
             != core::ptr::addr_of!(crate::objects::boot_task::init_task_storage) as usize
         || !ctx.boot_task.idle_role_bound()
-        || ctx.boot_task.cpu_id() != boot_cpu.logical_id()
+        || ctx.boot_init_flow.cpu_ref() != Some(boot_cpu.cpu_ref())
         || !ctx.boot_task.switch_context().initialized()
         || ctx.boot_idle_flow.state() != State::Ready
         || !ctx.boot_idle_flow.active()
@@ -88,7 +88,7 @@ pub fn run() -> SmokeResult {
         || ctx.kernel_init_task.kind() != TaskKind::UserModeThread
         || !ctx.kernel_init_task.running()
         || !ctx.kernel_init_task.enqueued()
-        || ctx.kernel_init_task.cpu_id() != boot_cpu.logical_id()
+        || ctx.kernel_init_flow.cpu_id() != boot_cpu.logical_id()
         || !ctx.kernel_init_task.pid_lookup_under_rcu_read()
         || !ctx.kernel_init_task.pid_lookup_rcu_guard_balanced()
         || ctx.kernel_init_task.waiting_for_kthreadd_done()
@@ -131,7 +131,7 @@ pub fn run() -> SmokeResult {
         || !ctx.kthreadd_task.kernel_thread_flag()
         || !ctx.kthreadd_task.running()
         || !ctx.kthreadd_task.enqueued()
-        || ctx.kthreadd_task.cpu_id() != boot_cpu.logical_id()
+        || ctx.kthreadd_flow.cpu_id() != boot_cpu.logical_id()
         || ctx.scheduler.selected_runqueue_task_id() != ctx.kthreadd_task.pid()
         || !boot_scheduler_view.runqueue_contains_task_id(ctx.kthreadd_task.pid())
         || !ctx.kthreadd_task.global_ref_bound()
@@ -225,8 +225,8 @@ pub fn run() -> SmokeResult {
         || !ctx.scheduler.scheduler_membarrier_switch_barrier_deferred()
         || ctx.scheduler.identity_switch_passes() == 0
         || ctx.scheduler.boot_idle_preemption().state() != State::Ready
-        || ctx.boot_cpu_current_task.switch_committed_count() == 0
-        || !ctx.boot_cpu_current_task.current_is_kernel_init()
+        || ctx.boot_cpu_current_task().switch_committed_count() == 0
+        || !ctx.boot_cpu_current_task().current_is_kernel_init()
         || !boot_idle_setup_state.switch_ctx_initialized()
         || boot_idle_setup_state.core_saved_count() == 0
         || boot_idle_setup_state.core_restored_count() != 0
@@ -296,7 +296,7 @@ pub fn run() -> SmokeResult {
             .kernel_init_task
             .stack_pointer_in_range(ctx.kernel_init_task.entry_stack_pointer())
         || !ctx.kernel_init_task.current_stack_pointer_in_range()
-        || !ctx.boot_cpu_current_task.current_is_kernel_init()
+        || !ctx.boot_cpu_current_task().current_is_kernel_init()
         || ctx.workqueue.workers_running()
     {
         printk::write_str("boot idle runtime facts invalid\n");

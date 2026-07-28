@@ -141,7 +141,6 @@ pub fn run() -> SmokeResult {
     if ctx.cpu_group.state() != State::Ready
         || !ctx.cpu_group.secondary_cpus_online()
         || !ctx.cpu_group.smp_concurrency_open()
-        || !ctx.secondary_cpus.all_match_cpu_group_views(&ctx.cpu_group)
         || ctx.smp_bringup_boundary.state() != State::Ready
         || !ctx.smp_bringup_boundary.smp_cpus_done_trimmed()
         || !ctx.smp_bringup_boundary.ap_hotplug_callbacks_deferred()

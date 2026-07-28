@@ -65,7 +65,7 @@ RISC-V64 入口前导期实现必须按地址空间阶段区分可执行代码�
 
 Linux 6.12 的参考路径是：`kernel/sched/core.c::__schedule()` 调用 `switch_to(prev, next, prev)`，RISC-V 宏 `arch/riscv/include/asm/switch_to.h::switch_to` 最终调用 `arch/riscv/kernel/entry.S::__switch_to`；`__switch_to` 保存 `prev->thread`、恢复 `next->thread` 后执行 `move tp, a1`，其中 `a1` 是 next `task_struct`。`arch/riscv/include/asm/current.h` 将 `current` 绑定为 `tp` 上的 `struct task_struct *`。
 
-per-cpu 存储可以作为其它 CPU-local 数据的实现承载方式，但不得把“通过 per-cpu 访问”误写成 `CurrentTaskRef` 的模型定义。当前 BP 路径只有 `BootCurrentCPU` 的 `CurrentTaskRef`；未来 AP 路径进入后，应由 AP 自己的 CPU 视角建立私有 current-task 引用。
+per-cpu 存储可以作为其它 CPU-local 数据的实现承载方式，但不得把“通过 per-cpu 访问”误写成 `CurrentTaskRef` 的模型定义。BP 的 current-task slot 位于 `CpuGroup.cpus[0]`；AP 路径进入后由其 effective Flow 的 CpuRef 选择自己的 CPU-local slot。
 
 ## 地址空间与页表
 

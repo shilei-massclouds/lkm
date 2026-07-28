@@ -6,7 +6,7 @@ tools2 必须能够把已经确定的 Signal trace 发布为单文件、可离�
 Signal 顺序观察发送者、接收者、响应类型、真实状态变化和失败原因。该能力属于 tools2 的展示与
 发布责任，不是新的 model 语义、derive 输入或浏览器 runtime。
 
-动画采用独立 `animate` 阶段，且只消费 tools2 version 5 `model.json` 与 `view.json`。model 提供
+动画采用独立 `animate` 阶段，且只消费 tools2 version 6 `model.json` 与 `view.json`。model 提供
 System identity、有效 parent、状态集合和静态结构，view 提供 derive 已经确定的 event sequence、Signal、
 source/target、handler、outcome、reason 与 before/after snapshot。animate 不重新求值 guard、选择
 choice、创建 Signal、重跑 handler 或逆向执行 transition。
@@ -24,7 +24,7 @@ choice、创建 Signal、重跑 handler 或逆向执行 transition。
 - moment kind 只取 `request`、`feedback`、`settle` 或 `terminal`；最终 `completed`、`rejected`、
   `failed`、`truncated`、`stopped` 继续由独立 outcome 字段记录。request 携带 source→target transfer，
   feedback 携带 target→source transfer，settle/terminal 不携带 transfer。
-- 所有 moment 严格按 v5 view event `sequence` 排列。同步 `drives` 子 Signal 的 request/feedback 位于父
+- 所有 moment 严格按 v6 view event `sequence` 排列。同步 `drives` 子 Signal 的 request/feedback 位于父
   feedback 之前；异步 `emits` 仍保持 derive 的 post-commit 与全局 FIFO 顺序。条件、invariant、FIFO、
   wait 和 handler 事件保留为因果证据，但不生成视觉时刻。
 - 初始帧为空。request 按 source、target 首次接收顺序分配 `first_seen` 并补齐必要结构祖先；
@@ -44,7 +44,7 @@ outcome 必须保持原 outcome 和结构化 reason。没有自身 snapshot stat
 
 ## 发布协议与播放器
 
-animate 输出内嵌 `lkm.spec.signal-animation` version `3` 的自包含 HTML。animation v3 是由 v5 输入
+animate 输出内嵌 `lkm.spec.signal-animation` version `3` 的自包含 HTML。animation v3 是由 v6 输入
 确定生成的播放协议：`moments` 与 `frames` 一一对应；moment ID 固定为 `<signal-id>:request`、
 `<signal-id>:feedback`、`<signal-id>:settle` 或 `<signal-id>:terminal`，kind 与 ID 后缀一致。
 每个 moment 保留 event sequence、Signal/cause identity、source/target/name/delivery、handler、
@@ -98,8 +98,8 @@ header 在一行优先显示小号品牌、请求标题以及 Source/Verdict/Sig
 
 ## 兼容性决定
 
-tools2 v5 model/view 的结构化字段提供上述生成语义；animation 封装协议升级为 version 3，model/view
-仍保持 version 5。新生成器和新 bundle 只发布 v3，不提供生成 v1/v2 的兼容开关；已经生成的自包含
+tools2 v6 model/view 的结构化字段提供上述生成语义；animation 封装协议保持 version 3。新生成器和
+新 bundle 只发布 v3，不提供生成 v1/v2 的兼容开关；已经生成的自包含
 v1/v2 HTML 仍可使用其各自内嵌播放器独立打开。前端不得从显示名称推断 handler/state，也不得复用老 `tools/`
 静态 SVG renderer。
 独立 CLI 是 `lkm-animate MODEL VIEW -o HTML`；tools2 driver 与便利入口另提供 `--html-out PATH`，并

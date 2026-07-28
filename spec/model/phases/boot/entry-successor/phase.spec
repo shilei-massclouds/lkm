@@ -321,7 +321,7 @@ object PlatformCpuInfo: PrepareObject {
 
         transitions {
             /*
-             * Enable 将平台 CPU 事实发布为 BootCPU 后续推进可依赖的输入。
+             * Enable 将平台 CPU 事实发布为 CpuGroup.cpus[0] 后续推进可依赖的输入。
              */
             on Transition::Enable -> State::Online {
                 ensures {
@@ -1064,8 +1064,7 @@ object EntrySuccessorPhase: PhaseObject {
                     BootInitStack.Transition::Enable;
                     EarlyDtb.Transition::Preset;
                     InterruptStream.Transition::Setup;
-                    BootCPU.Transition::Setup;
-                    BootCPU.Transition::Enable;
+                    CurrentCPU.Transition::Enable;
                     PrintkBuffer.Transition::Preset;
                     EarlyDtb.Transition::Setup;
                     InitMM.Transition::Setup;
@@ -1124,7 +1123,7 @@ object EntrySuccessorPhase: PhaseObject {
                     early_boot_irqs_disabled_true();
                     BootInitFlow.state == State::Prepared;
                     BootInitStack.state == State::Online;
-                    BootCPU.state == State::Online;
+                    CpuGroup.cpus[0].state == State::Online;
                     InterruptStream.state == State::Ready;
                     PrintkBuffer.state == State::Prepared;
                     EarlyDtb.state == State::Destroyed;
@@ -1164,7 +1163,7 @@ object EntrySuccessorPhase: PhaseObject {
                     early_boot_irqs_disabled_true();
                     BootInitFlow.state == State::Prepared;
                     BootInitStack.state == State::Online;
-                    BootCPU.state == State::Online;
+                    CpuGroup.cpus[0].state == State::Online;
                     InterruptStream.state == State::Ready;
                     PrintkBuffer.state == State::Prepared;
                     EarlyDtb.state == State::Destroyed;

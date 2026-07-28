@@ -10,20 +10,21 @@ from typing import Any
 from tools2_common import fingerprint
 
 
+_PATH = r"[A-Za-z_][A-Za-z0-9_-]*(?:\[[^\[\]]+\])?(?:\.[A-Za-z_][A-Za-z0-9_-]*(?:\[[^\[\]]+\])?)*"
 _CALL_RE = re.compile(
-    r"^(?:(?P<receiver>[A-Za-z_][A-Za-z0-9_.-]*)\.)?"
+    rf"^(?:(?P<receiver>{_PATH})\.)?"
     r"(?P<kind>Transition|Action)::(?P<name>[A-Za-z_][A-Za-z0-9_-]*)"
     r"(?:\((?P<args>.*)\))?$",
     re.S,
 )
 _STATE_RE = re.compile(
-    r"^(?P<target>[A-Za-z_][A-Za-z0-9_.-]*)\.state\s*==\s*State::(?P<state>[A-Za-z_][A-Za-z0-9_-]*)$"
+    rf"^(?P<target>{_PATH})\.state\s*==\s*State::(?P<state>[A-Za-z_][A-Za-z0-9_-]*)$"
 )
 _ASSIGN_STATE_RE = re.compile(
-    r"^(?P<target>[A-Za-z_][A-Za-z0-9_.-]*)\.state\s*=\s*State::(?P<state>[A-Za-z_][A-Za-z0-9_-]*)$"
+    rf"^(?P<target>{_PATH})\.state\s*=\s*State::(?P<state>[A-Za-z_][A-Za-z0-9_-]*)$"
 )
 _FACT_RE = re.compile(r"^(?P<name>[A-Za-z_][A-Za-z0-9_:.-]*)\((?P<args>.*)\)$", re.S)
-_PATH_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]*$")
+_PATH_RE = re.compile(rf"^{_PATH}$")
 
 
 def _diagnostic(
@@ -44,9 +45,9 @@ def _split_top(text: str, separator: str = ",") -> list[str]:
             continue
         if char == '"':
             in_string = True
-        elif char in "(<{":
+        elif char in "(<{[":
             depth += 1
-        elif char in ")>}":
+        elif char in ")>}]":
             depth = max(0, depth - 1)
         elif char == separator and depth == 0:
             result.append(text[start:index].strip())
@@ -72,9 +73,9 @@ def _split_top_operator(text: str, operator: str) -> list[str]:
             continue
         if char == '"':
             in_string = True
-        elif char in "(<{":
+        elif char in "(<{[":
             depth += 1
-        elif char in ")>}":
+        elif char in ")>}]":
             depth = max(0, depth - 1)
         elif depth == 0 and text.startswith(operator, index):
             result.append(text[start:index].strip())
@@ -91,9 +92,9 @@ def _split_top_operator(text: str, operator: str) -> list[str]:
 def _named_separator(text: str) -> int | None:
     depth = 0
     for index, char in enumerate(text):
-        if char in "(<{":
+        if char in "(<{[":
             depth += 1
-        elif char in ")>}":
+        elif char in ")>}]":
             depth = max(0, depth - 1)
         elif char == ":" and depth == 0:
             before = text[index - 1] if index else ""
@@ -147,9 +148,9 @@ def _expression(entry: dict[str, Any], *, assignment: bool = False) -> dict[str,
         positions: list[int] = []
         depth = 0
         for index, char in enumerate(text):
-            if char in "(<{":
+            if char in "(<{[":
                 depth += 1
-            elif char in ")>}":
+            elif char in ")>}]":
                 depth = max(0, depth - 1)
             elif char == "=" and depth == 0:
                 if assignment and (index == 0 or text[index - 1] not in "=!<>") and (
@@ -209,6 +210,22 @@ def _call(entry: dict[str, Any]) -> dict[str, Any]:
             "kind": "invalid_call",
             "text": entry["text"],
             "span": entry["span"],
+        }
+    indexed_declaration = re.fullmatch(
+        rf"declare\s+({_PATH}\[[^\[\]]+\])\s+of\s+(.+)", text, re.S
+    )
+    if indexed_declaration:
+        target = indexed_declaration.group(1)
+        collection, key = target.rsplit("[", 1)
+        owner, field = collection.rsplit(".", 1)
+        return {
+            "kind": "declare_indexed",
+            "owner_receiver": owner,
+            "field": field,
+            "key": _value(key[:-1].strip()),
+            "declared_type": indexed_declaration.group(2).strip(),
+            "span": entry["span"],
+            "text": entry["text"],
         }
     declaration = re.fullmatch(r"declare\s+([a-z][A-Za-z0-9_]*)\s+of\s+(.+)", text, re.S)
     if declaration:
@@ -675,6 +692,12 @@ def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
         enum_spans[name] = declaration["span"]
 
     types = _index_types(document.get("types", []), diagnostics)
+    for type_name, declaration in types.items():
+        lifecycle = _nearest_lifecycle(types, type_name)
+        declaration["effective_lifecycle_type"] = (
+            lifecycle["name"] if lifecycle is not None else None
+        )
+        declaration["effective_processes"] = _type_processes(types, type_name)
     _check_type_process_inheritance(types, diagnostics)
     for declaration in types.values():
         override_value = declaration.get("properties", {}).get("lifecycle_override")
@@ -956,6 +979,8 @@ def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
         owner = systems[owner_name]
         owned_fields = _type_fields(types, owner.get("declared_type"), "owned")
         for field in owned_fields:
+            if field.get("indexed"):
+                continue
             field_name = field["name"]
             child_type = field.get("type")
             if not child_type:
@@ -1062,11 +1087,23 @@ def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
             }
             materialize_queue.append(child_name)
 
+    def indexed_parent_known(parent: str) -> bool:
+        match = re.fullmatch(
+            r"(?P<owner>[A-Za-z_][A-Za-z0-9_.-]*)\.(?P<field>[A-Za-z_][A-Za-z0-9_-]*)\[[^\[\]]+\]",
+            parent,
+        )
+        if match is None or match.group("owner") not in systems:
+            return False
+        return any(
+            field.get("name") == match.group("field") and field.get("indexed")
+            for field in systems[match.group("owner")].get("fields", {}).get("owned", [])
+        )
+
     for name, system in systems.items():
         parent = system.get("parent")
         if parent == name:
             _diagnostic(diagnostics, "error", f"self parent {name}", system["span"])
-        elif parent is not None and parent not in systems:
+        elif parent is not None and parent not in systems and not indexed_parent_known(parent):
             _diagnostic(diagnostics, "error", f"unknown parent {parent} for system {name}", system["span"])
     for cycle in _parent_cycles(systems):
         _diagnostic(

@@ -338,12 +338,12 @@ object TaskCreationCore: KernelObject {
                     task_ref_targets(current_task_ref, src_task);
                     current_task_ref_targets_cpu_task(
                         current_task_ref,
-                        BootCurrentCPU,
+                        CurrentCPU,
                         src_task
                     );
                     current_task_ref_from_cpu_view(
                         current_task_ref,
-                        BootCurrentCPU,
+                        CurrentCPU,
                         src_task
                     );
                     current_task_slot_current(BootCpuCurrentTask, src_task);
@@ -440,7 +440,7 @@ object TaskCreationCore: KernelObject {
 
                 drives {
                     let runqueue: RunQueueRef <- scheduler.Action::SelectRunQueue(dst_ref);
-                    dst_ref.Action::SetTaskCpu(BootCPURef);
+                    flow.Action::AssignCpuRef(BootCPURef);
                     BootRunQueue.Action::EnqueueTask(runqueue, dst_ref);
                 }
 

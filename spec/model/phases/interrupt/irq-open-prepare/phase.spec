@@ -194,14 +194,14 @@ object DelayLoop: KernelObject {
             on Transition::Setup -> State::Ready {
                 depends_on {
                     RiscvTimerProvider.state == State::Ready;
-                    BootCPU.state == State::Online;
+                    CpuGroup.cpus[0].state == State::Online;
                     CpuGroup.state == State::Ready;
                 }
 
                 ensures {
                     delay_loop_ready(DelayLoop, RiscvTimerProvider);
                     lpj_fine_consumed_from_timer_provider(DelayLoop, RiscvTimerProvider);
-                    boot_cpu_loops_per_jiffy_ready(DelayLoop, BootCPU);
+                    boot_cpu_loops_per_jiffy_ready(DelayLoop, CpuGroup.cpus[0]);
                     global_loops_per_jiffy_ready(DelayLoop);
                     delay_api_actions_available(DelayLoop);
                 }
@@ -212,7 +212,7 @@ object DelayLoop: KernelObject {
     state State::Ready {
         invariant {
             delay_loop_ready(DelayLoop, RiscvTimerProvider);
-            boot_cpu_loops_per_jiffy_ready(DelayLoop, BootCPU);
+            boot_cpu_loops_per_jiffy_ready(DelayLoop, CpuGroup.cpus[0]);
             global_loops_per_jiffy_ready(DelayLoop);
             delay_api_actions_available(DelayLoop);
         }

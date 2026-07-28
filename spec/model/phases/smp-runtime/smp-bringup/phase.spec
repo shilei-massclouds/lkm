@@ -340,7 +340,7 @@ object CpuHotplugSyncSet: KernelObject {
                 depends_on {
                     PreSmpInitPhase.state == State::Online;
                     CpuGroup.state == State::Ready;
-                    BootCPU.state == State::Online;
+                    CpuGroup.cpus[0].state == State::Online;
                     KthreaddTask.state == State::Online;
                     CpuHotplugLock.state == State::Ready;
                     SmpbootThreadsLock.state == State::Ready;
@@ -498,7 +498,7 @@ object CpuStartProvider: HardwareObject {
 /*
  * ApEntryPreludePhase 是每个 AP 从 SBI HSM 进入 secondary_start_sbi 后
  * 执行的 AP 专属入口先导期。它不同于 BP BootInitFlow.Preset：不建立
- * BootCurrentCPU，不清 BSS，不解析 boot args；它消费 HSM boot data，
+ * CurrentCPU，不清 BSS，不解析 boot args；它消费 HSM boot data，
  * 建立 AP 当前 idle task 指针、AP 栈/pt_regs 指针，切到已存在的
  * SwapperVm，并安装正式 trap vector。boot-data/tp 验证后，同一入口直接
  * 建立该 idle Task 的 OnCpu 与 initial idle Flow Startup，不发送 Scheduler
@@ -838,12 +838,12 @@ object SecondaryCpuStartupAck: HardwareObject {
 
                 within CpuRunningCompletionWaitLockContext {
                     ensures {
-                        raw_spinlock_irqsave_entered(CpuRunningWaitLock, BootCurrentCPU);
-                        raw_spinlock_irqrestore_exited(CpuRunningWaitLock, BootCurrentCPU);
-                        completion_wait_lock_irqsave_entered(CpuHotplugSyncSet, BootCurrentCPU);
+                        raw_spinlock_irqsave_entered(CpuRunningWaitLock, CurrentCPU);
+                        raw_spinlock_irqrestore_exited(CpuRunningWaitLock, CurrentCPU);
+                        completion_wait_lock_irqsave_entered(CpuHotplugSyncSet, CurrentCPU);
                         completion_wait_lock_irqrestore_exited(
                             CpuHotplugSyncSet,
-                            BootCurrentCPU
+                            CurrentCPU
                         );
                         completion_done_increment_guarded_by_wait_lock(CpuHotplugSyncSet);
                         completion_wake_guarded_by_wait_lock(CpuHotplugSyncSet);
@@ -898,12 +898,12 @@ object SecondaryCpuOnlineAck: HardwareObject {
 
                 within DoneUpCompletionWaitLockContext {
                     ensures {
-                        raw_spinlock_irqsave_entered(DoneUpWaitLock, BootCurrentCPU);
-                        raw_spinlock_irqrestore_exited(DoneUpWaitLock, BootCurrentCPU);
-                        completion_wait_lock_irqsave_entered(CpuHotplugSyncSet, BootCurrentCPU);
+                        raw_spinlock_irqsave_entered(DoneUpWaitLock, CurrentCPU);
+                        raw_spinlock_irqrestore_exited(DoneUpWaitLock, CurrentCPU);
+                        completion_wait_lock_irqsave_entered(CpuHotplugSyncSet, CurrentCPU);
                         completion_wait_lock_irqrestore_exited(
                             CpuHotplugSyncSet,
-                            BootCurrentCPU
+                            CurrentCPU
                         );
                         completion_done_increment_guarded_by_wait_lock(CpuHotplugSyncSet);
                         completion_wake_guarded_by_wait_lock(CpuHotplugSyncSet);

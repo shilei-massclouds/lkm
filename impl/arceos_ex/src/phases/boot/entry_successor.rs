@@ -55,7 +55,14 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
     record_start_kernel_deferred_facts();
     ctx.init_stack.enable()?;
 
-    let boot_hartid = ctx.boot_current_cpu.hartid();
+    let Some(boot_hartid) = ctx.cpu_group.boot_hartid() else {
+        return failed_condition(
+            LifecycleEvent::Preset,
+            State::Base,
+            State::Base,
+            State::Prepared,
+        );
+    };
     ctx.early_dtb.preset(
         &ctx.raw_dtb,
         &ctx.fix_map,
@@ -63,13 +70,24 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
         &mut ctx.platform_cpu_info,
         &mut ctx.physical_memory,
     )?;
-    ctx.interrupt_stream
-        .setup(&mut ctx.boot_cpu_local_interrupt)?;
-    ctx.boot_current_cpu
-        .setup_boot_cpu(ctx.platform_cpu_info.contains(boot_hartid))?;
-    ctx.cpu_group.register_boot_cpu(&ctx.boot_current_cpu)?;
-    ctx.boot_current_cpu.enable_boot_cpu()?;
-    ctx.cpu_group.register_boot_cpu(&ctx.boot_current_cpu)?;
+    let Some(local_interrupt) = ctx.cpu_group.boot_cpu_local_interrupt_mut() else {
+        return failed_condition(
+            LifecycleEvent::Preset,
+            State::Base,
+            State::Base,
+            State::Prepared,
+        );
+    };
+    ctx.interrupt_stream.setup(local_interrupt)?;
+    if !ctx.platform_cpu_info.contains(boot_hartid) {
+        return failed_condition(
+            LifecycleEvent::Enable,
+            State::Ready,
+            State::Ready,
+            State::Online,
+        );
+    }
+    ctx.cpu_group.enable_boot_cpu()?;
     printk::preset()?;
     printk::write_str("arceos_ex object kernel\n");
 
@@ -175,9 +193,11 @@ fn entry_successor_phase_ready(ctx: &Context) -> bool {
     crate::flows::boot_init_flow::is_prepared()
         && ctx.init_stack.state() == State::Online
         && ctx.cpu_group.boot_cpu_state() == State::Online
-        && ctx.boot_current_cpu.state() == State::Online
-        && ctx.boot_cpu_local_interrupt.state() == State::Ready
-        && ctx.boot_cpu_local_interrupt.disabled()
+        && ctx
+            .cpu_group
+            .boot_cpu_local_interrupt()
+            .map(|control| control.state() == State::Ready && control.disabled())
+            .unwrap_or(false)
         && ctx.interrupt_stream.state() == State::Ready
         && ctx.interrupt_stream.early_boot_irqs_disabled()
         && ctx.vm.state() == State::Online

@@ -22,6 +22,8 @@ Classification meanings:
 | [`block_device.spec`](../../model/objects/block_device.spec) | `dedicated` | [`block-device.md`](block-device.md) |
 | [`bus_type.spec`](../../model/objects/bus_type.spec) | `phase-owned` | [`InitcallPhase`](../phases/smp-runtime/initcall.md) |
 | [`console.spec`](../../model/objects/console.spec) | `phase-owned` | [`InitcallPhase`](../phases/smp-runtime/initcall.md) |
+| [`cpu.spec`](../../model/objects/cpu.spec) | `dedicated` | [`cpu.md`](cpu.md) |
+| [`cpu_group.spec`](../../model/objects/cpu_group.spec) | `dedicated` | [`cpu-group.md`](cpu-group.md) |
 | [`devfs.spec`](../../model/objects/devfs.spec) | `grouped` | [`vfs.md`](vfs.md) |
 | [`device.spec`](../../model/objects/device.spec) | `phase-owned` | [`InitcallPhase`](../phases/smp-runtime/initcall.md) |
 | [`binary_format_registry.spec`](../../model/objects/binary_format_registry.spec) | `dedicated` | [`binary-format-registry.md`](binary-format-registry.md) |

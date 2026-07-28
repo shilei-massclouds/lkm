@@ -148,7 +148,6 @@ type Task: ResourceObject {
 
     ext_state: TaskRuntimeState;
     execution_authority: TaskExecutionAuthority;
-    cpu_ref: CpuRef;
 
     associations {
         initial_flow: TaskFlow;
@@ -477,16 +476,6 @@ type Task: ResourceObject {
             ensures {
                 task_flag_no_setaffinity(self);
                 task_cpumask_is(self, cpu_ref);
-            }
-        }
-
-        Action::SetTaskCpu(cpu_ref: CpuRef) {
-            state_effect: StateEffect::None;
-            depends_on {
-                cpu_ref_ready(cpu_ref);
-            }
-            ensures {
-                task_cpu_ref_is(self, cpu_ref);
             }
         }
 

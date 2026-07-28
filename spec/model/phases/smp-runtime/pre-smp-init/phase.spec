@@ -53,12 +53,12 @@ object PreSmpCpuTopology: HardwareObject {
             on Transition::Setup -> State::Ready {
                 depends_on {
                     CpuGroup.state == State::Ready;
-                    BootCPU.state == State::Online;
+                    CpuGroup.cpus[0].state == State::Online;
                 }
 
                 ensures {
                     cpu_topology_prepared_for_smp(CpuGroup);
-                    boot_cpu_topology_recorded(CpuGroup, BootCPU);
+                    boot_cpu_topology_recorded(CpuGroup, CpuGroup.cpus[0]);
                     secondary_cpus_present(CpuGroup);
                     secondary_cpus_present_but_not_online(CpuGroup);
                     smp_concurrency_closed();
@@ -70,7 +70,7 @@ object PreSmpCpuTopology: HardwareObject {
     state State::Ready {
         invariant {
             cpu_topology_prepared_for_smp(CpuGroup);
-            boot_cpu_topology_recorded(CpuGroup, BootCPU);
+            boot_cpu_topology_recorded(CpuGroup, CpuGroup.cpus[0]);
             secondary_cpus_present_but_not_online(CpuGroup);
             smp_concurrency_closed();
         }
@@ -134,7 +134,7 @@ object PreSmpInitcallTable: KernelObject {
                     pre_smp_initcalls_early_level_ran(PreSmpInitcallTable);
                     rcu_gp_kthread_ready(RcuCore);
                     softirq_ksoftirqd_ready(Softirq);
-                    scheduler_migration_ready(Scheduler, BootCPU);
+                    scheduler_migration_ready(Scheduler, CpuGroup.cpus[0]);
                     cpu_stopper_prepared();
                     memory_zero_page_bound();
                     address_space_id_ready();
@@ -148,7 +148,7 @@ object PreSmpInitcallTable: KernelObject {
             pre_smp_initcalls_early_level_ran(PreSmpInitcallTable);
             rcu_gp_kthread_ready(RcuCore);
             softirq_ksoftirqd_ready(Softirq);
-            scheduler_migration_ready(Scheduler, BootCPU);
+            scheduler_migration_ready(Scheduler, CpuGroup.cpus[0]);
         }
     }
 }

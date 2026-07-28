@@ -9,7 +9,7 @@ use super::{
 
 /// Role metadata for the linker-visible PID 0 Task carrier.
 ///
-/// The lifecycle, PID, CPU and switch context live only in
+/// The lifecycle, PID and switch context live only in
 /// `init_task_storage`; this wrapper never mirrors them.
 pub struct BootTask {
     idle_role_bound: bool,
@@ -39,10 +39,6 @@ impl BootTask {
         Self::canonical_pid()
     }
 
-    pub fn cpu_id(&self) -> usize {
-        Self::canonical_cpu_id()
-    }
-
     pub fn idle_role_bound(&self) -> bool {
         self.idle_role_bound
     }
@@ -52,7 +48,7 @@ impl BootTask {
         if task.state() != State::OnCpu
             || task.task_ref() != TaskRef::BOOT
             || task.pid() != 0
-            || !task.set_task_cpu(cpu_id)
+            || cpu_id == usize::MAX
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -113,10 +109,6 @@ impl BootTask {
 
     pub(crate) fn canonical_pid() -> usize {
         unsafe { (*Self::task_ptr()).pid() }
-    }
-
-    pub(crate) fn canonical_cpu_id() -> usize {
-        unsafe { (*Self::task_ptr()).cpu_id() }
     }
 
     pub(crate) fn canonical_switch_context() -> &'static TaskSwitchContext {

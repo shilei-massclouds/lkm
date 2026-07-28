@@ -11,7 +11,23 @@ type TaskFlow: PhaseObject {
     /* Every TaskFlow parent is structurally constrained to Task. */
     parent: Task;
 
+    associations {
+        mutable cpu_ref: CpuRef;
+    }
+
     processes {
+        Action::AssignCpuRef(cpu_ref: CpuRef) {
+            state_effect: StateEffect::None;
+            updates {
+                self.cpu_ref = cpu_ref;
+            }
+            ensures {
+                task_flow_cpu_ref_is(self, cpu_ref);
+                cpu_ref_dereference_requires_published_element(cpu_ref);
+                task_flow_cpu_ref_write_at_entry_or_scheduler_commit(self);
+            }
+        }
+
         Action::Continue {
             state_effect: StateEffect::None;
             depends_on {
@@ -235,6 +251,11 @@ predicate task_flow_owner_exclusive<F: TaskFlow>(flow: F) -> bool;
 predicate task_flow_initial_binding_consistent<F: TaskFlow>(flow: F) -> bool;
 predicate task_flow_start_binding_consistent<F: TaskFlow>(flow: F) -> bool;
 predicate task_flow_started<F: TaskFlow>(flow: F) -> bool;
+predicate task_flow_cpu_ref_is<F: TaskFlow, R: CpuRef>(flow: F, cpu_ref: R) -> bool;
+predicate task_flow_cpu_ref_targets<F: TaskFlow, C: CPU>(flow: F, cpu: C) -> bool;
+predicate task_flow_cpu_ref_write_at_entry_or_scheduler_commit<F: TaskFlow>(flow: F) -> bool;
+predicate task_flow_cpu_ref_read_only_while_executing<F: TaskFlow>(flow: F) -> bool;
+predicate task_flow_handoff_inherits_cpu_ref<From: TaskFlow, To: TaskFlow>(from: From, to: To) -> bool;
 predicate task_flow_online_on_cpu<F: TaskFlow>(flow: F) -> bool;
 predicate task_flow_resume_active_continuation<F: TaskFlow>(flow: F) -> bool;
 predicate task_active_flow_is<T: Task, F: TaskFlow>(task: T, flow: F) -> bool;
@@ -793,9 +814,9 @@ type BootIdleFlowType: TaskFlow {
                 task_flow_resume_active_continuation(self);
                 boot_task_idle_flow_entered(BootTask, BootIdleFlow);
                 boot_idle_task_pf_idle(BootTask);
-                boot_idle_arch_cpu_idle_prepare_done(self, BootCPU);
-                boot_idle_cpuhp_online_state_confirmed(self, BootCPU);
-                boot_cpu_hotplug_state_online(BootCPU);
+                boot_idle_arch_cpu_idle_prepare_done(self, CpuGroup.cpus[0]);
+                boot_idle_cpuhp_online_state_confirmed(self, CpuGroup.cpus[0]);
+                boot_cpu_hotplug_state_online(CpuGroup.cpus[0]);
                 boot_idle_need_resched_clear_before_wait(BootTask);
             }
         }
@@ -830,7 +851,7 @@ type BootIdleFlowType: TaskFlow {
             }
             ensures {
                 boot_idle_runtime_cycle_started(self, BootTask);
-                boot_idle_nohz_run_idle_balance_done(self, BootCPU);
+                boot_idle_nohz_run_idle_balance_done(self, CpuGroup.cpus[0]);
                 boot_idle_loop_cycle_committed(self);
                 boot_idle_loop_continues(self);
             }
@@ -846,11 +867,11 @@ type BootIdleFlowType: TaskFlow {
             within BootIdleWaitLocalInterruptContext {
                 ensures {
                     boot_idle_local_irq_disabled_for_sleep(self, BootCpuLocalInterrupt);
-                    boot_idle_arch_cpu_idle_enter_done(self, BootCPU);
+                    boot_idle_arch_cpu_idle_enter_done(self, CpuGroup.cpus[0]);
                     boot_idle_rcu_nocb_deferred_wakeup_flushed(self);
-                    boot_idle_cpu_offline_dead_path_not_taken(self, BootCPU);
+                    boot_idle_cpu_offline_dead_path_not_taken(self, CpuGroup.cpus[0]);
                     boot_idle_poll_or_cpuidle_path_deferred(self);
-                    boot_idle_arch_cpu_idle_exit_done(self, BootCPU);
+                    boot_idle_arch_cpu_idle_exit_done(self, CpuGroup.cpus[0]);
                 }
             }
             ensures {
@@ -861,11 +882,11 @@ type BootIdleFlowType: TaskFlow {
                 boot_idle_polling_rmb_before_sleep_check(BootTask);
                 boot_idle_nohz_entered(self);
                 boot_idle_local_irq_disabled_for_sleep(self, BootCpuLocalInterrupt);
-                boot_idle_arch_cpu_idle_enter_done(self, BootCPU);
+                boot_idle_arch_cpu_idle_enter_done(self, CpuGroup.cpus[0]);
                 boot_idle_rcu_nocb_deferred_wakeup_flushed(self);
-                boot_idle_cpu_offline_dead_path_not_taken(self, BootCPU);
+                boot_idle_cpu_offline_dead_path_not_taken(self, CpuGroup.cpus[0]);
                 boot_idle_poll_or_cpuidle_path_deferred(self);
-                boot_idle_arch_cpu_idle_exit_done(self, BootCPU);
+                boot_idle_arch_cpu_idle_exit_done(self, CpuGroup.cpus[0]);
                 boot_idle_runtime_waiting(self, BootTask);
                 boot_idle_wait_path_deferred(self);
             }
@@ -942,7 +963,7 @@ object BootIdleFlow: BootIdleFlowType {
 
                 ensures {
                     boot_idle_runtime_ready(BootIdleFlow, BootTask);
-                    boot_idle_cpu_startup_entry_ready(BootIdleFlow, BootCPU);
+                    boot_idle_cpu_startup_entry_ready(BootIdleFlow, CpuGroup.cpus[0]);
                     task_owns_flow(BootTask, BootIdleFlow);
                     task_flow_owner_is(BootIdleFlow, BootTask);
                     task_flow_parent_is(BootIdleFlow, BootTask);
@@ -961,7 +982,7 @@ object BootIdleFlow: BootIdleFlowType {
     state State::Ready {
         invariant {
             boot_idle_runtime_ready(BootIdleFlow, BootTask);
-            boot_idle_cpu_startup_entry_ready(BootIdleFlow, BootCPU);
+            boot_idle_cpu_startup_entry_ready(BootIdleFlow, CpuGroup.cpus[0]);
             task_owns_flow(BootTask, BootIdleFlow);
             task_flow_owner_is(BootIdleFlow, BootTask);
             task_flow_parent_is(BootIdleFlow, BootTask);

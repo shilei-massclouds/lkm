@@ -88,7 +88,7 @@ Base代表尚未建立对象的初始状态，Online代表运行状态，其余�
 ## 唯一顶层系统模型
 
 完整模型只有一棵顶层系统树，以 `Computer` 为根，直接包含 `Riscv64Platform`、`OpenSBI` 和
-`Kernel`。Kernel 下的启动 CPU 局部层级是 `BootCurrentCPU -> BootCPU -> BootCpuRegisters`；寄存器
+`Kernel`。Kernel 下的启动 CPU 局部层级是 `CpuGroup.cpus[0] -> BootCpuRegisters`；`BootCPU` 只是该元素的角色别名，寄存器
 对象不属于平台。
 
 System 同时承担本实例的规格建立、构造和运行交接。`SystemObject` 四态统一表示当前实例的局部进度：

@@ -2,7 +2,7 @@ use core::arch::global_asm;
 use core::sync::atomic::Ordering;
 
 use super::{
-    cpu::{MAX_CPUS, SecondaryCpuStore},
+    cpu::MAX_CPUS,
     cpu_control::{LocalInterruptControl, RawSpinLock},
     cpu_group::CpuGroup,
     irq_time::SbiIpi,
@@ -110,6 +110,9 @@ impl ApIdleTaskRecord {
         let flow_ref = TaskFlowRef::ap_idle(logical_id);
         self.task = Task::new_ap_idle_reserved(task_ref, flow_ref, logical_id);
         self.flow = TaskFlow::new_static_bound(flow_ref, task_ref);
+        if !self.flow.bind_cpu_ref(super::cpu::CpuRef::new(logical_id)) {
+            return false;
+        }
         self.logical_id = logical_id;
         self.hartid = hartid;
         self.reserved_before_hsm = self.task.state() == State::OnCpu
@@ -128,7 +131,7 @@ impl ApIdleTaskRecord {
             && self.task.state() == State::OnCpu
             && self.task.online()
             && self.task.breakpoint_state() == TaskBreakpointState::Invalid
-            && self.task.cpu_id() == logical_id
+            && self.flow.cpu_id() == logical_id
             && self.task.running()
             && !self.task.runqueue_published()
             && self.flow.owner() == self.task.task_ref()
@@ -997,10 +1000,9 @@ impl SecondaryCpuStartupAck {
     pub fn setup(
         &mut self,
         start_provider: &CpuStartProvider,
-        cpu_group: &CpuGroup,
+        cpu_group: &mut CpuGroup,
         sync: &mut CpuHotplugSyncSet,
         cpu_running_wait_lock: &mut RawSpinLock,
-        local_interrupt: &mut LocalInterruptControl,
         scheduler: &mut Scheduler,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
@@ -1016,6 +1018,9 @@ impl SecondaryCpuStartupAck {
             return self.failed_setup();
         }
 
+        let Some(local_interrupt) = cpu_group.boot_cpu_local_interrupt_mut() else {
+            return self.failed_setup();
+        };
         sync.observe_cpu_running(cpu_running_wait_lock, local_interrupt, scheduler)?;
         self.acknowledged = true;
         self.ap_smp_callin_ack_matches_secondary_cpu = true;
@@ -1101,10 +1106,8 @@ impl SecondaryCpuOnlineAck {
         startup_ack: &SecondaryCpuStartupAck,
         sync: &mut CpuHotplugSyncSet,
         cpu_group: &mut CpuGroup,
-        secondary_cpus: &mut SecondaryCpuStore,
         sbi_ipi: &SbiIpi,
         done_up_wait_lock: &mut RawSpinLock,
-        local_interrupt: &mut LocalInterruptControl,
         scheduler: &mut Scheduler,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
@@ -1120,8 +1123,13 @@ impl SecondaryCpuOnlineAck {
             return self.failed_setup();
         }
 
-        sync.observe_done_up(done_up_wait_lock, local_interrupt, scheduler)?;
-        cpu_group.mark_secondary_cpus_online_after_ap_ack(secondary_cpus)?;
+        {
+            let Some(local_interrupt) = cpu_group.boot_cpu_local_interrupt_mut() else {
+                return self.failed_setup();
+            };
+            sync.observe_done_up(done_up_wait_lock, local_interrupt, scheduler)?;
+        }
+        cpu_group.mark_secondary_cpus_online_after_ap_ack()?;
         self.acknowledged = true;
         self.online_after_ap_ack = true;
         self.ap_idle_or_park_loop_entered = true;

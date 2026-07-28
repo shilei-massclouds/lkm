@@ -54,13 +54,32 @@ fn preset_dependencies_ready(ctx: &Context) -> bool {
 fn preset_objects(ctx: &mut Context) -> EventResult {
     ctx.memory_topology
         .setup(&ctx.zones, &ctx.cpu_group, &ctx.config)?;
-    ctx.page_allocator.preset(
-        &ctx.memory_topology,
-        &ctx.page_metadata_map,
-        &ctx.cpu_hotplug_state,
-        &ctx.per_cpu_storage,
-        &mut ctx.boot_cpu_local_interrupt,
-    )?;
+    {
+        let Context {
+            page_allocator,
+            memory_topology,
+            page_metadata_map,
+            cpu_hotplug_state,
+            per_cpu_storage,
+            cpu_group,
+            ..
+        } = ctx;
+        let Some(local_interrupt) = cpu_group.boot_cpu_local_interrupt_mut() else {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                State::Base,
+                State::Base,
+                State::Prepared,
+            );
+        };
+        page_allocator.preset(
+            memory_topology,
+            page_metadata_map,
+            cpu_hotplug_state,
+            per_cpu_storage,
+            local_interrupt,
+        )?;
+    }
     ctx.memory_debug_hardening
         .setup(&mut ctx.static_branch, &ctx.early_param, &ctx.config)?;
     ctx.stack_depot
