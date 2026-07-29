@@ -941,7 +941,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
    | `a1` | 内核入口参数寄存器，用于承载设备树物理地址。 | `dtb_pa` |
    | `sp` | 栈指针寄存器，用于指向当前执行流使用的栈位置。 |  |
    | `tp` | 线程指针寄存器，在入口前导期用于指向当前根任务对象。 |  |
-   | `gp` | 全局指针寄存器，用于支持 `.sdata` 与 `.sbss` 等小数据段的 `gp` 相对寻址。 |  |
+   | `gp` | 全局指针寄存器，用于支持对内核映像中全局数据的相对寻址。 |  |
    | `sstatus` | 监管者状态寄存器，用于控制内核态下的状态位，例如 `FPU` 与 `VECTOR` 相关状态。 |  |
    | `sie` | 监管者中断使能寄存器，用于控制各类中断是否允许进入。 |  |
    | `sip` | 监管者中断挂起寄存器，用于表示各类中断挂起状态。 |  |
@@ -951,9 +951,9 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 2. `LDS`
 
-   `LDS` 是链接脚本对象，对应内核映像链接布局，用于提供内核映像的段布局、关键符号和地址边界。例如 `__global_pointer$`、入口 `_start`、`BSS` 段边界、静态根栈范围等信息，都应从该对象提供的链接结果中取得或解释。`LDS` 由本规格按入口前导期推导需要给出约束，但不展开到具体链接脚本的全部实现细节。
+   `LDS` 是链接脚本对象，对应内核映像链接布局，用于提供内核映像的段布局、关键符号和地址边界。例如相对 `gp` 寻址基准、入口 `_start`、`BSS` 段边界、静态根栈范围等信息，都应从该对象提供的链接结果中取得或解释。`LDS` 由本规格按入口前导期推导需要给出约束，但不展开到具体链接脚本的全部实现细节。
 
-   入口布局有两条硬约束：`__global_pointer$` 必须作为 `gp` 初始化的直接符号来源；`_start` 必须等于内核 text 起点和 ELF entry，确保固件跳入的第一条内核指令就是入口代码，而不是链接布局中的后置符号。
+   入口布局必须为相对 `gp` 寻址机制提供稳定基准；具体符号和寄存器映射属于 Coding 约束。`_start` 必须等于内核 text 起点和 ELF entry，确保固件跳入的第一条内核指令就是入口代码，而不是链接布局中的后置符号。
 
    入口前导期还必须遵守分段访问纪律。链接布局应能识别一段集中放置在内核映像起始处的入口 head text 区域，用于承载 MMU 关闭阶段和 trampoline 临时映射阶段必须执行的代码。该要求类似 Linux RISC-V64 通过 `__HEAD` 将 `head.S` 放入 `.head.text`，再由链接脚本把 `HEAD_TEXT_SECTION` 放在 `_start` 之后；但本规格不强制使用相同宏名或段名，只要求形成等价的布局和访问约束。
 
@@ -961,11 +961,11 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
    1. MMU 关闭阶段：代码和早期函数必须使用 PC-relative 或等价 position-independent 方式访问内核符号，不得依赖尚未建立的虚拟地址访问普通 `.data/.bss/.init.data`。若该阶段调用高级语言函数，相关函数也必须满足无绝对寻址、无不受控 instrumentation 的约束。
    2. trampoline 临时映射阶段：代码必须位于 trampoline 映射覆盖范围内，并且不得访问普通 `.data/.bss/.init.data`；该阶段只允许依赖寄存器、CSR、立即数以及已确认映射的 head/trampoline 代码，目标是尽快切换到 EarlyVM。
-   3. EarlyVM 阶段：`EarlyVM.setup/enable` 已经映射整个 `KernelImage` 后，普通 `.data/.bss/.init.data` 才可以按早期虚拟地址访问；此时还应重新建立 `gp` 相对寻址的有效性。
+   3. EarlyVM 阶段：`EarlyVM.setup/enable` 已经映射整个 `KernelImage` 后，普通 `.data/.bss/.init.data` 才可以通过当前执行环境访问；相对 `gp` 寻址机制必须保持有效。
 
    | 属性 | 作用 | 初始值 |
    | --- | --- | --- |
-   | `__global_pointer$` | `gp` 寄存器初始化所依赖的链接符号。 |  |
+   | `gp_relative_addressing_anchor` | 相对 `gp` 寻址机制使用的链接布局基准。 |  |
    | `_start` / text 起点 / ELF entry | 内核入口与 text 起点，三者必须一致。 |  |
    | `head_text_range` | 入口前导期早期代码集中放置范围。 |  |
    | `pre_mmu_text_range` | MMU 关闭阶段允许执行且必须满足 PC-relative 访问纪律的代码范围。 |  |
@@ -1139,27 +1139,10 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
      * 执行动作：设置 `RISCV64.stvec` 指向事件的正式处理入口 `formal_event_entry`。在参考内核中，该入口对应 `handle_exception`。该动作建立起中断/异常处理的入口框架，并清零 `RISCV64.sscratch` 指示当前处于内核态。
      * 结束状态：验证 `RISCV64.stvec` 指向 `formal_event_entry`，并验证 `RISCV64.sscratch` 指向当前 CPU 的正式入口上下文。
 
-6. `内核映像`（`Kernel Image`）
+6. `内核映像`（`KernelImage`）
 
-   描述：代表内核映像本身，主要维护其各个 `segment` 的信息与状态。
-
-   * `preset` - 初始化全局指针
-
-     * 初始状态：待补充。
-     * 执行动作：用 `global_pointer$` 符号地址初始化 `gp` 寄存器，作为 `preset` 动作。
-     * 结束状态：验证 `gp` 寄存器值等于 `global_pointer$` 的符号地址，确保用于快速访问 `.sbss` 与 `.sdata` 的 `gp` 相对寻址方式有效。
-
-   * `setup` - 清零 BSS 段
-
-     * 初始状态：验证 `BSS` 段的开始地址与结束地址有效，基本要求是二者均不为 `0`，且结束地址大于开始地址。
-     * 执行动作：清零 `BSS` 段。
-     * 结束状态：验证 `BSS` 段已经清零。
-
-   * `enable` - 在虚拟内存空间重置 `gp-relative` 寻址方式
-
-     * 初始状态：`VM.setup()` 正在完成入口前导期页表切换，`global_pointer$` 的虚拟地址可用，`gp` 尚未按当前虚拟内存空间重新设置。
-     * 执行动作：在 `VM.setup()` 过程中，用 `global_pointer$` 的虚拟地址重新初始化 `gp` 寄存器，作为 `enable` 动作。
-     * 结束状态：验证 `gp` 寄存器值等于 `global_pointer$` 的虚拟地址，确保虚拟内存空间中的 `gp-relative` 快速寻址方式有效。
+   `KernelImage` 的权威规格见 [`objects/kernel-image.md`](objects/kernel-image.md)。入口前导期为其建立
+   相对 `gp` 寻址基准，支持对内核映像中全局数据的快速访问机制。BSS 处理仍是独立的 Setup 责任。
 
 7. `物理内存空间`（`Physical Memory Space`，`PM`）
 
@@ -1180,7 +1163,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
    * `setup` - 依次启用入口前导期页表子对象
 
      * 初始状态：`VM.preset()` 已完成，`TrampolineVM` 与 `EarlyVM` 均处于可启用状态，当前控制流仍处于物理地址阶段。
-     * 执行动作：依次调用 `TrampolineVM.ActivateOnCpu(CurrentCPU)` 与 `EarlyVM.ActivateOnCpu(CurrentCPU)`。两次均为 Handoff：第一步基于 `静态对象集合.trampoline_pg_dir` 完成从 PhysicalDirect 到虚拟地址的切换；第二步借助 `静态对象集合.early_pg_dir` 扩大映射范围。本过程内部执行 `内核映像.enable()`，在虚拟内存空间中重置 `gp-relative` 寻址方式。两个 controller 始终保持 Ready，不进入 Online/Destroyed。
+     * 执行动作：依次调用 `TrampolineVM.ActivateOnCpu(CurrentCPU)` 与 `EarlyVM.ActivateOnCpu(CurrentCPU)`。两次均为 Handoff：第一步基于 `静态对象集合.trampoline_pg_dir` 完成从 PhysicalDirect 到虚拟地址的切换；第二步借助 `静态对象集合.early_pg_dir` 扩大映射范围。本过程内部执行 `内核映像.enable()`，确认相对 `gp` 寻址机制保持可用。两个 controller 始终保持 Ready，不进入 Online/Destroyed。
      * 结束状态：验证 `RISCV64.satp` 指向 `静态对象集合.early_pg_dir` 对应的早期内核页表，验证当前控制流已经进入早期虚拟地址阶段，验证 `VM` 对后续 `TrapType.setup()`、`根任务.enable()` 与 `根栈.setup()` 可用。
 
    * `enable` - 建立完整虚拟内存空间
@@ -1262,7 +1245,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 从对象角度看，`BootInitFlow.Preset` 是父 Flow 的编排过程。`a0` 与 `a1` 的入口参数识别先保留在对象的初始状态检查中，不作为图 9 中的对象动作。它依次完成以下工作：
 
 1. 建立 `InterruptType` 的早期受控状态，屏蔽所有中断。
-2. 执行 `内核映像.preset()`，用 `global_pointer$` 符号初始化物理地址阶段的 `gp`。
+2. 执行 `内核映像.preset()`，建立相对 `gp` 寻址基准。
 3. 执行 `根流.preset()`，禁止在内核态执行 `FPU` 指令与 `VECTOR` 指令。
 4. 执行 `内核映像.setup()`，清零 `BSS` 段，使内核映像进入早期可运行状态。
 5. `OpenSBI.Enable` 同步驱动 `处理器管理.preset()`，原子创建 `CpuGroup.cpus[0]` 并驱动它进入 `Prepared`；只有该父子发布全部成功后才发送 `Kernel.Enable`。

@@ -8,8 +8,9 @@
 `KernelAddrSpace` 直接拥有 `KernelImage`、`FixMap`、`LinearMap` 和 `UserSpaceReserve`。实现必须保存并
 验证每个虚拟范围的 parent、端点、页对齐和两两不重叠：
 
-- `KernelImage` 只表示固件交接时已加载在内存中的内核映像，保存物理装载范围、链接虚拟范围和段信息。
-  含混的独立 `KernelImageMap` 投影不得保留；所有映像映射检查直接使用 `KernelImage.virt_range`。
+- `KernelImage` 只表示固件交接时已加载在内存中的内核映像，保存物理装载范围、链接虚拟范围和段信息；
+  其相对 `gp` 寻址 lowering 由 [`kernel-image.md`](kernel-image.md) 负责。含混的独立
+  `KernelImageMap` 投影不得保留；所有映像映射检查直接使用 `KernelImage.virt_range`。
 - `FixMap` 保存配置给出的固定槽位。本轮 FDT slot 容量仍为 2 MiB；它只临时映射 `RawDtb`，不拥有
   该物理 blob。
 - `LinearMap` 从 `PAGE_OFFSET` 开始，表示物理内存的线性映射虚拟区域；入口前导期 Ready 只表示布局

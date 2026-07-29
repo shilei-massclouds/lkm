@@ -20,7 +20,8 @@ Kernel
 ```
 
 `KernelAddrSpace.Ready` 表示四个区域的布局、范围和互不冲突约束成立。`KernelImage` 是固件装载后
-已经存在于内存中的内核映像，其虚拟范围是自身属性；不再建立独立映像映射准对象。
+已经存在于内存中的内核映像，其对象语义由 [`kernel-image.md`](kernel-image.md) 规定；本文件只规定
+它是 `KernelAddrSpace` 拥有的区域及其布局关系，不再建立独立映像映射准对象。
 `FixMap` 是固定虚拟槽位区域，当前由 FDT slot 为物理 `RawDtb` 提供临时映射。
 `LinearMap` 是从 `PAGE_OFFSET` 开始的物理内存线性映射区域。
 `UserSpaceReserve` 是体系结构 canonical 用户地址预留范围，内核区域和最终内核页表不得占用它。
@@ -55,10 +56,10 @@ EarlyVm。EarlyVm activation 完成时 trampoline 只对该 CPU 退役，但静�
 Ready，供以后 AP 复用。EarlyVm 同样保持 Ready；BP 切换到 SwapperVm 不销毁共享 controller。
 任何 controller、`KernelAddrSpace` 或 `Vm` 的 Ready/Online 聚合状态都不能推出某个 CPU 已激活它。
 
-## KernelImage 与构建产物命名
+## KernelImage ownership 与构建产物命名
 
-`KernelImage` 仅表示入口时已经加载在内存中的映像，不表示磁盘文件、ELF 文件或 build pipeline
-artifact。构建层事实分别称为 kernel ELF build fact 与 kernel boot artifact build fact。
+`KernelImage` 的访问机制和 lifecycle 由独立对象规格规定。本文件只保留命名边界：它不表示磁盘文件、
+ELF 文件或 build pipeline artifact。构建层事实分别称为 kernel ELF build fact 与 kernel boot artifact build fact。
 `KernelImageFile` 保留给未来可能建模的文件对象；本轮不创建该类型、实例或生命周期。
 
 ## RawDtb 边界
@@ -70,6 +71,7 @@ artifact。构建层事实分别称为 kernel ELF build fact 与 kernel boot art
 
 ## Mapping
 
-- Model: `spec/model/phases/boot-init/preset.spec`
-- Coding: `spec/coding/phases/boot-init/preset.md` 与 `spec/coding/riscv64.md`
+- Model: `spec/model/objects/kernel_image.spec` 与 `spec/model/phases/boot-init/preset.spec`
+- Coding: `spec/coding/objects/kernel-image.md`、`spec/coding/objects/kernel-address-space.md` 与
+  `spec/coding/phases/boot-init/preset.md`
 - Implementation: `impl/arceos_ex/src/objects/kernel_addr_space.rs`、`vm.rs` 及各 controller module

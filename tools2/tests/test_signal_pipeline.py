@@ -4252,7 +4252,7 @@ class SignalPipelineTests(unittest.TestCase):
                 "interrupt_class_gates_closed(CpuGroup.cpus[0].trap.interrupt)",
                 "interrupt_pending_cleared(CpuGroup.cpus[0].trap.interrupt)",
                 "interrupt_class_gates_closed_before_pending_cleared(CpuGroup.cpus[0].trap.interrupt)",
-                "assert:BootCpuRegisters.gp == phys_addr(Lds.global_pointer)",
+                "gp_relative_addressing_ready(KernelImage)",
                 "assert:BootCpuRegisters.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack)",
                 "assert:BootCpuRegisters.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode)",
                 "boot_task_entry_bound_for_active_controller(CpuGroup.cpus[0],BootTask)",
@@ -4330,14 +4330,14 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(snapshot.read_bytes(), BOOT_INIT_SETUP_SCENARIO.read_bytes())
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "d75847df85302ebc28711d31b0792763752246b5afaf81d944e22bcb3183bbc5",
+                "ee25e57879b6a5384b76f357bee6b6a9a8ad9e53fef9ed791bee219429b13d25",
             )
             self.assertEqual(
                 {
                     derivation["model_fingerprint"], model["model_fingerprint"],
                     view["model_fingerprint"], saved["model_fingerprint"],
                 },
-                {"sha256:57640370eebe203e1c9afb94871043f7c3219d9db2f022aa07ced9c63462f994"},
+                {"sha256:75deeb5c6923b5056a5ee8be53c1070e77dffbfb67ff961adacfed2d6c7f22e1"},
             )
             with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
                 compact_text = render_text(view)

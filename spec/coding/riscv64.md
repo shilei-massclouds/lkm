@@ -38,7 +38,8 @@ RISC-V64 入口前导期实现必须按地址空间阶段区分可执行代码�
    - checkpoint hook 若位于该阶段，必须是极小的 head/trampoline-safe 实现。
 3. EarlyVm 阶段：
    - `EarlyVm` 必须至少映射整个 `KernelImage`，包括入口后续需要访问的 `.text/.rodata/.data/.bss/.init.data` 等内核映像范围。
-   - 进入 EarlyVm 后应重新设置 `gp = __global_pointer$` 的当前虚拟地址，使 `gp-relative` 访问重新有效。
+   - 地址转换切换不得破坏 `gp_relative_addressing_ready(KernelImage)`；若原有寻址基准会失效，必须按
+     [`objects/kernel-image.md`](objects/kernel-image.md) 在下一次 `gp` 相对访问前重新建立。
    - 只有在该阶段之后，入口前导期代码才可以按普通早期虚拟地址访问内核静态数据。
 
 该约束参考 Linux RISC-V64 的 `__HEAD`/`HEAD_TEXT_SECTION`、`setup_vm()` 的 `medany` 要求，以及 trampoline 到 early page table 的两次 `satp` 切换流程；`arceos_ex` 不要求复制 Linux 宏名，但必须提供等价的链接布局和访问纪律。
@@ -47,9 +48,9 @@ RISC-V64 入口前导期实现必须按地址空间阶段区分可执行代码�
 
 - 生成或维护的 RISC-V64 `.lds` 文件不得依赖固定的内核物理加载地址，也不得定义 `KERNEL_PHYS_ADDR` 这类 Config 常量。内核链接虚拟地址来自 `Config.kernel_link_addr`；实际物理装载起点由入口前导期 `KernelImage.Preset` 根据运行时映像位置确认，并作为 `KernelImage.phys_start` 一类对象事实供后续地址转换使用。
 - `.lds` 仍可依赖 `Lds` 规格和其它 `Config` 值，例如页大小、PMD 大小、段对齐、head text 布局、boot stack size 和相关符号位置。
-- `__global_pointer$` 的存在和入口可达性属于强制约束；其在链接脚本中的精确位置当前作为实现建议处理。
-- 可参考 Linux RISC-V64 的链接布局，把 `__global_pointer$` 放在 `.sbss` 与 `.sdata` 之间。这有助于让 `gp` 相对寻址覆盖小 BSS 与小数据段，并进一步使 `.sbss`、`.sdata` 的相对顺序和距离约束在链接脚本中显式化。
-- 若具体内核沿用不同布局，只要能证明 `gp` 初始化后的可寻址范围覆盖所有依赖 `gp` 相对寻址的符号，即可视为满足当前强制规格；后续若模型需要表达小数据段布局，可再把该建议提升为更精细的约束。
+- `__global_pointer$` 的存在、初始化方式和实际引用覆盖证明属于
+  [`objects/kernel-image.md`](objects/kernel-image.md) 的强制约束；本文件不规定它必须位于两个特定
+  section 之间。
 
 ## CSR 与屏障
 

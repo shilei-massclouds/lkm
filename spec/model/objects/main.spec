@@ -121,6 +121,7 @@ enum TranslationActivationKind {
 
 include "cpu.spec";
 include "cpu_group.spec";
+include "kernel_image.spec";
 include "trap_type.spec";
 include "interrupt_type.spec";
 include "exception_type.spec";

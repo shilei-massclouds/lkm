@@ -41,6 +41,7 @@ Classification meanings:
 | [`interrupt_flow_type.spec`](../../model/objects/interrupt_flow_type.spec) | `dedicated` | [`interrupt-flow-type.md`](interrupt-flow-type.md) |
 | [`interrupt_type.spec`](../../model/objects/interrupt_type.spec) | `dedicated` | [`interrupt-type.md`](interrupt-type.md) |
 | [`ioremap.spec`](../../model/objects/ioremap.spec) | `phase-owned` | [`MmCoreInitPhase`](../phases/boot/mm-core-init.md) |
+| [`kernel_image.spec`](../../model/objects/kernel_image.spec) | `dedicated` | [`kernel-image.md`](kernel-image.md) |
 | [`main.spec`](../../model/objects/main.spec) | `grouped` | [`mapping.md`](../mapping.md) |
 | [`ns16550a_driver.spec`](../../model/objects/ns16550a_driver.spec) | `phase-owned` | [`InitcallPhase`](../phases/smp-runtime/initcall.md) |
 | [`object_kinds.spec`](../../model/objects/object_kinds.spec) | `general-only` | [`mapping.md`](../mapping.md) |
@@ -70,8 +71,8 @@ Classification meanings:
 - [`device-tree.md`](device-tree.md): DeviceTree unflatten/storage rules used by CorePreparePhase.
 - [`completion.md`](completion.md): `main.spec` 中 reusable Completion primitive 的附加专用规则。
 - [`effective-context.md`](effective-context.md): `main.spec` 中 context/guard primitive 的附加专用规则。
-- [`kernel-address-space.md`](kernel-address-space.md): `main.spec`/BootInit preset 中
-  `KernelAddrSpace`、区域对象、`Vm` controller 与 per-CPU activation 的共享映射规则。
+- [`kernel-address-space.md`](kernel-address-space.md): BootInit preset 中 `KernelAddrSpace`、其它区域对象、
+  `Vm` controller 与 per-CPU activation 的共享映射规则；`KernelImage` 的访问机制由独立文件负责。
 
 Coding `.spec` files are forbidden by the repository `coding-spec-check` gate. When a model object file is
 added, removed or changes ownership, update this table in the same specification change.

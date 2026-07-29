@@ -114,8 +114,8 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
 - 提交的 `tools2/scenarios/BootInitFlow.Setup.snapshot.json` 必须与从模型初态执行
   `tools2/bin/pyveri -u BootInitFlow.Setup --snapshot-out /tmp/boot-init-flow-setup-presend.snapshot.json`
   得到的 canonical bytes 逐字节一致，并从仓库根与其它 cwd 重建出相同结果。当前正式模型下其
-  SHA-256 固定为 `d75847df85302ebc28711d31b0792763752246b5afaf81d944e22bcb3183bbc5`，model
-  fingerprint 固定为 `sha256:57640370eebe203e1c9afb94871043f7c3219d9db2f022aa07ced9c63462f994`。
+  SHA-256 固定为 `ee25e57879b6a5384b76f357bee6b6a9a8ad9e53fef9ed791bee219429b13d25`，model
+  fingerprint 固定为 `sha256:75deeb5c6923b5056a5ee8be53c1070e77dffbfb67ff961adacfed2d6c7f22e1`。
   `tools2/bin/pyveri -t BootInitFlow.Setup` 必须自动采用该第 3 组入口 scenario；显式 `-s` 仍优先，
   其它模型必须因 stale fingerprint 拒绝，缺失 canonical scenario 必须在 derive 前返回 2。
 - `-u BootInitFlow.Setup` 的真实上游推导必须精确包含 52 个 Signal，并逐项固定

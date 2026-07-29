@@ -28,7 +28,7 @@ Preset 横跨三个物理实现段，但仍是 BootInitFlow 的一个 model tran
 | 段 | model drives 与实现 |
 | --- | --- |
 | Kernel entry acceptance | `AcceptEnable` → `AssignCpuRef` → `PhysicalDirect.ActivateOnCpu(InitialActivation)` → 接受 Preset 并记录 `BootInitFlow.Started`；任何 Preset child 尚未启动 |
-| `_start` Preset head | `InterruptType.Preset` 先以 `csrw sie, zero` 实现全部分路门控关闭，再以 `csrw sip, zero` 实现全部待决信号清空；不得由此推断 `sstatus.SIE` 总门控已关闭；随后由入口动作禁用 FPU/vector、清 BSS并 adopt boot hart/stack |
+| `_start` Preset head | `InterruptType.Preset` 先以 `csrw sie, zero` 实现全部分路门控关闭，再以 `csrw sip, zero` 实现全部待决信号清空；不得由此推断 `sstatus.SIE` 总门控已关闭；随后把 `__global_pointer$` 装入 `gp/x3`，并用 `.option norelax` 保护该初始化，以建立 `gp_relative_addressing_ready(KernelImage)`；再由入口动作禁用 FPU/vector、清 BSS 并 adopt boot hart/stack |
 | `preset_until_vm_switch()` | 读取 Kernel Enable 前已发布的 `CpuGroup.cpus[0]`；验证 BootInitFlow 的 CpuRef 与已激活的 PhysicalDirect association，调用 `BindBootTaskEntry(TaskRef::BOOT)` 建立物理 `tp`/首次 preempt 事实；通过 BootInitFlow 的 CpuRef 解析 `CurrentCPU.Setup`，驱动 `KernelAddrSpace.Preset`、`TrapType.Preset`、`ExceptionType.Preset` 和 `Vm.Preset` |
 | `after_vm_setup()` | `Vm.Setup` 的 Trampoline→Early continuation 返回后调用同一 `BindBootTaskEntry` 建立虚拟 `tp` 且保持 preempt count，再驱动 `TrapType.Setup`、`BootInitStack.Setup` 和 `Soc.Preset` |
 
