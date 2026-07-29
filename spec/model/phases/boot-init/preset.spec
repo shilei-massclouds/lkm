@@ -377,7 +377,7 @@ object KernelAddrSpace: AddressSpaceObject {
         transitions {
             on Transition::Preset -> State::Prepared {
                 depends_on {
-                    KernelImage.state == State::Base;
+                    KernelImage.state == State::Ready;
                     LinearMap.state == State::Base;
                     UserSpaceReserve.state == State::Base;
                 }
@@ -385,8 +385,6 @@ object KernelAddrSpace: AddressSpaceObject {
                 drives {
                     LinearMap.Transition::Preset;
                     UserSpaceReserve.Transition::Preset;
-                    KernelImage.Transition::Preset;
-                    KernelImage.Transition::Setup;
                 }
 
                 ensures {

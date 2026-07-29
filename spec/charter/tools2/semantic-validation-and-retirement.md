@@ -158,49 +158,50 @@ cause chain 和最后稳定 snapshot。
 
 第 2 组继续使用第 1 组已经核准的 `Kernel.Enable` 发送前 snapshot，但验收必须重新从模型初态和
 唯一 `external Human` 编排到达 `BootInitFlow.Setup` 发送前，不能把提交的 scenario 当作真实 sender
-证据。完整路径恰有 52 个 Signal；`sig-0016 OpenSBI -> Kernel.Enable` 保持已接受但 ancestor 尚未
+证据。完整路径恰有 53 个 Signal；`sig-0016 OpenSBI -> Kernel.Enable` 保持已接受但 ancestor 尚未
 提交的 `stopped: until_signal_reached`，其后的同步 drives 全部完成。本组确定的
-`sig-0016` 至 `sig-0052` 如下：
+`sig-0016` 至 `sig-0053` 如下：
 
 | ID | source -> target.Signal | delivery / cause | handler 与提交边界 |
 | --- | --- | --- | --- |
-| `sig-0016` | `OpenSBI -> Kernel.Enable` | emits / 0013 | `Kernel.Transition::Enable@Ready`；等待 0017–0052，边界截断时 Kernel 保持 Ready、outcome 为 stopped |
+| `sig-0016` | `OpenSBI -> Kernel.Enable` | emits / 0013 | `Kernel.Transition::Enable@Ready`；等待 0017–0053，边界截断时 Kernel 保持 Ready、outcome 为 stopped |
 | `sig-0017` | `Kernel -> Kernel.AcceptEnable` | drives / 0016 | `Kernel.Action::AcceptEnable@Ready`；保持 Ready 并提交 Enable acceptance |
 | `sig-0018` | `Kernel -> BootInitFlow.AssignCpuRef` | drives / 0016 | `BootInitFlow.Action::AssignCpuRef@process`；唯一写入 `BootCPURef -> CpuGroup.cpus[0]` |
 | `sig-0019` | `Kernel -> PhysicalDirect.ActivateOnCpu` | drives / 0016 | Action；验证入口 `satp=0` 与 absent association，以 InitialActivation 把 CPU0 原子关联到 PhysicalDirect |
-| `sig-0020` | `Kernel -> BootInitFlow.Preset` | drives / 0016 | `BootInitFlow.Transition::Preset@Base`；在一个 `SingleTaskContext` 内等待 0021–0052 后提交 Prepared |
+| `sig-0020` | `Kernel -> BootInitFlow.Preset` | drives / 0016 | `BootInitFlow.Transition::Preset@Base`；在一个 `SingleTaskContext` 内等待 0021–0053 后提交 Prepared |
 | `sig-0021` | `BootInitFlow -> InterruptType.Preset` | drives / 0020 | Base -> Prepared；先关闭 CPU0 的全部中断分路门控，再清空这些门控上的全部待决中断信号；不改变总门控或建立 fallback |
-| `sig-0022` | `BootInitFlow -> KernelAddrSpace.Preset` | drives / 0020 | 等待 0023–0026 后 Base -> Prepared，建立地址区域布局 |
-| `sig-0023` | `KernelAddrSpace -> LinearMap.Preset` | drives / 0022 | Base -> Ready，固定从 `PAGE_OFFSET` 开始的物理线性映射区域 |
-| `sig-0024` | `KernelAddrSpace -> UserSpaceReserve.Preset` | drives / 0022 | Base -> Ready，保留 canonical 用户地址范围 |
-| `sig-0025` | `KernelAddrSpace -> KernelImage.Preset` | drives / 0022 | Base -> Prepared，采纳内存中 Image、segment 与物理 `gp` 事实 |
-| `sig-0026` | `KernelAddrSpace -> KernelImage.Setup` | drives / 0022 | Prepared -> Ready，提交 BSS 清零与映像虚拟范围事实 |
-| `sig-0027` | `BootInitFlow -> CpuGroup.cpus[0].Setup` | drives / 0020 | CurrentCPU 解析到 CPU0；Prepared -> Ready |
-| `sig-0028` | `BootInitFlow -> BootCpuLocalInterrupt.Setup` | drives / 0020 | Prepared -> Ready，建立 CPU0 本地中断关闭事实 |
-| `sig-0029` | `BootInitFlow -> BootInitFlow.BindBootTaskEntry` | drives / 0020 | Action；PhysicalDirect 下绑定物理 `tp` 并仅首次初始化 preempt count |
-| `sig-0030` | `BootInitFlow -> BootInitStack.Preset` | drives / 0020 | Base -> Prepared，提交物理入口 `sp` |
-| `sig-0031` | `BootInitFlow -> TrapType.Preset` | drives / 0020 | Base -> Prepared，安装物理 early event entry |
-| `sig-0032` | `BootInitFlow -> ExceptionType.Preset` | drives / 0020 | 等待 0033–0036 后 Base -> Prepared |
-| `sig-0033` | `ExceptionType -> PageFaultException.Preset` | drives / 0032 | Base -> Prepared |
-| `sig-0034` | `ExceptionType -> SyscallException.Preset` | drives / 0032 | Base -> Prepared |
-| `sig-0035` | `ExceptionType -> BreakpointException.Preset` | drives / 0032 | Base -> Prepared |
-| `sig-0036` | `ExceptionType -> UnexpectedException.Preset` | drives / 0032 | Base -> Prepared |
-| `sig-0037` | `BootInitFlow -> Vm.Preset` | drives / 0020 | 等待 0038–0044 后 Base -> Prepared |
-| `sig-0038` | `Vm -> TrampolineVm.Setup` | drives / 0037 | Base -> Ready，建立共享 trampoline controller |
-| `sig-0039` | `Vm -> EarlyVm.Preset` | drives / 0037 | 等待 0040–0042 后 Base -> Prepared |
-| `sig-0040` | `EarlyVm -> RawDtb.Preset` | drives / 0039 | Base -> Prepared，验证入口/header/magic |
-| `sig-0041` | `EarlyVm -> RawDtb.Setup` | drives / 0039 | Prepared -> Ready，检查 size/overflow/slot capacity，不解析节点 |
-| `sig-0042` | `EarlyVm -> FixMap.Preset` | drives / 0039 | Base -> Ready，将 RawDtb 安排到 FDT slot |
-| `sig-0043` | `Vm -> KernelAddrSpace.Setup` | drives / 0037 | Prepared -> Ready，提交四区域 disjoint/canonical reserve |
-| `sig-0044` | `Vm -> EarlyVm.Setup` | drives / 0037 | Prepared -> Ready，建立 Image 与 fixmap 的 early page table |
-| `sig-0045` | `BootInitFlow -> Vm.Setup` | drives / 0020 | 等待 0046–0048 后 Prepared -> Ready |
-| `sig-0046` | `Vm -> TrampolineVm.ActivateOnCpu` | drives / 0045 | Action；CPU0 PhysicalDirect -> TrampolineVm Handoff |
-| `sig-0047` | `Vm -> EarlyVm.ActivateOnCpu` | drives / 0045 | Action；CPU0 TrampolineVm -> EarlyVm Handoff，trampoline 仅对该 CPU 退役 |
-| `sig-0048` | `Vm -> KernelImage.Enable` | drives / 0045 | Ready -> Online，提交虚拟 `gp` |
-| `sig-0049` | `BootInitFlow -> TrapType.Setup` | drives / 0020 | Prepared -> Ready，安装正式 event entry |
-| `sig-0050` | `BootInitFlow -> BootInitFlow.BindBootTaskEntry` | drives / 0020 | Action；EarlyVm 下绑定虚拟 `tp`，保持 preempt count |
-| `sig-0051` | `BootInitFlow -> BootInitStack.Setup` | drives / 0020 | Prepared -> Ready，将 init stack `sp` 切到虚拟地址 |
-| `sig-0052` | `BootInitFlow -> Soc.Preset` | drives / 0020 | Base -> Prepared；Soc 与 CpuGroup 是 Kernel 平级子对象 |
+| `sig-0022` | `BootInitFlow -> KernelImage.Preset` | drives / 0020 | Base -> Prepared，建立相对 `gp` 寻址基准 |
+| `sig-0023` | `BootInitFlow -> CpuGroup.cpus[0].DisableFpuVectorExecution` | drives / 0020 | Action；CurrentCPU 解析到 CPU0，关闭浮点与向量执行状态并建立受控使用策略 |
+| `sig-0024` | `BootInitFlow -> KernelImage.Setup` | drives / 0020 | Prepared -> Ready，提交 BSS 清零与映像虚拟范围事实 |
+| `sig-0025` | `BootInitFlow -> KernelAddrSpace.Preset` | drives / 0020 | 等待 0026–0027 后 Base -> Prepared，建立地址区域布局 |
+| `sig-0026` | `KernelAddrSpace -> LinearMap.Preset` | drives / 0025 | Base -> Ready，固定从 `PAGE_OFFSET` 开始的物理线性映射区域 |
+| `sig-0027` | `KernelAddrSpace -> UserSpaceReserve.Preset` | drives / 0025 | Base -> Ready，保留 canonical 用户地址范围 |
+| `sig-0028` | `BootInitFlow -> CpuGroup.cpus[0].Setup` | drives / 0020 | CurrentCPU 解析到 CPU0；Prepared -> Ready |
+| `sig-0029` | `BootInitFlow -> BootCpuLocalInterrupt.Setup` | drives / 0020 | Prepared -> Ready，建立 CPU0 本地中断关闭事实 |
+| `sig-0030` | `BootInitFlow -> BootInitFlow.BindBootTaskEntry` | drives / 0020 | Action；PhysicalDirect 下绑定物理 `tp` 并仅首次初始化 preempt count |
+| `sig-0031` | `BootInitFlow -> BootInitStack.Preset` | drives / 0020 | Base -> Prepared，提交物理入口 `sp` |
+| `sig-0032` | `BootInitFlow -> TrapType.Preset` | drives / 0020 | Base -> Prepared，安装物理 early event entry |
+| `sig-0033` | `BootInitFlow -> ExceptionType.Preset` | drives / 0020 | 等待 0034–0037 后 Base -> Prepared |
+| `sig-0034` | `ExceptionType -> PageFaultException.Preset` | drives / 0033 | Base -> Prepared |
+| `sig-0035` | `ExceptionType -> SyscallException.Preset` | drives / 0033 | Base -> Prepared |
+| `sig-0036` | `ExceptionType -> BreakpointException.Preset` | drives / 0033 | Base -> Prepared |
+| `sig-0037` | `ExceptionType -> UnexpectedException.Preset` | drives / 0033 | Base -> Prepared |
+| `sig-0038` | `BootInitFlow -> Vm.Preset` | drives / 0020 | 等待 0039–0045 后 Base -> Prepared |
+| `sig-0039` | `Vm -> TrampolineVm.Setup` | drives / 0038 | Base -> Ready，建立共享 trampoline controller |
+| `sig-0040` | `Vm -> EarlyVm.Preset` | drives / 0038 | 等待 0041–0043 后 Base -> Prepared |
+| `sig-0041` | `EarlyVm -> RawDtb.Preset` | drives / 0040 | Base -> Prepared，验证入口/header/magic |
+| `sig-0042` | `EarlyVm -> RawDtb.Setup` | drives / 0040 | Prepared -> Ready，检查 size/overflow/slot capacity，不解析节点 |
+| `sig-0043` | `EarlyVm -> FixMap.Preset` | drives / 0040 | Base -> Ready，将 RawDtb 安排到 FDT slot |
+| `sig-0044` | `Vm -> KernelAddrSpace.Setup` | drives / 0038 | Prepared -> Ready，提交四区域 disjoint/canonical reserve |
+| `sig-0045` | `Vm -> EarlyVm.Setup` | drives / 0038 | Prepared -> Ready，建立 Image 与 fixmap 的 early page table |
+| `sig-0046` | `BootInitFlow -> Vm.Setup` | drives / 0020 | 等待 0047–0049 后 Prepared -> Ready |
+| `sig-0047` | `Vm -> TrampolineVm.ActivateOnCpu` | drives / 0046 | Action；CPU0 PhysicalDirect -> TrampolineVm Handoff |
+| `sig-0048` | `Vm -> EarlyVm.ActivateOnCpu` | drives / 0046 | Action；CPU0 TrampolineVm -> EarlyVm Handoff，trampoline 仅对该 CPU 退役 |
+| `sig-0049` | `Vm -> KernelImage.Enable` | drives / 0046 | Ready -> Online，确认当前执行环境中的相对 `gp` 寻址机制可用 |
+| `sig-0050` | `BootInitFlow -> TrapType.Setup` | drives / 0020 | Prepared -> Ready，安装正式 event entry |
+| `sig-0051` | `BootInitFlow -> BootInitFlow.BindBootTaskEntry` | drives / 0020 | Action；EarlyVm 下绑定虚拟 `tp`，保持 preempt count |
+| `sig-0052` | `BootInitFlow -> BootInitStack.Setup` | drives / 0020 | Prepared -> Ready，将 init stack `sp` 切到虚拟地址 |
+| `sig-0053` | `BootInitFlow -> Soc.Preset` | drives / 0020 | Base -> Prepared；Soc 与 CpuGroup 是 Kernel 平级子对象 |
 
 `sig-0020` 的 handler 进入前必须逐项验证 Kernel acceptance、RISC-V/SBI/OpenSBI、BootCpuRegisters、
 Config/Lds、BootTask `OnCpu/Live/Invalid`、initial-flow binding、task concurrency 和入口 `satp=0`。
@@ -209,7 +210,7 @@ Config/Lds、BootTask `OnCpu/Live/Invalid`、initial-flow binding、task concurr
 CPU0 的唯一 indexed declaration 已在第 1 组完成，不得用最终 `context_is(SystemExclusive)` 事实虚构
 第二个 context、Lock 或实例事件。
 
-最后一个 child 0052 完成后，0020 检查 CurrentTask 仍解析为 BootTask 及 `task_flow_started(BootInitFlow)`，再把
+最后一个 child 0053 完成后，0020 检查 CurrentTask 仍解析为 BootTask 及 `task_flow_started(BootInitFlow)`，再把
 BootInitFlow 从 Base 提交到 Prepared。此时 Kernel.Enable 的同步 drives 列表下一项是
 `BootInitFlow.Setup`；有界推导必须在创建该 Signal 之前 reached。boundary provenance 的 source/target
 必须是 `Kernel -> BootInitFlow`、canonical signal 必须是 `BootInitFlow.Setup`、delivery 必须是 drives、
@@ -221,7 +222,7 @@ TrampolineVm/EarlyVm 为 Ready。不存在独立入口 binding snapshot，也不
 instance 或 lifecycle。不得创建 `BootInitFlow.Setup` identity，也不得出现它的 send、receive、handler
 或 Context 事件。
 
-Linux 6.12 的 RISC-V `head.S` 依次关闭 BootCPU 的全部中断分路门控并清空其待决中断信号、建立 `gp`、禁用 FPU/vector、清 BSS、保存 boot
+Linux 6.12 的 RISC-V `head.S` 依次关闭 BootCPU 的全部中断分路门控并清空其待决中断信号、建立 `gp`、关闭 BootCPU 的浮点与向量执行状态、清 BSS、保存 boot
 hart、建立 `tp/sp/stvec`，再由 `setup_vm()` 建立 trampoline、early kernel mapping 和 FDT fixmap，
 `relocate_enable_mmu()` 完成 trampoline 到 early page table 的切换。现有 entry checkpoint 与实现把
 Rust 前不可延迟的动作作为同一 BootInitFlow.Preset 的 head segment adoption，并在 VM continuation

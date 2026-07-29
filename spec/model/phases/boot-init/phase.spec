@@ -72,13 +72,12 @@ object BootInitFlow: TaskFlow {
                     );
                 }
 
-                may_change {
-                    BootCpuRegisters.sstatus;
-                }
-
                 within SingleTaskContext {
                     drives {
                         CurrentCPU.trap.interrupt.Transition::Preset;
+                        KernelImage.Transition::Preset;
+                        CurrentCPU.Action::DisableFpuVectorExecution;
+                        KernelImage.Transition::Setup;
                         KernelAddrSpace.Transition::Preset;
                         CurrentCPU.Transition::Setup(true);
                         CurrentCPU.trap.interrupt.Transition::Setup;
@@ -99,8 +98,12 @@ object BootInitFlow: TaskFlow {
                     interrupt_concurrency_closed();
                     task_concurrency_closed();
                     context_is(SystemExclusive);
-                    kernel_fpu_disabled(BootCpuRegisters.sstatus);
-                    kernel_vector_disabled(BootCpuRegisters.sstatus);
+                    cpu_fpu_execution_disabled(CpuGroup.cpus[0]);
+                    cpu_vector_execution_disabled(CpuGroup.cpus[0]);
+                    cpu_kernel_fpu_vector_default_disabled(CpuGroup.cpus[0]);
+                    cpu_kernel_fpu_vector_temporary_enable_requires_controlled_scope(CpuGroup.cpus[0]);
+                    cpu_kernel_fpu_vector_disabled_after_controlled_scope(CpuGroup.cpus[0]);
+                    cpu_user_fpu_vector_enable_follows_task_need_and_system_policy(CpuGroup.cpus[0]);
                     CurrentCPU.trap.interrupt.state == State::Ready;
                     CurrentCPU.trap.state == State::Ready;
                     CurrentCPU.trap.exception.state == State::Prepared;

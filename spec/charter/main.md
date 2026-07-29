@@ -1073,8 +1073,8 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 1. `启动执行阶段`（`BootInitFlow`）
 
    描述：静态 `BootTask` 的 initial TaskFlow，从 `_start` 开始按标准阶段生命周期推进。
-   `BootInitFlow.Preset` 负责通过 `sstatus` 禁止内核态 FPU/VECTOR 使用；该入口约束属于 Flow transition，
-   不建立第二个启动 Flow。
+   `BootInitFlow.Preset` 负责编排 BootCPU 关闭浮点运算和向量运算能力；相关执行状态属于 BootCPU，
+   不属于 Flow，也不建立第二个启动 Flow。
 
 2. `启动根任务`（`BootTask`）
 
@@ -1246,7 +1246,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 1. 建立 `InterruptType` 的早期受控状态，屏蔽所有中断。
 2. 执行 `内核映像.preset()`，建立相对 `gp` 寻址基准。
-3. 执行 `根流.preset()`，禁止在内核态执行 `FPU` 指令与 `VECTOR` 指令。
+3. 驱动 BootCPU 关闭浮点运算和向量运算能力；内核态默认禁止使用，只能在明确受控的执行区间内临时打开并随即关闭，用户态根据任务需要和系统策略打开。
 4. 执行 `内核映像.setup()`，清零 `BSS` 段，使内核映像进入早期可运行状态。
 5. `OpenSBI.Enable` 同步驱动 `处理器管理.preset()`，原子创建 `CpuGroup.cpus[0]` 并驱动它进入 `Prepared`；只有该父子发布全部成功后才发送 `Kernel.Enable`。
 6. 由 `PhysicalDirect.ActivateOnCpu(BootCPURef)` 以 InitialActivation 从 absent 建立 CPU-local association，再调用 `BootInitFlow.BindBootTaskEntry(CurrentTaskRef)` 与根栈 setup，建立物理地址阶段的根任务指针与根栈指针；首次 action 只初始化一次 preempt count。

@@ -18,6 +18,25 @@
 Trace/checkpoint code that receives this capability records the canonical `CpuGroup.cpus[i]` target and the
 source Flow/CpuRef. Recording only `CurrentCPU` is insufficient.
 
+## 浮点与向量执行状态
+
+`CPU.Action::DisableFpuVectorExecution` 必须作用于通过 effective TaskFlow 解析出的 canonical CPU。
+在 RISC-V S-mode 中，它按以下单条状态更新 lowering：
+
+```asm
+li   t0, SR_FS_VS
+csrc CSR_STATUS, t0
+```
+
+其中 `SR_FS_VS == SR_FS | SR_VS`，当前 S-mode 的 `CSR_STATUS` 是 `sstatus`；等价的
+`csrrc zero, sstatus, t0` 也满足约束。该更新必须同时把当前 CPU 的 FS、VS 字段置为 Off，并位于
+`KernelImage.Preset` 建立相对 `gp` 寻址基准之后、`KernelImage.Setup` 清理 BSS 之前。
+
+这一 mapping 只关闭当前 CPU 的浮点与向量执行状态，不清理浮点/向量寄存器，不删除
+`CpuCapabilities` 中的硬件支持事实，也不改变中断状态。后续内核态临时打开必须由明确受控的
+save/enable/use/disable/restore 区间 lowering，且退出区间时恢复为关闭；用户态是否打开由任务状态和
+系统策略 lowering。本入口 action 只建立默认关闭及这些使用策略，不提前实现后续受控区间。
+
 `PhysicalDirect`、`TrampolineVm`、`EarlyVm`、`SwapperVm` 的 `activate_on_cpu(cpu_ref)` 是修改
 association 的唯一语义入口。体系结构汇编执行 SATP 切换、同步和 activation commit，Rust 完成验证与
 controller 的每 CPU 完成事实；两部分共同 lowering 同一次 `Action::ActivateOnCpu`，不得把 Rust 验证

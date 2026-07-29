@@ -114,21 +114,21 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
 - 提交的 `tools2/scenarios/BootInitFlow.Setup.snapshot.json` 必须与从模型初态执行
   `tools2/bin/pyveri -u BootInitFlow.Setup --snapshot-out /tmp/boot-init-flow-setup-presend.snapshot.json`
   得到的 canonical bytes 逐字节一致，并从仓库根与其它 cwd 重建出相同结果。当前正式模型下其
-  SHA-256 固定为 `ee25e57879b6a5384b76f357bee6b6a9a8ad9e53fef9ed791bee219429b13d25`，model
-  fingerprint 固定为 `sha256:75deeb5c6923b5056a5ee8be53c1070e77dffbfb67ff961adacfed2d6c7f22e1`。
+  SHA-256 固定为 `137b6702ec696e45c44ed98eeb82723e1ff85f2eceb8751fb744308b4645eecd`，model
+  fingerprint 固定为 `sha256:3b134570391ac51a38f0fff4be5484f8acad3ad6e3d45e510a5b6064df779056`。
   `tools2/bin/pyveri -t BootInitFlow.Setup` 必须自动采用该第 3 组入口 scenario；显式 `-s` 仍优先，
   其它模型必须因 stale fingerprint 拒绝，缺失 canonical scenario 必须在 derive 前返回 2。
-- `-u BootInitFlow.Setup` 的真实上游推导必须精确包含 52 个 Signal，并逐项固定
-  `sig-0016..sig-0052` 在 charter 因果账本中的 source、target、canonical name、delivery、cause、
-  handler kind/id、target before/after state 和创建顺序。0016 必须是唯一 stopped Signal；0017–0048
-  以及 0049–0052 必须合计为 36 个 completed drives，完整 summary 必须为 51 completed、1 stopped、
+- `-u BootInitFlow.Setup` 的真实上游推导必须精确包含 53 个 Signal，并逐项固定
+  `sig-0016..sig-0053` 在 charter 因果账本中的 source、target、canonical name、delivery、cause、
+  handler kind/id、target before/after state 和创建顺序。0016 必须是唯一 stopped Signal；0017–0049
+  以及 0050–0053 必须合计为 37 个 completed drives，完整 summary 必须为 52 completed、1 stopped、
   0 failed/rejected/truncated/pending。0020 只允许一对 `SingleTaskContext` enter/exit，enter 位于首个
   child send 前、exit 位于最后一个 child response 后和 0020 commit 前；第 1 组只有 CPU0 的一个 indexed declaration，
   第 2 组不得出现 Lock 或其它 fresh-instance event。
 - `BootInitFlow.Setup` 发送前 boundary 必须来自 `spec/model/systems/kernel.spec` 中 Kernel.Enable 的真实
   drives 位置，source/target 为 `Kernel -> BootInitFlow`、delivery 为 drives、cause 为 0016，snapshot
   精确等于 0020 after snapshot。Kernel 必须保持 Ready、BootInitFlow 必须为 Prepared；入口关键对象
-  状态必须与 charter 账本一致，`task_flow_started(BootInitFlow)`、中断关闭、物理/虚拟 `tp/sp/gp`、
+  状态必须与 charter 账本一致，`task_flow_started(BootInitFlow)`、中断关闭、BootCPU 浮点/向量默认关闭及受控使用策略、物理/虚拟 `tp/sp/gp`、
   early event、DTB/fixmap、VM translation 和 Soc early-platform 事实必须存在。结构化 Signal 必须把
   `selector_resolutions` 数组必须保留 `CurrentCPU` 的 source flow `BootInitFlow`、source ref `BootCPURef`
   与 canonical target `CpuGroup.cpus[0]`，以及 `CurrentTask` 的 source flow `BootInitFlow`、source ref

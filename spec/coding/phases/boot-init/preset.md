@@ -28,7 +28,7 @@ Preset 横跨三个物理实现段，但仍是 BootInitFlow 的一个 model tran
 | 段 | model drives 与实现 |
 | --- | --- |
 | Kernel entry acceptance | `AcceptEnable` → `AssignCpuRef` → `PhysicalDirect.ActivateOnCpu(InitialActivation)` → 接受 Preset 并记录 `BootInitFlow.Started`；任何 Preset child 尚未启动 |
-| `_start` Preset head | `InterruptType.Preset` 先以 `csrw sie, zero` 实现全部分路门控关闭，再以 `csrw sip, zero` 实现全部待决信号清空；不得由此推断 `sstatus.SIE` 总门控已关闭；随后把 `__global_pointer$` 装入 `gp/x3`，并用 `.option norelax` 保护该初始化，以建立 `gp_relative_addressing_ready(KernelImage)`；再由入口动作禁用 FPU/vector、清 BSS 并 adopt boot hart/stack |
+| `_start` Preset head | `InterruptType.Preset` 先以 `csrw sie, zero` 实现全部分路门控关闭，再以 `csrw sip, zero` 实现全部待决信号清空；不得由此推断 `sstatus.SIE` 总门控已关闭；随后把 `__global_pointer$` 装入 `gp/x3`，并用 `.option norelax` 保护该初始化，以建立 `gp_relative_addressing_ready(KernelImage)`；`CurrentCPU.Action::DisableFpuVectorExecution` 再以 `li t0, SR_FS_VS` 和 `csrc CSR_STATUS, t0` 同时关闭 BootCPU 的 FS/VS 执行状态；然后清 BSS 并 adopt boot hart/stack |
 | `preset_until_vm_switch()` | 读取 Kernel Enable 前已发布的 `CpuGroup.cpus[0]`；验证 BootInitFlow 的 CpuRef 与已激活的 PhysicalDirect association，调用 `BindBootTaskEntry(TaskRef::BOOT)` 建立物理 `tp`/首次 preempt 事实；通过 BootInitFlow 的 CpuRef 解析 `CurrentCPU.Setup`，驱动 `KernelAddrSpace.Preset`、`TrapType.Preset`、`ExceptionType.Preset` 和 `Vm.Preset` |
 | `after_vm_setup()` | `Vm.Setup` 的 Trampoline→Early continuation 返回后调用同一 `BindBootTaskEntry` 建立虚拟 `tp` 且保持 preempt count，再驱动 `TrapType.Setup`、`BootInitStack.Setup` 和 `Soc.Preset` |
 
@@ -41,6 +41,10 @@ Setup 的第一个叶阶段，不回调 Kernel。
 并由 Rust adoption 消费。不得在进入 Rust、消费早先的 BootInitFlow.Started checkpoint 后
 重新要求整段 BSS 仍为零：checkpoint handler、诊断缓冲区和其它已启动静态对象可以从这一刻起合法写入
 BSS。handoff fact 只证明清零循环已完成，不改变后续 BSS 的正常可写语义。
+
+`DisableFpuVectorExecution` 是 CPU action，不是 BootInitFlow 私有 action，也不属于 CpuGroup。Rust
+adoption 必须通过 BootInitFlow 的 CpuRef 解析到 `CpuGroup.cpus[0]`，再验证该 CPU 的 FS/VS 已关闭；
+不得把 `sstatus` 检查重新解释为 Flow 状态、CPU 能力缺失或用户态永久禁用。
 
 `BindBootTaskEntry` 是本 Flow 的可重复 action，不保存 Base/Prepared/Ready 私有状态，不加入公共
 `Context`，也不发 lifecycle checkpoint。每次调用在修改 `tp` 前验证 BootTask、`TaskRef::BOOT`、当前

@@ -4034,11 +4034,11 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(
                 derivation["summary"],
                 {
-                    "completed": 51,
+                    "completed": 52,
                     "failed": 0,
                     "pending": 0,
                     "rejected": 0,
-                    "signals": 52,
+                    "signals": 53,
                     "stopped": 1,
                     "truncated": 0,
                 },
@@ -4059,37 +4059,38 @@ class SignalPipelineTests(unittest.TestCase):
                 (19, "Kernel", "PhysicalDirect", "ActivateOnCpu", "drives", 16, "Action", "Ready", "Ready", "completed"),
                 (20, "Kernel", "BootInitFlow", "Preset", "drives", 16, "Transition", "Base", "Prepared", "completed"),
                 (21, "BootInitFlow", "CpuGroup.cpus[0].trap.interrupt", "Preset", "drives", 20, "Transition", "Base", "Prepared", "completed"),
-                (22, "BootInitFlow", "KernelAddrSpace", "Preset", "drives", 20, "Transition", "Base", "Prepared", "completed"),
-                (23, "KernelAddrSpace", "LinearMap", "Preset", "drives", 22, "Transition", "Base", "Ready", "completed"),
-                (24, "KernelAddrSpace", "UserSpaceReserve", "Preset", "drives", 22, "Transition", "Base", "Ready", "completed"),
-                (25, "KernelAddrSpace", "KernelImage", "Preset", "drives", 22, "Transition", "Base", "Prepared", "completed"),
-                (26, "KernelAddrSpace", "KernelImage", "Setup", "drives", 22, "Transition", "Prepared", "Ready", "completed"),
-                (27, "BootInitFlow", "CpuGroup.cpus[0]", "Setup", "drives", 20, "Transition", "Prepared", "Ready", "completed"),
-                (28, "BootInitFlow", "CpuGroup.cpus[0].trap.interrupt", "Setup", "drives", 20, "Transition", "Prepared", "Ready", "completed"),
-                (29, "BootInitFlow", "BootInitFlow", "BindBootTaskEntry", "drives", 20, "Action", "Base", "Base", "completed"),
-                (30, "BootInitFlow", "BootInitStack", "Preset", "drives", 20, "Transition", "Base", "Prepared", "completed"),
-                (31, "BootInitFlow", "CpuGroup.cpus[0].trap", "Preset", "drives", 20, "Transition", "Base", "Prepared", "completed"),
-                (32, "BootInitFlow", "CpuGroup.cpus[0].trap.exception", "Preset", "drives", 20, "Transition", "Base", "Prepared", "completed"),
-                (33, "CpuGroup.cpus[0].trap.exception", "CpuGroup.cpus[0].trap.exception.page_fault", "Preset", "drives", 32, "Transition", "Base", "Prepared", "completed"),
-                (34, "CpuGroup.cpus[0].trap.exception", "CpuGroup.cpus[0].trap.exception.syscall", "Preset", "drives", 32, "Transition", "Base", "Prepared", "completed"),
-                (35, "CpuGroup.cpus[0].trap.exception", "CpuGroup.cpus[0].trap.exception.breakpoint", "Preset", "drives", 32, "Transition", "Base", "Prepared", "completed"),
-                (36, "CpuGroup.cpus[0].trap.exception", "CpuGroup.cpus[0].trap.exception.unexpected", "Preset", "drives", 32, "Transition", "Base", "Prepared", "completed"),
-                (37, "BootInitFlow", "Vm", "Preset", "drives", 20, "Transition", "Base", "Prepared", "completed"),
-                (38, "Vm", "TrampolineVm", "Setup", "drives", 37, "Transition", "Base", "Ready", "completed"),
-                (39, "Vm", "EarlyVm", "Preset", "drives", 37, "Transition", "Base", "Prepared", "completed"),
-                (40, "EarlyVm", "RawDtb", "Preset", "drives", 39, "Transition", "Base", "Prepared", "completed"),
-                (41, "EarlyVm", "RawDtb", "Setup", "drives", 39, "Transition", "Prepared", "Ready", "completed"),
-                (42, "EarlyVm", "FixMap", "Preset", "drives", 39, "Transition", "Base", "Ready", "completed"),
-                (43, "Vm", "KernelAddrSpace", "Setup", "drives", 37, "Transition", "Prepared", "Ready", "completed"),
-                (44, "Vm", "EarlyVm", "Setup", "drives", 37, "Transition", "Prepared", "Ready", "completed"),
-                (45, "BootInitFlow", "Vm", "Setup", "drives", 20, "Transition", "Prepared", "Ready", "completed"),
-                (46, "Vm", "TrampolineVm", "ActivateOnCpu", "drives", 45, "Action", "Ready", "Ready", "completed"),
-                (47, "Vm", "EarlyVm", "ActivateOnCpu", "drives", 45, "Action", "Ready", "Ready", "completed"),
-                (48, "Vm", "KernelImage", "Enable", "drives", 45, "Transition", "Ready", "Online", "completed"),
-                (49, "BootInitFlow", "CpuGroup.cpus[0].trap", "Setup", "drives", 20, "Transition", "Prepared", "Ready", "completed"),
-                (50, "BootInitFlow", "BootInitFlow", "BindBootTaskEntry", "drives", 20, "Action", "Base", "Base", "completed"),
-                (51, "BootInitFlow", "BootInitStack", "Setup", "drives", 20, "Transition", "Prepared", "Ready", "completed"),
-                (52, "BootInitFlow", "Soc", "Preset", "drives", 20, "Transition", "Base", "Prepared", "completed"),
+                (22, "BootInitFlow", "KernelImage", "Preset", "drives", 20, "Transition", "Base", "Prepared", "completed"),
+                (23, "BootInitFlow", "CpuGroup.cpus[0]", "DisableFpuVectorExecution", "drives", 20, "Action", "Prepared", "Prepared", "completed"),
+                (24, "BootInitFlow", "KernelImage", "Setup", "drives", 20, "Transition", "Prepared", "Ready", "completed"),
+                (25, "BootInitFlow", "KernelAddrSpace", "Preset", "drives", 20, "Transition", "Base", "Prepared", "completed"),
+                (26, "KernelAddrSpace", "LinearMap", "Preset", "drives", 25, "Transition", "Base", "Ready", "completed"),
+                (27, "KernelAddrSpace", "UserSpaceReserve", "Preset", "drives", 25, "Transition", "Base", "Ready", "completed"),
+                (28, "BootInitFlow", "CpuGroup.cpus[0]", "Setup", "drives", 20, "Transition", "Prepared", "Ready", "completed"),
+                (29, "BootInitFlow", "CpuGroup.cpus[0].trap.interrupt", "Setup", "drives", 20, "Transition", "Prepared", "Ready", "completed"),
+                (30, "BootInitFlow", "BootInitFlow", "BindBootTaskEntry", "drives", 20, "Action", "Base", "Base", "completed"),
+                (31, "BootInitFlow", "BootInitStack", "Preset", "drives", 20, "Transition", "Base", "Prepared", "completed"),
+                (32, "BootInitFlow", "CpuGroup.cpus[0].trap", "Preset", "drives", 20, "Transition", "Base", "Prepared", "completed"),
+                (33, "BootInitFlow", "CpuGroup.cpus[0].trap.exception", "Preset", "drives", 20, "Transition", "Base", "Prepared", "completed"),
+                (34, "CpuGroup.cpus[0].trap.exception", "CpuGroup.cpus[0].trap.exception.page_fault", "Preset", "drives", 33, "Transition", "Base", "Prepared", "completed"),
+                (35, "CpuGroup.cpus[0].trap.exception", "CpuGroup.cpus[0].trap.exception.syscall", "Preset", "drives", 33, "Transition", "Base", "Prepared", "completed"),
+                (36, "CpuGroup.cpus[0].trap.exception", "CpuGroup.cpus[0].trap.exception.breakpoint", "Preset", "drives", 33, "Transition", "Base", "Prepared", "completed"),
+                (37, "CpuGroup.cpus[0].trap.exception", "CpuGroup.cpus[0].trap.exception.unexpected", "Preset", "drives", 33, "Transition", "Base", "Prepared", "completed"),
+                (38, "BootInitFlow", "Vm", "Preset", "drives", 20, "Transition", "Base", "Prepared", "completed"),
+                (39, "Vm", "TrampolineVm", "Setup", "drives", 38, "Transition", "Base", "Ready", "completed"),
+                (40, "Vm", "EarlyVm", "Preset", "drives", 38, "Transition", "Base", "Prepared", "completed"),
+                (41, "EarlyVm", "RawDtb", "Preset", "drives", 40, "Transition", "Base", "Prepared", "completed"),
+                (42, "EarlyVm", "RawDtb", "Setup", "drives", 40, "Transition", "Prepared", "Ready", "completed"),
+                (43, "EarlyVm", "FixMap", "Preset", "drives", 40, "Transition", "Base", "Ready", "completed"),
+                (44, "Vm", "KernelAddrSpace", "Setup", "drives", 38, "Transition", "Prepared", "Ready", "completed"),
+                (45, "Vm", "EarlyVm", "Setup", "drives", 38, "Transition", "Prepared", "Ready", "completed"),
+                (46, "BootInitFlow", "Vm", "Setup", "drives", 20, "Transition", "Prepared", "Ready", "completed"),
+                (47, "Vm", "TrampolineVm", "ActivateOnCpu", "drives", 46, "Action", "Ready", "Ready", "completed"),
+                (48, "Vm", "EarlyVm", "ActivateOnCpu", "drives", 46, "Action", "Ready", "Ready", "completed"),
+                (49, "Vm", "KernelImage", "Enable", "drives", 46, "Transition", "Ready", "Online", "completed"),
+                (50, "BootInitFlow", "CpuGroup.cpus[0].trap", "Setup", "drives", 20, "Transition", "Prepared", "Ready", "completed"),
+                (51, "BootInitFlow", "BootInitFlow", "BindBootTaskEntry", "drives", 20, "Action", "Base", "Base", "completed"),
+                (52, "BootInitFlow", "BootInitStack", "Setup", "drives", 20, "Transition", "Prepared", "Ready", "completed"),
+                (53, "BootInitFlow", "Soc", "Preset", "drives", 20, "Transition", "Base", "Prepared", "completed"),
             ]
             actual = []
             for item in derivation["signals"][15:]:
@@ -4109,10 +4110,10 @@ class SignalPipelineTests(unittest.TestCase):
                         item["outcome"],
                     )
                 )
-                handler_member = "Action" if number in {17, 18, 19, 29, 46, 47, 50} else "Transition"
+                handler_member = "Action" if number in {17, 18, 19, 23, 30, 47, 48, 51} else "Transition"
                 handler_state = (
                     "process"
-                    if number in {18, 29, 50}
+                    if number in {18, 23, 30, 51}
                     else item["before_snapshot"]["states"][item["target"]]
                 )
                 self.assertEqual(
@@ -4122,7 +4123,7 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(actual, expected)
             self.assertEqual(derivation["signals"][15]["reason"], "until_signal_reached")
             self.assertEqual(
-                derivation["signals"][26]["selector_resolutions"],
+                derivation["signals"][22]["selector_resolutions"],
                 [
                     {
                         "selector": "CurrentCPU",
@@ -4133,7 +4134,22 @@ class SignalPipelineTests(unittest.TestCase):
                 ],
             )
             self.assertEqual(
-                derivation["signals"][28]["selector_resolutions"],
+                " ".join(derivation["signals"][22]["handler"]["description"].split()),
+                "关闭 BootCPU 的浮点运算和向量运算能力。内核态默认禁止使用这些能力，只在明确受控的执行区间内才允许临时打开，随即关闭。用户态根据任务需要和系统策略打开。",
+            )
+            self.assertEqual(
+                derivation["signals"][27]["selector_resolutions"],
+                [
+                    {
+                        "selector": "CurrentCPU",
+                        "source_cpu_ref": "BootCPURef",
+                        "source_flow": "BootInitFlow",
+                        "target": "CpuGroup.cpus[0]",
+                    }
+                ],
+            )
+            self.assertEqual(
+                derivation["signals"][29]["selector_resolutions"],
                 [
                     {
                         "selector": "CurrentTask",
@@ -4253,6 +4269,12 @@ class SignalPipelineTests(unittest.TestCase):
                 "interrupt_pending_cleared(CpuGroup.cpus[0].trap.interrupt)",
                 "interrupt_class_gates_closed_before_pending_cleared(CpuGroup.cpus[0].trap.interrupt)",
                 "gp_relative_addressing_ready(KernelImage)",
+                "cpu_fpu_execution_disabled(CpuGroup.cpus[0])",
+                "cpu_vector_execution_disabled(CpuGroup.cpus[0])",
+                "cpu_kernel_fpu_vector_default_disabled(CpuGroup.cpus[0])",
+                "cpu_kernel_fpu_vector_temporary_enable_requires_controlled_scope(CpuGroup.cpus[0])",
+                "cpu_kernel_fpu_vector_disabled_after_controlled_scope(CpuGroup.cpus[0])",
+                "cpu_user_fpu_vector_enable_follows_task_need_and_system_policy(CpuGroup.cpus[0])",
                 "assert:BootCpuRegisters.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack)",
                 "assert:BootCpuRegisters.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode)",
                 "boot_task_entry_bound_for_active_controller(CpuGroup.cpus[0],BootTask)",
@@ -4306,7 +4328,7 @@ class SignalPipelineTests(unittest.TestCase):
                 )
 
             self.assertLess(context_events[0]["sequence"], sequence("signal_sent", "sig-0021"))
-            self.assertLess(sequence("response_completed", "sig-0052"), context_events[1]["sequence"])
+            self.assertLess(sequence("response_completed", "sig-0053"), context_events[1]["sequence"])
             self.assertLess(context_events[1]["sequence"], sequence("response_completed", "sig-0020"))
             self.assertLess(sequence("response_completed", "sig-0020"), sequence("until_signal_reached"))
             self.assertLess(sequence("until_signal_reached"), sequence("response_stopped", "sig-0016"))
@@ -4330,14 +4352,14 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(snapshot.read_bytes(), BOOT_INIT_SETUP_SCENARIO.read_bytes())
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "ee25e57879b6a5384b76f357bee6b6a9a8ad9e53fef9ed791bee219429b13d25",
+                "137b6702ec696e45c44ed98eeb82723e1ff85f2eceb8751fb744308b4645eecd",
             )
             self.assertEqual(
                 {
                     derivation["model_fingerprint"], model["model_fingerprint"],
                     view["model_fingerprint"], saved["model_fingerprint"],
                 },
-                {"sha256:75deeb5c6923b5056a5ee8be53c1070e77dffbfb67ff961adacfed2d6c7f22e1"},
+                {"sha256:3b134570391ac51a38f0fff4be5484f8acad3ad6e3d45e510a5b6064df779056"},
             )
             with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
                 compact_text = render_text(view)
@@ -4358,7 +4380,11 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertIn("Signal derivation: Human -> Computer.Preset", verbose_text)
             self.assertIn("sig-0020 [drives] Kernel -> BootInitFlow.Preset", verbose_text)
             self.assertIn("handler: BootInitFlow.Transition::Preset@Base", verbose_text)
-            self.assertIn("sig-0052 [drives] BootInitFlow -> Soc.Preset", verbose_text)
+            self.assertIn(
+                "sig-0023 [drives] BootInitFlow -> CpuGroup.cpus[0].DisableFpuVectorExecution",
+                verbose_text,
+            )
+            self.assertIn("sig-0053 [drives] BootInitFlow -> Soc.Preset", verbose_text)
             self.assertIn(
                 "reached boundary: Kernel -> BootInitFlow.Setup [drives]", verbose_text
             )

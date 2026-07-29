@@ -17,6 +17,8 @@
 - OpenSBI 交接时 `BootCpuRegisters.a0` 必须等于初态已存在的 `BootArgs.boot_hartid`。
 - OpenSBI 交接时 `BootCpuRegisters.a1` 必须等于初态已存在的 `BootArgs.dtb_pa`。
 - OpenSBI 只确定上述两个交接寄存器；`sp/tp/gp` 和 supervisor CSR 继续由真实入口汇编按阶段更新。
+- BootCPU 的 FS/VS 执行状态及其内核态受控使用策略归 CPU 规格所有；入口 lowering 见
+  [`objects/cpu.md`](objects/cpu.md)。`BootInitFlow` 只负责编排，`CpuGroup` 只负责 CPU identity 关系。
 - 入口代码不得跳过 `BootArgs` 抽象直接让后续对象长期依赖裸寄存器值。
 - `Riscv64` 只表示外部 ISA 能力，不作为 live GPR/CSR 容器。
 - 链接脚本必须显式提供 `__global_pointer$`，并保证 `_start` 同时是内核 text 起点和 ELF entry。

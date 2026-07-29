@@ -976,6 +976,11 @@ RCU reader nesting、preemptible-RCU accounting、quiescent-state 或 scheduler/
 
 CPU 的 live 寄存器组也是 `CPU视角` 的私有对象，包括通用寄存器组 GPRs 和控制状态寄存器 CSRs。一个 CPU 不能在自己的规格步骤中直接读写另一个 CPU 的 live registers，只能通过 trap frame、saved task context、IPI/同步结果或共享内存中已经发布的保存副本观察间接结果。RISC-V64 中 `tp` 属于本 CPU 的 GPR 视图，`sstatus`、`stvec`、`sie`、`sip`、`satp` 等属于本 CPU 的 CSR 视图。当前只为启动 CPU 建模 `BootCpuRegisters`，并只保留入口所需的 `a0/a1/sp/tp/gp` 与现有 supervisor CSR 子集；它是 `BootCPU` 的私有子对象，不扩展为完整寄存器文件，也不推广到所有 `CPUObject`。AP 的寄存器对象留待 SMP 规格扩展。
 
+`CPU.Action::DisableFpuVectorExecution` 是 CPU-local、无 lifecycle state effect 的 action。它关闭目标 CPU
+当前的浮点与向量执行状态，并建立三类策略事实：内核态默认关闭、临时启用必须位于明确受控的执行区间
+且退出后恢复关闭、用户态启用服从任务需要和系统策略。BootInitFlow 只通过 `CurrentCPU` 驱动该 action；
+CpuGroup 不拥有或复制这些执行状态。
+
 `BP视角` 和 `AP视角` 是 `CPU视角` 的两个具体分类。BP 是唯一且必须存在的启动 CPU，承担主要内核初始化职责；AP 是后续进入的 secondary CPU，复用共享类型语义和 BP 已建立的共享环境，但必须拥有自己的 effective TaskFlow、`CurrentTask`/`CurrentCPU` 解析、本地中断控制、GPR/CSR 寄存器组和 AP entry/ack 路径。
 
 多个 CPU 视角共同可见、共同依赖或共同维护的公共事实集合，命名为 `共享全局视角`。它包括共享内存对象、全局 phase 边界、`CpuGroup`/topology、全局调度设施、同步对象和跨 CPU 可见状态等。`共享全局视角` 不是新的执行主体，也不是可以同时支配所有 CPU 私有步骤的全局控制视角；它只是各个 `CPU视角` 中公共可见环境的规格化名称。本地中断状态、当前寄存器组和当前任务切换结果必须留在对应 CPU 视角内表达；CurrentTaskRef 始终由该执行上下文的 effective Flow 派生。

@@ -48,8 +48,8 @@
 
   <g transform="translate(0 132)">
     <circle cx="137" cy="238" r="15" class="dot"/><text x="137" y="238" class="num">3</text>
-    <rect x="258" y="210" width="876" height="56" rx="10" class="box flow"/>
-    <text x="286" y="238" class="line1">根流.preset() - 禁止在内核态执行 FPU 指令与 VECTOR 指令</text>
+    <rect x="258" y="210" width="876" height="56" rx="10" class="box cpu"/>
+    <text x="286" y="238" class="line1">BootCPU.action() - 关闭浮点运算和向量运算能力</text>
   </g>
 
   <g transform="translate(0 198)">

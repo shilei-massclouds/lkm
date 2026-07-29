@@ -19,6 +19,8 @@ PhaseObject，它从 `_start` 开始承载并编排启动执行片段，同时�
 - `BootInitFlow.Preset` 的第一个直接 child 是 BootCPU 的 `InterruptType.Preset`。它先关闭 BootCPU 的
   全部中断分路门控，再清空这些门控上的全部待决中断信号；该 child 不改变或判定中断总门控，也不
   提前建立 handler、fallback 或正式分派框架。
+- 建立相对 `gp` 寻址基准后，`BootInitFlow.Preset` 驱动 BootCPU 关闭浮点运算和向量运算能力，再继续
+  处理内核映像的 BSS。相关执行状态属于 BootCPU；BootInitFlow 只负责编排，不拥有这些状态。
 - Setup 直接顺序驱动 `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、
   `SchedInitPhase`、`IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、
   `ProcessPreparePhase` 和 `BootInitRestInitPhase`。最后一个叶子 Online 后提交

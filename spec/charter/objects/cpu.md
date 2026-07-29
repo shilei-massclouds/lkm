@@ -33,6 +33,14 @@ Ready/Online 仍由对应 CPU 的入口和 hotplug 因果推进。
 possible/present/active/online 集合只能从每个已发布 CPU 的状态或属性派生。实现可以缓存位图，但缓存
 必须可由 `cpus[]` 重建且不得保存 CpuRef/CpuView 副本数组。
 
+## 浮点与向量运算能力
+
+关闭 BootCPU 的浮点运算和向量运算能力。内核态默认禁止使用这些能力，只在明确受控的执行区间内才
+允许临时打开，随即关闭。用户态根据任务需要和系统策略打开。
+
+这些执行状态属于对应 CPU，不属于启动 Flow 或 CpuGroup。CpuGroup 只负责 CPU 实例的 ownership、
+index 与 reference 关系；BootInitFlow 只按入口顺序驱动 BootCPU 完成初始关闭。
+
 ## CPU-local 子对象
 
 每个已发布 CPU 恰好拥有一个独立 `TrapType` 资源；Trap 再拥有独立 `InterruptType` 与

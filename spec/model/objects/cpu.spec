@@ -19,6 +19,26 @@ type CPU: CPUObject {
     }
 
     processes {
+        /*
+         * 关闭 BootCPU 的浮点运算和向量运算能力。内核态默认禁止使用这些能力，只在明确受控的执行区间内才允许临时打开，随即关闭。用户态根据任务需要和系统策略打开。
+         */
+        Action::DisableFpuVectorExecution {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Prepared
+                    || self.state == State::Ready
+                    || self.state == State::Online;
+            }
+            ensures {
+                cpu_fpu_execution_disabled(self);
+                cpu_vector_execution_disabled(self);
+                cpu_kernel_fpu_vector_default_disabled(self);
+                cpu_kernel_fpu_vector_temporary_enable_requires_controlled_scope(self);
+                cpu_kernel_fpu_vector_disabled_after_controlled_scope(self);
+                cpu_user_fpu_vector_enable_follows_task_need_and_system_policy(self);
+            }
+        }
+
         Action::PrepareSecondaryTrapEntry {
             state_effect: StateEffect::None;
             depends_on {
@@ -130,3 +150,9 @@ predicate cpu_translation_controller_is_valid_for_execution_state<C: CPU>(cpu: C
 predicate cpu_translation_controller_matches_live_satp<C: CPU>(cpu: C) -> bool;
 predicate cpu_translation_controller_matches_live_satp_for_ref<R: CpuRef>(cpu_ref: R) -> bool;
 predicate cpu_translation_controller_association_replaced_atomically<C: CPU>(cpu: C) -> bool;
+predicate cpu_fpu_execution_disabled<C: CPU>(cpu: C) -> bool;
+predicate cpu_vector_execution_disabled<C: CPU>(cpu: C) -> bool;
+predicate cpu_kernel_fpu_vector_default_disabled<C: CPU>(cpu: C) -> bool;
+predicate cpu_kernel_fpu_vector_temporary_enable_requires_controlled_scope<C: CPU>(cpu: C) -> bool;
+predicate cpu_kernel_fpu_vector_disabled_after_controlled_scope<C: CPU>(cpu: C) -> bool;
+predicate cpu_user_fpu_vector_enable_follows_task_need_and_system_policy<C: CPU>(cpu: C) -> bool;
