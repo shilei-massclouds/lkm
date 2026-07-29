@@ -38,6 +38,12 @@ This file is the testing authority for CPU ownership, references and the
   the absence of a second boot/current CPU or current-task store. `current_cpu()`
   must derive the effective Flow through CurrentTask, dereference that Flow's
   CpuRef and reject any Task/Flow/CPU disagreement.
+- The same smoke boundary must observe each CPU's final translation owner and
+  takeover trace. The BP path ends `EarlyVm -> SwapperVm`; every AP path ends
+  `TrampolineVm -> SwapperVm`. Each record carries the canonical CPU, old/new
+  owner, installed SATP and completed synchronization, while the shared
+  `PhysicalDirect`, `TrampolineVm`, `EarlyVm` and `SwapperVm` controllers remain
+  `Ready` rather than being destroyed by any CPU-local handoff.
 - Focused tool tests cover indexed publication/rollback and selector isolation;
   scheduler and user-flow smoke cover migration and handoff. The final gate
   after implementation changes is the direct repository-root `make test`.

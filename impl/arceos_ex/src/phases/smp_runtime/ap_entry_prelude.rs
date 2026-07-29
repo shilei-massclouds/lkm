@@ -8,7 +8,9 @@ use crate::{
 const BOOT_DATA_VERIFIED: u8 = 1 << 0;
 const STACK_VERIFIED: u8 = 1 << 1;
 const TASK_POINTER_VERIFIED: u8 = 1 << 2;
-const ALL_ADOPTION_FACTS: u8 = BOOT_DATA_VERIFIED | STACK_VERIFIED | TASK_POINTER_VERIFIED;
+const TRANSLATION_CHAIN_VERIFIED: u8 = 1 << 3;
+const ALL_ADOPTION_FACTS: u8 =
+    BOOT_DATA_VERIFIED | STACK_VERIFIED | TASK_POINTER_VERIFIED | TRANSLATION_CHAIN_VERIFIED;
 
 static STATES: [AtomicU8; MAX_CPUS] =
     [const { AtomicU8::new(crate::phases::state::encode(State::Base)) }; MAX_CPUS];
@@ -62,6 +64,9 @@ pub(crate) fn preset(adoption: ApEntryAdoption) -> ! {
     }
     if !adoption.task_pointer_matches_target() {
         fail(logical_id, "task-pointer");
+    }
+    if !adoption.translation_chain_matches_target() {
+        fail(logical_id, "translation-chain");
     }
     if crate::objects::smp_bringup::activate_ap_idle_entry_execution(logical_id).is_err() {
         fail(logical_id, "idle-task-entry-execution");

@@ -56,7 +56,10 @@ RISC-V64 入口前导期实现必须按地址空间阶段区分可执行代码�
 - CSR 访问应集中封装，调用点表达具体语义，例如关闭中断、设置 `stvec`、切换 `satp`。
 - 写入 `stvec` 的入口地址必须满足 RISC-V64 `stvec` 对齐和模式编码要求。直接模式下入口 base 至少 4 字节对齐，低位不得被误用为 mode；trampoline 或 early trap 入口标签必须在汇编或链接布局中显式保证对齐，并按当前地址空间阶段写入物理地址或虚拟地址。
 - 页表切换相关代码必须显式处理 `sfence.vma` 要求。模型规格可以不逐条展开该细节，但实现规格要求保留该边界。
-- `SwapperVm.Enable` 对应 Linux/RISC-V `setup_vm_final()` 中写入 `swapper_pg_dir` SATP 后的 `local_flush_tlb_all()` 边界。实现必须在写入 swapper SATP 后执行本地 TLB/地址转换同步，并把完成结果暴露为 `swapper_vm_translation_sync_complete(SwapperVm)` 对应的可检查事实；不得只把屏障指令散落在代码中而不纳入对象状态或阶段 ready 检查。
+- `SwapperVm.Action::TakeOver(cpu_ref)` 对应 Linux/RISC-V `setup_vm_final()` 中写入 `swapper_pg_dir`
+  SATP 后的 `local_flush_tlb_all()` 边界。实现必须在写入 swapper SATP 后执行本地 TLB/地址转换同步，
+  并把完成结果暴露为 `swapper_vm_translation_sync_complete(SwapperVm, cpu)`；不得只把屏障指令散落在
+  代码中而不纳入 per-CPU takeover 事实。
 - 早期入口对中断 pending/enable 状态的防御性清理应对应 `InterruptType.Preset` 或 `InterruptType.Setup` 的实现边界。
 
 ## 当前任务引用
@@ -76,13 +79,15 @@ Linux PLIC shim 对 `tp` 的临时占用只属于 foreign ABI；正常、错误�
 
 ## 地址空间与页表
 
-- `TrampolineVm`、`EarlyVm`、`SwapperVm` 应在代码中保持可区分的实现边界。
+- `PhysicalDirect`、`TrampolineVm`、`EarlyVm`、`SwapperVm` 应在代码中保持可区分的共享 controller 实现边界。
 - 第一轮应真实拆分入口前导期和入口后继期页表推进过程，而不是只把现有 boot page table 代码改名为多个模型 transition。
 - `EarlyVm` 的实现必须覆盖规格要求的 `KernelImage` 和 `RawDtb` 映射前提。
-- `SwapperVm` 的实现必须在 `Enable` 成功后能被只读检查确认 `swapper_vm_translation_sync_complete(SwapperVm)`，该事实至少应覆盖写入 swapper SATP 之后执行过本地 TLB flush 或等价地址转换同步。
+- `SwapperVm` 的实现必须在每个 `TakeOver(cpu_ref)` 成功后能按 CPU 只读检查同步事实；该事实至少应覆盖
+  写入 swapper SATP 之后执行过本地 TLB flush 或等价地址转换同步。
 - `FixMap` 槽位布局应由配置或架构常量统一定义，不应在多个对象实现中分散硬编码。
 - 第一轮 `Config.fixmap.fdt` 的 FDT 槽位容量按 2MiB 配置，用于覆盖 Linux RISC-V64 `FIX_FDT`/`FIX_FDT_SIZE` 级别的早期 FDT 映射窗口；`FixMap` 只能消费该配置并执行容量检查，不应自行定义槽位大小。
-- 完整内核页表启用后，`EarlyVm` 退出服务应有明确的代码边界，对应 `EarlyVm.Cleanup`。
+- controller 页表准备状态保持全局 Ready；CPU 切走只更新该 CPU 的 owner，不执行
+  `TrampolineVm.Cleanup`、`EarlyVm.Cleanup` 或全局 Destroyed 迁移。
 
 ## FDT 与物理内存
 
@@ -188,10 +193,10 @@ must not use a fixed Config.kernel_phys_addr-style constant.
 
 Rule IDs (MUST):
 
-- `riscv64_must_trampoline_vm_enable_flush_tlb_before_satp`
-- `riscv64_must_trampoline_vm_enable_commit_sync_fact_after_tlb_flush`
+- `riscv64_must_trampoline_vm_takeover_flush_tlb_before_satp`
+- `riscv64_must_trampoline_vm_takeover_commit_per_cpu_sync_fact`
 
-Code generated for TrampolineVm.Enable must flush or otherwise
+Code generated for TrampolineVm.TakeOver(cpu_ref) must flush or otherwise
 invalidate the local address-translation cache after building the
 trampoline page table and before writing the trampoline SATP value.
 This maps Linux/RISC-V relocate_enable_mmu()'s sfence.vma before
@@ -201,17 +206,17 @@ The minimum acceptable implementation order is:
 1. compute or load the trampoline SATP value,
 2. execute sfence.vma or an equivalent local TLB flush,
 3. only then write SATP to the trampoline value,
-4. only then commit the implementation fact corresponding to
-   trampoline_vm_translation_sync_ready_before_satp(TrampolineVm).
+4. only then commit `trampoline_vm_translation_sync_complete(TrampolineVm, cpu_ref)` and atomically publish
+   that CPU's owner.
 
 #### Early page table handoff
 
 Rule IDs (MUST):
 
-- `riscv64_must_early_vm_enable_flush_tlb_after_satp`
-- `riscv64_must_early_vm_enable_commit_sync_fact_after_tlb_flush`
+- `riscv64_must_early_vm_takeover_flush_tlb_after_satp`
+- `riscv64_must_early_vm_takeover_commit_per_cpu_sync_fact`
 
-Code generated for EarlyVm.Enable must flush or otherwise
+Code generated for EarlyVm.TakeOver(cpu_ref) must flush or otherwise
 invalidate the local address-translation cache after writing the
 early SATP value. This maps Linux/RISC-V relocate_enable_mmu()'s
 sfence.vma after switching from trampoline_pg_dir to early_pg_dir.
@@ -220,28 +225,26 @@ The minimum acceptable implementation order is:
 1. compute or load the early SATP value,
 2. write SATP,
 3. execute sfence.vma or an equivalent local TLB flush,
-4. only then commit the implementation fact corresponding to
-   early_vm_translation_sync_complete(EarlyVm).
+4. only then commit `early_vm_translation_sync_complete(EarlyVm, cpu_ref)` and atomically publish that CPU's owner.
 
 #### Swapper page table handoff
 
 Rule IDs (MUST):
 
-- `riscv64_must_swapper_vm_enable_flush_tlb_after_satp`
-- `riscv64_must_swapper_vm_enable_commit_sync_fact_after_tlb_flush`
+- `riscv64_must_swapper_vm_takeover_flush_tlb_after_satp`
+- `riscv64_must_swapper_vm_takeover_commit_per_cpu_sync_fact`
 
-Code generated for SwapperVm.Enable must flush or otherwise
+Code generated for SwapperVm.TakeOver(cpu_ref) must flush or otherwise
 invalidate the local address-translation cache after writing the
 swapper SATP value, and must expose that completion as the model
-fact swapper_vm_translation_sync_complete(SwapperVm). This maps
+fact swapper_vm_translation_sync_complete(SwapperVm, cpu_ref). This maps
 Linux/RISC-V setup_vm_final()'s local_flush_tlb_all() boundary.
 
 The minimum acceptable implementation order is:
 1. compute or load the swapper SATP value,
 2. write SATP,
 3. execute sfence.vma or an equivalent local TLB flush,
-4. only then commit the implementation fact corresponding to
-   swapper_vm_translation_sync_complete(SwapperVm).
+4. only then commit `swapper_vm_translation_sync_complete(SwapperVm, cpu_ref)` and atomically publish that CPU's owner.
 
 ### Riscv64SchedulerCodingShould
 

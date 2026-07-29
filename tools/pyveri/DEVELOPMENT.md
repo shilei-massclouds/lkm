@@ -245,7 +245,7 @@ tools/pyveri/bin/pyveri spec/model/main.spec -T custom-trace.svg -a state,transi
 当前对象填充规则：
 
 - 准备期对象来自 `PreparePhase.Online` 的状态不变量，例如 `Riscv64`、`Lds`、`Config`、`PhysicalMemory`。
-- 入口步骤对象来自 `BootInitFlow.Preset` 直接驱动出的状态推进结果，例如 `BootTaskEntryBinding`、`InterruptType`、`Vm`、`BootTask`、`BootInitStack`、`TrapType` 等。
+- 入口步骤来自 `BootInitFlow.Preset` 直接驱动的对象与 action，例如 `BindBootTaskEntry`、当前 CPU 的 trap 资源、`KernelAddrSpace`、`Vm`、`BootInitStack` 与 `RawDtb`。
 - `Computer` 是唯一顶层系统；`Kernel` 承载内核系统阶段树。
 - 阶段对象和子阶段对象只通过左侧单元体现，不在对象列重复显示。
 
@@ -482,15 +482,13 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --derive
 - `RawDtb.Preset/Setup` 当前属于规格前置证明边界，不表示 Linux 6.12 的 RISC-V `setup_vm()` 在同一源码位置逐项验证 DTB。Linux 实现侧主要在 `setup_vm()` 中根据 `dtb_pa` 建立 FDT fixmap 映射并设置 `dtb_early_va/dtb_early_pa`，后续 `parse_dtb()` 调用 `early_init_dt_scan()`，再由 `early_init_dt_verify()` 执行 `fdt_check_header()` 并扫描 `/chosen`、`/memory` 等节点。本规格把这些后续隐含依赖提前收口，是为了让 `EarlyVm` 的 FDT 映射前提可推导、可检查。
 - `fits_in_fixmap_slot(range, slot, page_size)` 只表达 RawDtb 物理范围有资格放入 FDT fixmap 槽位范围的页覆盖数约束，不表示映射已经建立，也不要求 RawDtb 原始前后边界页对齐。fixmap 的基本单位是页，FDT slot 可覆盖连续多个页；因此 `FixMapSlotRange<T>` 表示连续页槽位范围，容量比较已改为 `page_cover_count(range, page_size) <= slot_page_count(slot)`。该约束已由 `riscv_fixmap_layout` 收口：Linux/RISC-V 定义 `FIX_FDT = FIX_FDT_END + FIX_FDT_SIZE / PAGE_SIZE - 1`，64 位下 `MAX_FDT_SIZE = PMD_SIZE` 且 `FIX_FDT_SIZE = MAX_FDT_SIZE + SZ_2M`，`create_fdt_early_page_table()` 用两个 PMD 映射覆盖未对齐 DTB 所在范围。
 - 已引入最小 `FixMap` 对象，先只建模 FDT 槽位。`RawDtb` 负责物理 DTB 有效性，`FixMap.Preset` 负责检查 FDT slot 存在且能够容纳 RawDtb，并记录 `slot_contains(FixMap.fdt_slot, RawDtb)`；`EarlyVm` 后续只依赖 FixMap 已就绪和槽位内容，再建立页表映射。
-- 已引入最小 `LinearMap` 对象，表示 `PAGE_OFFSET` 起始的物理内存线性映射区域在入口前导期已按布局预留，但完整 RAM banks 映射尚未建立。`EarlyVm.Ready` 只要求 `LinearMap.state == State::Destroyed`；这里的 `Destroyed` 使用其 `reserved/已预留` 别名，表示该区域尚不提供当前地址转换服务。完整线性映射应留给 `SwapperVm` 或后续完整 VM 阶段。
-- `LinearMap.Destroyed` 的 `linear_map_area_reserved(self)` 与 `fixmap_adjacent_to_linear_map(FixMap, LinearMap)` 已由 `config_address_layout` 收口。依据是 RISC-V/Linux 地址空间布局中 `PAGE_OFFSET` 作为 lowmem/direct map 起点，`FIXADDR_START/FIXADDR_TOP` 定义位于其前侧的 fixmap 区域；入口前导期只证明该虚拟区域布局已预留，不证明完整 RAM banks 已映射。
+- `LinearMap` 表示 `PAGE_OFFSET` 起始的物理内存线性映射区域；其 `Ready` 只证明布局已预留，不表示完整 RAM banks 已映射。`linear_map_area_reserved(self)` 与 `fixmap_adjacent_to_linear_map(FixMap, LinearMap)` 由地址布局事实收口，最终映射由 `SwapperVm` 发布。
 - `EarlyVm` 的 FDT 映射谓词已改为通用 fixmap slot 语义：`fixmap_slot_mapping_ready(EarlyVm.pg_dir, FixMap.fdt_slot)` 和 `fixmap_slot_accessible(FixMap.fdt_slot)`。RawDtb 是否位于该槽位由 `FixMap` 的 `slot_contains(...)` 负责，页表映射阶段不再直接绑定 RawDtb 物理范围。
-- `KernelImageArea` 已更名为 `KernelImageMap`，表达内核映像在 EarlyVm 中的虚拟映射区域。`EarlyVm.Ready` 和 `EarlyVm.Online` 分别使用 `kernel_image_mapping_ready(EarlyVm.pg_dir, KernelImage, KernelImageMap)` 与 `kernel_image_accessible(KernelImage, KernelImageMap)`，避免把内核映像映射写成无参数黑盒。
-- `EarlyVm.Setup` 不再直接使用 `KernelImage.end - KernelImage.start < Config.kernel_image_va_window_size` 这种裸关系表达容量约束，而是使用 `fits_in_kernel_image_map(KernelImage, KernelImageMap)` 表达“内核映像可装入该映射区域”。该约束已由 `KernelImage` 的链接布局与 `Config` 地址窗口共同证明：`KernelImageMap.range` 从 `KERNEL_LINK_ADDR` 和 `SZ_2G` 派生，Linux `create_kernel_page_table()` 按 `kernel_map.virt_addr + kernel_map.size` 建立 early_pg_dir 的内核映像映射。
+- `KernelImage` 自身保存已加载内核映像的 `virt_range`，不再建立独立映射准对象。`EarlyVm.Setup` 使用 `kernel_image_mapping_ready(EarlyVm.pg_dir, KernelImage, KernelImage.virt_range)`，容量约束使用 `fits_in_kernel_image_range(KernelImage, virt_range)`。
 - `valid_virt_addr(kernel_link_addr)` 已上移到 `Config.Online`，表示内核链接地址有效性属于配置/地址布局事实，`TrampolineVm.Setup` 不再重复声明该检查。`trampoline_mapping_ready(...)` 归入 `boot_code_candidate`，`phys_to_virt_transition_completed()` 归入 `prior_derivation_facts`。
 - 已引入 `TrampolineMap` 表示第一次物理到虚拟地址过渡所需的最小跳板映射区域，其物理起点来自 `Lds.kernel_start`，虚拟起点来自 `Config.kernel_link_addr`，大小来自 `Config.pmd_size`。`TrampolineVm` 现在使用 `trampoline_mapping_ready(TrampolineVm.pg_dir, TrampolineMap)`，不再把物理起点和虚拟起点散落在谓词参数里。
 - `phys_to_virt_transition_completed(...)` 已参数化为 `phys_to_virt_transition_completed(TrampolineVm.pg_dir, TrampolineMap)`，表示第一次地址空间过渡完成应由跳板页表、跳板映射和 `TrampolineVm.Enable` 的 satp 切换共同推出。
-- `KernelImage` 自身的剩余义务按来源细化：`valid_segment_set(segments)` 来自链接脚本段布局，`memory_zeroed(segments.bss.range)` 已由 `KernelImage.Setup` 的transition 后置事实证明，对应 Linux `head.S` 中 `__bss_start` 到 `__bss_stop` 的清零循环；`gp_relative_access_ready()` 由 `KernelImage.Enable` 重置 gp、`KernelImageMap` 可访问等前序事实推出。
+- `KernelImage` 自身的剩余义务按来源细化：`valid_segment_set(segments)` 来自链接脚本段布局，`memory_zeroed(segments.bss.range)` 由 `KernelImage.Setup` 的 transition 后置事实证明；`gp_relative_access_ready()` 由 `KernelImage.Enable` 与映像虚拟范围可访问事实推出。
 - `TrampolineVm.pg_dir`、`EarlyVm.pg_dir` 和 `SwapperVm.pg_dir` 各自承担静态页表存储的存在性、稳定性、静态分配、页对齐和最小容量约束。`TrampolineVm.Setup`、`EarlyVm.Setup` 和 `SwapperVm.Setup` 不再重复声明裸 `page_aligned(...)`；各 VM 阶段在自身 `Setup` 中绑定静态页表存储并声明映射语义。
 - `TrapType.early_event_entry` 和 `TrapType.formal_event_entry` 各自承担事件入口符号的存在性与稳定性约束。`TrapType.Preset` 和 `TrapType.Setup` 在绑定符号后设置对应入口，不再依赖准备期的统一静态对象集合。
 - `TrampolineMap` 增加 `valid_trampoline_map(...)` 约束，把跳板映射的物理起点、虚拟起点和映射大小约束集中到映射对象自身。`TrampolineVm.Setup` 不再直接声明 `aligned(Lds.kernel_start, Config.pmd_size)`，也不再重复声明 `valid_satp_mode(Config.satp_mode)`；`valid_trampoline_map(...)` 已由 `Lds` 链接布局和 `Config` 地址配置共同证明，对应 Linux `setup_vm()` 中从 `_start`、`KERNEL_LINK_ADDR/kernel_map.virt_addr` 和 `PMD_SIZE` 建立 trampoline 映射。
@@ -508,9 +506,7 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --derive
 - `FixMap.Preset` 已用 `ensures { slot_contains(fdt_slot, RawDtb); }` 表达“RawDtb 已被安排到 FDT fixmap 槽位”的transition 后置事实；`EarlyVm.Preset` 作为复合事件，用 `ensures { slot_contains(FixMap.fdt_slot, RawDtb); }` 表达驱动 `RawDtb` 与 `FixMap` 后形成的对外事实。`EarlyVm.Setup` 中重复依赖的同一 `slot_contains(...)` 可由前序已证明事实推出，因此 `fixmap_slot_content/prior_derivation_facts` 这一组当前已收口。
 - `FixMap.Preset` 不再把 `fdt_slot == Config.fixmap.fdt` 当作设置 `fdt_slot` 前的前置条件，而是作为transition 完成后的后置事实；`attrs_accessible(self)` 也由该事件设置槽位后保证。`fits_in_fixmap_slot(...)` 已由 FDT fixmap 槽位容量布局证明，不再作为剩余义务保留。
 - `TrampolineVm.Enable` 已用transition 后置条件证明 `phys_to_virt_transition_completed(TrampolineVm.pg_dir, TrampolineMap)`；`KernelImage.Enable` 已用transition 后置条件证明 `gp_relative_access_ready()`。这两项目前作为具体事件效果收口，而不是引入泛化自动规则。
-- `TrampolineVm.Setup` 已用transition 后置条件证明 `trampoline_mapping_ready(TrampolineVm.pg_dir, TrampolineMap)`；`EarlyVm.Setup` 已用transition 后置条件证明 `kernel_image_mapping_ready(EarlyVm.pg_dir, KernelImage, KernelImageMap)` 和 `fixmap_slot_mapping_ready(EarlyVm.pg_dir, FixMap.fdt_slot)`。这些事实表达页表构建transition 完成后的映射就绪状态，不引入泛化自动映射规则。
-- `TrampolineVm.Online` 中重复出现的 `trampoline_mapping_ready(...)` 由 `TrampolineVm.Ready` 已证明的同一映射就绪事实作为前序事实延续，不重新归入 boot code obligation。
-- `EarlyVm.Enable` 已用transition 后置条件证明 `kernel_image_accessible(KernelImage, KernelImageMap)` 和 `fixmap_slot_accessible(FixMap.fdt_slot)`。含义是 `EarlyVm.Ready` 已经具备映射，`Enable` 切换到 `early_pg_dir` 后这些映射进入可访问状态；当前不引入通用映射可访问自动证明规则。
+- `TrampolineVm.Setup` 证明共享 trampoline controller 的映射 Ready；`EarlyVm.Setup` 证明 `kernel_image_mapping_ready(EarlyVm.pg_dir, KernelImage, KernelImage.virt_range)` 和 fixmap 映射 Ready。`TakeOver(cpu_ref)` 只切换该 CPU 的 owner/live SATP，controller 保持 Ready，不产生全局 Online 或 Cleanup。
 
 #### Step C.1: 收口 trace 输出和注释数据流
 
@@ -524,7 +520,7 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --derive
 - `--trace-svg` / `--trace-annotations` 已增加短形式：`-T/--trace` 和 `-a`。
 - 当前剩余 `deferred` 暂时放在 trace 输出体验之后处理。
 - 基础 trace 图仍需继续改进：`depends_on` 虚线是否改成靠近目标端的短线，`emits` 事件框标签是否进一步简化，完整图是否分段/折叠/分页，标签是否简化和自动分行，以及布局常量是否暴露为 render 参数。
-- trace 当前只把 `Object.state == State::X` 这类 `depends_on` 展示为 verified state，非状态谓词事实没有显式展示。后续应为关键谓词增加 verified fact 节点或事件摘要，例如 `EarlyVm.Setup` 中的 `fits_in_kernel_image_map(KernelImage, KernelImageMap)`、`slot_contains(FixMap.fdt_slot, RawDtb)`、`kernel_image_mapping_ready(...)` 和 `fixmap_slot_mapping_ready(...)`，避免 SVG 只显示 RawDtb/FixMap 而弱化 KernelImage 映射范围依赖。
+- trace 当前只把 `Object.state == State::X` 这类 `depends_on` 展示为 verified state；关键非状态事实包括 `fits_in_kernel_image_range(KernelImage, virt_range)`、`slot_contains(FixMap.fdt_slot, RawDtb)` 与页表映射 Ready 记录。
 
 #### Step C.2: 统一 Roadmap
 

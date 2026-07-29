@@ -1150,9 +1150,9 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
    描述：准备期输入对象，对物理层面的内存与设备 `I/O` 地址资源布局的抽象。它不是入口前导期建立出来的对象；入口前导期只读取它提供的资源布局约束。后续解析 `dtb`、建立 `memblock` 或管理可分配物理页，属于更高层次对象，不能与本对象混为一谈。
 
-8. `虚拟内存空间`（`VM`）
+8. `内核地址空间`（`KernelAddrSpace`）与控制面（`VM`）
 
-   描述：代表内核虚拟内存空间的抽象。`VM` 包含三个页表子对象：`跳板虚拟内存空间`（`TrampolineVM`）、`早期虚拟内存空间`（`EarlyVM`）与 `交换虚拟内存空间`（`SwapperVM`），分别维护和使用 `静态对象集合.trampoline_pg_dir`、`静态对象集合.early_pg_dir` 与 `静态对象集合.swapper_pg_dir`。内核通过依次切换和使用这些页表，最终建立完整的虚拟内存空间。在入口前导期，只涉及 `TrampolineVM` 与 `EarlyVM`；`SwapperVM` 对应的完整虚拟内存空间由后续阶段继续建立。
+   描述：`KernelAddrSpace` 是唯一的内核地址空间资源，拥有 `KernelImage`、`FixMap`、从 `PAGE_OFFSET` 开始的 `LinearMap` 与 canonical `UserSpaceReserve`。`VM` 仅是控制面协调对象，包含 `PhysicalDirect`、`TrampolineVM`、`EarlyVM` 与 `SwapperVM` 四个共享 translation controller，分别维护无分页模式或使用 `静态对象集合.trampoline_pg_dir`、`静态对象集合.early_pg_dir` 与 `静态对象集合.swapper_pg_dir`。controller 的页表准备状态是全局事实，激活状态由每 CPU 的 `active_translation_owner` 表示。
 
    `跳板虚拟内存空间`（`TrampolineVM`）负责第一次过渡，把当前控制流从物理地址空间带入虚拟地址空间；`早期虚拟内存空间`（`EarlyVM`）负责入口前导期后半段可用的早期内核虚拟地址空间；`交换虚拟内存空间`（`SwapperVM`）负责后续阶段的完整内核虚拟内存空间。
 
@@ -1165,13 +1165,13 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
    * `setup` - 依次启用入口前导期页表子对象
 
      * 初始状态：`VM.preset()` 已完成，`TrampolineVM` 与 `EarlyVM` 均处于可启用状态，当前控制流仍处于物理地址阶段。
-     * 执行动作：依次推进 `TrampolineVM.enable()` 与 `EarlyVM.enable()`。第一步，`TrampolineVM.enable()` 基于 `静态对象集合.trampoline_pg_dir` 完成从物理地址空间到虚拟地址空间的切换；第二步，`EarlyVM.enable()` 借助 `静态对象集合.early_pg_dir` 完成第二次页表切换，扩大虚拟内存空间的管理范围。本过程内部执行 `内核映像.enable()`，在虚拟内存空间中重置 `gp-relative` 寻址方式。
+     * 执行动作：依次调用 `TrampolineVM.TakeOver(CurrentCPU)` 与 `EarlyVM.TakeOver(CurrentCPU)`。第一步基于 `静态对象集合.trampoline_pg_dir` 完成从 PhysicalDirect 到虚拟地址的切换；第二步借助 `静态对象集合.early_pg_dir` 扩大映射范围。本过程内部执行 `内核映像.enable()`，在虚拟内存空间中重置 `gp-relative` 寻址方式。两个 controller 始终保持 Ready，不进入 Online/Destroyed。
      * 结束状态：验证 `RISCV64.satp` 指向 `静态对象集合.early_pg_dir` 对应的早期内核页表，验证当前控制流已经进入早期虚拟地址阶段，验证 `VM` 对后续 `TrapType.setup()`、`根任务.enable()` 与 `根栈.setup()` 可用。
 
    * `enable` - 建立完整虚拟内存空间
 
      * 初始状态：`VM.setup()` 已完成并处于早期虚拟地址阶段，`SwapperVM` 尚未进入完整启用状态。
-     * 执行动作：依次推进 `SwapperVM.setup()` 与 `SwapperVM.enable()`。`SwapperVM.setup()` 初始化 `静态对象集合.swapper_pg_dir` 并建立后续阶段所需的完整内核页表；`SwapperVM.enable()` 基于 `静态对象集合.swapper_pg_dir` 执行页表切换，建立完整的虚拟内存空间。
+     * 执行动作：推进 `SwapperVM.setup()`，发布 `KernelAddrSpace.Online`，再调用 `SwapperVM.TakeOver(CurrentCPU)`。前者初始化 `静态对象集合.swapper_pg_dir` 并建立完整内核页表，后者只原子替换当前 CPU owner。
      * 结束状态：验证 `RISCV64.satp` 指向 `静态对象集合.swapper_pg_dir` 对应的完整内核页表，验证完整虚拟内存空间可用。
      * 当前阶段：本过程不在入口前导期触发。
 
@@ -1185,32 +1185,32 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
      * 执行动作：初始化 `静态对象集合.trampoline_pg_dir`，配合`Config.satp_mode`模式，建立`Config.PMD_SIZE`大小的页表映射区域，支撑从物理地址空间到虚拟地址空间的切换。
      * 结束状态：验证 `静态对象集合.trampoline_pg_dir` 可用于构造临时 `satp` 值，并能够支撑从物理地址空间进入虚拟地址空间的过渡。
 
-   * `enable` - 启用跳板页表
+   * `TakeOver(cpu_ref)` - 由目标 CPU 接管跳板页表
 
      * 初始状态：无。
-     * 执行动作：把 `RISCV64.satp` 切换到 `静态对象集合.trampoline_pg_dir` 对应的临时页表，并执行必要的地址转换同步，使控制流完成第一次过渡。随后触发 `内核映像.enable()`，重置 `gp-relative` 寻址方式。
+     * 执行动作：验证目标 CPU 旧 owner 与 live SATP 一致，把 `RISCV64.satp` 切换到 `静态对象集合.trampoline_pg_dir` 对应的临时页表，执行必要同步并原子替换 owner。
      * 结束状态：验证控制流已经进入可继续执行的虚拟地址位置。
 
    8.2. `早期虚拟内存空间`（`EarlyVM`）
 
    描述：`VM` 的页表子对象，维护并使用 `静态对象集合.early_pg_dir`，用于支撑入口前导期后半段的早期内核虚拟地址空间。空间包括两个虚拟地址区域：完整的内核映像和物理内存中的原始 `dtb`。
 
-   对原始 `dtb` 的头部、完整物理范围以及 `FixMap` 槽位容量检查，属于本规格的前置证明边界。它把固件交接、DTB 有效性和 FDT fixmap 布局这些后续步骤隐含依赖的事实提前收口。Linux 6.12 的 RISC-V 实现中，`setup_vm()` 主要先根据 `dtb_pa` 建立 FDT fixmap 映射并记录 `dtb_early_va/dtb_early_pa`；真正的 FDT header 校验和内容扫描发生在后续 `parse_dtb()` / `early_init_dt_scan()` 路径中。因此这里的验证边界强于 Linux 当前源码顺序，不表示 Linux 在 `setup_vm()` 中逐项执行这些检查。
+   对原始 `dtb` 的入口地址、固定头部可访问性、magic、`total_size` 下限/溢出以及 `FixMap` 槽位容量检查，属于本规格的前置证明边界；完整 blob 可访问性来自 OpenSBI handoff 契约，不伪装成逐字节物理探测。`RawDtb` 不解析 `/memory`、`/cpus` 等节点，这些内容扫描发生在后续 `EarlyDtb` / `DeviceTree` 路径。
 
    * `setup` - 建立早期页表
 
-     * 初始状态：`静态对象集合.early_pg_dir` 物理地址按页对齐；内核映像可装入 `KernelImageMap`；`BootArgs.dtb_pa` 指向的原始 `dtb` 已由规格前置证明确认为有效，且其完整物理范围能放入 `FixMap` 的 FDT 槽位。
+     * 初始状态：`静态对象集合.early_pg_dir` 物理地址按页对齐；内核映像可装入 `KernelImage.virt_range`；`BootArgs.dtb_pa` 指向的原始 `dtb` 已由规格前置证明确认为有效，且其完整物理范围能放入 `FixMap` 的 FDT 槽位。
      * 执行动作：初始化 `静态对象集合.early_pg_dir`，建立入口前导期后续执行所需的完整内核映像映射和 `FixMap` 区域映射，`FixMap` 区域中包括对物理内存中原始 `dtb` 的完整映射。映射要保持与 `satp_mode` 匹配。
      * 结束状态：验证 `静态对象集合.early_pg_dir` 能覆盖入口前导期后续执行所需的完整内核映像范围与通过 FDT fixmap 槽位访问原始 `dtb` 的能力。
 
-   * `enable` - 启用早期页表
+   * `TakeOver(cpu_ref)` - 由目标 CPU 接管早期页表
      * 初始状态：`TrampolineVM.enable()` 已完成，当前控制流已经具备执行第二次页表切换的条件。
      * 执行动作：把 `RISCV64.satp` 切换到 `静态对象集合.early_pg_dir` 对应的早期内核页表，并执行必要的地址转换同步。
      * 结束状态：验证在虚拟内存空间中能够访问完整的内核映像和物理内存中的完整原始 `dtb`。
 
 9. `处理器管理`（`CPUGroup`）
 
-   描述：`片上系统` 的下级子对象，通过 `cpus[logical_id]: CPU` indexed-owned collection 唯一拥有所有 CPU 实例。`BootCPU := CpuGroup.cpus[0]`，其它角色别名同样不得建立独立状态或身份。possible/present/active/online 集合从 CPU 元素状态派生。
+   描述：`Kernel` 的直接子对象，与 `片上系统` 平级；通过 `cpus[logical_id]: CPU` indexed-owned collection 唯一拥有所有 CPU 实例。`BootCPU := CpuGroup.cpus[0]`，其它角色别名同样不得建立独立状态或身份。possible/present/active/online 集合从 CPU 元素状态派生。
 
    * `preset` - 原子建立启动 CPU
 
@@ -1251,12 +1251,12 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 3. 执行 `根流.preset()`，禁止在内核态执行 `FPU` 指令与 `VECTOR` 指令。
 4. 执行 `内核映像.setup()`，清零 `BSS` 段，使内核映像进入早期可运行状态。
 5. `OpenSBI.Enable` 同步驱动 `处理器管理.preset()`，原子创建 `CpuGroup.cpus[0]` 并驱动它进入 `Prepared`；只有该父子发布全部成功后才发送 `Kernel.Enable`。
-6. 执行 `根任务.setup()` 与 `根栈.setup()`，建立物理地址阶段的根任务指针与根栈指针。
+6. 由 `PhysicalDirect.TakeOver(BootCPURef)` 建立 CPU-local owner，再调用 `BootInitFlow.BindBootTaskEntry(CurrentTaskRef)` 与根栈 setup，建立物理地址阶段的根任务指针与根栈指针；首次 action 只初始化一次 preempt count。
 7. 执行 `TrapType.preset()`，设置受控早期处理入口，使 `VM` 建立过程中误入的中断或异常能够进入受控停机路径。
 8. 执行 `虚拟内存空间.preset()`，依次推进 `TrampolineVM.setup()` 与 `EarlyVM.setup()`，初始化 `静态对象集合.trampoline_pg_dir` 与 `静态对象集合.early_pg_dir`，为入口前导期的两次页表切换准备条件。
-9. 执行 `虚拟内存空间.setup()`，依次推进 `TrampolineVM.enable()` 与 `EarlyVM.enable()`：先基于 `静态对象集合.trampoline_pg_dir` 完成从物理地址空间到虚拟地址空间的切换，再借助 `静态对象集合.early_pg_dir` 完成第二次页表切换，扩大虚拟内存空间的管理范围；其中，`内核映像.enable()` 作为 `VM.setup()` 的内部调用，用于在虚拟内存空间重置 `gp-relative` 寻址方式。
+9. 执行 `虚拟内存空间.setup()`，依次调用 `TrampolineVM.TakeOver()` 与 `EarlyVM.TakeOver()`：先完成从物理地址空间到跳板映射的切换，再切到 early page table；其中 `内核映像.enable()` 重置 `gp-relative` 寻址方式。controller 仍保持共享 Ready。
 10. `VM.setup()` 完成后，执行 `TrapType.setup()`，设置正式公共处理入口，使 `RISCV64.stvec` 指向 `formal_event_entry`。
-11. 在 `VM.setup()` 完成后，执行 `根任务.enable()` 与 `根栈.setup()`，分别将 `tp` 与 `sp` 重置为虚拟地址。
+11. 在 `VM.setup()` 完成后，再次调用 `BootInitFlow.BindBootTaskEntry(CurrentTaskRef)` 并执行根栈 setup，分别将 `tp` 与 `sp` 重置为虚拟地址；抢占计数保持首次值。
 12. 执行 `片上系统.preset()`，完成片上系统平台相关的早期预置，并直接提交 `BootInitFlow.Prepared`。
 
 当前时序图主要表达对象过程的编排顺序，不表达逐项源码对应关系。失败时进入 `FAIL` 状态的错误传播方式，以及每一步更细的依赖检查，后续继续补充。
@@ -3788,8 +3788,9 @@ Linux 侧运行命令以 `/home/cloud/gitLKM/linux-6.12/start.sh` 为准：QEMU 
 `LinuxRiscv64KernelBootSpec`、`Config`、`Lds.parent = Kernel`。只读的
 `LinuxRiscv64KernelBootSpec` 提供 a0/a1、satp=0 和 RV64 物理 PMD/2 MiB 装载对齐要求；Kernel.Preset
 只采纳这些规范要求。Config/Lds 是构建时输入，完整模型初态为 Ready；Kernel.Setup 依次驱动
-Config.Enable 和 Lds.Enable，后者依赖已经 Online 的 Config，然后分别证明 ELF 链接与 boot Image
-文件构造，两项叶事实共同推出 `kernel_image_file_constructed`；Kernel.Ready 不包含物理装载事实。
+Config.Enable 和 Lds.Enable，后者依赖已经 Online 的 Config，然后分别证明 kernel ELF 与 kernel
+boot artifact 的构建，两项叶事实共同推出 `kernel_boot_artifact_constructed`；`KernelImageFile`
+只保留为未来文件对象名称，本轮不创建；Kernel.Ready 不包含物理装载事实。
 `Riscv64` 只保存外部 ISA 能力。boot CPU 天然存在且可访问的
 启动相关 GPR/CSR 子集由初态 `Online` 的 `BootCpuRegisters` 表示，其 parent 是 `BootCPU`；它不是
 平台构造产物，也不推广为所有 `CPUObject` 的通用寄存器文件。`BootArgs` 是

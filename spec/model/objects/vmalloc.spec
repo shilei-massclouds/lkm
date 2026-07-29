@@ -141,7 +141,9 @@ type VmallocAllocatorType: MemoryObject {
             state_effect: StateEffect::None;
             depends_on {
                 self.state == State::Ready;
-                SwapperVm.state == State::Online;
+                SwapperVm.state == State::Ready;
+                KernelAddrSpace.state == State::Online;
+                Vm.state == State::Online;
                 PageTableCaches.state == State::Ready;
                 PageAllocator.state == State::Ready;
                 vmalloc_allocator_page_range_mapping_api_ready(self);
@@ -182,7 +184,9 @@ type VmallocAllocatorType: MemoryObject {
             state_effect: StateEffect::None;
             depends_on {
                 self.state == State::Ready;
-                SwapperVm.state == State::Online;
+                SwapperVm.state == State::Ready;
+                KernelAddrSpace.state == State::Online;
+                Vm.state == State::Online;
                 PageTableCaches.state == State::Ready;
                 vmalloc_allocator_page_range_mapping_api_ready(self);
                 vmalloc_allocator_executes_page_table_mappings(self, SwapperVm);

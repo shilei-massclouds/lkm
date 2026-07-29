@@ -2,6 +2,12 @@ mod preset;
 mod rest_init;
 mod schedule_handoff;
 
+#[cfg(app_smoke)]
+pub(crate) use preset::{
+    boot_task_entry_bind_count, boot_task_entry_bind_diagnostic,
+    boot_task_entry_preemption_initialized,
+};
+
 use crate::{
     checkpoint::Checkpoint,
     objects::{

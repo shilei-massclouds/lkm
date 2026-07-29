@@ -534,13 +534,23 @@ object ApEntryPreludePhase: PhaseObject {
                     task_authority_activated_by_hsm(ApIdleTask);
                     ap_idle_flow_hsm_startup_keyed(ApIdleFlow);
                     CpuGroup.state == State::Ready;
-                    SwapperVm.state == State::Online;
+                    Vm.state == State::Online;
+                    KernelAddrSpace.state == State::Online;
+                    PhysicalDirect.state == State::Ready;
+                    TrampolineVm.state == State::Ready;
+                    SwapperVm.state == State::Ready;
                     CurrentCPU.trap.state == State::Ready;
                     CurrentCPU.trap.exception.state == State::Ready;
                     sbi_hsm_hart_start_requests_issued(CpuStartProvider, CpuGroup);
                     sbi_hart_boot_data_per_secondary_cpu(CpuStartProvider, CpuGroup);
                     secondary_idle_task_per_secondary_cpu(CpuGroup);
                     secondary_cpus_present_but_not_online(CpuGroup);
+                }
+
+                drives {
+                    PhysicalDirect.Action::TakeOver(ApCPURef);
+                    TrampolineVm.Action::TakeOver(ApCPURef);
+                    SwapperVm.Action::TakeOver(ApCPURef);
                 }
 
                 ensures {
@@ -554,6 +564,10 @@ object ApEntryPreludePhase: PhaseObject {
                     ap_kernel_fpu_vector_disabled(CpuGroup);
                     ap_interrupts_masked_on_entry(CpuGroup);
                     ap_switches_to_swapper_vm(SwapperVm);
+                    cpu_active_translation_owner_for_ref_is(
+                        ApCPURef,
+                        TranslationOwnerKind::SwapperVm
+                    );
                     ap_formal_trap_entry_installed(CurrentCPU.trap, CurrentCPU.trap.exception);
                     ap_entry_boot_data_logical_id_matches_target(CpuGroup);
                     ap_entry_boot_data_stack_pointer_matches_target(

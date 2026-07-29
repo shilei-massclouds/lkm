@@ -743,7 +743,7 @@ class SignalAnimationTests(unittest.TestCase):
         ]
         self.assertEqual(stable_states, ["Base", "Prepared", "Ready", "Online"])
 
-    def test_boot_init_setup_boundary_has_48_signals_and_96_causal_moments(self) -> None:
+    def test_boot_init_setup_boundary_has_52_signals_and_104_causal_moments(self) -> None:
         work = self.root / "boot-init-setup-boundary-work"
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(
@@ -771,17 +771,17 @@ class SignalAnimationTests(unittest.TestCase):
                 derivation["model_fingerprint"],
                 view["model_fingerprint"],
             },
-            {"sha256:1f32e8114fb887125633bdc5278b3ab58556c0f1a6f192a27c6915c51c2063d3"},
+            {"sha256:0e4bf79545ade8d19ac7b3795de0a802698593251776125f0d8bd27b2ef955e1"},
         )
         animation = build_animation(model, view)
-        self.assertEqual(animation["trace"]["total_signals"], 48)
-        self.assertEqual(animation["trace"]["total_moments"], 96)
+        self.assertEqual(animation["trace"]["total_signals"], 52)
+        self.assertEqual(animation["trace"]["total_moments"], 104)
         self.assertEqual(
             {
                 kind: sum(moment["kind"] == kind for moment in animation["moments"])
                 for kind in ("request", "feedback", "settle", "terminal")
             },
-            {"request": 48, "feedback": 44, "settle": 3, "terminal": 1},
+            {"request": 52, "feedback": 48, "settle": 3, "terminal": 1},
         )
         self.assertEqual(
             [moment["id"] for moment in animation["moments"] if moment["kind"] == "settle"],
@@ -819,8 +819,8 @@ class SignalAnimationTests(unittest.TestCase):
             moment["id"]: index for index, moment in enumerate(animation["moments"])
         }
         self.assertGreater(
-            moment_index["sig-0019:feedback"],
-            max(moment_index[f"sig-{index:04d}:feedback"] for index in range(20, 49)),
+            moment_index["sig-0020:feedback"],
+            max(moment_index[f"sig-{index:04d}:feedback"] for index in range(21, 53)),
         )
         self.assertEqual(
             animation["trace"]["boundary"]["normalized_signal"],
@@ -832,7 +832,7 @@ class SignalAnimationTests(unittest.TestCase):
                 for moment in animation["moments"]
             )
         )
-        feedback_index = moment_index["sig-0019:feedback"]
+        feedback_index = moment_index["sig-0020:feedback"]
         feedback_frame = animation["frames"][feedback_index]
         self.assertEqual(
             next(

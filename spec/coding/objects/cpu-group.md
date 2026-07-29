@@ -1,6 +1,8 @@
 # CpuGroup coding contract
 
-`Context` owns one `CpuGroup`; it does not store a separate boot/current CPU or secondary CPU store.
+`CpuGroup` is a direct child of `Kernel`, alongside `Soc`; required boot ordering between them is an explicit
+signal/guard dependency and never structural ownership. `Context` owns one `CpuGroup`; it does not store a
+separate boot/current CPU or secondary CPU store.
 `CpuGroup` owns `[Option<Cpu>; MAX_CPUS]`, which is the only authoritative CPU collection.
 
 Creating an indexed element is a parent operation. It validates the logical-ID key, bounds, duplicate slot,

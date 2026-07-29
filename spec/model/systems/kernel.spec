@@ -13,11 +13,11 @@ predicate linux_riscv64_kernel_a1_dtb_pa_required() -> bool;
 predicate linux_riscv64_kernel_satp_zero_required() -> bool;
 predicate linux_riscv64_kernel_pmd_aligned_load_required<S>(pmd_size: S) -> bool;
 predicate kernel_elf_linked_from_config_and_lds<C, L>(config: C, lds: L) -> bool;
-predicate kernel_boot_image_constructed_from_elf<C, L>(config: C, lds: L) -> bool;
+predicate kernel_boot_artifact_constructed_from_elf<C, L>(config: C, lds: L) -> bool;
 
-predicate kernel_image_file_constructed() -> bool {
+predicate kernel_boot_artifact_constructed() -> bool {
     kernel_elf_linked_from_config_and_lds(Config, Lds);
-    kernel_boot_image_constructed_from_elf(Config, Lds);
+    kernel_boot_artifact_constructed_from_elf(Config, Lds);
 }
 
 predicate kernel_image_loaded_for_handoff_at<A>(kernel_load_pa: A) -> bool;
@@ -294,8 +294,8 @@ object Kernel: KernelObject {
                     Config.state == State::Online;
                     Lds.state == State::Online;
                     kernel_elf_linked_from_config_and_lds(Config, Lds);
-                    kernel_boot_image_constructed_from_elf(Config, Lds);
-                    kernel_image_file_constructed();
+                    kernel_boot_artifact_constructed_from_elf(Config, Lds);
+                    kernel_boot_artifact_constructed();
                     kernel_enable_accept_available(self);
                 }
             }
@@ -310,8 +310,8 @@ object Kernel: KernelObject {
             kernel_system_spec_established();
             linux_riscv64_kernel_boot_spec_adopted();
             kernel_elf_linked_from_config_and_lds(Config, Lds);
-            kernel_boot_image_constructed_from_elf(Config, Lds);
-            kernel_image_file_constructed();
+            kernel_boot_artifact_constructed_from_elf(Config, Lds);
+            kernel_boot_artifact_constructed();
             kernel_enable_accept_available(self);
         }
 
@@ -342,8 +342,8 @@ object Kernel: KernelObject {
                     Lds.state == State::Online;
                     Config.state == State::Online;
                     kernel_elf_linked_from_config_and_lds(Config, Lds);
-                    kernel_boot_image_constructed_from_elf(Config, Lds);
-                    kernel_image_file_constructed();
+                    kernel_boot_artifact_constructed_from_elf(Config, Lds);
+                    kernel_boot_artifact_constructed();
                     kernel_image_loaded_for_handoff_at(OpenSBI.kernel_load_pa);
                     kernel_image_load_pmd_aligned(
                         OpenSBI.kernel_load_pa,
@@ -358,6 +358,7 @@ object Kernel: KernelObject {
                 drives {
                     Kernel.Action::AcceptEnable;
                     BootInitFlow.Action::AssignCpuRef(BootCPURef);
+                    PhysicalDirect.Action::TakeOver(BootCPURef);
                     BootInitFlow.Transition::Preset;
                     BootInitFlow.Transition::Setup;
                     BootInitFlow.Transition::Enable;
@@ -400,8 +401,8 @@ object Kernel: KernelObject {
             Config.state == State::Online;
             Lds.state == State::Online;
             kernel_elf_linked_from_config_and_lds(Config, Lds);
-            kernel_boot_image_constructed_from_elf(Config, Lds);
-            kernel_image_file_constructed();
+            kernel_boot_artifact_constructed_from_elf(Config, Lds);
+            kernel_boot_artifact_constructed();
             kernel_image_loaded_for_handoff_at(OpenSBI.kernel_load_pa);
             kernel_image_load_pmd_aligned(
                 OpenSBI.kernel_load_pa,

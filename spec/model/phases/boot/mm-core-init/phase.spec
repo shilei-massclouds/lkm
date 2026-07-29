@@ -1144,7 +1144,8 @@ object PageTableCaches: MemoryObject {
                     PageAllocator.state == State::Ready;
                     PageMetadataMap.state == State::Ready;
                     Config.state == State::Online;
-                    SwapperVm.state == State::Online;
+                    SwapperVm.state == State::Ready;
+                    KernelAddrSpace.state == State::Online;
                     Vm.state == State::Online;
                 }
 
@@ -1512,7 +1513,9 @@ object Ioremap: AddressSpaceObject {
         transitions {
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    SwapperVm.state == State::Online;
+                    SwapperVm.state == State::Ready;
+                    KernelAddrSpace.state == State::Online;
+                    Vm.state == State::Online;
                     VmallocAllocator.state == State::Ready;
                     VmapAddressSpace.state == State::Ready;
                     PageTableCaches.state == State::Ready;
@@ -1751,7 +1754,8 @@ object MmCoreInitPhase: PhaseObject {
                     PrintkBuffer.state == State::Ready;
                     StaticBranch.state == State::Ready;
                     Vm.state == State::Online;
-                    SwapperVm.state == State::Online;
+                    SwapperVm.state == State::Ready;
+                    KernelAddrSpace.state == State::Online;
                 }
 
                 drives {

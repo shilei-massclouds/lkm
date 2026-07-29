@@ -93,17 +93,18 @@ Linux 6.12 `Documentation/arch/riscv/boot.rst` 与当前 RV64 Image contract 提
 
 * OnSetup：由 `Computer.Setup` 同步驱动。先同步发送 `Config.Enable`，再同步发送 `Lds.Enable`；Lds
   必须依赖已经 Online 的 Config。随后在 Kernel.Prepared 内消费已采纳的
-  `LinuxRiscv64KernelBootSpec`，分别证明 ELF 已按 Config/Lds 链接、boot Image 文件已由 ELF 构造；
-  两项叶事实共同推出汇总 `kernel_image_file_constructed`。Setup 不选择装载物理地址，也不声称 Image
+  `LinuxRiscv64KernelBootSpec`，分别证明 kernel ELF 已按 Config/Lds 构建、kernel boot artifact 已由 ELF 构建；
+  两项叶事实共同推出汇总 `kernel_boot_artifact_constructed`。`KernelImageFile` 是未来文件对象的
+  保留名称，本轮不创建其类型、实例或生命周期。Setup 不选择装载物理地址，也不声称 `KernelImage`
   已经放置到待启动内存。Config 与 Lds 的完整模型初态都是 Ready：Enable 只验证、发布构建输入，
   不代表运行期初始化。
 
-* Ready：Linux/RISC-V64 boot 规格已经采纳，ELF 与 boot Image 文件构造事实成立，Config/Lds 已
+* Ready：Linux/RISC-V64 boot 规格已经采纳，kernel ELF 与 boot artifact 构造事实成立，Config/Lds 已
   Online，OpenSBI 即将建立装载和交接事实；Kernel 尚未启动，可以接受固件发出的 Enable。Ready
   不表示映像字节已经位于某个待启动物理地址。
 
 * OnEnable：只接受 OpenSBI 的真实入口交接。必须验证 `Riscv64Platform`、`OpenSBI`、`Riscv64`、
-  `SbiSpec`、`BootArgs`、`LinuxRiscv64KernelBootSpec`、Config/Lds、kernel image 文件构造事实，以及
+  `SbiSpec`、`BootArgs`、`LinuxRiscv64KernelBootSpec`、Config/Lds、kernel boot artifact 构造事实，以及
   OpenSBI 为其 `kernel_load_pa` 保持的“映像已装载待交接”和 PMD 对齐事实，
   以及 OpenSBI Enable 已原子发布 Prepared 的 `CpuGroup` 与 `CpuGroup.cpus[0]`，
   确认静态 `BootTask` 与入口 ABI，并精确检查
@@ -137,6 +138,18 @@ Online 后由仍在执行的 Kernel.Enable 驱动 `Scheduler.Action::Schedule`�
 `KernelImage.Preset` 在真实入口位置建立 `KernelImage.phys_start`，并核对该值等于
 `OpenSBI.kernel_load_pa`。设计期 linker symbol `Lds.kernel_start` 仍描述 ELF 入口和布局，但
 `phys_addr(Lds.kernel_start)` 不得再被当作映像物理装载地址。
+
+`Kernel` 直接拥有平级的 `KernelAddrSpace`、`Vm`、`Soc` 与 `CpuGroup`。`KernelAddrSpace` 是唯一
+地址空间资源，拥有 `KernelImage`、`FixMap`、`LinearMap` 与 `UserSpaceReserve` 四个区域；
+`RawDtb` 仍是固件物理 blob，通过 FixMap 临时映射。`Vm` 是控制面协调对象，拥有共享的
+`PhysicalDirect`、`TrampolineVm`、`EarlyVm` 与 `SwapperVm` controller。controller 的 Ready 是全局
+事实，当前激活 controller 由每 CPU `active_translation_owner` 表达。BP 按 PhysicalDirect →
+TrampolineVm → EarlyVm → SwapperVm 接管，AP 按 PhysicalDirect → TrampolineVm → SwapperVm 接管；
+旧 controller 不 Cleanup/Destroyed，静态页表保持 Ready。
+
+`BootInitFlow.Action::BindBootTaskEntry(CurrentTaskRef)` 在 PhysicalDirect 和 EarlyVm 接管后各调用一次。
+首次调用只初始化一次入口 preempt count，第二次只把同一 carrier 的 `tp` 改为虚拟地址并保持计数；
+TrampolineVm、owner 缺失或 owner/live SATP 不一致必须诊断并 fail-stop。
 
 首次调度真实切换先通过 CurrentTask 选择器确认 BootTask，随后提交 context-switch prepare 事实并
 完成物理栈切换；next 栈上的 finish 原子保存/发布 BootTask 断点、消费 KernelInitTask 断点、提交

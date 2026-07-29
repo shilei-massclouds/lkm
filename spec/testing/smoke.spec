@@ -406,6 +406,18 @@ type SmokeTestGenerationMust {
         testing_cpu_group_smoke_must_cover_unique_logical_ids_and_hartids();
 
         /*
+         * Per-CPU translation ownership:
+         *
+         * CpuGroup smoke coverage must observe the live owner and final
+         * takeover trace independently for every CPU. The boot CPU reaches
+         * SwapperVm from EarlyVm, while APs reach it from TrampolineVm; every
+         * trace must record the installed SATP and completed synchronization.
+         */
+        testing_cpu_group_smoke_must_cover_per_cpu_translation_owner();
+        testing_cpu_group_smoke_must_cover_bp_and_ap_takeover_paths();
+        testing_cpu_group_smoke_must_cover_translation_takeover_trace();
+
+        /*
          * KUnit default:
          *
          * TypeBehavior smoke cases must not be registered as checkpoint KUnit

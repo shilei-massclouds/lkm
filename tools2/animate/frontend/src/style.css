@@ -88,10 +88,12 @@ dd {
   color: #68766e;
   background: linear-gradient(135deg, #f0f5f1, #e5ece7);
   scroll-behavior: smooth;
+  scrollbar-gutter: stable;
   overscroll-behavior: contain;
 }
 .frame-forest {
   display: flex;
+  align-self: start;
   inline-size: max-content;
   min-inline-size: 100%;
   min-block-size: 100%;
@@ -101,10 +103,10 @@ dd {
   justify-content: flex-start;
 }
 .layout-row { flex-direction: row; align-items: flex-end; }
-.layout-up { flex-direction: column-reverse; align-items: flex-start; }
+.layout-up { flex-direction: column; align-items: flex-start; }
 .node-card {
   display: flex;
-  flex-direction: column-reverse;
+  flex-direction: column;
   inline-size: max-content;
   min-inline-size: 0;
   gap: var(--content-gap);
@@ -116,6 +118,8 @@ dd {
   background: #fff;
   box-shadow: 0 .6rem 1.5rem rgb(24 42 32 / 10%);
 }
+.node-card > .node-identity { order: 2; }
+.node-card > .node-children { order: 1; }
 .node-identity {
   display: flex;
   inline-size: clamp(11rem, 16cqi, 15rem);
@@ -249,7 +253,7 @@ dd {
   .node-card.state-online { border-color: #eef4f0; }
   .node-card.structural { color: #9eaba3; border-color: #63736a; background: transparent; }
   .node-card.external { border-color: #6d9d7e; background: #203529; }
-  .node-children { border-top-color: #3a4a41; }
+  .node-children { border-bottom-color: #3a4a41; }
   .signal-overlay text { stroke: #17211c; fill: #93d4ab; }
   .transport button:disabled { color: #738078; border-color: #34463b; background: #223029; }
   .step-copy { border-color: #34463b; background: #1d2a23; }
@@ -262,18 +266,18 @@ dd {
 }
 
 @media (max-width: 48rem) {
-  body { block-size: auto; min-block-size: 100dvh; overflow-x: hidden; overflow-y: auto; }
-  #lkm-signal-player { block-size: auto; overflow: visible; }
+  body { block-size: 100dvh; min-block-size: 0; overflow: hidden; }
+  #lkm-signal-player { block-size: 100%; overflow: hidden; }
   .player-shell {
-    grid-template-rows: auto auto auto;
-    block-size: auto;
-    min-block-size: calc(100dvh - 2 * var(--page-gap));
-    overflow: visible;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    block-size: calc(100dvh - 2 * var(--page-gap));
+    min-block-size: 0;
+    overflow: hidden;
   }
   .trace-header { flex-direction: column; }
   .trace-heading { inline-size: 100%; flex-direction: row; align-items: baseline; }
   .trace-meta { inline-size: 100%; justify-content: flex-start; }
-  .stage { block-size: clamp(26rem, 62dvh, 38rem); }
+  .stage { min-block-size: 0; }
   .transport { grid-template-columns: 1fr 1fr; }
   .step-copy { grid-column: 1 / -1; grid-row: 1; }
   .transport button { inline-size: 100%; }

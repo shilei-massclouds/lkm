@@ -24,6 +24,11 @@
     return level % 2 === 1 ? 'row' : 'up';
   }
 
+  function visualChildren(parent: string, level: number) {
+    const children = childrenOf(parent);
+    return layoutFor(level) === 'up' ? [...children].reverse() : children;
+  }
+
   function displayNode(id: string) {
     const node = nodes.get(id);
     if (
@@ -48,9 +53,9 @@
       outcome={activeMoment?.outcome || 'completed'}
       effectPhase={phase}
     >
-      {@const childIds = childrenOf(id)}
+      {@const childLevel = level + 1}
+      {@const childIds = visualChildren(id, childLevel)}
       {#if childIds.length}
-        {@const childLevel = level + 1}
         <div
           class="node-children layout-{layoutFor(childLevel)}"
           data-children-of={id}

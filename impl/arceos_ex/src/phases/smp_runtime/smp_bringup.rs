@@ -332,7 +332,8 @@ fn publish_ap_prerequisites(ctx: &Context) -> EventResult {
         && ctx.sbi_ipi.state() == State::Ready
         && ctx.init_mm.state() == State::Ready
         && ctx.vm.state() == State::Online
-        && ctx.vm.swapper_vm().state() == State::Online
+        && ctx.kernel_addr_space.state() == State::Online
+        && ctx.vm.swapper_vm().state() == State::Ready
         && ctx.boot_cpu_trap().state() == State::Ready
         && ctx.boot_cpu_exception().state() == State::Ready;
     if !ready {

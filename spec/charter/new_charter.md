@@ -123,7 +123,7 @@ Computer.Enable；Computer 的三个 handler 不相互触发。子 System 规格
 
 `Config` 与 `Lds` 是 Kernel 的构建时静态输入，完整模型初态为 Ready。`Kernel.Preset` 建立 Kernel
 系统规格并提交 Prepared；Setup 先驱动 Config.Enable，再驱动依赖 Config.Online 的 Lds.Enable，随后
-只建立 ELF 与 boot Image 文件构造事实并提交 Ready。OpenSBI.Enable 选择 `kernel_load_pa`，保证 Image
+只建立 kernel ELF 与 boot artifact 构造事实并提交 Ready。OpenSBI.Enable 选择 `kernel_load_pa`，保证 Image
 已装载待交接且地址满足 PMD 对齐，再通过 Kernel.Enable 交接真实入口；Kernel 验证上游和入口 ABI，
 在 Ready 内顺序驱动 BootInitFlow、首次调度和 KernelInitFlow 直至
 `PayloadHandoffPreparePhase.Online`，再提交 Online 并异步发送 `CommitPayloadHandoff`。
@@ -131,7 +131,7 @@ Computer.Enable；Computer 的三个 handler 不相互触发。子 System 规格
 > MUST[model]：Kernel 构造与启动模型
 >
 > 1. Kernel.Preset/Setup 只由 Computer 的同名迁移同步驱动
-> 2. Kernel.Setup 按 Config.Enable、Lds.Enable 顺序发布输入，只完成 image 文件构造后为 Ready
+> 2. Kernel.Setup 按 Config.Enable、Lds.Enable 顺序发布输入，只完成 kernel boot artifact 构造后为 Ready
 > 3. Kernel.Enable 只接受真实 OpenSBI 交接，应用环境准备完成后提交 Online，并且只由该提交发送 payload handoff
 
 ### 内核系统模型 - 本项目核心模型
@@ -200,10 +200,12 @@ lifecycle，也不产生第二次 Kernel Enable 接受。
 
 ### BootInitFlow.Preset 的入口前导步骤
 
-`BootInitFlow.Preset` 拥有入口期的 `BootTaskEntryBinding` 协调协议。它按“物理 `tp` binding →
-VM setup → 虚拟 `tp` binding”建立调度器运行前的初始抢占关闭条件。binding 不是 Task、TaskRef
-或 Flow，不改变 PID 0 identity。`BootTask` 在入口前已经由静态初始化器构造为 OnCpu；本步骤只
-验证其稳定 storage、PID 0、`TaskRef::BOOT` 和 canonical identity。
+`BootInitFlow.Preset` 通过可重复调用的 `Action::BindBootTaskEntry(CurrentTaskRef)` 按“PhysicalDirect
+下物理 `tp` binding → VM controller takeover → EarlyVm 下虚拟 `tp` binding”建立调度器运行前的
+初始抢占关闭条件。首次物理调用初始化一次 preempt count；后续虚拟调用保持该计数。该 action 不是
+Task、TaskRef、Flow 或独立 lifecycle，不改变 PID 0 identity。`BootTask` 在入口前已经由静态初始化器
+构造为 OnCpu；本步骤只验证其稳定 storage、PID 0、`TaskRef::BOOT`、canonical identity、当前 CPU
+translation owner 与 live SATP。
 
 ### BootInitFlow 的引导叶子
 

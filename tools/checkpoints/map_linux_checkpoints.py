@@ -642,13 +642,13 @@ def default_mapping_rules() -> dict[str, MappingRule]:
             confidence="medium",
             notes="RISC-V64 setup_vm() trampoline page-table construction interval.",
         ),
-        "TrampolineVm.Online": MappingRule(
+        "TrampolineVm.TakeOver": MappingRule(
             mapping_kind="exact",
             linux_file="arch/riscv/kernel/head.S",
             linux_symbol="relocate_enable_mmu",
             anchor_pattern=r"^[ \t]*csrw[ \t]+CSR_SATP,\s*a0\b",
             confidence="high",
-            notes="RISC-V64 relocate_enable_mmu loads the trampoline page directory into satp.",
+            notes="RISC-V64 relocate_enable_mmu transfers this CPU to the trampoline page directory.",
         ),
         "RawDtb.Prepared": MappingRule(
             mapping_kind="exact",
@@ -692,13 +692,13 @@ def default_mapping_rules() -> dict[str, MappingRule]:
             confidence="high",
             notes="RISC-V64 setup_vm() constructs the early kernel page table.",
         ),
-        "EarlyVm.Online": MappingRule(
+        "EarlyVm.TakeOver": MappingRule(
             mapping_kind="exact",
             linux_file="arch/riscv/kernel/head.S",
             linux_symbol="relocate_enable_mmu",
             anchor_pattern=r"^[ \t]*csrw[ \t]+CSR_SATP,\s*a2\b",
             confidence="high",
-            notes="RISC-V64 relocate_enable_mmu switches from trampoline mappings to the early kernel page table.",
+            notes="RISC-V64 relocate_enable_mmu transfers this CPU from trampoline mappings to the early kernel page table.",
         ),
         "Kernel.Started": MappingRule(
             mapping_kind="exact",

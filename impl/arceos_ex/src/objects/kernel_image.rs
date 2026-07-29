@@ -39,6 +39,12 @@ impl KernelImage {
         self.virt_offset
     }
 
+    pub fn loaded_virt_range(&self, lds: &Lds) -> Option<(usize, usize)> {
+        let start = self.runtime_to_link(lds.kernel_start())?;
+        let end = self.runtime_to_link(lds.kernel_end())?;
+        (start < end).then_some((start, end))
+    }
+
     pub fn link_to_phys(&self, addr: usize) -> Option<usize> {
         addr.checked_sub(self.virt_offset)
     }

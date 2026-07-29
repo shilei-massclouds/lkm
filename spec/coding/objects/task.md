@@ -62,9 +62,13 @@ provider、CPU pin 或 global reference publication 不得写入这些通用方�
 
 `BootTask` 使用 boot-only const initializer 直接构造 OnCpu/Live/Invalid `init_task_storage` 和固定
 `TaskRef::BOOT`；不得复用普通 Task lifecycle 方法，也不得暴露 `preset/setup/enable` 或兼容 alias。
-早期 `tp` 物理/虚拟地址模式与初始 preemption 事实由 EntryPrelude 私有
-`BootTaskEntryBinding` lower；OnCpu 初态只由固件/架构入口执行权事实建立，不依赖尚未建立的 runqueue
-或 runqueue current。各阶段只能静默验证该 carrier 仍为 OnCpu/canonical。
+早期 `tp` 物理/虚拟地址模式与初始 preemption 事实由可重复调用的
+`BootInitFlow::bind_boot_task_entry(TaskRef::BOOT)` lower；不创建 entry-binding object、lifecycle、
+兼容名称或 snapshot state。`PhysicalDirect` owner 下首次调用绑定物理 carrier 并仅初始化一次入口
+preempt count；`EarlyVm`/`SwapperVm` owner 下绑定同一 carrier 的虚拟地址且保持计数。
+`TrampolineVm`、owner 缺失、owner/live SATP 不一致、错误 ref/carrier 必须在修改 `tp` 前记录诊断并
+fail-stop。OnCpu 初态只由固件/架构入口执行权事实建立，不依赖尚未建立的 runqueue 或 runqueue current；
+各阶段只能静默验证该 carrier 仍为 OnCpu/canonical。
 
 ## TaskRef 与 storage
 

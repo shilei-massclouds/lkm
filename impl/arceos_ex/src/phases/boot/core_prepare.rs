@@ -36,7 +36,8 @@ fn preset_start(ctx: &Context) -> EventResult {
 fn preset_dependencies_ready(ctx: &Context) -> bool {
     crate::phases::boot::entry_successor::is_online()
         && ctx.vm.state() == State::Online
-        && ctx.vm.swapper_vm().state() == State::Online
+        && ctx.kernel_addr_space.state() == State::Online
+        && ctx.vm.swapper_vm().state() == State::Ready
         && ctx.memblock.state() == State::Online
         && ctx.params.state() == State::Prepared
         && ctx.early_param.state() == State::Ready

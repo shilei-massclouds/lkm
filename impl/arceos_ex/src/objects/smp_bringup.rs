@@ -2,7 +2,7 @@ use core::arch::global_asm;
 use core::sync::atomic::Ordering;
 
 use super::{
-    cpu::MAX_CPUS,
+    cpu::{MAX_CPUS, TranslationOwner},
     cpu_control::RawSpinLock,
     cpu_group::CpuGroup,
     interrupt_type::InterruptType,
@@ -31,13 +31,16 @@ const AP_STACK_SIZE: usize = 16 * 1024;
 const SSTATUS_FPU_VECTOR_MASK: usize = (0b11 << 9) | (0b11 << 13);
 const AP_BOOT_DATA_TASK_PTR_OFFSET: usize = 0;
 const AP_BOOT_DATA_STACK_PTR_OFFSET: usize = 8;
-const AP_BOOT_DATA_SATP_OFFSET: usize = 32;
-const AP_BOOT_DATA_GP_OFFSET: usize = 40;
-const AP_BOOT_DATA_RUST_ENTRY_OFFSET: usize = 48;
-const AP_BOOT_DATA_VIRT_OFFSET: usize = 56;
-const AP_BOOT_DATA_KERNEL_VIRT_OFFSET_OFFSET: usize = 64;
-const AP_BOOT_DATA_ENTRY_CONTEXT_OFFSET: usize = 72;
-const AP_BOOT_DATA_FORMAL_ENTRY_OFFSET: usize = 80;
+const AP_BOOT_DATA_TRAMPOLINE_SATP_OFFSET: usize = 32;
+const AP_BOOT_DATA_SWAPPER_SATP_OFFSET: usize = 40;
+const AP_BOOT_DATA_OWNER_PHYS_OFFSET: usize = 48;
+const AP_BOOT_DATA_OWNER_VIRT_OFFSET: usize = 56;
+const AP_BOOT_DATA_GP_OFFSET: usize = 64;
+const AP_BOOT_DATA_RUST_ENTRY_OFFSET: usize = 72;
+const AP_BOOT_DATA_VIRT_OFFSET: usize = 80;
+const AP_BOOT_DATA_KERNEL_VIRT_OFFSET_OFFSET: usize = 88;
+const AP_BOOT_DATA_ENTRY_CONTEXT_OFFSET: usize = 96;
+const AP_BOOT_DATA_FORMAL_ENTRY_OFFSET: usize = 104;
 
 #[repr(C, align(64))]
 struct SbiHartBootData {
@@ -45,7 +48,10 @@ struct SbiHartBootData {
     stack_ptr: usize,
     logical_id: usize,
     hartid: usize,
-    satp: usize,
+    trampoline_satp: usize,
+    swapper_satp: usize,
+    translation_owner_phys: usize,
+    translation_owner_virt: usize,
     gp: usize,
     rust_entry: usize,
     boot_data_virt: usize,
@@ -57,7 +63,21 @@ struct SbiHartBootData {
 const _: () = {
     assert!(core::mem::offset_of!(SbiHartBootData, task_ptr) == AP_BOOT_DATA_TASK_PTR_OFFSET);
     assert!(core::mem::offset_of!(SbiHartBootData, stack_ptr) == AP_BOOT_DATA_STACK_PTR_OFFSET);
-    assert!(core::mem::offset_of!(SbiHartBootData, satp) == AP_BOOT_DATA_SATP_OFFSET);
+    assert!(
+        core::mem::offset_of!(SbiHartBootData, trampoline_satp)
+            == AP_BOOT_DATA_TRAMPOLINE_SATP_OFFSET
+    );
+    assert!(
+        core::mem::offset_of!(SbiHartBootData, swapper_satp) == AP_BOOT_DATA_SWAPPER_SATP_OFFSET
+    );
+    assert!(
+        core::mem::offset_of!(SbiHartBootData, translation_owner_phys)
+            == AP_BOOT_DATA_OWNER_PHYS_OFFSET
+    );
+    assert!(
+        core::mem::offset_of!(SbiHartBootData, translation_owner_virt)
+            == AP_BOOT_DATA_OWNER_VIRT_OFFSET
+    );
     assert!(core::mem::offset_of!(SbiHartBootData, gp) == AP_BOOT_DATA_GP_OFFSET);
     assert!(core::mem::offset_of!(SbiHartBootData, rust_entry) == AP_BOOT_DATA_RUST_ENTRY_OFFSET);
     assert!(core::mem::offset_of!(SbiHartBootData, boot_data_virt) == AP_BOOT_DATA_VIRT_OFFSET);
@@ -80,7 +100,10 @@ impl SbiHartBootData {
             stack_ptr: 0,
             logical_id: usize::MAX,
             hartid: usize::MAX,
-            satp: 0,
+            trampoline_satp: 0,
+            swapper_satp: 0,
+            translation_owner_phys: 0,
+            translation_owner_virt: 0,
             gp: 0,
             rust_entry: 0,
             boot_data_virt: 0,
@@ -226,8 +249,8 @@ arceos_ex_secondary_start_sbi:
     /*
      * SBI HSM enters with a0 = hartid and a1 = opaque boot-data PA.
      * The AP consumes boot data while translation is off, switches to the
-     * already-built swapper page table, then calls the Rust AP bringup entry
-     * using virtual addresses.
+     * shared PhysicalDirect -> TrampolineVm -> SwapperVm chain, then calls
+     * the Rust AP bringup entry using virtual addresses.
      */
     csrw    sie, zero
     csrw    sip, zero
@@ -237,26 +260,39 @@ arceos_ex_secondary_start_sbi:
     mv      s0, a1
     ld      tp, {task_ptr_offset}(s0)
     ld      sp, {stack_ptr_offset}(s0)
-    ld      t1, {satp_offset}(s0)
-    ld      t2, {gp_offset}(s0)
-    ld      t3, {rust_entry_offset}(s0)
-    ld      t4, {boot_data_virt_offset}(s0)
-    ld      t5, {kernel_virt_offset_offset}(s0)
-    ld      t6, {entry_context_offset}(s0)
-    ld      s1, {formal_entry_offset}(s0)
+    ld      t1, {trampoline_satp_offset}(s0)
+    ld      t2, {swapper_satp_offset}(s0)
+    ld      t3, {owner_phys_offset}(s0)
+    ld      t4, {owner_virt_offset}(s0)
+    ld      t5, {gp_offset}(s0)
+    ld      t6, {rust_entry_offset}(s0)
+    ld      s1, {boot_data_virt_offset}(s0)
+    ld      s2, {kernel_virt_offset_offset}(s0)
+    ld      s3, {entry_context_offset}(s0)
+    ld      s4, {formal_entry_offset}(s0)
+
+    sfence.vma
+    li      t0, {physical_owner}
+    sb      t0, 0(t3)
 
     la      t0, 1f
-    add     t0, t0, t5
+    add     t0, t0, s2
     csrw    stvec, t0
     sfence.vma
+    li      t0, {trampoline_owner}
+    sb      t0, 0(t3)
     csrw    satp, t1
     .balign 4
 1:
-    mv      gp, t2
-    csrw    sscratch, t6
-    csrw    stvec, s1
-    mv      a0, t4
-    jr      t3
+    csrw    satp, t2
+    sfence.vma
+    li      t0, {swapper_owner}
+    sb      t0, 0(t4)
+    mv      gp, t5
+    csrw    sscratch, s3
+    csrw    stvec, s4
+    mv      a0, s1
+    jr      t6
 "#,
     boot_data_virt_offset = const AP_BOOT_DATA_VIRT_OFFSET,
     gp_offset = const AP_BOOT_DATA_GP_OFFSET,
@@ -264,7 +300,13 @@ arceos_ex_secondary_start_sbi:
     formal_entry_offset = const AP_BOOT_DATA_FORMAL_ENTRY_OFFSET,
     kernel_virt_offset_offset = const AP_BOOT_DATA_KERNEL_VIRT_OFFSET_OFFSET,
     rust_entry_offset = const AP_BOOT_DATA_RUST_ENTRY_OFFSET,
-    satp_offset = const AP_BOOT_DATA_SATP_OFFSET,
+    owner_phys_offset = const AP_BOOT_DATA_OWNER_PHYS_OFFSET,
+    owner_virt_offset = const AP_BOOT_DATA_OWNER_VIRT_OFFSET,
+    physical_owner = const TranslationOwner::PhysicalDirect as u8,
+    swapper_owner = const TranslationOwner::SwapperVm as u8,
+    swapper_satp_offset = const AP_BOOT_DATA_SWAPPER_SATP_OFFSET,
+    trampoline_owner = const TranslationOwner::TrampolineVm as u8,
+    trampoline_satp_offset = const AP_BOOT_DATA_TRAMPOLINE_SATP_OFFSET,
     sstatus_fpu_vector_mask = const SSTATUS_FPU_VECTOR_MASK,
     stack_ptr_offset = const AP_BOOT_DATA_STACK_PTR_OFFSET,
     task_ptr_offset = const AP_BOOT_DATA_TASK_PTR_OFFSET,
@@ -305,6 +347,22 @@ extern "C" fn arceos_ex_secondary_entry_rust(boot_data: *const SbiHartBootData) 
             "task-initial-flow-key",
         );
     };
+    let observed_satp = crate::arch::riscv64::csr::read_satp();
+    let translation_chain_verified = {
+        let ctx = crate::context::context_ref();
+        ctx.cpu_group.cpu(target_logical_id).is_some_and(|cpu| {
+            data.translation_owner_virt == cpu.translation_owner_storage() as usize
+                && ctx
+                    .kernel_image
+                    .runtime_to_phys(data.translation_owner_virt)
+                    == Some(data.translation_owner_phys)
+                && data.trampoline_satp == ctx.vm.trampoline_vm().satp()
+                && data.swapper_satp == ctx.vm.swapper_vm().satp()
+                && observed_satp == data.swapper_satp
+                && ctx.vm.adopt_ap_translation_chain(cpu)
+                && ctx.vm.ap_translation_ready(cpu)
+        })
+    };
     let adoption = ApEntryAdoption {
         target_logical_id,
         boot_data_logical_id: data.logical_id,
@@ -316,6 +374,7 @@ extern "C" fn arceos_ex_secondary_entry_rust(boot_data: *const SbiHartBootData) 
         boot_data_task_pointer: data.task_ptr,
         expected_task_pointer: ap_idle_task_virt(target_logical_id).unwrap_or(0),
         observed_tp,
+        translation_chain_verified,
     };
     crate::phases::smp_runtime::ap_entry_prelude::preset(adoption)
 }
@@ -331,6 +390,7 @@ pub(crate) struct ApEntryAdoption {
     boot_data_task_pointer: usize,
     expected_task_pointer: usize,
     observed_tp: usize,
+    translation_chain_verified: bool,
 }
 
 impl ApEntryAdoption {
@@ -360,6 +420,10 @@ impl ApEntryAdoption {
         self.expected_task_pointer != 0
             && self.boot_data_task_pointer == self.expected_task_pointer
             && self.observed_tp == self.expected_task_pointer
+    }
+
+    pub(crate) const fn translation_chain_matches_target(&self) -> bool {
+        self.translation_chain_verified
     }
 }
 
@@ -953,7 +1017,10 @@ impl CpuStartProvider {
         else {
             return false;
         };
-        let Some(satp) = static_objects.swapper_satp(kernel_image) else {
+        let Some(trampoline_satp) = static_objects.trampoline_satp(kernel_image) else {
+            return false;
+        };
+        let Some(swapper_satp) = static_objects.swapper_satp(kernel_image) else {
             return false;
         };
         let gp = lds.global_pointer();
@@ -980,6 +1047,14 @@ impl CpuStartProvider {
             };
             let cpu_ref = cpu.cpu_ref();
             let hartid = cpu.hartid();
+            if cpu.active_translation_owner() != TranslationOwner::None {
+                return false;
+            }
+            let translation_owner_virt = cpu.translation_owner_storage() as usize;
+            let Some(translation_owner_phys) = kernel_image.runtime_to_phys(translation_owner_virt)
+            else {
+                return false;
+            };
             let Some(task_ptr) = ap_idle_task_virt(logical_id) else {
                 return false;
             };
@@ -1015,7 +1090,10 @@ impl CpuStartProvider {
                     stack_ptr,
                     logical_id,
                     hartid,
-                    satp,
+                    trampoline_satp,
+                    swapper_satp,
+                    translation_owner_phys,
+                    translation_owner_virt,
                     gp,
                     rust_entry,
                     boot_data_virt,

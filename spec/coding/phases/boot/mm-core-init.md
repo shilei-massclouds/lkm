@@ -20,7 +20,7 @@
 - `CpuGroup.state == Ready`、`DmaCachePolicy.state == Ready`
 - `PerCpuStorage.state == Ready`、`PrintkBuffer.state == Ready`
 - `StaticBranch.state == Ready`
-- `Vm.state == Online`、`SwapperVm.state == Online`
+- `KernelAddrSpace.state == Online`、`Vm.state == Online`、共享 `SwapperVm.state == Ready`
 
 `preset()` 必须先检查 `MM_CORE_INIT_PHASE_STATE == Base`；全部依赖通过后才发出
 `MmCoreInitPhase.Started`。

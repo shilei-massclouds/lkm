@@ -6,9 +6,41 @@ use super::{
     trap_type::TrapType,
 };
 use crate::checkpoint::Checkpoint;
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 
 pub(crate) const MAX_CPUS: usize = 16;
 pub(crate) const BOOT_CPU_LOGICAL_ID: usize = 0;
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TranslationOwner {
+    None = 0,
+    PhysicalDirect = 1,
+    TrampolineVm = 2,
+    EarlyVm = 3,
+    SwapperVm = 4,
+}
+
+impl TranslationOwner {
+    const fn decode(value: u8) -> Self {
+        match value {
+            1 => Self::PhysicalDirect,
+            2 => Self::TrampolineVm,
+            3 => Self::EarlyVm,
+            4 => Self::SwapperVm,
+            _ => Self::None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[allow(dead_code)]
+pub struct TranslationTakeoverTrace {
+    pub old_owner: TranslationOwner,
+    pub new_owner: TranslationOwner,
+    pub satp: usize,
+    pub synchronization_complete: bool,
+}
 
 unsafe extern "C" {
     static head_boot_hartid: usize;
@@ -91,6 +123,11 @@ pub struct Cpu {
     present: bool,
     active: bool,
     online: bool,
+    active_translation_owner: AtomicU8,
+    translation_trace_old_owner: AtomicU8,
+    translation_trace_new_owner: AtomicU8,
+    translation_trace_satp: AtomicUsize,
+    translation_trace_sync_complete: AtomicBool,
     trap: TrapType,
 }
 
@@ -105,6 +142,11 @@ impl Cpu {
             present: false,
             active: false,
             online: false,
+            active_translation_owner: AtomicU8::new(TranslationOwner::None as u8),
+            translation_trace_old_owner: AtomicU8::new(TranslationOwner::None as u8),
+            translation_trace_new_owner: AtomicU8::new(TranslationOwner::None as u8),
+            translation_trace_satp: AtomicUsize::new(0),
+            translation_trace_sync_complete: AtomicBool::new(false),
             trap: TrapType::new(),
         }
     }
@@ -119,6 +161,11 @@ impl Cpu {
             present: true,
             active: false,
             online: false,
+            active_translation_owner: AtomicU8::new(TranslationOwner::None as u8),
+            translation_trace_old_owner: AtomicU8::new(TranslationOwner::None as u8),
+            translation_trace_new_owner: AtomicU8::new(TranslationOwner::None as u8),
+            translation_trace_satp: AtomicUsize::new(0),
+            translation_trace_sync_complete: AtomicBool::new(false),
             trap: TrapType::new(),
         }
     }
@@ -213,6 +260,79 @@ impl Cpu {
 
     pub const fn role(&self) -> CpuRole {
         self.role
+    }
+
+    pub fn active_translation_owner(&self) -> TranslationOwner {
+        TranslationOwner::decode(self.active_translation_owner.load(Ordering::Acquire))
+    }
+
+    pub(crate) fn translation_owner_storage(&self) -> *mut u8 {
+        self.active_translation_owner.as_ptr()
+    }
+
+    pub(crate) fn replace_translation_owner(
+        &self,
+        old_owner: TranslationOwner,
+        new_owner: TranslationOwner,
+        satp: usize,
+    ) -> bool {
+        if self
+            .active_translation_owner
+            .compare_exchange(
+                old_owner as u8,
+                new_owner as u8,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_err()
+        {
+            return false;
+        }
+        self.record_translation_takeover(old_owner, new_owner, satp);
+        true
+    }
+
+    pub(crate) fn adopt_translation_takeover(
+        &self,
+        old_owner: TranslationOwner,
+        new_owner: TranslationOwner,
+        satp: usize,
+    ) -> bool {
+        if self.active_translation_owner() != new_owner {
+            return false;
+        }
+        self.record_translation_takeover(old_owner, new_owner, satp);
+        true
+    }
+
+    fn record_translation_takeover(
+        &self,
+        old_owner: TranslationOwner,
+        new_owner: TranslationOwner,
+        satp: usize,
+    ) {
+        self.translation_trace_old_owner
+            .store(old_owner as u8, Ordering::Relaxed);
+        self.translation_trace_new_owner
+            .store(new_owner as u8, Ordering::Relaxed);
+        self.translation_trace_satp.store(satp, Ordering::Relaxed);
+        self.translation_trace_sync_complete
+            .store(true, Ordering::Release);
+    }
+
+    #[allow(dead_code)]
+    pub fn translation_takeover_trace(&self) -> TranslationTakeoverTrace {
+        let synchronization_complete = self.translation_trace_sync_complete.load(Ordering::Acquire);
+        TranslationTakeoverTrace {
+            old_owner: TranslationOwner::decode(
+                self.translation_trace_old_owner.load(Ordering::Relaxed),
+            ),
+            new_owner: TranslationOwner::decode(
+                self.translation_trace_new_owner.load(Ordering::Relaxed),
+            ),
+            satp: self.translation_trace_satp.load(Ordering::Relaxed),
+            synchronization_complete,
+        }
     }
 
     pub const fn is_possible(&self) -> bool {

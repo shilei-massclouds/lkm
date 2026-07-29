@@ -9,19 +9,22 @@ continuation，不拥有 CorePrepare sibling 的启动权。
 ### Preset: Base -> Prepared
 
 `preset()` 先检查自身精确 Base 和全部 model `depends_on`：EntryPrelude Online，Vm/BootTask/
-KernelImage 状态，EarlyVm、BootInitStack、InterruptType、RawDtb 和 FixMap 状态。检查通过后才
+KernelImage 状态，KernelAddrSpace Ready、EarlyVm controller Ready、boot CPU owner/live SATP、
+BootInitStack、InterruptType、RawDtb 和 FixMap 状态。检查通过后才
 发出 `EntrySuccessorPhase.Started`。
 
 随后严格按 model 顺序驱动 BootInitStack.Enable、EarlyDtb.Preset、InterruptType.Setup、
 BootCPU.Setup/Enable、PrintkBuffer.Preset、EarlyDtb.Setup、InitMM.Setup、EarlyIoremap.Setup、
 SBI.Setup、Params.Preset、MemBlock.Setup、Vm.Enable、MemBlock.Enable 和 EarlyDtb.Cleanup。
+`Vm.Enable` 先准备 SwapperVm，发布 `KernelAddrSpace.Online`，再由
+`SwapperVm.TakeOver(BootCPURef)` 原子切换 boot CPU；共享 Early/Trampoline controller 保持 Ready。
 驱动完成后检查 start_kernel deferred facts，提交 Prepared，读回并发出
 `EntrySuccessorPhase.Prepared`，再按 emits 调用 Setup。
 
 ### Setup: Prepared -> Ready
 
 Setup 检查精确 Prepared，并验证 EntrySuccessor Ready invariant：入口先导 Online、完整内核虚拟
-地址空间与 boot CPU 状态、early IRQ 关闭、EarlyDtb 销毁、MemBlock/参数/console 等对象状态
+地址空间与 boot CPU Swapper owner 状态、early IRQ 关闭、EarlyDtb 销毁、MemBlock/参数/console 等对象状态
 以及 deferred facts。成功后提交 Ready，发出 `EntrySuccessorPhase.Ready`，再调用 Enable。
 
 ### Enable: Ready -> Online

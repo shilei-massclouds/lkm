@@ -14,7 +14,7 @@
 
 由 `BootInitFlow.setup_after_entry_successor()` 启动，并在 `preset()` 中逐项检查：
 - `EntrySuccessorPhase.state == Online`
-- `Vm.state == Online`、`SwapperVm.state == Online`
+- `KernelAddrSpace.state == Online`、`Vm.state == Online`、共享 `SwapperVm.state == Ready`
 - `MemBlock.state == Online`
 - `Params.state == Prepared`、`EarlyParam.state == Ready`
 - `CommandLine.state == Prepared`

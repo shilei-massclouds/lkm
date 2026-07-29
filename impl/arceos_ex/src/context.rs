@@ -58,6 +58,7 @@ use crate::objects::{
         Serial8250RxBatchLoopbackProbe, Serial8250RxLoopbackProbe, SmpCallFunction, SrcuCore, Tick,
         Timekeeper, TimerWheel, TtyXmitFifoProbe, UartExternalIrqEnable, UartInterruptChainProbe,
     },
+    kernel_addr_space::KernelAddrSpace,
     kernel_cmdline::KernelCmdline,
     kernel_image::KernelImage,
     lds::Lds,
@@ -128,6 +129,7 @@ pub struct Context {
     pub lds: Lds,
 
     pub kernel_image: KernelImage,
+    pub kernel_addr_space: KernelAddrSpace,
     pub cpu_group: CpuGroup,
     pub boot_task: BootTask,
     pub boot_init_flow: BootInitFlow,
@@ -345,6 +347,7 @@ impl Context {
             static_objects: StaticObjects::new(),
             lds: Lds::new(),
             kernel_image: KernelImage::new(),
+            kernel_addr_space: KernelAddrSpace::new(),
             cpu_group: CpuGroup::new(),
             boot_task: BootTask::new(),
             boot_init_flow: BootInitFlow::new(),

@@ -889,7 +889,9 @@ object UserAddressSpace: ResourceObject {
         transitions {
             on Transition::Preset -> State::Prepared {
                 depends_on {
-                    SwapperVm.state == State::Online;
+                    SwapperVm.state == State::Ready;
+                    KernelAddrSpace.state == State::Online;
+                    Vm.state == State::Online;
                     PageAllocator.state == State::Ready;
                     KernelGlobalAllocator.state == State::Ready;
                     KernelInitTask.state == State::OnCpu;
@@ -981,7 +983,9 @@ object UserAddressSpace: ResourceObject {
             on Transition::Enable -> State::Online {
                 depends_on {
                     UserTrapFrame.state == State::Ready;
-                    SwapperVm.state == State::Online;
+                    SwapperVm.state == State::Ready;
+                    KernelAddrSpace.state == State::Online;
+                    Vm.state == State::Online;
                     PageAllocator.state == State::Ready;
                     PageMetadataMap.state == State::Ready;
                 }

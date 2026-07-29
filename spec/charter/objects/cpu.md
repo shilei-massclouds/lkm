@@ -1,7 +1,7 @@
 # CPU
 
 `CPU` 是每个逻辑处理器实例的统一类型。它保存独立 lifecycle、物理 `hartid`、由容器索引派生的
-`logical_id`，以及 possible/present/active/online 状态。系统中不存在 boot/AP 专用 CPU 类型；
+`logical_id`，possible/present/active/online 状态，以及可选的 `active_translation_owner`。系统中不存在 boot/AP 专用 CPU 类型；
 `BootCPU`、`ApCPU(i)` 只是同一实例集合上的角色别名：
 
 ```text
@@ -49,6 +49,12 @@ ExceptionType.{page_fault, syscall, breakpoint, unexpected}
 这些 resident 资源随 CPU 建立并保持各自 lifecycle、入口容量与 handler/gate 状态，任何一个 CPU 的
 状态都不得由全局对象或其它 CPU 的缓存副本替代。CurrentTask 不属于 CPU 子对象；它由底层 effective
 TaskFlow 的 parent 解析，不存在 per-CPU current-task slot 或同义权威副本。
+
+`active_translation_owner` 是 CPU-local 的 typed controller reference，不是另一份页表状态。正在
+执行内核入口的 CPU 必须恰有一个 owner；仅 discovered、尚未进入内核的 AP 可以为空。owner 的替换
+只能由 `PhysicalDirect`、`TrampolineVm`、`EarlyVm` 或 `SwapperVm` 的
+`Action::TakeOver(cpu_ref)` 原子提交，并且提交前必须证明旧 owner 与 live SATP 一致。完整协议见
+[`KernelAddrSpace 与启动期 translation controller`](kernel-address-space.md)。
 
 ## CurrentCPU capability
 

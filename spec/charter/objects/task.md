@@ -79,13 +79,13 @@ Live；它不改变 Task lifecycle，也不发送 Task Enable/Continue。随后 
 logical-id 的 initial idle Flow。AP 首次 Suspend 才产生第一个可恢复的 Online/Valid 断点，后续切换
 完全使用普通 Suspend/Continue。
 
-`tp` 的物理/虚拟绑定与早期 preemption 事实归 `BootInitFlow.Preset` 私有的
-`BootTaskEntryBinding`，不属于 Task carrier lifecycle。入口各阶段只能验证 `BootTask.OnCpu`
-稳定 invariant，不能推进或重放其生命周期。
-
-`BootTaskEntryBinding` 只协调同一静态 carrier 的入口可寻址性：Base 表示尚未绑定，Prepared 表示
-`tp` 使用物理地址且初始抢占关闭条件已建立，Ready 表示 `EarlyVm` 下的虚拟地址绑定已提交。它不
-建立新的 Task identity/storage/Flow ownership，也不进入公共 Task 或 Context API。
+`tp` 的物理/虚拟绑定与早期 preemption 事实由可重复调用的
+`BootInitFlow.Action::BindBootTaskEntry(current_task_ref)` 建立，不属于 Task carrier lifecycle，也不
+建立独立 binding 对象或 snapshot state。`PhysicalDirect` owner 下首次调用绑定物理 carrier，并且
+只在这一次把 preempt count 初始化为入口关闭值；`EarlyVm` 或 `SwapperVm` owner 下调用绑定同一
+carrier 的虚拟地址并保持已有 count。`TrampolineVm`、缺失 owner、owner 与 live SATP 不一致、错误
+TaskRef 或错误 carrier 都必须在修改 `tp` 前记录诊断并 fail-stop。入口各阶段只能验证
+`BootTask.OnCpu` 稳定 invariant，不能推进或重放其生命周期。
 
 普通 Task 的 `Preset` 统一建立 fresh identity、`TaskRef`、typed initial Flow association、初始 Flow ownership 与 clone
 specification；`Setup` 统一消费 `TaskCreationCore` 已提交的 copy-process 事实，并建立 PID、thread

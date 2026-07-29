@@ -663,8 +663,6 @@ class ModelToolTests(unittest.TestCase):
             opensbi = objects["OpenSBI"]
             preset = computer["states"]["Base"]["transitions"]["Preset"]
             enable = computer["states"]["Ready"]["transitions"]["Enable"]
-            event_stream = objects["TrapType"]
-            event_preset = event_stream["states"]["Base"]["transitions"]["Preset"]
             completion_type = data["model"]["types"]["Completion"]
 
             self.assertEqual(
@@ -870,8 +868,8 @@ class ModelToolTests(unittest.TestCase):
                     "Lds.state == State::Online",
                     "Config.state == State::Online",
                     "kernel_elf_linked_from_config_and_lds(Config, Lds)",
-                    "kernel_boot_image_constructed_from_elf(Config, Lds)",
-                    "kernel_image_file_constructed()",
+                    "kernel_boot_artifact_constructed_from_elf(Config, Lds)",
+                    "kernel_boot_artifact_constructed()",
                 ],
             )
             self.assertFalse(
@@ -916,7 +914,7 @@ class ModelToolTests(unittest.TestCase):
                     "LocalIrqEnablePhase",
                     "IrqOpenPreparePhase",
                     "ProcessPreparePhase",
-                    "BootTaskEntryBinding",
+                    "RawDtb",
                     "BootInitRestInitPhase",
                     "BootInitScheduleHandoffPhase",
                 ],
@@ -962,20 +960,18 @@ class ModelToolTests(unittest.TestCase):
                     for entry in boot_init_preset_within["drives"][0]["entries"]
                 ],
                 [
-                    "InterruptType.Transition::Preset",
-                    "KernelImage.Transition::Preset",
-                    "KernelImage.Transition::Setup",
+                    "CurrentCPU.trap.interrupt.Transition::Preset",
+                    "KernelAddrSpace.Transition::Preset",
                     "CurrentCPU.Transition::Setup(true)",
-                    "CurrentCPU.BootCpuLocalInterrupt.Transition::Setup",
-                    "CurrentCPU.BootCpuCurrentTask.Transition::Setup",
-                    "BootTaskEntryBinding.Transition::Preset",
+                    "CurrentCPU.trap.interrupt.Transition::Setup",
+                    "BootInitFlow.Action::BindBootTaskEntry(CurrentTaskRef)",
                     "BootInitStack.Transition::Preset",
-                    "TrapType.Transition::Preset",
-                    "ExceptionType.Transition::Preset",
+                    "CurrentCPU.trap.Transition::Preset",
+                    "CurrentCPU.trap.exception.Transition::Preset",
                     "Vm.Transition::Preset",
                     "Vm.Transition::Setup",
-                    "TrapType.Transition::Setup",
-                    "BootTaskEntryBinding.Transition::Setup",
+                    "CurrentCPU.trap.Transition::Setup",
+                    "BootInitFlow.Action::BindBootTaskEntry(CurrentTaskRef)",
                     "BootInitStack.Transition::Setup",
                     "Soc.Transition::Preset",
                 ],
@@ -991,6 +987,7 @@ class ModelToolTests(unittest.TestCase):
                 [
                     "Kernel.Action::AcceptEnable",
                     "BootInitFlow.Action::AssignCpuRef(BootCPURef)",
+                    "PhysicalDirect.Action::TakeOver(BootCPURef)",
                     "BootInitFlow.Transition::Preset",
                     "BootInitFlow.Transition::Setup",
                     "BootInitFlow.Transition::Enable",
@@ -1060,14 +1057,6 @@ class ModelToolTests(unittest.TestCase):
                 ],
             )
             self.assertEqual(preset["emits"], [])
-            self.assertIn(
-                "BootCpuRegisters.stvec == phys_addr(TrapType.early_event_entry)",
-                [
-                    entry["text"]
-                    for block in event_preset["ensures"]
-                    for entry in block["entries"]
-                ],
-            )
             self.assertEqual(
                 objects["PhysicalMemory"]["properties"]["access"],
                 "Access::ReadOnly",
@@ -1111,10 +1100,10 @@ class ModelToolTests(unittest.TestCase):
             enable = kernel_image["states"]["Ready"]["transitions"]["Enable"]
             entry = enable["depends_on"][0]["entries"][0]
 
-            self.assertEqual(entry["text"], "EarlyVm.state == State::Online")
+            self.assertEqual(entry["text"], "EarlyVm.state == State::Ready")
             expanded = _read_with_includes(self.spec, seen=set(), stack=[])[0].splitlines()
             line = expanded[entry["span"]["start_line"] - 1]
-            self.assertIn("EarlyVm.state == State::Online", line)
+            self.assertIn("EarlyVm.state == State::Ready", line)
 
     def test_invalid_ast_schema_returns_usage_error_code(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

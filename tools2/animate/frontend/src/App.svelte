@@ -17,6 +17,7 @@
   let overlayWidth = $state(1);
   let overlayHeight = $state(1);
   let arrowFrame: number | null = null;
+  let resizeFrame: number | null = null;
   const frameScroll = new Map<number, { left: number; top: number }>();
   const shownIndex = $derived(activeIndex ?? position);
   const frame = $derived(shownIndex < 0 ? animation.initial_frame : animation.frames[shownIndex]);
@@ -223,7 +224,14 @@
         next();
       }
     };
-    const onResize = () => updateArrow();
+    const onResize = () => {
+      if (resizeFrame !== null) window.cancelAnimationFrame(resizeFrame);
+      resizeFrame = window.requestAnimationFrame(() => {
+        resizeFrame = null;
+        revealTarget();
+        updateArrow();
+      });
+    };
     const onStageScroll = () => {
       scheduleArrowUpdate();
       if (activeIndex === null && phase === 'idle') rememberScroll(position);
@@ -247,6 +255,7 @@
       stageElement?.removeEventListener('scroll', onStageScroll);
       observer?.disconnect();
       if (arrowFrame !== null) window.cancelAnimationFrame(arrowFrame);
+      if (resizeFrame !== null) window.cancelAnimationFrame(resizeFrame);
       media?.removeEventListener('change', setMotion);
     };
   });

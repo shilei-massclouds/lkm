@@ -69,7 +69,8 @@ Flow、非活跃 Flow、错误 owner、非 `OnCpu/Live` 或悬空/过期 TaskRef
 动作，也不存在另一份 current-task 权威存储。TaskFlow 及其同步 `drives` 子树继承同一解析；异步
 `emits` 不继承，接收方从自己的 effective TaskFlow 重新解析。trace 必须记录 canonical Task、source
 Flow 和 source TaskRef。Kernel 接管并启动 BootInitFlow 后，逻辑 CurrentTask 即为 BootTask；
-`BootTaskEntryBinding` 只协调入口架构绑定与物理到虚拟 identity 迁移，不承担 CurrentTask lifecycle。
+`BootInitFlow.Action::BindBootTaskEntry` 只协调入口架构绑定，不承担 CurrentTask lifecycle，也不建立
+snapshot object。
 
 ## 陷入期间的底层执行权
 

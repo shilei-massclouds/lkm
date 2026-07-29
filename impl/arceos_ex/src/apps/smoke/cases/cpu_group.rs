@@ -2,7 +2,7 @@ use crate::{
     apps::smoke::SmokeResult,
     context::context,
     objects::{
-        cpu::{BOOT_CPU_LOGICAL_ID, CpuRole},
+        cpu::{BOOT_CPU_LOGICAL_ID, CpuRole, TranslationOwner},
         printk,
         state::State,
     },
@@ -73,12 +73,31 @@ pub fn run() -> SmokeResult {
             return SmokeResult::Failed;
         }
         if logical_id == BOOT_CPU_LOGICAL_ID {
-            if cpu.role() != CpuRole::Boot || !cpu.is_online() {
+            if cpu.role() != CpuRole::Boot
+                || !cpu.is_online()
+                || !ctx.vm.entry_successor_ready_for(cpu)
+            {
                 printk::write_str("CpuGroup boot CPU slot is invalid\n");
                 return SmokeResult::Failed;
             }
-        } else if cpu.role() != CpuRole::Secondary {
-            printk::write_str("CpuGroup secondary CPU slot is invalid\n");
+        } else if cpu.role() != CpuRole::Secondary || !ctx.vm.ap_translation_ready(cpu) {
+            printk::write_str("CpuGroup secondary CPU translation is invalid\n");
+            return SmokeResult::Failed;
+        }
+
+        let takeover = cpu.translation_takeover_trace();
+        let expected_old_owner = if logical_id == BOOT_CPU_LOGICAL_ID {
+            TranslationOwner::EarlyVm
+        } else {
+            TranslationOwner::TrampolineVm
+        };
+        if cpu.active_translation_owner() != TranslationOwner::SwapperVm
+            || takeover.old_owner != expected_old_owner
+            || takeover.new_owner != TranslationOwner::SwapperVm
+            || takeover.satp != ctx.vm.swapper_vm().satp()
+            || !takeover.synchronization_complete
+        {
+            printk::write_str("CpuGroup per-CPU translation owner trace is invalid\n");
             return SmokeResult::Failed;
         }
 

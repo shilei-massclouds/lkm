@@ -81,8 +81,12 @@ reason。普通和错误 SVG marker 使用精确 `5×4` 尺寸并保持箭头尖
 速度、时间线跳转、浏览器 derive 或视频导出。
 
 页面必须使用有上下限的流式尺寸而非绑定某个桌面分辨率。桌面外壳占据可用 viewport，主体按
-紧凑 header、自动扩展 stage、紧凑控制栏排列；stage 占据主要空间并在内部滚动。窄屏允许元数据、
-节点 identity 和控制栏自然换行以及页面纵向滚动，但页面本身不得横向溢出。主要长宽、间距、圆角、
+紧凑 header、自动扩展 stage、紧凑控制栏排列；stage 是唯一滚动容器，稳定保留纵向 scrollbar
+gutter，外层桌面页面保持固定且不得产生第二条 scrollbar。向上展开的节点必须全部处于正向 flex
+overflow 区域，不得使用 `column-reverse` 形成不可到达的负向 overflow；视觉上的“子级向上展开”由
+DOM 顺序/布局层实现。播放、前后步进与 resize 后必须保持当前 target 可见，并可恢复各 frame 的
+`scrollTop`/`scrollLeft`。窄屏允许元数据、节点 identity 和控制栏自然换行，但外层页面仍保持固定，
+纵向和必要的横向滚动都局限于 stage，页面本身不得溢出。主要长宽、间距、圆角、
 字体、卡片 padding 和箭头曲率使用相对单位、容器/viewport 比例及有界 `clamp()`；只有边框和 SVG
 stroke 等视觉细线可固定为 CSS pixel。
 

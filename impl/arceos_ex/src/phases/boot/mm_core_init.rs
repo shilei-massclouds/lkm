@@ -48,7 +48,8 @@ fn preset_dependencies_ready(ctx: &Context) -> bool {
         && printk::is_ready()
         && ctx.static_branch.state() == State::Ready
         && ctx.vm.state() == State::Online
-        && ctx.vm.swapper_vm().state() == State::Online
+        && ctx.kernel_addr_space.state() == State::Online
+        && ctx.vm.swapper_vm().state() == State::Ready
 }
 
 fn preset_objects(ctx: &mut Context) -> EventResult {

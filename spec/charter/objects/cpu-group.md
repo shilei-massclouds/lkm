@@ -1,6 +1,7 @@
 # CpuGroup
 
-`CpuGroup` 是内核中唯一的 CPU 实例 owner。系统只有一个 `CpuGroupObject` 实例 `CpuGroup`，其唯一
+`CpuGroup` 是 `Kernel` 的直接子对象，也是内核中唯一的 CPU 实例 owner；它与 `Soc` 平级，二者之间
+需要的启动先后关系只通过 signal/guard 表达，不通过 parent 表达。系统只有一个 `CpuGroupObject` 实例 `CpuGroup`，其唯一
 权威集合为：
 
 ```text

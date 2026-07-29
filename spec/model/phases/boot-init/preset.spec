@@ -6,91 +6,13 @@
  */
 
 /*
- * BootTask 的定义集中在 task.spec；本文件拥有它进入早期地址空间时所需的 binding 协议，
- * 并编排入口前导期中的迁移顺序。
+ * BootTask 的定义集中在 task.spec。入口 tp binding 是 BootInitFlow 的
+ * 可重复 Action，不创建独立对象、状态或 snapshot identity。
  */
-
-/*
- * BootTaskEntryBinding 是 BootInitFlow.Preset 私有的入口协调对象。它只
- * 绑定同一个静态 BootTask carrier 的物理/虚拟地址并建立入口抢占条件，
- * 不创建第二个 Task、TaskRef、Flow 或调度实体。
- */
-object BootTaskEntryBinding: KernelObject {
-    initial_state: State::Base;
-    parent: BootInitFlow;
-
-    /* Base 表示 init_task 尚未绑定到当前 hart 的 tp。 */
-    state State::Base {
-        transitions {
-            /* Preset 建立物理地址阶段的 tp 与初始抢占关闭条件。 */
-            on Transition::Preset(current_task_ref: TaskRef) -> State::Prepared {
-                depends_on {
-                    Riscv64.state == State::Online;
-                    BootTask.state == State::OnCpu;
-                    task_ref_targets(current_task_ref, BootTask);
-                }
-
-                may_change {
-                    BootCpuRegisters.tp;
-                }
-
-                ensures {
-                    BootCpuRegisters.tp == phys_addr(BootTask.storage);
-                    valid_task_ref(BootCpuRegisters.tp);
-                    task_preemption_control_ready(BootTask);
-                    task_preempt_count_initialized_to_init_preempt_count(BootTask);
-                    task_preemption_disabled(BootTask);
-                    current_task_resolved_target_is(BootInitFlow, current_task_ref, BootTask);
-                    current_task_ref_derived_from_selector(current_task_ref, BootTask);
-                }
-            }
-        }
-    }
-
-    /* Prepared 表示物理 tp binding 已完整建立。 */
-    state State::Prepared {
-        invariant {
-            BootCpuRegisters.tp == phys_addr(BootTask.storage);
-            valid_task_ref(BootCpuRegisters.tp);
-            task_preemption_control_ready(BootTask);
-            task_preempt_count_initialized_to_init_preempt_count(BootTask);
-            task_preemption_disabled(BootTask);
-        }
-
-        transitions {
-            /* Setup 在 EarlyVm 就绪后切换到同一 carrier 的虚拟地址。 */
-            on Transition::Setup -> State::Ready {
-                depends_on {
-                    BootTask.state == State::OnCpu;
-                    Vm.state == State::Ready;
-                }
-
-                may_change {
-                    BootCpuRegisters.tp;
-                }
-
-                ensures {
-                    BootCpuRegisters.tp == virt_addr(BootTask.storage, EarlyVm, KernelImageMap);
-                    valid_task_ref(BootCpuRegisters.tp);
-                    task_preemption_control_ready(BootTask);
-                    task_preempt_count_initialized_to_init_preempt_count(BootTask);
-                    task_preemption_disabled(BootTask);
-                }
-            }
-        }
-    }
-
-    /* Ready 表示虚拟 tp binding 已提交；BootTask 始终保持 Online。 */
-    state State::Ready {
-        invariant {
-            BootCpuRegisters.tp == virt_addr(BootTask.storage, EarlyVm, KernelImageMap);
-            valid_task_ref(BootCpuRegisters.tp);
-            task_preemption_control_ready(BootTask);
-            task_preempt_count_initialized_to_init_preempt_count(BootTask);
-            task_preemption_disabled(BootTask);
-        }
-    }
-}
+predicate boot_task_entry_bound_for_active_owner<C: CPU, T: Task>(cpu: C, task: T) -> bool;
+predicate boot_task_entry_preempt_count_initialized_once<T: Task>(task: T) -> bool;
+predicate boot_task_entry_preempt_count_preserved<T: Task>(task: T) -> bool;
+predicate boot_task_entry_binding_diagnostic_clear() -> bool;
 
 /*
  * BootInitStack 表示入口前导期根任务使用的静态根栈。它约束 sp 在物理地址阶段和早期虚拟地址阶段的取值。
@@ -154,7 +76,8 @@ object BootInitStack: StackObject {
                 }
 
                 ensures {
-                    BootCpuRegisters.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImageMap);
+                    BootCpuRegisters.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImage.virt_range);
+                    inside(BootCpuRegisters.sp, virt_addr(Lds.init_stack_end, EarlyVm, KernelImage.virt_range), virt_addr(Lds.init_stack_start, EarlyVm, KernelImage.virt_range), virt_addr(Lds.init_stack_end, EarlyVm, KernelImage.virt_range));
                 }
             }
         }
@@ -167,9 +90,9 @@ object BootInitStack: StackObject {
     state State::Ready {
         invariant {
             Lds.init_stack_end - Lds.init_stack_start >= Config.page_size;
-            BootCpuRegisters.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImageMap);
+            BootCpuRegisters.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImage.virt_range);
             valid_stack_pointer(BootCpuRegisters.sp);
-            inside(BootCpuRegisters.sp, virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_start, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap));
+            inside(BootCpuRegisters.sp, virt_addr(Lds.init_stack_end, EarlyVm, KernelImage.virt_range), virt_addr(Lds.init_stack_start, EarlyVm, KernelImage.virt_range), virt_addr(Lds.init_stack_end, EarlyVm, KernelImage.virt_range));
         }
 
         transitions {
@@ -203,11 +126,13 @@ object BootInitStack: StackObject {
  */
 object KernelImage: ImageObject {
     initial_state: State::Base;
+    parent: KernelAddrSpace;
 
     attrs {
         start: Derived<SymbolAddr, Lds.kernel_start>;
         phys_start: PhysAddr<KernelImage>;
         end: Derived<SymbolAddr, Lds.kernel_end>;
+        virt_range: Derived<VirtAddrRange<KernelImage>, range(Config.kernel_link_addr, Config.kernel_link_addr + Config.kernel_image_va_window_size)>;
         segments: SegmentSet<KernelImageSegment>;
     }
 
@@ -267,7 +192,7 @@ object KernelImage: ImageObject {
                 ensures {
                     phys_start == OpenSBI.kernel_load_pa;
                     memory_zeroed(segments.bss.range);
-                    fits_in_kernel_image_map(self, KernelImageMap);
+                    fits_in_kernel_image_range(self, virt_range);
                 }
             }
         }
@@ -283,7 +208,7 @@ object KernelImage: ImageObject {
             inside(segments.bss.range.start, segments.bss.range.end, start, end);
             phys_start == OpenSBI.kernel_load_pa;
             memory_zeroed(segments.bss.range);
-            fits_in_kernel_image_map(self, KernelImageMap);
+            fits_in_kernel_image_range(self, virt_range);
         }
 
         transitions {
@@ -293,7 +218,11 @@ object KernelImage: ImageObject {
              */
             on Transition::Enable -> State::Online {
                 depends_on {
-                    EarlyVm.state == State::Online;
+                    EarlyVm.state == State::Ready;
+                    cpu_active_translation_owner_for_ref_is(
+                        BootCPURef,
+                        TranslationOwnerKind::EarlyVm
+                    );
                 }
 
                 may_change {
@@ -302,7 +231,7 @@ object KernelImage: ImageObject {
 
                 ensures {
                     phys_start == OpenSBI.kernel_load_pa;
-                    BootCpuRegisters.gp == virt_addr(Lds.global_pointer, EarlyVm, KernelImageMap);
+                    BootCpuRegisters.gp == virt_addr(Lds.global_pointer, EarlyVm, virt_range);
                     gp_relative_access_ready();
                 }
             }
@@ -318,7 +247,7 @@ object KernelImage: ImageObject {
             segments.bss.range == range(Lds.bss_start, Lds.bss_end);
             inside(segments.bss.range.start, segments.bss.range.end, start, end);
             phys_start == OpenSBI.kernel_load_pa;
-            BootCpuRegisters.gp == virt_addr(Lds.global_pointer, EarlyVm, KernelImageMap);
+            BootCpuRegisters.gp == virt_addr(Lds.global_pointer, EarlyVm, virt_range);
             gp_relative_access_ready();
         }
     }
@@ -333,6 +262,7 @@ object KernelImage: ImageObject {
  */
 object RawDtb: ResourceObject {
     initial_state: State::Base;
+    parent: BootInitFlow;
 
     attrs {
         header: DtbHeader;
@@ -362,10 +292,13 @@ object RawDtb: ResourceObject {
                 }
 
                 ensures {
+                    BootArgs.dtb_pa != 0;
+                    dtb_header_range_addition_safe(BootArgs.dtb_pa, size_of::<DtbHeader>());
                     header_range.start == BootArgs.dtb_pa;
                     header_range.end == BootArgs.dtb_pa + size_of::<DtbHeader>();
                     firmware_dtb_header_accessible(header_range);
                     valid_dtb_magic(header);
+                    raw_dtb_nodes_unparsed(self);
                 }
             }
         }
@@ -380,6 +313,7 @@ object RawDtb: ResourceObject {
             header_range.end == BootArgs.dtb_pa + size_of::<DtbHeader>();
             firmware_dtb_header_accessible(header_range);
             valid_dtb_magic(header);
+            raw_dtb_nodes_unparsed(self);
         }
 
         transitions {
@@ -391,6 +325,7 @@ object RawDtb: ResourceObject {
                 depends_on {
                     OpenSBI.state == State::Online;
                     firmware_dtb_blob_complete_at_kernel_entry(BootArgs.dtb_pa);
+                    Config.state == State::Online;
                 }
 
                 may_change {
@@ -399,10 +334,17 @@ object RawDtb: ResourceObject {
 
                 ensures {
                     valid_dtb_header(header);
+                    header.total_size >= size_of::<DtbHeader>();
+                    dtb_range_addition_safe(BootArgs.dtb_pa, header.total_size);
                     range.start == BootArgs.dtb_pa;
                     range.end == BootArgs.dtb_pa + header.total_size;
-                    firmware_dtb_range_accessible(range);
-                    fits_in_fixmap_slot(range, FixMap.fdt_slot, Config.page_size);
+                    firmware_dtb_range_accessible_from_handoff_contract(range);
+                    fits_in_fixmap_slot(
+                        RawDtb.range,
+                        Config.fixmap.fdt,
+                        Config.page_size
+                    );
+                    raw_dtb_nodes_unparsed(self);
                 }
             }
         }
@@ -414,9 +356,17 @@ object RawDtb: ResourceObject {
     state State::Ready {
         invariant {
             valid_dtb_header(header);
+            header.total_size >= size_of::<DtbHeader>();
+            dtb_range_addition_safe(BootArgs.dtb_pa, header.total_size);
             range.start == BootArgs.dtb_pa;
             range.end == BootArgs.dtb_pa + header.total_size;
-            firmware_dtb_range_accessible(range);
+            firmware_dtb_range_accessible_from_handoff_contract(range);
+            fits_in_fixmap_slot(
+                RawDtb.range,
+                Config.fixmap.fdt,
+                Config.page_size
+            );
+            raw_dtb_nodes_unparsed(self);
         }
     }
 }
@@ -428,8 +378,9 @@ object RawDtb: ResourceObject {
  * FIX_FDT/FIX_FDT_SIZE/MAX_FDT_SIZE 布局和 create_fdt_early_page_table()
  * 的固定映射窗口。
  */
-object FixMap: PrepareObject {
+object FixMap: AddressSpaceObject {
     initial_state: State::Base;
+    parent: KernelAddrSpace;
 
     attrs {
         fdt_slot: FixMapSlotRange<Fdt>;
@@ -449,7 +400,11 @@ object FixMap: PrepareObject {
                     Config.state == State::Online;
                     RawDtb.state == State::Ready;
                     has_slot(Config.fixmap, FixMapSlot::Fdt);
-                    fits_in_fixmap_slot(RawDtb.range, fdt_slot, Config.page_size);
+                    fits_in_fixmap_slot(
+                        RawDtb.range,
+                        Config.fixmap.fdt,
+                        Config.page_size
+                    );
                 }
 
                 may_change {
@@ -482,52 +437,218 @@ object FixMap: PrepareObject {
  * 入口前导期只预留该区域，完整 RAM banks 映射由后续完整页表阶段建立。
  */
 object LinearMap: AddressSpaceObject {
-    initial_state: State::Destroyed;
-    parent: Vm;
+    initial_state: State::Base;
+    parent: KernelAddrSpace;
 
-    /*
-     * Destroyed 表示线性映射虚拟区域已按布局预留，但尚未建立完整物理内存映射，也不提供当前地址转换服务。
-     */
-    state State::Destroyed {
+    attrs {
+        range: VirtAddrRange<PhysicalMemory>;
+    }
+
+    state State::Base {
+        transitions {
+            on Transition::Preset -> State::Ready {
+                depends_on {
+                    Config.state == State::Online;
+                }
+
+                ensures {
+                    linear_map_area_reserved(self);
+                    linear_map_starts_at_page_offset(self);
+                    fixmap_adjacent_to_linear_map(FixMap, self);
+                }
+            }
+        }
+    }
+
+    /* Ready 表示区域布局已保留；映射发布是 controller 的独立事实。 */
+    state State::Ready {
         invariant {
             linear_map_area_reserved(self);
+            linear_map_starts_at_page_offset(self);
             fixmap_adjacent_to_linear_map(FixMap, LinearMap);
         }
     }
 }
 
-/*
- * Vm 表示入口前导期正在建立的内核虚拟内存空间抽象。它编排 TrampolineVm 和 EarlyVm，后续阶段再接入 SwapperVm。
- */
-object Vm: AddressSpaceObject {
+object UserSpaceReserve: AddressSpaceObject {
     initial_state: State::Base;
+    parent: KernelAddrSpace;
 
-    /*
-     * Base 表示页表子对象尚未完成入口前导期所需的准备。
-     */
+    attrs {
+        range: VirtAddrRange<User>;
+    }
+
     state State::Base {
         transitions {
-            /*
-             * Preset 编排跳板页表和早期页表的建立。
-             * Linux/RISC-V setup_vm() 在 MMU 关闭期间调用
-             * apply_early_boot_alternatives()，当前模型不展开 alternatives/errata
-             * text patch 细节，但必须把该同步边界标成显式 deferred。
-             */
+            on Transition::Preset -> State::Ready {
+                depends_on {
+                    Config.state == State::Online;
+                }
+
+                ensures {
+                    canonical_user_address_range_reserved(self);
+                    kernel_mappings_exclude_user_reserve(KernelAddrSpace, self);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            canonical_user_address_range_reserved(self);
+            kernel_mappings_exclude_user_reserve(KernelAddrSpace, self);
+        }
+    }
+}
+
+object KernelAddrSpace: AddressSpaceObject {
+    initial_state: State::Base;
+    parent: Kernel;
+
+    state State::Base {
+        transitions {
             on Transition::Preset -> State::Prepared {
                 depends_on {
+                    KernelImage.state == State::Base;
+                    LinearMap.state == State::Base;
+                    UserSpaceReserve.state == State::Base;
+                }
+
+                drives {
+                    LinearMap.Transition::Preset;
+                    UserSpaceReserve.Transition::Preset;
+                    KernelImage.Transition::Preset;
+                    KernelImage.Transition::Setup;
+                }
+
+                ensures {
+                    kernel_addr_space_region_parentage_ready(self);
+                    kernel_addr_space_layout_declared(self);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            KernelImage.state == State::Ready;
+            LinearMap.state == State::Ready;
+            UserSpaceReserve.state == State::Ready;
+            kernel_addr_space_region_parentage_ready(self);
+            kernel_addr_space_layout_declared(self);
+        }
+
+        transitions {
+            on Transition::Setup -> State::Ready {
+                depends_on {
+                    FixMap.state == State::Ready;
+                }
+
+                ensures {
+                    kernel_addr_space_regions_disjoint(
+                        KernelImage.virt_range,
+                        FixMap,
+                        LinearMap,
+                        UserSpaceReserve
+                    );
+                    kernel_mappings_exclude_user_reserve(self, UserSpaceReserve);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            KernelImage.state == State::Ready
+                || KernelImage.state == State::Online;
+            FixMap.state == State::Ready;
+            LinearMap.state == State::Ready;
+            UserSpaceReserve.state == State::Ready;
+            kernel_addr_space_regions_disjoint(
+                KernelImage.virt_range,
+                FixMap,
+                LinearMap,
+                UserSpaceReserve
+            );
+            kernel_mappings_exclude_user_reserve(self, UserSpaceReserve);
+        }
+
+        transitions {
+            on Transition::Enable -> State::Online {
+                depends_on {
+                    SwapperVm.state == State::Ready;
+                }
+
+                ensures {
+                    kernel_addr_space_final_swapper_mappings_published(self, SwapperVm);
+                    kernel_addr_space_online_is_not_all_cpus_switched(self);
+                }
+            }
+        }
+    }
+
+    state State::Online {
+        invariant {
+            SwapperVm.state == State::Ready;
+            kernel_addr_space_final_swapper_mappings_published(self, SwapperVm);
+            kernel_addr_space_online_is_not_all_cpus_switched(self);
+            kernel_mappings_exclude_user_reserve(self, UserSpaceReserve);
+        }
+    }
+}
+
+/* PhysicalDirect 是 satp=0 的共享 translation controller。 */
+object PhysicalDirect: PrepareObject {
+    initial_state: State::Ready;
+    parent: Vm;
+
+    state State::Ready {
+        actions {
+            on Action::TakeOver(cpu_ref: CpuRef) {
+                depends_on {
+                    cpu_ref_dereference_requires_published_element(cpu_ref);
+                    cpu_active_translation_owner_for_ref_is(
+                        cpu_ref,
+                        TranslationOwnerKind::None
+                    );
+                    translation_live_satp_for_ref_is(cpu_ref, 0);
+                }
+
+                ensures {
+                    cpu_active_translation_owner_for_ref_is(
+                        cpu_ref,
+                        TranslationOwnerKind::PhysicalDirect
+                    );
+                    translation_takeover_recorded(cpu_ref, TranslationOwnerKind::None, TranslationOwnerKind::PhysicalDirect, 0);
+                    translation_takeover_fence_complete(cpu_ref);
+                    translation_takeover_owner_replaced_atomically(cpu_ref);
+                    cpu_translation_owner_matches_live_satp_for_ref(cpu_ref);
+                }
+            }
+        }
+    }
+}
+
+/* Vm 是控制面协调对象，不是地址空间资源。 */
+object Vm: KernelObject {
+    initial_state: State::Base;
+    parent: Kernel;
+
+    state State::Base {
+        transitions {
+            on Transition::Preset -> State::Prepared {
+                depends_on {
+                    PhysicalDirect.state == State::Ready;
                     TrampolineVm.state == State::Base;
                     EarlyVm.state == State::Base;
+                    KernelAddrSpace.state == State::Prepared;
                 }
 
                 drives {
                     TrampolineVm.Transition::Setup;
                     EarlyVm.Transition::Preset;
+                    KernelAddrSpace.Transition::Setup;
                     EarlyVm.Transition::Setup;
-                }
-
-                may_change {
-                    TrampolineVm.pg_dir;
-                    EarlyVm.pg_dir;
                 }
 
                 ensures {
@@ -548,94 +669,76 @@ object Vm: AddressSpaceObject {
         }
     }
 
-    /*
-     * Prepared 表示 TrampolineVm 与 EarlyVm 都已具备可启用状态。
-     */
     state State::Prepared {
         invariant {
+            PhysicalDirect.state == State::Ready;
             TrampolineVm.state == State::Ready;
             EarlyVm.state == State::Ready;
+            KernelAddrSpace.state == State::Ready;
             riscv_early_boot_alternatives_deferred(Vm);
             riscv_early_boot_alternatives_mmu_off_boundary_preserved(Vm);
         }
 
         transitions {
-            /*
-             * Setup 启用跳板页表和早期页表，并完成进入早期虚拟地址阶段的切换。
-             */
             on Transition::Setup -> State::Ready {
-                depends_on {
-                    TrampolineVm.state == State::Ready;
-                    EarlyVm.state == State::Ready;
-                }
-
                 drives {
-                    TrampolineVm.Transition::Enable;
-                    EarlyVm.Transition::Enable;
-                    TrampolineVm.Transition::Cleanup;
+                    TrampolineVm.Action::TakeOver(BootCPURef);
+                    EarlyVm.Action::TakeOver(BootCPURef);
                     KernelImage.Transition::Enable;
                 }
 
-                may_change {
-                    BootCpuRegisters.satp;
-                    BootCpuRegisters.gp;
-                    BootCpuRegisters.stvec;
-                }
-
                 ensures {
+                    cpu_active_translation_owner_is(CpuGroup.cpus[0], TranslationOwnerKind::EarlyVm);
+                    cpu_active_translation_owner_for_ref_is(BootCPURef, TranslationOwnerKind::EarlyVm);
                     BootCpuRegisters.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode);
+                    early_vm_translation_sync_complete(EarlyVm, CpuGroup.cpus[0]);
                     vm_transition_stvec_released_to_trap(BootCpuRegisters.stvec, CurrentCPU.trap);
                 }
             }
         }
     }
 
-    /*
-     * Ready 表示控制流已经切换到 EarlyVm，入口前导期后续对象可使用早期虚拟地址。
-     */
     state State::Ready {
         invariant {
-            TrampolineVm.state == State::Destroyed;
-            EarlyVm.state == State::Online;
+            PhysicalDirect.state == State::Ready;
+            TrampolineVm.state == State::Ready;
+            EarlyVm.state == State::Ready;
+            SwapperVm.state == State::Base;
+            KernelAddrSpace.state == State::Ready;
             KernelImage.state == State::Online;
+            cpu_active_translation_owner_is(CpuGroup.cpus[0], TranslationOwnerKind::EarlyVm);
             BootCpuRegisters.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode);
-            early_vm_translation_sync_complete(EarlyVm);
-            riscv_early_boot_alternatives_deferred(Vm);
-            riscv_early_boot_alternatives_mmu_off_boundary_preserved(Vm);
+            early_vm_translation_sync_complete(EarlyVm, CpuGroup.cpus[0]);
         }
 
         transitions {
-            /*
-             * Enable 建立完整内核虚拟内存空间；该事件由入口后继期触发。
-             */
             on Transition::Enable -> State::Online {
                 drives {
                     SwapperVm.Transition::Setup;
-                    SwapperVm.Transition::Enable;
-                    EarlyVm.Transition::Cleanup;
-                }
-
-                may_change {
-                    BootCpuRegisters.satp;
-                    SwapperVm.pg_dir;
+                    KernelAddrSpace.Transition::Enable;
+                    SwapperVm.Action::TakeOver(BootCPURef);
                 }
 
                 ensures {
+                    cpu_active_translation_owner_is(CpuGroup.cpus[0], TranslationOwnerKind::SwapperVm);
+                    cpu_active_translation_owner_for_ref_is(BootCPURef, TranslationOwnerKind::SwapperVm);
                     BootCpuRegisters.satp == satp_of(SwapperVm.pg_dir, Config.satp_mode);
+                    swapper_vm_translation_sync_complete(SwapperVm, CpuGroup.cpus[0]);
                 }
             }
         }
     }
 
-    /*
-     * Online 表示完整内核虚拟内存空间已经由 SwapperVm 接管；该状态属于后续阶段。
-     */
     state State::Online {
         invariant {
-            SwapperVm.state == State::Online;
-            EarlyVm.state == State::Destroyed;
+            PhysicalDirect.state == State::Ready;
+            TrampolineVm.state == State::Ready;
+            EarlyVm.state == State::Ready;
+            SwapperVm.state == State::Ready;
+            KernelAddrSpace.state == State::Online;
+            cpu_active_translation_owner_is(CpuGroup.cpus[0], TranslationOwnerKind::SwapperVm);
             BootCpuRegisters.satp == satp_of(SwapperVm.pg_dir, Config.satp_mode);
-            swapper_vm_translation_sync_complete(SwapperVm);
+            swapper_vm_translation_sync_complete(SwapperVm, CpuGroup.cpus[0]);
         }
     }
 }
@@ -685,9 +788,7 @@ object TrampolineVm: AddressSpaceObject {
         }
     }
 
-    /*
-     * Ready 表示跳板页表已经具备执行第一次地址空间切换的条件。
-     */
+    /* Ready 是共享 controller 的稳定页表准备状态；每 CPU 激活由 TakeOver 表达。 */
     state State::Ready {
         invariant {
             attrs_accessible(self);
@@ -695,68 +796,43 @@ object TrampolineVm: AddressSpaceObject {
             trampoline_mapping_ready(TrampolineVm.pg_dir, TrampolineMap);
         }
 
-        transitions {
-            /*
-             * Enable 切换到跳板页表，完成从物理地址阶段进入虚拟地址阶段的第一次过渡。
-             * Linux/RISC-V 实现中，在写入 trampoline satp 前执行 sfence.vma，
-             * 确保 setup_vm() 刚建立的页表项对新的地址转换可见。
-             * 同一临界区会临时把 stvec 设置为虚拟 continuation，借用 trap 入口完成
-             * 物理 PC 到虚拟 PC 的重定位；这不是正式异常/中断分发。
-             * 规格层只保留地址转换同步要求，不把 sfence.vma 展开为独立事件。
-             */
-            on Transition::Enable -> State::Online {
+        actions {
+            on Action::TakeOver(cpu_ref: CpuRef) {
                 depends_on {
-                    KernelImage.state == State::Ready;
-                }
-
-                may_change {
-                    BootCpuRegisters.satp;
-                    BootCpuRegisters.stvec;
+                    KernelImage.state == State::Ready
+                        || KernelImage.state == State::Online;
+                    cpu_active_translation_owner_for_ref_is(
+                        cpu_ref,
+                        TranslationOwnerKind::PhysicalDirect
+                    );
+                    translation_live_satp_for_ref_is(cpu_ref, 0);
                 }
 
                 ensures {
                     attrs_accessible(self);
                     valid_page_table_storage(pg_dir);
-                    trampoline_vm_translation_sync_ready_before_satp(TrampolineVm);
+                    trampoline_vm_translation_sync_complete(TrampolineVm, cpu_ref);
                     phys_to_virt_transition_completed(TrampolineVm.pg_dir, TrampolineMap);
-                    BootCpuRegisters.stvec == virt_addr(VmSwitchContinuation, TrampolineVm, TrampolineMap);
-                    trap_stvec_temporarily_borrowed(CurrentCPU.trap, Vm);
+                    translation_live_satp_for_ref_is(
+                        cpu_ref,
+                        satp_of(TrampolineVm.pg_dir, Config.satp_mode)
+                    );
+                    translation_stvec_borrowed_for_ref(cpu_ref, TrampolineVm);
+                    cpu_active_translation_owner_for_ref_is(
+                        cpu_ref,
+                        TranslationOwnerKind::TrampolineVm
+                    );
+                    translation_takeover_recorded(
+                        cpu_ref,
+                        TranslationOwnerKind::PhysicalDirect,
+                        TranslationOwnerKind::TrampolineVm,
+                        satp_of(TrampolineVm.pg_dir, Config.satp_mode)
+                    );
+                    translation_takeover_fence_complete(cpu_ref);
+                    translation_takeover_owner_replaced_atomically(cpu_ref);
+                    cpu_translation_owner_matches_live_satp_for_ref(cpu_ref);
                 }
             }
-        }
-    }
-
-    /*
-     * Online 表示第一次物理到虚拟地址过渡已经完成，跳板映射仍处于服务状态。
-     */
-    state State::Online {
-        invariant {
-            attrs_accessible(self);
-            valid_page_table_storage(pg_dir);
-            trampoline_vm_translation_sync_ready_before_satp(TrampolineVm);
-            phys_to_virt_transition_completed(TrampolineVm.pg_dir, TrampolineMap);
-            trampoline_mapping_ready(TrampolineVm.pg_dir, TrampolineMap);
-        }
-
-        transitions {
-            /*
-             * Cleanup 在 EarlyVm 接管后让跳板虚拟内存空间退出服务。
-             * Destroyed 不表示 TrampolineVm.pg_dir 这块静态页表存储被释放。
-             */
-            on Transition::Cleanup -> State::Destroyed {
-                depends_on {
-                    EarlyVm.state == State::Online;
-                }
-            }
-        }
-    }
-
-    /*
-     * Destroyed 表示跳板虚拟内存空间退出服务，但其静态页表存储仍作为对象绑定保留。
-     */
-    state State::Destroyed {
-        invariant {
-            no_service(TrampolineVm);
         }
     }
 }
@@ -764,7 +840,7 @@ object TrampolineVm: AddressSpaceObject {
 /*
  * EarlyVm 表示入口前导期后半段使用的早期虚拟内存空间。它映射内核映像区域和 FixMap 中承载 RawDtb 的 FDT 槽位，并保留线性映射区域。
  */
-object EarlyVm: AddressSpaceObject {
+object EarlyVm: PrepareObject {
     initial_state: State::Base;
     parent: Vm;
     source: static::linux_6_12;
@@ -826,7 +902,7 @@ object EarlyVm: AddressSpaceObject {
                     KernelImage.state == State::Ready;
                     RawDtb.state == State::Ready;
                     FixMap.state == State::Ready;
-                    fits_in_kernel_image_map(KernelImage, KernelImageMap);
+                    KernelAddrSpace.state == State::Ready;
                     slot_contains(FixMap.fdt_slot, RawDtb);
                 }
 
@@ -837,9 +913,9 @@ object EarlyVm: AddressSpaceObject {
                 ensures {
                     attrs_accessible(self);
                     valid_page_table_storage(pg_dir);
-                    kernel_image_mapping_ready(EarlyVm.pg_dir, KernelImage, KernelImageMap);
+                    kernel_image_mapping_ready(EarlyVm.pg_dir, KernelImage, KernelImage.virt_range);
                     fixmap_slot_mapping_ready(EarlyVm.pg_dir, FixMap.fdt_slot);
-                    kernel_image_mapped_for_plain_data(KernelImage, KernelImageMap);
+                    kernel_image_mapped_for_plain_data(KernelImage, KernelImage.virt_range);
                 }
             }
         }
@@ -852,72 +928,52 @@ object EarlyVm: AddressSpaceObject {
         invariant {
             attrs_accessible(self);
             valid_page_table_storage(pg_dir);
-            kernel_image_mapping_ready(EarlyVm.pg_dir, KernelImage, KernelImageMap);
+            kernel_image_mapping_ready(EarlyVm.pg_dir, KernelImage, KernelImage.virt_range);
             fixmap_slot_mapping_ready(EarlyVm.pg_dir, FixMap.fdt_slot);
-            kernel_image_mapped_for_plain_data(KernelImage, KernelImageMap);
-            LinearMap.state == State::Destroyed;
+            kernel_image_mapped_for_plain_data(KernelImage, KernelImage.virt_range);
+            LinearMap.state == State::Ready;
         }
 
-        transitions {
-            /*
-             * Enable 切换到 early_pg_dir，使早期虚拟地址空间进入服务状态。
-             * Linux/RISC-V 实现中，在写入 early/kernel satp 后执行 sfence.vma，
-             * 避免继续使用只覆盖首个 superpage 的 trampoline translations。
-             * 规格层只保留地址转换同步要求，不把 sfence.vma 展开为独立事件。
-             */
-            on Transition::Enable -> State::Online {
+        actions {
+            on Action::TakeOver(cpu_ref: CpuRef) {
                 depends_on {
-                    TrampolineVm.state == State::Online;
-                }
-
-                may_change {
-                    BootCpuRegisters.satp;
+                    TrampolineVm.state == State::Ready;
+                    cpu_active_translation_owner_for_ref_is(
+                        cpu_ref,
+                        TranslationOwnerKind::TrampolineVm
+                    );
+                    translation_live_satp_for_ref_is(
+                        cpu_ref,
+                        satp_of(TrampolineVm.pg_dir, Config.satp_mode)
+                    );
                 }
 
                 ensures {
                     attrs_accessible(self);
                     valid_page_table_storage(pg_dir);
-                    BootCpuRegisters.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode);
-                    early_vm_translation_sync_complete(EarlyVm);
-                    kernel_image_accessible(KernelImage, KernelImageMap);
+                    translation_live_satp_for_ref_is(
+                        cpu_ref,
+                        satp_of(EarlyVm.pg_dir, Config.satp_mode)
+                    );
+                    early_vm_translation_sync_complete(EarlyVm, cpu_ref);
+                    kernel_image_accessible(KernelImage, KernelImage.virt_range);
                     fixmap_slot_accessible(FixMap.fdt_slot);
+                    cpu_active_translation_owner_for_ref_is(
+                        cpu_ref,
+                        TranslationOwnerKind::EarlyVm
+                    );
+                    translation_takeover_recorded(
+                        cpu_ref,
+                        TranslationOwnerKind::TrampolineVm,
+                        TranslationOwnerKind::EarlyVm,
+                        satp_of(EarlyVm.pg_dir, Config.satp_mode)
+                    );
+                    translation_takeover_fence_complete(cpu_ref);
+                    translation_takeover_owner_replaced_atomically(cpu_ref);
+                    cpu_translation_owner_matches_live_satp_for_ref(cpu_ref);
+                    translation_controller_retired_for_cpu(TrampolineVm, cpu_ref);
                 }
             }
-        }
-    }
-
-    /*
-     * Online 表示 EarlyVm 已启用，内核映像和 FDT fixmap 槽位可以通过早期虚拟地址访问。
-     */
-    state State::Online {
-        invariant {
-            attrs_accessible(self);
-            valid_page_table_storage(pg_dir);
-            BootCpuRegisters.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode);
-            early_vm_translation_sync_complete(EarlyVm);
-            kernel_image_accessible(KernelImage, KernelImageMap);
-            fixmap_slot_accessible(FixMap.fdt_slot);
-        }
-
-        transitions {
-            /*
-             * Cleanup 在 SwapperVm 接管后让早期虚拟内存空间退出服务。
-             * Destroyed 不表示 EarlyVm.pg_dir 这块静态页表存储被释放。
-             */
-            on Transition::Cleanup -> State::Destroyed {
-                depends_on {
-                    SwapperVm.state == State::Online;
-                }
-            }
-        }
-    }
-
-    /*
-     * Destroyed 表示早期虚拟内存空间已被后续完整地址空间接管。
-     */
-    state State::Destroyed {
-        invariant {
-            no_service(EarlyVm);
         }
     }
 }
@@ -925,7 +981,7 @@ object EarlyVm: AddressSpaceObject {
 /*
  * SwapperVm 表示后续阶段使用的完整内核虚拟内存空间。
  */
-object SwapperVm: AddressSpaceObject {
+object SwapperVm: PrepareObject {
     initial_state: State::Base;
     parent: Vm;
     source: static::linux_6_12;
@@ -959,7 +1015,8 @@ object SwapperVm: AddressSpaceObject {
                 ensures {
                     attrs_accessible(self);
                     valid_page_table_storage(pg_dir);
-                    swapper_vm_mappings_ready(SwapperVm, MemBlock, KernelImage, LinearMap, FixMap);
+                    swapper_vm_mappings_ready(SwapperVm, MemBlock, KernelImage, LinearMap, FixMap, UserSpaceReserve);
+                    swapper_vm_excludes_user_reserve(SwapperVm, UserSpaceReserve);
                     temporary_fixmap_page_table_slots_clean(SwapperVm);
                     swapper_vm_strict_kernel_rwx_boundary_deferred(SwapperVm);
                     swapper_vm_final_permissions_not_split_yet(SwapperVm);
@@ -985,44 +1042,43 @@ object SwapperVm: AddressSpaceObject {
         invariant {
             attrs_accessible(self);
             valid_page_table_storage(pg_dir);
-            swapper_vm_mappings_ready(SwapperVm, MemBlock, KernelImage, LinearMap, FixMap);
+            swapper_vm_mappings_ready(SwapperVm, MemBlock, KernelImage, LinearMap, FixMap, UserSpaceReserve);
+            swapper_vm_excludes_user_reserve(SwapperVm, UserSpaceReserve);
             temporary_fixmap_page_table_slots_clean(SwapperVm);
             swapper_vm_strict_kernel_rwx_boundary_deferred(SwapperVm);
             swapper_vm_final_permissions_not_split_yet(SwapperVm);
         }
 
-        transitions {
-            /*
-             * Enable 切换到完整内核页表。Linux/RISC-V 的 setup_vm_final()
-             * 在写入 swapper_pg_dir 对应 SATP 后执行 local_flush_tlb_all()；
-             * 规格层把该边界收敛为完整内核地址空间切换后的翻译同步事实。
-             */
-            on Transition::Enable -> State::Online {
-                may_change {
-                    BootCpuRegisters.satp;
+        actions {
+            on Action::TakeOver(cpu_ref: CpuRef) {
+                depends_on {
+                    KernelAddrSpace.state == State::Online;
+                    cpu_active_translation_owner_for_ref_is(
+                        cpu_ref,
+                        TranslationOwnerKind::EarlyVm
+                    ) || cpu_active_translation_owner_for_ref_is(
+                        cpu_ref,
+                        TranslationOwnerKind::TrampolineVm
+                    );
+                    cpu_translation_owner_matches_live_satp_for_ref(cpu_ref);
                 }
 
                 ensures {
                     attrs_accessible(self);
                     valid_page_table_storage(pg_dir);
-                    BootCpuRegisters.satp == satp_of(SwapperVm.pg_dir, Config.satp_mode);
-                    swapper_vm_current(SwapperVm);
-                    swapper_vm_translation_sync_complete(SwapperVm);
+                    translation_live_satp_for_ref_is(
+                        cpu_ref,
+                        satp_of(SwapperVm.pg_dir, Config.satp_mode)
+                    );
+                    swapper_vm_current_on_cpu(SwapperVm, cpu_ref);
+                    swapper_vm_translation_sync_complete(SwapperVm, cpu_ref);
+                    cpu_active_translation_owner_for_ref_is(cpu_ref, TranslationOwnerKind::SwapperVm);
+                    translation_takeover_to_swapper_recorded(cpu_ref, satp_of(SwapperVm.pg_dir, Config.satp_mode));
+                    translation_takeover_fence_complete(cpu_ref);
+                    translation_takeover_owner_replaced_atomically(cpu_ref);
+                    cpu_translation_owner_matches_live_satp_for_ref(cpu_ref);
                 }
             }
-        }
-    }
-
-    /*
-     * Online 表示完整内核虚拟内存空间已经启用。
-     */
-    state State::Online {
-        invariant {
-            attrs_accessible(self);
-            valid_page_table_storage(pg_dir);
-            BootCpuRegisters.satp == satp_of(SwapperVm.pg_dir, Config.satp_mode);
-            swapper_vm_current(SwapperVm);
-            swapper_vm_translation_sync_complete(SwapperVm);
         }
     }
 }
@@ -1065,6 +1121,7 @@ predicate soc_full_early_platform_model_deferred<T>(soc: T) -> bool;
 
 object Soc: HardwareObject {
     initial_state: State::Base;
+    parent: Kernel;
 
     /*
      * Base 表示 SoC 平台早期预置尚未执行。

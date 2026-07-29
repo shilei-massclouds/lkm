@@ -73,6 +73,8 @@ pub struct RawDtb {
     header: DtbHeader,
     header_range: PhysRange,
     range: PhysRange,
+    handoff_blob_access_contract: bool,
+    nodes_unparsed: bool,
 }
 
 impl RawDtb {
@@ -82,6 +84,8 @@ impl RawDtb {
             header: DtbHeader::empty(),
             header_range: PhysRange::empty(),
             range: PhysRange::empty(),
+            handoff_blob_access_contract: false,
+            nodes_unparsed: true,
         }
     }
 
@@ -98,6 +102,21 @@ impl RawDtb {
     #[allow(dead_code)]
     pub const fn range(&self) -> PhysRange {
         self.range
+    }
+
+    #[allow(dead_code)]
+    pub const fn total_size(&self) -> usize {
+        self.header.total_size
+    }
+
+    #[allow(dead_code)]
+    pub const fn handoff_blob_access_contract(&self) -> bool {
+        self.handoff_blob_access_contract
+    }
+
+    #[allow(dead_code)]
+    pub const fn nodes_unparsed(&self) -> bool {
+        self.nodes_unparsed
     }
 
     pub fn preset(&mut self, boot_args: &BootArgs) -> EventResult {
@@ -128,12 +147,7 @@ impl RawDtb {
 
     pub fn setup(&mut self) -> EventResult {
         if self.lifecycle.state() != State::Prepared {
-            return self.lifecycle.transition(
-                LifecycleEvent::Setup,
-                State::Prepared,
-                State::Ready,
-                Checkpoint::RawDtbReady,
-            );
+            return self.failed_condition(LifecycleEvent::Setup, State::Prepared, State::Ready);
         }
 
         let Some(total_size) = read_be_u32(self.header_range.start + FDT_TOTAL_SIZE_OFFSET) else {
@@ -149,6 +163,7 @@ impl RawDtb {
 
         self.header = self.header.with_total_size(total_size);
         self.range = PhysRange::new(self.header_range.start, range_end);
+        self.handoff_blob_access_contract = true;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Prepared,

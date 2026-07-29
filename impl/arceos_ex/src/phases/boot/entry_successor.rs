@@ -42,7 +42,11 @@ fn preset_start(ctx: &Context) -> EventResult {
 fn preset_dependencies_ready(ctx: &Context) -> bool {
     crate::flows::boot_init_flow::is_prepared()
         && ctx.vm.state() == State::Ready
-        && ctx.vm.entry_prelude_ready()
+        && ctx.kernel_addr_space.state() == State::Ready
+        && ctx
+            .cpu_group
+            .boot_cpu()
+            .is_some_and(|cpu| ctx.vm.entry_prelude_ready_for(cpu))
         && ctx.boot_task.state() == State::OnCpu
         && ctx.init_stack.state() == State::Ready
         && ctx.boot_cpu_interrupt().state() == State::Ready
@@ -106,13 +110,36 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
         &ctx.lds,
         &ctx.physical_memory,
     )?;
-    ctx.vm.enable(
-        &ctx.config,
-        &mut ctx.static_objects,
-        &ctx.lds,
-        &ctx.kernel_image,
-        &ctx.memblock,
-    )?;
+    {
+        let Context {
+            vm,
+            config,
+            static_objects,
+            lds,
+            kernel_image,
+            memblock,
+            cpu_group,
+            kernel_addr_space,
+            ..
+        } = ctx;
+        let Some(boot_cpu) = cpu_group.boot_cpu() else {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                State::Ready,
+                State::Ready,
+                State::Online,
+            );
+        };
+        vm.enable(
+            config,
+            static_objects,
+            lds,
+            kernel_image,
+            memblock,
+            boot_cpu,
+            kernel_addr_space,
+        )?;
+    }
     ctx.memblock.enable(ctx.vm.state())?;
     crate::checkpoint::dispatch(Checkpoint::MemBlockOnline, ctx);
     ctx.early_dtb.cleanup(&ctx.memblock, &ctx.early_param)
@@ -192,7 +219,12 @@ fn entry_successor_phase_ready(ctx: &Context) -> bool {
         && ctx.boot_cpu_interrupt().state() == State::Ready
         && ctx.boot_cpu_interrupt().early_boot_irqs_disabled()
         && ctx.vm.state() == State::Online
-        && ctx.vm.entry_successor_ready()
+        && ctx.kernel_addr_space.state() == State::Online
+        && ctx.kernel_addr_space.final_swapper_mappings_published()
+        && ctx
+            .cpu_group
+            .boot_cpu()
+            .is_some_and(|cpu| ctx.vm.entry_successor_ready_for(cpu))
         && printk::is_prepared()
         && ctx.early_dtb.state() == State::Destroyed
         && ctx.command_line.state() == State::Prepared

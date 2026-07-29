@@ -14,11 +14,14 @@ let generated = '';
 let pipelineHtml = '';
 let effectsHtml = '';
 let alternatingHtml = '';
+let upwardHtml = '';
 let mainHtml = '';
 let pipelineMoments = 0;
 let effectsMoments = 0;
 let alternatingMoments = 0;
 let alternatingRequestMoments: number[] = [];
+let upwardMoments = 0;
+let upwardRequestMoments: number[] = [];
 let mainSignals = 0;
 let mainMoments = 0;
 
@@ -93,6 +96,13 @@ test.beforeAll(() => {
   alternatingHtml = alternating.html;
   alternatingMoments = alternating.totalMoments;
   alternatingRequestMoments = alternating.requestMoments;
+  const upward = generate(
+    'upward', join(repository, 'tools2/tests/fixtures/upward-overflow.spec'),
+    ['--signal', 'Controller.Begin'], 0, 'complete'
+  );
+  upwardHtml = upward.html;
+  upwardMoments = upward.totalMoments;
+  upwardRequestMoments = upward.requestMoments;
   const main = generate(
     'main', join(repository, 'spec/model/main.spec'), ['--until', 'Kernel.Enable'], 0, 'reached'
   );
@@ -132,7 +142,7 @@ test('offline controls restore exact hierarchy and sibling order', async ({ page
   }
   await expect(page.locator('[data-children-of="Root"] > .node-slot')).toHaveCount(3);
   await expect(page.locator('[data-children-of="Root"] > .node-slot')).toHaveText([
-    /Child/, /Async/, /Sink/
+    /Sink/, /Async/, /Child/
   ]);
 
   for (let index = pipelineMoments - 1; index >= 1; index -= 1) {
@@ -249,6 +259,71 @@ test('four levels alternate from the lower-left and inflate only outward', async
     top: stage.scrollTop
   }));
   expect(repeatedScroll).toEqual(finalScroll);
+});
+
+test('upward overflow remains positively scrollable and keeps the current target visible', async ({ page }) => {
+  await page.setViewportSize({ width: 720, height: 480 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await openOffline(page, upwardHtml);
+  const counter = page.locator('.counter');
+  const lastChildRequest = upwardRequestMoments.at(-1)!;
+  for (let index = 1; index <= lastChildRequest; index += 1) {
+    await page.keyboard.press('ArrowRight');
+    await expect(counter).toContainText(`时刻 ${index} / ${upwardMoments}`);
+  }
+
+  const stage = page.locator('.stage');
+  const positiveOverflow = await stage.evaluate((element) => {
+    const topNode = element.querySelector<HTMLElement>('[data-node-id="Up12"]')!;
+    const rootIdentity = element.querySelector<HTMLElement>(
+      '[data-node-id="Root"] > .node-identity'
+    )!;
+    const flexDirections = {
+      up: getComputedStyle(element.querySelector<HTMLElement>('.layout-up')!).flexDirection,
+      card: getComputedStyle(element.querySelector<HTMLElement>('[data-node-id="Root"]')!).flexDirection
+    };
+    element.scrollTop = 0;
+    const stageTop = element.getBoundingClientRect().top;
+    const topAtZero = topNode.getBoundingClientRect().top - stageTop;
+    element.scrollTop = element.scrollHeight;
+    const maximum = element.scrollTop;
+    const stageBottom = element.getBoundingClientRect().bottom;
+    const rootAtMaximum = rootIdentity.getBoundingClientRect().bottom - stageBottom;
+    return {
+      overflow: element.scrollHeight - element.clientHeight,
+      maximum,
+      topAtZero,
+      rootAtMaximum,
+      flexDirections
+    };
+  });
+  expect(positiveOverflow.overflow).toBeGreaterThan(0);
+  expect(positiveOverflow.maximum).toBe(positiveOverflow.overflow);
+  expect(positiveOverflow.topAtZero).toBeGreaterThanOrEqual(0);
+  expect(positiveOverflow.rootAtMaximum).toBeLessThanOrEqual(0);
+  expect(positiveOverflow.flexDirections).toEqual({ up: 'column', card: 'column' });
+
+  await page.setViewportSize({ width: 620, height: 420 });
+  await page.waitForFunction(() => {
+    const element = document.querySelector<HTMLElement>('.stage');
+    const target = document.querySelector<HTMLElement>('[data-node-id="Up12"]');
+    if (!element || !target) return false;
+    const stageRect = element.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    return targetRect.top >= stageRect.top && targetRect.bottom <= stageRect.bottom;
+  });
+
+  const saved = await stage.evaluate((element) => {
+    element.scrollTop = Math.min(37, element.scrollHeight - element.clientHeight);
+    element.scrollLeft = Math.min(19, element.scrollWidth - element.clientWidth);
+    element.dispatchEvent(new Event('scroll'));
+    return { left: element.scrollLeft, top: element.scrollTop };
+  });
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowLeft');
+  await expect(counter).toContainText(`时刻 ${lastChildRequest} / ${upwardMoments}`);
+  expect(await stage.evaluate((element) => ({ left: element.scrollLeft, top: element.scrollTop })))
+    .toEqual(saved);
 });
 
 test('request, feedback, settle, and exceptional self effects stay distinct', async ({ page }) => {
@@ -469,6 +544,7 @@ test('mobile layout wraps without page-level horizontal overflow', async ({ page
     });
     return {
       pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      pageVerticalOverflow: document.documentElement.scrollHeight - document.documentElement.clientHeight,
       stageOverflow: (stage?.scrollWidth || 0) - (stage?.clientWidth || 0),
       overlapping,
       sameFontSize: identities.every((identity) => {
@@ -479,6 +555,7 @@ test('mobile layout wraps without page-level horizontal overflow', async ({ page
     };
   });
   expect(layout.pageOverflow).toBeLessThanOrEqual(1);
+  expect(layout.pageVerticalOverflow).toBeLessThanOrEqual(1);
   expect(layout.stageOverflow).toBeGreaterThan(0);
   expect(layout.overlapping).toBe(false);
   expect(layout.sameFontSize).toBe(true);

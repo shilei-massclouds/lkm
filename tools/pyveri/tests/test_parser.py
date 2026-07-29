@@ -407,11 +407,11 @@ class ParserTests(unittest.TestCase):
         enable = next(transition for transition in ready.transitions if transition.name == "Enable")
         entry, span = enable.depends_on[0].entry_spans[0]
 
-        self.assertEqual(entry, "EarlyVm.state == State::Online")
+        self.assertEqual(entry, "EarlyVm.state == State::Ready")
         line = _read_with_includes(spec, seen=set(), stack=[])[0].splitlines()[
             span.start_line - 1
         ]
-        self.assertIn("EarlyVm.state == State::Online", line)
+        self.assertIn("EarlyVm.state == State::Ready", line)
 
     def test_parse_error_for_unknown_top_level_declaration(self) -> None:
         with self.assertRaises(ParseError):

@@ -391,7 +391,12 @@ class DeriveToolTests(unittest.TestCase):
             self.assertEqual(data["states"]["EntrySuccessorPhase"], "Online")
             self.assertEqual(data["states"]["CorePreparePhase"], "Online")
             self.assertEqual(data["states"]["MmCoreInitPhase"], "Online")
-            self.assertEqual(data["states"]["SwapperVm"], "Online")
+            self.assertEqual(data["states"]["KernelAddrSpace"], "Online")
+            self.assertEqual(data["states"]["Vm"], "Online")
+            self.assertEqual(data["states"]["PhysicalDirect"], "Ready")
+            self.assertEqual(data["states"]["TrampolineVm"], "Ready")
+            self.assertEqual(data["states"]["EarlyVm"], "Ready")
+            self.assertEqual(data["states"]["SwapperVm"], "Ready")
             self.assertEqual(data["states"]["MemBlock"], "Offline")
             self.assertEqual(data["states"]["PageAllocator"], "Ready")
             self.assertEqual(data["states"]["VmallocAllocator"], "Ready")
@@ -462,7 +467,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "linear_map_area_reserved"
                     and record["proof_class"] == "address_layout"
-                    and record["proof_provider"] == "config_address_layout"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -470,7 +475,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "fixmap_adjacent_to_linear_map"
                     and record["proof_class"] == "address_layout"
-                    and record["proof_provider"] == "config_address_layout"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -589,7 +594,7 @@ class DeriveToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     record["expression"]
-                    == "Scheduler.Action::SwitchTo(CurrentTaskRef, next)"
+                    == "Scheduler.Action::SwitchTo(CurrentTaskRef, KernelInitTaskRef)"
                     and record["proof_class"] == "action_commit"
                     and record["proof_provider"] == "within_context"
                     for record in proved
@@ -608,8 +613,8 @@ class DeriveToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     record["expression"]
-                    == "CurrentTaskRef.Action::SetCurrent(task: KernelInitTask)"
-                    and record["proof_class"] == "type_process_commit"
+                    == "KernelInitFlow.Action::ConfirmCurrentTask(task_ref: KernelInitTaskRef)"
+                    and record["proof_class"] == "action_commit"
                     and record["proof_provider"] == "within_context"
                     and "Scheduler.Action::SwitchTo" in (record["process_parent"] or "")
                     for record in proved
@@ -617,16 +622,17 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    record["expression"] == "task_ref_targets(CurrentTaskRef, KernelInitTask)"
-                    and record["proof_class"] == "type_process_ensures"
-                    and record["proof_provider"] == "within_context"
+                    record["expression"]
+                    == "current_task_resolved_target_is(KernelInitFlow, KernelInitTaskRef, KernelInitTask)"
+                    and record["proof_class"] == "exclusive_context_fact"
+                    and record["proof_provider"] == "within_ensures"
                     for record in proved
                 )
             )
             self.assertTrue(
                 any(
                     record["expression"]
-                    == "next.Action::RestoreCoreContext"
+                    == "KernelInitTaskRef.Action::RestoreCoreContext"
                     and record["proof_class"] == "type_process_commit"
                     and record["proof_provider"] == "within_context"
                     and "Scheduler.Action::SwitchTo" in (record["process_parent"] or "")
@@ -721,17 +727,17 @@ class DeriveToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     record["expression"]
-                    == "BootCpuRegisters.stvec == virt_addr(TrapType.formal_event_entry, EarlyVm, KernelImageMap)"
-                    and record["proof_class"] == "register_effect"
-                    and record["proof_provider"] == "transition_ensures"
+                    == "translation_stvec_borrowed_for_ref(BootCPURef, TrampolineVm)"
+                    and record["proof_class"] == "type_process_ensures"
+                    and record["proof_provider"] == "action_drive"
                     for record in proved
                 )
             )
             self.assertTrue(
                 any(
-                    record["expression"] == "BootCpuRegisters.tp == virt_addr(BootTask.storage, EarlyVm, KernelImageMap)"
-                    and record["proof_class"] == "register_effect"
-                    and record["proof_provider"] == "transition_ensures"
+                    record["predicate"] == "boot_task_entry_bound_for_active_owner"
+                    and record["proof_class"] == "type_process_ensures"
+                    and record["proof_provider"] == "within_context"
                     for record in proved
                 )
             )
@@ -799,9 +805,10 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    record["expression"] == "boot_cpu_hartid_ready(BootCPU, BootArgs.boot_hartid)"
-                    and record["proof_class"] == "boot_hart_identity"
-                    and record["proof_provider"] == "transition_ensures"
+                    record["expression"]
+                    == "cpu_translation_owner_matches_live_satp_for_ref(BootCPURef)"
+                    and record["proof_class"] == "type_process_ensures"
+                    and record["proof_provider"] == "action_drive"
                     for record in proved
                 )
             )
@@ -843,9 +850,10 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    record["expression"] == "boot_cpu_online(BootCPU)"
-                    and record["proof_class"] == "cpu_state"
-                    and record["proof_provider"] == "transition_ensures"
+                    record["expression"]
+                    == "cpu_active_translation_owner_for_ref_is(BootCPURef, TranslationOwnerKind::SwapperVm)"
+                    and record["proof_class"] == "type_process_ensures"
+                    and record["proof_provider"] == "action_drive"
                     for record in proved
                 )
             )
@@ -914,7 +922,7 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    record["predicate"] == "kernel_image_file_constructed"
+                    record["predicate"] == "kernel_boot_artifact_constructed"
                     and record["proof_class"] == "derived_fact"
                     and record["proof_provider"] == "prior_derivation_facts"
                     for record in proved
@@ -1009,15 +1017,15 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertFalse(
                 any(
-                    record["predicate"] == "fits_in_kernel_image_map"
+                    record["predicate"] == "fits_in_kernel_image_range"
                     for record in obligations
                 )
             )
             self.assertTrue(
                 any(
-                    record["predicate"] == "fits_in_kernel_image_map"
+                    record["predicate"] == "fits_in_kernel_image_range"
                     and record["proof_class"] == "address_mapping"
-                    and record["proof_provider"] == "config_and_linker"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -1031,7 +1039,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "fits_in_fixmap_slot"
                     and record["proof_class"] == "address_mapping"
-                    and record["proof_provider"] == "riscv_fixmap_layout"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -1060,16 +1068,16 @@ class DeriveToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     record["predicate"] == "kernel_image_accessible"
-                    and record["proof_class"] == "address_mapping"
-                    and record["proof_provider"] == "transition_ensures"
+                    and record["proof_class"] == "type_process_ensures"
+                    and record["proof_provider"] == "action_drive"
                     for record in proved
                 )
             )
             self.assertTrue(
                 any(
                     record["predicate"] == "fixmap_slot_accessible"
-                    and record["proof_class"] == "address_mapping"
-                    and record["proof_provider"] == "transition_ensures"
+                    and record["proof_class"] == "type_process_ensures"
+                    and record["proof_provider"] == "action_drive"
                     for record in proved
                 )
             )
@@ -1092,14 +1100,6 @@ class DeriveToolTests(unittest.TestCase):
                     record["predicate"] == "trampoline_mapping_ready"
                     and record["proof_class"] == "address_mapping"
                     and record["proof_provider"] == "transition_ensures"
-                    for record in proved
-                )
-            )
-            self.assertTrue(
-                any(
-                    record["predicate"] == "trampoline_mapping_ready"
-                    and record["proof_class"] == "address_mapping"
-                    and record["proof_provider"] == "prior_derivation_facts"
                     for record in proved
                 )
             )
@@ -1143,14 +1143,6 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    record["predicate"] == "valid_function_symbol"
-                    and record["proof_class"] == "linker_symbol"
-                    and record["proof_provider"] == "transition_ensures"
-                    for record in proved
-                )
-            )
-            self.assertTrue(
-                any(
                     record["predicate"] == "valid_page_table_storage"
                     and record["proof_class"] == "object_storage"
                     and record["proof_provider"] == "transition_ensures"
@@ -1176,14 +1168,6 @@ class DeriveToolTests(unittest.TestCase):
                     record["predicate"] == "valid_task_storage"
                     and record["proof_class"] == "object_storage"
                     and record["proof_provider"] == "linux_static_object_binding"
-                    for record in proved
-                )
-            )
-            self.assertTrue(
-                any(
-                    record["predicate"] == "valid_task_ref"
-                    and record["proof_class"] == "object_storage"
-                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -1252,8 +1236,8 @@ class DeriveToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     record["predicate"] == "phys_to_virt_transition_completed"
-                    and record["proof_class"] == "architecture_state"
-                    and record["proof_provider"] == "transition_ensures"
+                    and record["proof_class"] == "type_process_ensures"
+                    and record["proof_provider"] == "action_drive"
                     for record in proved
                 )
             )

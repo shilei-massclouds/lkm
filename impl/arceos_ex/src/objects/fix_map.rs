@@ -41,6 +41,12 @@ impl FixMapSlot {
         self.virt_start
     }
 
+    pub fn virt_end(self) -> Option<usize> {
+        self.page_count
+            .checked_mul(self.page_size)
+            .and_then(|bytes| self.virt_start.checked_add(bytes))
+    }
+
     pub fn virt_for_phys(self, phys: usize) -> Option<usize> {
         if self.page_size == 0
             || !self.page_size.is_power_of_two()

@@ -3,10 +3,13 @@ use crate::{arch::riscv64::csr, checkpoint::Checkpoint};
 use super::{
     boot_args::BootArgs,
     config::Config,
+    cpu::{Cpu, TranslationOwner},
     early_vm::EarlyVm,
     fix_map::FixMap,
+    kernel_addr_space::KernelAddrSpace,
     kernel_image::KernelImage,
     lds::Lds,
+    physical_direct::PhysicalDirect,
     raw_dtb::RawDtb,
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     static_objects::StaticObjects,
@@ -17,22 +20,26 @@ use super::{
 
 pub struct Vm {
     lifecycle: Lifecycle,
+    physical_direct: PhysicalDirect,
     trampoline_vm: TrampolineVm,
     early_vm: EarlyVm,
     swapper_vm: SwapperVm,
     early_boot_alternatives_deferred: bool,
     early_boot_alternatives_mmu_off_boundary_preserved: bool,
+    kernel_addr_space_online_observed: bool,
 }
 
 impl Vm {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
+            physical_direct: PhysicalDirect::new(),
             trampoline_vm: TrampolineVm::new(),
             early_vm: EarlyVm::new(),
             swapper_vm: SwapperVm::new(),
             early_boot_alternatives_deferred: false,
             early_boot_alternatives_mmu_off_boundary_preserved: false,
+            kernel_addr_space_online_observed: false,
         }
     }
 
@@ -52,6 +59,7 @@ impl Vm {
         boot_args: &BootArgs,
         raw_dtb: &mut RawDtb,
         fix_map: &mut FixMap,
+        kernel_addr_space: &mut KernelAddrSpace,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || self.trampoline_vm.state() != State::Base
@@ -69,6 +77,8 @@ impl Vm {
             .setup(config, static_objects, lds, kernel_image)?;
 
         self.early_vm.preset(config, boot_args, raw_dtb, fix_map)?;
+
+        kernel_addr_space.setup(config, fix_map)?;
 
         self.early_vm
             .setup(config, static_objects, lds, kernel_image, raw_dtb, fix_map)?;
@@ -90,11 +100,15 @@ impl Vm {
         static_objects: &StaticObjects,
         lds: &Lds,
         kernel_image: &mut KernelImage,
+        boot_cpu: &Cpu,
         after_switch: VmSetupContinuation,
     ) -> ! {
         if self.lifecycle.state() != State::Prepared
             || self.trampoline_vm.state() != State::Ready
             || self.early_vm.state() != State::Ready
+            || self.physical_direct.state() != State::Ready
+            || boot_cpu.active_translation_owner() != TranslationOwner::PhysicalDirect
+            || csr::read_satp() != 0
         {
             crate::arch::riscv64::sbi::system_shutdown();
         }
@@ -118,7 +132,13 @@ impl Vm {
         let Some(continuation_virt) = vm_setup::continuation_addr(kernel_image) else {
             crate::arch::riscv64::sbi::system_shutdown();
         };
-        let Some(context) = vm_setup::VmSetupContext::new(self, kernel_image, lds, after_switch)
+        let Some(owner_phys) =
+            kernel_image.runtime_to_phys(boot_cpu.translation_owner_storage() as usize)
+        else {
+            crate::arch::riscv64::sbi::system_shutdown();
+        };
+        let Some(context) =
+            vm_setup::VmSetupContext::new(self, kernel_image, lds, boot_cpu, after_switch)
         else {
             crate::arch::riscv64::sbi::system_shutdown();
         };
@@ -132,27 +152,28 @@ impl Vm {
                 gp_virt,
                 continuation_virt,
                 kernel_image.virt_offset(),
+                owner_phys,
             )
         }
     }
 
-    pub(super) fn finish_setup_after_switch(&mut self, kernel_image: &mut KernelImage, lds: &Lds) {
+    pub(super) fn finish_setup_after_switch(
+        &mut self,
+        kernel_image: &mut KernelImage,
+        lds: &Lds,
+        boot_cpu: &Cpu,
+    ) {
         crate::checkpoint::enable_post_vm_checkpoints();
 
-        let result = self.trampoline_vm.enable(kernel_image);
-        if result.is_err() {
+        if !self.trampoline_vm.adopt_completed_takeover(boot_cpu) {
             crate::arch::riscv64::sbi::system_shutdown();
         }
+        crate::checkpoint::checkpoint(Checkpoint::TrampolineVmTakeOver);
 
-        let result = self.early_vm.enable(&self.trampoline_vm);
-        if result.is_err() {
+        if !self.early_vm.adopt_take_over(boot_cpu) {
             crate::arch::riscv64::sbi::system_shutdown();
         }
-
-        let result = self.trampoline_vm.cleanup(&self.early_vm);
-        if result.is_err() {
-            crate::arch::riscv64::sbi::system_shutdown();
-        }
+        crate::checkpoint::checkpoint(Checkpoint::EarlyVmTakeOver);
 
         let result = kernel_image.enable(lds);
         if result.is_err() {
@@ -170,6 +191,7 @@ impl Vm {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn enable(
         &mut self,
         config: &Config,
@@ -177,8 +199,14 @@ impl Vm {
         lds: &Lds,
         kernel_image: &KernelImage,
         memblock: &super::memblock::MemBlock,
+        boot_cpu: &Cpu,
+        kernel_addr_space: &mut KernelAddrSpace,
     ) -> EventResult {
-        if self.lifecycle.state() != State::Ready || self.early_vm.state() != State::Online {
+        if self.lifecycle.state() != State::Ready
+            || self.early_vm.state() != State::Ready
+            || !self.early_vm.current_on_cpu(boot_cpu)
+            || kernel_addr_space.state() != State::Ready
+        {
             return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
@@ -190,9 +218,14 @@ impl Vm {
         self.swapper_vm
             .setup(config, static_objects, lds, kernel_image, memblock)?;
 
-        self.swapper_vm.enable(static_objects, kernel_image)?;
-
-        self.early_vm.cleanup(&self.swapper_vm)?;
+        kernel_addr_space.enable(&self.swapper_vm)?;
+        self.kernel_addr_space_online_observed = true;
+        self.swapper_vm.take_over(
+            boot_cpu,
+            TranslationOwner::EarlyVm,
+            self.early_vm.satp(),
+            kernel_addr_space,
+        )?;
 
         self.lifecycle.transition(
             LifecycleEvent::Enable,
@@ -202,25 +235,64 @@ impl Vm {
         )
     }
 
+    pub fn take_over_physical(&self, cpu: &Cpu) -> EventResult {
+        self.physical_direct.take_over(cpu)
+    }
+
     pub fn entry_prelude_ready(&self) -> bool {
-        self.trampoline_vm.state() == State::Destroyed
-            && self.trampoline_vm.translation_sync_ready_before_satp()
-            && self.early_vm.state() == State::Online
-            && self.early_vm.translation_sync_complete()
+        self.physical_direct.state() == State::Ready
+            && self.trampoline_vm.state() == State::Ready
+            && self.early_vm.state() == State::Ready
             && self.early_boot_alternatives_deferred
             && self.early_boot_alternatives_mmu_off_boundary_preserved
     }
 
+    pub fn entry_prelude_ready_for(&self, cpu: &Cpu) -> bool {
+        self.lifecycle.state() == State::Ready
+            && self.entry_prelude_ready()
+            && self.physical_direct.takeover_complete_for(cpu)
+            && self.trampoline_vm.translation_sync_complete(cpu)
+            && self.early_vm.current_on_cpu(cpu)
+    }
+
     pub fn entry_successor_ready(&self) -> bool {
         self.lifecycle.state() == State::Online
-            && self.swapper_vm.state() == State::Online
-            && self.swapper_vm.translation_sync_complete()
+            && self.physical_direct.state() == State::Ready
+            && self.trampoline_vm.state() == State::Ready
+            && self.early_vm.state() == State::Ready
+            && self.swapper_vm.state() == State::Ready
+            && self.kernel_addr_space_online_observed
             && self.swapper_vm.strict_kernel_rwx_boundary_deferred()
             && self.swapper_vm.final_permissions_not_split_yet()
-            && self.early_vm.state() == State::Destroyed
+    }
+
+    pub fn entry_successor_ready_for(&self, cpu: &Cpu) -> bool {
+        self.entry_successor_ready() && self.swapper_vm.current_on_cpu(cpu)
+    }
+
+    pub fn adopt_ap_translation_chain(&self, cpu: &Cpu) -> bool {
+        self.entry_successor_ready()
+            && self.physical_direct.adopt_completed_takeover(cpu)
+            && self.trampoline_vm.adopt_completed_takeover(cpu)
+            && self.swapper_vm.adopt_ap_take_over(cpu)
+    }
+
+    pub fn ap_translation_ready(&self, cpu: &Cpu) -> bool {
+        self.entry_successor_ready()
+            && self.physical_direct.takeover_complete_for(cpu)
+            && self.trampoline_vm.translation_sync_complete(cpu)
+            && self.swapper_vm.current_on_cpu(cpu)
     }
 
     pub const fn swapper_vm(&self) -> &SwapperVm {
         &self.swapper_vm
+    }
+
+    pub const fn early_vm_satp(&self) -> usize {
+        self.early_vm.satp()
+    }
+
+    pub const fn trampoline_vm(&self) -> &TrampolineVm {
+        &self.trampoline_vm
     }
 }

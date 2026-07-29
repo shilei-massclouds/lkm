@@ -31,7 +31,8 @@ object DeviceTree: ResourceObject {
                 depends_on {
                     RawDtb.state == State::Ready;
                     Vm.state == State::Online;
-                    SwapperVm.state == State::Online;
+                    SwapperVm.state == State::Ready;
+                    KernelAddrSpace.state == State::Online;
                     MemBlock.state == State::Online;
                 }
 
@@ -121,7 +122,8 @@ object Zones: MemoryObject {
                 depends_on {
                     MemBlock.state == State::Online;
                     Vm.state == State::Online;
-                    SwapperVm.state == State::Online;
+                    SwapperVm.state == State::Ready;
+                    KernelAddrSpace.state == State::Online;
                 }
 
                 ensures {
@@ -186,7 +188,9 @@ object PageMetadataMap: MemoryObject {
                 depends_on {
                     MemBlock.state == State::Online;
                     Zones.state == State::Ready;
-                    SwapperVm.state == State::Online;
+                    SwapperVm.state == State::Ready;
+                    KernelAddrSpace.state == State::Online;
+                    Vm.state == State::Online;
                 }
 
                 ensures {
@@ -752,7 +756,9 @@ object StaticBranch: KernelObject {
             on Transition::Setup -> State::Ready {
                 depends_on {
                     KernelImage.state == State::Online;
-                    SwapperVm.state == State::Online;
+                    SwapperVm.state == State::Ready;
+                    KernelAddrSpace.state == State::Online;
+                    Vm.state == State::Online;
                     CpuHotplugLock.state == State::Ready;
                     JumpLabelMutex.state == State::Ready;
                     BootTask.state == State::OnCpu;
@@ -908,7 +914,9 @@ object PerCpuFirstChunk: MemoryObject {
                 depends_on {
                     PerCpuStaticImage.state == State::Ready;
                     MemBlock.state == State::Online;
-                    SwapperVm.state == State::Online;
+                    SwapperVm.state == State::Ready;
+                    KernelAddrSpace.state == State::Online;
+                    Vm.state == State::Online;
                     CpuGroup.state == State::Ready;
                 }
 
@@ -1038,7 +1046,9 @@ object PerCpuStorage: MemoryObject {
                 depends_on {
                     PerCpuStaticImage.state == State::Ready;
                     MemBlock.state == State::Online;
-                    SwapperVm.state == State::Online;
+                    SwapperVm.state == State::Ready;
+                    KernelAddrSpace.state == State::Online;
+                    Vm.state == State::Online;
                     CpuGroup.state == State::Ready;
                 }
 
@@ -1365,7 +1375,8 @@ object CorePreparePhase: PhaseObject {
                 depends_on {
                     EntrySuccessorPhase.state == State::Online;
                     Vm.state == State::Online;
-                    SwapperVm.state == State::Online;
+                    SwapperVm.state == State::Ready;
+                    KernelAddrSpace.state == State::Online;
                     MemBlock.state == State::Online;
                     Params.state == State::Prepared;
                     EarlyParam.state == State::Ready;

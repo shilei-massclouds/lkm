@@ -32,7 +32,7 @@ OpenSBI.Ready 只承载规格与 firmware 构造完成事实，不提前承载 o
 页表，OpenSBI.Online 保持的是“交接时 satp 为零”的稳定 handoff 记录，不要求 live satp 永远为零。
 
 OpenSBI.Online 只表示固件实例已经启动并提交 Kernel 入口控制权；下游失败不回滚该状态。
-CpuGroup 是 Kernel 内部对象；上述同步效果由真实 Kernel 入口在接受 Enable 前采用，不要求修改外部
+CpuGroup 是 Kernel 的直接子对象；上述同步效果由真实 Kernel 入口在接受 Enable 前采用，不要求修改外部
 OpenSBI 固件或让固件直接构造 Rust 对象。
 
 ## Mapping

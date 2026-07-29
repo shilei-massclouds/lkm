@@ -1,7 +1,10 @@
+use core::sync::atomic::{AtomicBool, Ordering};
+
 use crate::checkpoint::Checkpoint;
 
 use super::{
     config::Config,
+    cpu::{Cpu, MAX_CPUS},
     kernel_image::KernelImage,
     lds::Lds,
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
@@ -10,14 +13,16 @@ use super::{
 
 pub struct TrampolineVm {
     lifecycle: Lifecycle,
-    translation_sync_ready_before_satp: bool,
+    satp: usize,
+    translation_sync_complete: [AtomicBool; MAX_CPUS],
 }
 
 impl TrampolineVm {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
-            translation_sync_ready_before_satp: false,
+            satp: 0,
+            translation_sync_complete: [const { AtomicBool::new(false) }; MAX_CPUS],
         }
     }
 
@@ -26,45 +31,22 @@ impl TrampolineVm {
         self.lifecycle.state()
     }
 
-    pub const fn translation_sync_ready_before_satp(&self) -> bool {
-        self.translation_sync_ready_before_satp
+    pub const fn satp(&self) -> usize {
+        self.satp
     }
 
-    pub fn enable(&mut self, kernel_image: &KernelImage) -> EventResult {
-        if self.lifecycle.state() != State::Ready || kernel_image.state() != State::Ready {
-            return failed_condition(
-                LifecycleEvent::Enable,
-                self.lifecycle.state(),
-                State::Ready,
-                State::Online,
-            );
-        }
-
-        self.translation_sync_ready_before_satp = true;
-        self.lifecycle.transition(
-            LifecycleEvent::Enable,
-            State::Ready,
-            State::Online,
-            Checkpoint::TrampolineVmOnline,
-        )
+    pub fn translation_sync_complete(&self, cpu: &Cpu) -> bool {
+        cpu.logical_id() < MAX_CPUS
+            && self.translation_sync_complete[cpu.logical_id()].load(Ordering::Acquire)
     }
 
-    pub fn cleanup(&mut self, early_vm: &super::early_vm::EarlyVm) -> EventResult {
-        if self.lifecycle.state() != State::Online || early_vm.state() != State::Online {
-            return failed_condition(
-                LifecycleEvent::Cleanup,
-                self.lifecycle.state(),
-                State::Online,
-                State::Destroyed,
-            );
+    pub fn adopt_completed_takeover(&self, cpu: &Cpu) -> bool {
+        if self.lifecycle.state() != State::Ready || cpu.logical_id() >= MAX_CPUS || self.satp == 0
+        {
+            return false;
         }
-
-        self.lifecycle.transition(
-            LifecycleEvent::Cleanup,
-            State::Online,
-            State::Destroyed,
-            Checkpoint::TrampolineVmDestroyed,
-        )
+        self.translation_sync_complete[cpu.logical_id()].store(true, Ordering::Release);
+        true
     }
 
     pub fn setup(
@@ -97,6 +79,16 @@ impl TrampolineVm {
                 State::Ready,
             );
         }
+
+        let Some(satp) = static_objects.trampoline_satp(kernel_image) else {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        };
+        self.satp = satp;
 
         self.lifecycle.transition(
             LifecycleEvent::Setup,

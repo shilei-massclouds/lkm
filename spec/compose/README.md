@@ -1,5 +1,11 @@
 # Compose 规格
 
+2026-07-29 KernelAddrSpace/translation controller 复核：`KernelAddrSpace` 与 `Vm` 在既有
+`arceos_ex::objects`/`Context` 内拆为私有 module，四个 controller 的激活身份收归既有 canonical
+`Cpu`；BootTask bind action 和 AP boot-data 扩展也只在既有 boot-init/SMP/arch 私有边界内流动。
+不新增 crate、facade、feature、公开 API 或组件依赖。`spec/compose/main.spec` 增加三项组合 invariant，
+防止后续把地址空间资源与控制面重新合并、复制 CPU owner 或发布 controller internals。
+
 本目录记录 `Composition Phase` 的补充约束。
 
 2026-07-27 tools2 Signal animation v3 复核：request/feedback/settle 因果时刻只改变独立 Python

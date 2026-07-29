@@ -1,5 +1,5 @@
 use core::arch::global_asm;
-use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 
 use crate::{
     arch::riscv64::csr,
@@ -7,6 +7,7 @@ use crate::{
     context::Context,
     objects::{
         boot_args::BootArgs,
+        cpu::TranslationOwner,
         soc::Soc,
         state::{EventResult, LifecycleEvent, State, failed_condition},
         task::TaskRef,
@@ -14,16 +15,12 @@ use crate::{
     },
 };
 
-/// Preset-private lowering of the model `BootTaskEntryBinding` object.
-///
-/// It deliberately stays out of `Context`: the binding is neither a second
-/// Task carrier nor a service exposed outside BootInitFlow.Preset.
-#[unsafe(link_section = ".data.phase")]
-static BOOT_TASK_ENTRY_BINDING_STATE: AtomicU8 =
-    AtomicU8::new(crate::phases::state::encode(State::Base));
-
 #[unsafe(link_section = ".data.phase")]
 static BOOT_TASK_ENTRY_PREEMPTION_INITIALIZED: AtomicBool = AtomicBool::new(false);
+#[unsafe(link_section = ".data.phase")]
+static BOOT_TASK_ENTRY_BIND_COUNT: AtomicUsize = AtomicUsize::new(0);
+#[unsafe(link_section = ".data.phase")]
+static BOOT_TASK_ENTRY_BIND_DIAGNOSTIC: AtomicU8 = AtomicU8::new(0);
 
 const HEAD_TEXT_ALIGN: usize = 2;
 const SSTATUS_FPU_VECTOR_MASK: usize = (0b11 << 9) | (0b11 << 13);
@@ -127,8 +124,8 @@ _start:
     li a0, {trace_boot_cpu_preset}
     call {head_checkpoint}
 
-    # BootTaskEntryBinding.Preset: install the physical init task pointer in tp.
-    # BootTask remains Online; binding does not drive its lifecycle.
+    # BootInitFlow.BindBootTaskEntry: bind the physical BootTask carrier in tp.
+    # The repeatable action does not drive a separate binding lifecycle.
     la tp, {init_task_storage}
 
     # InitStack.Preset: reserve temporary page-table space on the boot stack.
@@ -269,6 +266,13 @@ extern "C" fn boot_init_flow_preset_rust_entry(hartid: usize, dtb_pa: usize) -> 
         crate::systems::kernel::accept_enable_at_entry(&boot_args),
         "arceos_ex kernel enable failed\n",
     );
+    let Some(boot_cpu) = ctx.cpu_group.boot_cpu() else {
+        crate::arch::riscv64::sbi::system_shutdown()
+    };
+    crate::phases::shutdown_on_error(
+        ctx.vm.take_over_physical(boot_cpu),
+        "arceos_ex physical translation takeover failed\n",
+    );
     crate::checkpoint::checkpoint(Checkpoint::BootInitFlowStarted);
     crate::phases::shutdown_on_error(
         super::adopt_head_preset_start(),
@@ -307,7 +311,7 @@ fn adopt_preset_dependencies(boot_args: &BootArgs) -> EventResult {
 /// - BootInitFlow.Preset private FPU/vector disable action
 /// - `KernelImage.Setup`
 /// - `CpuGroup.cpus[0].Preset`
-/// - `BootTaskEntryBinding.Preset` while BootTask remains Online
+/// - physical `tp` installation for the later BindBootTaskEntry action
 /// - `InitStack.Preset`
 ///
 /// This Rust segment adopts those completed events into the resource objects,
@@ -325,12 +329,17 @@ fn preset_flow(boot_args: &BootArgs) -> ! {
         &ctx.static_objects,
         &ctx.lds,
         &mut ctx.kernel_image,
+        ctx.cpu_group
+            .boot_cpu()
+            .unwrap_or_else(|| crate::arch::riscv64::sbi::system_shutdown()),
         after_vm_setup_continuation,
     )
 }
 
 fn preset_until_vm_switch(ctx: &mut Context, boot_args: &BootArgs) -> EventResult {
     adopt_head_prefix(ctx, boot_args)?;
+    ctx.kernel_addr_space
+        .preset(&ctx.config, &ctx.lds, &ctx.kernel_image)?;
     {
         let Context {
             cpu_group,
@@ -358,6 +367,7 @@ fn preset_until_vm_switch(ctx: &mut Context, boot_args: &BootArgs) -> EventResul
         boot_args,
         &mut ctx.raw_dtb,
         &mut ctx.fix_map,
+        &mut ctx.kernel_addr_space,
     )
 }
 
@@ -394,6 +404,7 @@ fn adopt_head_prefix(ctx: &mut Context, boot_args: &BootArgs) -> EventResult {
     };
     local_interrupt.setup_local_control()?;
     local_interrupt.setup()?;
+    bind_boot_task_entry(ctx, TaskRef::BOOT)?;
     let Ok(current_task) = ctx.current_task() else {
         return failed_condition(
             LifecycleEvent::Setup,
@@ -426,7 +437,6 @@ fn adopt_head_prefix(ctx: &mut Context, boot_args: &BootArgs) -> EventResult {
             State::Ready,
         );
     }
-    adopt_boot_task_entry_binding_physical(ctx)?;
     ctx.init_stack
         .adopt_head_preset(&ctx.kernel_image, &ctx.lds)
 }
@@ -457,6 +467,7 @@ fn after_vm_setup(ctx: &mut Context) -> EventResult {
     let boot_task_identity = ctx.boot_task.carrier_address();
     let boot_stack_base = ctx.lds.init_stack_start();
     let boot_stack_top = ctx.lds.init_stack_end();
+    bind_boot_task_entry(ctx, TaskRef::BOOT)?;
     let Context {
         cpu_group,
         vm,
@@ -479,7 +490,6 @@ fn after_vm_setup(ctx: &mut Context) -> EventResult {
         boot_stack_base,
         boot_stack_top,
     )?;
-    setup_boot_task_entry_binding_virtual(ctx)?;
     if !ctx
         .boot_task
         .task_mut()
@@ -497,22 +507,21 @@ fn after_vm_setup(ctx: &mut Context) -> EventResult {
     Soc::preset()
 }
 
-/// Adopts the physical `tp` operation already performed in the head segment.
-/// All recoverable checks precede the private binding-state commit.
-fn adopt_boot_task_entry_binding_physical(ctx: &Context) -> EventResult {
-    let binding_state = boot_task_entry_binding_state();
+/// Repeatable lowering of `BootInitFlow.Action::BindBootTaskEntry`.
+/// It has no lifecycle/snapshot state; the sole persistent fact is whether
+/// the entry preemption count has been initialized once.
+fn bind_boot_task_entry(ctx: &Context, current_task_ref: TaskRef) -> EventResult {
     let carrier_address = ctx.boot_task.carrier_address();
     let Some(init_task_phys) = ctx.kernel_image.runtime_to_phys(carrier_address) else {
-        return failed_condition(
-            LifecycleEvent::Preset,
-            binding_state,
-            State::Base,
-            State::Prepared,
-        );
+        return bind_boot_task_entry_failed(1);
     };
-
-    if binding_state != State::Base
-        || ctx.kernel_image.state() != State::Ready
+    let Some(init_task_virt) = ctx.kernel_image.runtime_to_link(carrier_address) else {
+        return bind_boot_task_entry_failed(1);
+    };
+    let Some(boot_cpu) = ctx.cpu_group.boot_cpu() else {
+        return bind_boot_task_entry_failed(2);
+    };
+    if !current_task_ref.same_identity(TaskRef::BOOT)
         || ctx.boot_task.state() != State::OnCpu
         || ctx.boot_task.task().task_ref() != TaskRef::BOOT
         || ctx.boot_task.task().pid() != 0
@@ -523,79 +532,62 @@ fn adopt_boot_task_entry_binding_physical(ctx: &Context) -> EventResult {
             .same_identity(TaskFlowRef::BOOT_INIT)
         || !ctx.boot_init_flow.core().active()
         || ctx.boot_task.task_ref() != TaskRef::BOOT
-        || csr::read_tp() != init_task_phys
     {
-        return failed_condition(
-            LifecycleEvent::Preset,
-            binding_state,
-            State::Base,
-            State::Prepared,
-        );
+        return bind_boot_task_entry_failed(3);
+    }
+    let observed_tp = csr::read_tp();
+    if observed_tp != init_task_phys && observed_tp != init_task_virt {
+        return bind_boot_task_entry_failed(4);
     }
 
-    crate::phases::state::adopt(
-        &BOOT_TASK_ENTRY_BINDING_STATE,
-        LifecycleEvent::Preset,
-        State::Base,
-        State::Prepared,
-    )?;
-    BOOT_TASK_ENTRY_PREEMPTION_INITIALIZED.store(true, Ordering::Relaxed);
+    match boot_cpu.active_translation_owner() {
+        TranslationOwner::PhysicalDirect => {
+            if csr::read_satp() != 0 || ctx.kernel_image.state() != State::Ready {
+                return bind_boot_task_entry_failed(5);
+            }
+            csr::write_tp(init_task_phys);
+            let _ = BOOT_TASK_ENTRY_PREEMPTION_INITIALIZED.compare_exchange(
+                false,
+                true,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            );
+        }
+        TranslationOwner::EarlyVm | TranslationOwner::SwapperVm => {
+            let expected_satp = if boot_cpu.active_translation_owner() == TranslationOwner::EarlyVm
+            {
+                ctx.vm.early_vm_satp()
+            } else {
+                ctx.vm.swapper_vm().satp()
+            };
+            if expected_satp == 0
+                || csr::read_satp() != expected_satp
+                || !boot_task_entry_preemption_initialized()
+                || init_task_virt != carrier_address
+            {
+                return bind_boot_task_entry_failed(5);
+            }
+            csr::write_tp(init_task_virt);
+        }
+        TranslationOwner::None | TranslationOwner::TrampolineVm => {
+            return bind_boot_task_entry_failed(6);
+        }
+    }
+    BOOT_TASK_ENTRY_BIND_COUNT.fetch_add(1, Ordering::Relaxed);
+    BOOT_TASK_ENTRY_BIND_DIAGNOSTIC.store(0, Ordering::Release);
     Ok(())
 }
 
-/// Switches `tp` to the EarlyVm address of the same canonical carrier.
-/// Binding, Task and VM facts are all checked before the CSR is modified.
-fn setup_boot_task_entry_binding_virtual(ctx: &Context) -> EventResult {
-    let binding_state = boot_task_entry_binding_state();
-    let carrier_address = ctx.boot_task.carrier_address();
-    let Some(init_task_phys) = ctx.kernel_image.runtime_to_phys(carrier_address) else {
-        return failed_condition(
-            LifecycleEvent::Setup,
-            binding_state,
-            State::Prepared,
-            State::Ready,
-        );
-    };
-    let Some(init_task_virt) = ctx.kernel_image.runtime_to_link(carrier_address) else {
-        return failed_condition(
-            LifecycleEvent::Setup,
-            binding_state,
-            State::Prepared,
-            State::Ready,
-        );
-    };
-
-    if binding_state != State::Prepared
-        || !boot_task_entry_preemption_initialized()
-        || ctx.boot_task.state() != State::OnCpu
-        || ctx.boot_task.task().task_ref() != TaskRef::BOOT
-        || ctx.boot_task.task().pid() != 0
-        || !ctx
-            .boot_task
-            .task()
-            .active_flow()
-            .same_identity(TaskFlowRef::BOOT_INIT)
-        || !ctx.boot_init_flow.core().active()
-        || ctx.vm.state() != State::Ready
-        || !ctx.vm.entry_prelude_ready()
-        || ctx.kernel_image.state() != State::Online
-        || init_task_virt != carrier_address
-        || csr::read_tp() != init_task_phys
-    {
-        return failed_condition(
-            LifecycleEvent::Setup,
-            binding_state,
-            State::Prepared,
-            State::Ready,
-        );
-    }
-
-    csr::write_tp(init_task_virt);
-    crate::phases::state::adopt(
-        &BOOT_TASK_ENTRY_BINDING_STATE,
-        LifecycleEvent::Setup,
-        State::Prepared,
-        State::Ready,
+fn bind_boot_task_entry_failed(code: u8) -> EventResult {
+    BOOT_TASK_ENTRY_BIND_DIAGNOSTIC.store(code, Ordering::Release);
+    crate::arch::riscv64::sbi::putstr("BindBootTaskEntry failed code=");
+    crate::arch::riscv64::sbi::putchar(b'0' + code.min(9));
+    crate::arch::riscv64::sbi::putchar(b'\n');
+    failed_condition(
+        LifecycleEvent::Continue,
+        State::OnCpu,
+        State::OnCpu,
+        State::OnCpu,
     )
 }
 
@@ -613,8 +605,9 @@ fn verify_boot_task_online_virtual(ctx: &Context) -> EventResult {
         );
     };
 
-    if boot_task_entry_binding_state() != State::Ready
-        || !boot_task_entry_preemption_initialized()
+    if !boot_task_entry_preemption_initialized()
+        || BOOT_TASK_ENTRY_BIND_COUNT.load(Ordering::Acquire) < 2
+        || BOOT_TASK_ENTRY_BIND_DIAGNOSTIC.load(Ordering::Acquire) != 0
         || task_state != State::OnCpu
         || ctx.boot_task.task().task_ref() != TaskRef::BOOT
         || ctx.boot_task.task().pid() != 0
@@ -625,6 +618,10 @@ fn verify_boot_task_online_virtual(ctx: &Context) -> EventResult {
             .same_identity(TaskFlowRef::BOOT_INIT)
         || !ctx.boot_init_flow.core().active()
         || ctx.vm.state() != State::Ready
+        || !ctx
+            .cpu_group
+            .boot_cpu()
+            .is_some_and(|cpu| ctx.vm.entry_prelude_ready_for(cpu))
         || ctx.kernel_image.state() != State::Online
         || init_task_virt != carrier_address
         || csr::read_tp() != init_task_virt
@@ -639,12 +636,18 @@ fn verify_boot_task_online_virtual(ctx: &Context) -> EventResult {
     Ok(())
 }
 
-fn boot_task_entry_binding_state() -> State {
-    crate::phases::state::load(&BOOT_TASK_ENTRY_BINDING_STATE)
+pub(crate) fn boot_task_entry_preemption_initialized() -> bool {
+    BOOT_TASK_ENTRY_PREEMPTION_INITIALIZED.load(Ordering::Relaxed)
 }
 
-fn boot_task_entry_preemption_initialized() -> bool {
-    BOOT_TASK_ENTRY_PREEMPTION_INITIALIZED.load(Ordering::Relaxed)
+#[cfg_attr(not(app_smoke), allow(dead_code))]
+pub(crate) fn boot_task_entry_bind_count() -> usize {
+    BOOT_TASK_ENTRY_BIND_COUNT.load(Ordering::Acquire)
+}
+
+#[cfg_attr(not(app_smoke), allow(dead_code))]
+pub(crate) fn boot_task_entry_bind_diagnostic() -> u8 {
+    BOOT_TASK_ENTRY_BIND_DIAGNOSTIC.load(Ordering::Acquire)
 }
 
 fn head_bss_clear_completed() -> bool {
@@ -666,9 +669,11 @@ pub(super) fn entry_objects_ready(ctx: &Context) -> bool {
         && ctx.boot_cpu_exception().breakpoint_state() == State::Prepared
         && ctx.boot_cpu_exception().unexpected_state() == State::Prepared
         && ctx.kernel_image.state() == State::Online
+        && ctx.kernel_addr_space.state() == State::Ready
         && ctx.raw_dtb.state() == State::Ready
-        && boot_task_entry_binding_state() == State::Ready
         && boot_task_entry_preemption_initialized()
+        && BOOT_TASK_ENTRY_BIND_COUNT.load(Ordering::Acquire) >= 2
+        && BOOT_TASK_ENTRY_BIND_DIAGNOSTIC.load(Ordering::Acquire) == 0
         && ctx.boot_task.state() == State::OnCpu
         && ctx.boot_task.task().task_ref() == TaskRef::BOOT
         && ctx.boot_task.task().pid() == 0
@@ -681,7 +686,10 @@ pub(super) fn entry_objects_ready(ctx: &Context) -> bool {
         && csr::read_tp() == ctx.boot_task.carrier_address()
         && ctx.init_stack.state() == State::Ready
         && ctx.vm.state() == State::Ready
-        && ctx.vm.entry_prelude_ready()
+        && ctx
+            .cpu_group
+            .boot_cpu()
+            .is_some_and(|cpu| ctx.vm.entry_prelude_ready_for(cpu))
         && ctx.boot_init_flow.cpu_ref() == ctx.cpu_group.boot_cpu_ref()
         && ctx
             .cpu_group

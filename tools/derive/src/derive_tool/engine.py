@@ -379,7 +379,7 @@ _EXTERNAL_PREDICATES = {
     "context_is": "system_exclusive_context",
     "disjoint": "platform_memory_layout",
     "fits_in_fixmap_slot": "address_mapping",
-    "fits_in_kernel_image_map": "address_mapping",
+    "fits_in_kernel_image_range": "address_mapping",
     "fixmap_slot_accessible": "address_mapping",
     "fixmap_slot_mapping_ready": "address_mapping",
     "firmware_dtb_blob_in_ram_at_kernel_entry": "firmware_entry_state",
@@ -472,7 +472,7 @@ _DERIVED_PROVIDERS = {
     "fixmap_slot_accessible": "prior_derivation_facts",
     "fixmap_slot_mapping_ready": "boot_code_candidate",
     "fits_in_fixmap_slot": "config_source_candidate",
-    "fits_in_kernel_image_map": "config_source_candidate",
+    "fits_in_kernel_image_range": "config_source_candidate",
     "firmware_dtb_blob_in_ram_at_kernel_entry": "opensbi_firmware",
     "firmware_dtb_blob_complete_at_kernel_entry": "opensbi_firmware",
     "firmware_dtb_blob_accessible_at_kernel_entry": "opensbi_firmware",
@@ -546,12 +546,11 @@ _DERIVED_PROVIDERS = {
 }
 
 _AGGREGATE_FACT_PROOFS = {
-    "kernel_image_constructed()": (
-        "kernel_image_construction",
+    "kernel_boot_artifact_constructed()": (
+        "kernel_boot_artifact_construction",
         {
             "kernel_elf_linked_from_config_and_lds(Config, Lds)",
-            "kernel_boot_image_constructed_from_elf(Config, Lds)",
-            "kernel_image_physical_load_pmd_aligned(phys_addr(Lds.kernel_start), Config.pmd_size)",
+            "kernel_boot_artifact_constructed_from_elf(Config, Lds)",
         },
     ),
 }
@@ -682,7 +681,7 @@ _RELATION_PROOFS = {
         "stack_layout",
         "prior_derivation_facts",
     ),
-    "inside(BootCpuRegisters.sp, virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_start, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap))": (
+    "inside(BootCpuRegisters.sp, virt_addr(Lds.init_stack_end, EarlyVm, KernelImage.virt_range), virt_addr(Lds.init_stack_start, EarlyVm, KernelImage.virt_range), virt_addr(Lds.init_stack_end, EarlyVm, KernelImage.virt_range))": (
         "stack_layout",
         "prior_derivation_facts",
     ),
@@ -718,7 +717,7 @@ _RELATION_PROOFS = {
         "register_effect",
         "prior_derivation_facts",
     ),
-    "BootCpuRegisters.stvec == virt_addr(TrapType.formal_event_entry, EarlyVm, KernelImageMap)": (
+    "BootCpuRegisters.stvec == virt_addr(TrapType.formal_event_entry, EarlyVm, KernelImage.virt_range)": (
         "register_effect",
         "prior_derivation_facts",
     ),
@@ -730,7 +729,7 @@ _RELATION_PROOFS = {
         "register_effect",
         "prior_derivation_facts",
     ),
-    "BootCpuRegisters.tp == virt_addr(BootTask.storage, EarlyVm, KernelImageMap)": (
+    "BootCpuRegisters.tp == virt_addr(BootTask.storage, EarlyVm, KernelImage.virt_range)": (
         "register_effect",
         "prior_derivation_facts",
     ),
@@ -738,7 +737,7 @@ _RELATION_PROOFS = {
         "register_effect",
         "prior_derivation_facts",
     ),
-    "BootCpuRegisters.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImageMap)": (
+    "BootCpuRegisters.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImage.virt_range)": (
         "register_effect",
         "prior_derivation_facts",
     ),
@@ -746,7 +745,7 @@ _RELATION_PROOFS = {
         "register_effect",
         "prior_derivation_facts",
     ),
-    "BootCpuRegisters.gp == virt_addr(Lds.global_pointer, EarlyVm, KernelImageMap)": (
+    "BootCpuRegisters.gp == virt_addr(Lds.global_pointer, EarlyVm, KernelImage.virt_range)": (
         "register_effect",
         "prior_derivation_facts",
     ),
@@ -3391,7 +3390,7 @@ class _Deriver:
                     entry, entry_span, kind, transition, state
                 ):
                     continue
-                elif self._try_prove_kernel_image_map_layout_fact(
+                elif self._try_prove_kernel_image_range_layout_fact(
                     entry, entry_span, kind, transition, state
                 ):
                     continue
@@ -4091,7 +4090,7 @@ class _Deriver:
         )
         return True
 
-    def _try_prove_kernel_image_map_layout_fact(
+    def _try_prove_kernel_image_range_layout_fact(
         self,
         expression: str,
         span: SourceSpan,
@@ -4099,7 +4098,7 @@ class _Deriver:
         transition: TransitionDef | None,
         state: StateDef | None,
     ) -> bool:
-        if expression.strip() != "fits_in_kernel_image_map(KernelImage, KernelImageMap)":
+        if expression.strip() != "fits_in_kernel_image_range(KernelImage, virt_range)":
             return False
         if not (
             self._validate_state("KernelImage", "Ready")
@@ -5948,7 +5947,7 @@ _PRIOR_FACT_PROOFS = {
         "object_storage",
         {
             "BootCpuRegisters.tp == phys_addr(BootTask.storage)",
-            "BootCpuRegisters.tp == virt_addr(BootTask.storage, EarlyVm, KernelImageMap)",
+            "BootCpuRegisters.tp == virt_addr(BootTask.storage, EarlyVm, KernelImage.virt_range)",
         },
     ),
     "valid_task_storage(BootTask.storage)": (
@@ -5961,7 +5960,7 @@ _PRIOR_FACT_PROOFS = {
         "architecture_state",
         {
             "BootCpuRegisters.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack)",
-            "BootCpuRegisters.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImageMap)",
+            "BootCpuRegisters.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImage.virt_range)",
         },
     ),
     "inside(BootCpuRegisters.sp, Lds.init_stack_end, Lds.init_stack_start, Lds.init_stack_end)": (
@@ -5970,10 +5969,10 @@ _PRIOR_FACT_PROOFS = {
             "BootCpuRegisters.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack)",
         },
     ),
-    "inside(BootCpuRegisters.sp, virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_start, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap))": (
+    "inside(BootCpuRegisters.sp, virt_addr(Lds.init_stack_end, EarlyVm, KernelImage.virt_range), virt_addr(Lds.init_stack_start, EarlyVm, KernelImage.virt_range), virt_addr(Lds.init_stack_end, EarlyVm, KernelImage.virt_range))": (
         "stack_layout",
         {
-            "BootCpuRegisters.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImageMap)",
+            "BootCpuRegisters.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImage.virt_range)",
         },
     ),
 }

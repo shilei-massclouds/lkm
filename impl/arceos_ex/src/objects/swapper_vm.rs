@@ -1,7 +1,11 @@
+use core::sync::atomic::{AtomicBool, Ordering};
+
 use crate::{arch::riscv64::csr, checkpoint::Checkpoint};
 
 use super::{
     config::Config,
+    cpu::{Cpu, MAX_CPUS, TranslationOwner},
+    kernel_addr_space::KernelAddrSpace,
     kernel_image::KernelImage,
     lds::Lds,
     memblock::MemBlock,
@@ -11,7 +15,8 @@ use super::{
 
 pub struct SwapperVm {
     lifecycle: Lifecycle,
-    translation_sync_complete: bool,
+    satp: usize,
+    translation_sync_complete: [AtomicBool; MAX_CPUS],
     strict_kernel_rwx_boundary_deferred: bool,
     final_permissions_not_split_yet: bool,
 }
@@ -20,7 +25,8 @@ impl SwapperVm {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
-            translation_sync_complete: false,
+            satp: 0,
+            translation_sync_complete: [const { AtomicBool::new(false) }; MAX_CPUS],
             strict_kernel_rwx_boundary_deferred: false,
             final_permissions_not_split_yet: false,
         }
@@ -30,8 +36,13 @@ impl SwapperVm {
         self.lifecycle.state()
     }
 
-    pub const fn translation_sync_complete(&self) -> bool {
-        self.translation_sync_complete
+    pub const fn satp(&self) -> usize {
+        self.satp
+    }
+
+    pub fn translation_sync_complete(&self, cpu: &Cpu) -> bool {
+        cpu.logical_id() < MAX_CPUS
+            && self.translation_sync_complete[cpu.logical_id()].load(Ordering::Acquire)
     }
 
     pub const fn strict_kernel_rwx_boundary_deferred(&self) -> bool {
@@ -82,6 +93,15 @@ impl SwapperVm {
         }
         self.strict_kernel_rwx_boundary_deferred = true;
         self.final_permissions_not_split_yet = true;
+        let Some(satp) = static_objects.swapper_satp(kernel_image) else {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        };
+        self.satp = satp;
 
         self.lifecycle.transition(
             LifecycleEvent::Setup,
@@ -91,37 +111,64 @@ impl SwapperVm {
         )
     }
 
-    pub fn enable(
-        &mut self,
-        static_objects: &StaticObjects,
-        kernel_image: &KernelImage,
+    pub fn take_over(
+        &self,
+        cpu: &Cpu,
+        old_owner: TranslationOwner,
+        old_satp: usize,
+        kernel_addr_space: &KernelAddrSpace,
     ) -> EventResult {
-        if self.lifecycle.state() != State::Ready {
+        if self.lifecycle.state() != State::Ready
+            || kernel_addr_space.state() != State::Online
+            || cpu.logical_id() >= MAX_CPUS
+            || cpu.active_translation_owner() != old_owner
+            || csr::read_satp() != old_satp
+            || self.satp == 0
+        {
             return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
                 State::Ready,
-                State::Online,
+                State::Ready,
             );
         }
 
-        let Some(satp) = static_objects.swapper_satp(kernel_image) else {
+        csr::write_satp(self.satp);
+        csr::sfence_vma();
+        if !cpu.replace_translation_owner(old_owner, TranslationOwner::SwapperVm, self.satp) {
             return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
                 State::Ready,
-                State::Online,
+                State::Ready,
             );
-        };
-        csr::write_satp(satp);
-        csr::sfence_vma();
-        self.translation_sync_complete = true;
+        }
+        self.translation_sync_complete[cpu.logical_id()].store(true, Ordering::Release);
+        crate::checkpoint::checkpoint(Checkpoint::SwapperVmTakeOver);
+        Ok(())
+    }
 
-        self.lifecycle.transition(
-            LifecycleEvent::Enable,
-            State::Ready,
-            State::Online,
-            Checkpoint::SwapperVmOnline,
-        )
+    pub fn adopt_ap_take_over(&self, cpu: &Cpu) -> bool {
+        if self.lifecycle.state() != State::Ready
+            || cpu.logical_id() >= MAX_CPUS
+            || cpu.active_translation_owner() != TranslationOwner::SwapperVm
+            || csr::read_satp() != self.satp
+            || !cpu.adopt_translation_takeover(
+                TranslationOwner::TrampolineVm,
+                TranslationOwner::SwapperVm,
+                self.satp,
+            )
+        {
+            return false;
+        }
+        self.translation_sync_complete[cpu.logical_id()].store(true, Ordering::Release);
+        true
+    }
+
+    pub fn current_on_cpu(&self, cpu: &Cpu) -> bool {
+        self.state() == State::Ready
+            && cpu.active_translation_owner() == TranslationOwner::SwapperVm
+            && csr::read_satp() == self.satp
+            && self.translation_sync_complete(cpu)
     }
 }

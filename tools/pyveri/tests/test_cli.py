@@ -341,9 +341,9 @@ class CliTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             text = output.read_text(encoding="utf-8")
             self.assertIn("annotation-box", text)
-            self.assertIn("控制流已经切换到", text)
+            self.assertIn("Ready 表示 early_pg_dir", text)
             self.assertIn("EarlyVm", text)
-            self.assertIn("启用跳板页表和早期页表", text)
+            self.assertIn("初始化跳板页表并建立第一次", text)
 
     def test_legacy_trace_svg_accepts_state_annotations_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -363,8 +363,8 @@ class CliTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0)
             text = output.read_text(encoding="utf-8")
-            self.assertIn("控制流已经切换到", text)
-            self.assertNotIn("启用跳板页表和早期页表", text)
+            self.assertIn("Ready 表示 early_pg_dir", text)
+            self.assertNotIn("初始化跳板页表并建立第一次", text)
 
     def test_legacy_trace_svg_accepts_event_annotations_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -384,8 +384,8 @@ class CliTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0)
             text = output.read_text(encoding="utf-8")
-            self.assertIn("启用跳板页表和早期页表", text)
-            self.assertNotIn("控制流已经切换到", text)
+            self.assertIn("初始化跳板页表并建立第一次", text)
+            self.assertNotIn("Ready 表示 early_pg_dir", text)
 
     def test_trace_short_option_writes_default_out_path(self) -> None:
         output = (
@@ -420,8 +420,8 @@ class CliTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0)
             text = output.read_text(encoding="utf-8")
-            self.assertIn("启用跳板页表和早期页表", text)
-            self.assertNotIn("控制流已经切换到", text)
+            self.assertIn("初始化跳板页表并建立第一次", text)
+            self.assertNotIn("Ready 表示 early_pg_dir", text)
 
     def test_legacy_trace_svg_rejects_output_alias(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

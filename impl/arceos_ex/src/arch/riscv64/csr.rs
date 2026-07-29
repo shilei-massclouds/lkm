@@ -29,18 +29,21 @@ arceos_ex_switch_to_early_vm:
      * a3 = virtual gp
      * a4 = virtual continuation
      * a5 = kernel virtual offset
+     * a6 = physical address of the current CPU translation-owner byte
      *
      * This follows the Linux/RISC-V relocation idea: after writing the
      * trampoline satp, the next physical PC is not mapped, so the CPU traps
      * to the virtual stvec label that is covered by the trampoline mapping.
      * The sfence.vma before writing trampoline satp and the sfence.vma after
      * writing early satp are the implementation facts required by
-     * TrampolineVm.Enable and EarlyVm.Enable.
+     * TrampolineVm.TakeOver and EarlyVm.TakeOver.
      */
     la      t0, 1f
     add     t0, t0, a5
     csrw    stvec, t0
     sfence.vma
+    li      t1, {trampoline_owner}
+    sb      t1, 0(a6)
     csrw    satp, a0
     .balign 4
 1:
@@ -48,6 +51,9 @@ arceos_ex_switch_to_early_vm:
     mv      gp, a3
     csrw    satp, a1
     sfence.vma
+    add     a6, a6, a5
+    li      t1, {early_owner}
+    sb      t1, 0(a6)
     jr      a4
 
     .section .text.user_entry, "ax"
@@ -70,6 +76,8 @@ arceos_ex_enter_user_mode:
     mv      sp, a2
     sret
 "#,
+    early_owner = const crate::objects::cpu::TranslationOwner::EarlyVm as u8,
+    trampoline_owner = const crate::objects::cpu::TranslationOwner::TrampolineVm as u8,
     trap_context_task_offset = const crate::objects::trap_type::TRAP_ENTRY_CONTEXT_TASK_OFFSET,
 );
 
@@ -81,6 +89,7 @@ unsafe extern "C" {
         gp_virt: usize,
         continuation_virt: usize,
         kernel_virt_offset: usize,
+        translation_owner_phys: usize,
     ) -> !;
     #[cfg(app_user_boot)]
     fn arceos_ex_enter_user_mode(
@@ -286,6 +295,7 @@ pub unsafe fn switch_to_early_vm(
     gp_virt: usize,
     continuation_virt: usize,
     kernel_virt_offset: usize,
+    translation_owner_phys: usize,
 ) -> ! {
     // SAFETY: this is the architecture boundary for Vm.Setup. The caller must
     // provide satp values for initialized TrampolineVm/EarlyVm page tables and
@@ -298,6 +308,7 @@ pub unsafe fn switch_to_early_vm(
             gp_virt,
             continuation_virt,
             kernel_virt_offset,
+            translation_owner_phys,
         )
     }
 }

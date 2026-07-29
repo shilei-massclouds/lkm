@@ -1466,7 +1466,7 @@ impl UserAddressSpace {
         kernel_init_task: &KernelInitTask,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
-            || swapper_vm.state() != State::Online
+            || swapper_vm.state() != State::Ready
             || page_allocator.state() != State::Ready
             || global_allocator.state() != State::Ready
             || !kernel_init_task.task().online()
@@ -2038,7 +2038,7 @@ impl UserAddressSpace {
         if self.lifecycle.state() != State::Ready
             || trap_frame.state() != State::Ready
             || stack.state() != State::Ready
-            || swapper_vm.state() != State::Online
+            || swapper_vm.state() != State::Ready
             || page_allocator.state() != State::Ready
             || page_metadata_map.state() != State::Ready
             || !self.page_table_view_ready()
@@ -9244,9 +9244,25 @@ fn try_boot_exec_candidate(
         .try_candidate(path_ref, path, &ctx.elf_object)
         .is_err()
     {
+        print_post_commit_candidate_rejection(ctx, path);
         return Err(super::exec_transaction::ExecError::InvalidState);
     }
     Ok(success)
+}
+
+#[cfg(app_user_boot)]
+fn print_post_commit_candidate_rejection(ctx: &crate::context::Context, path: &[u8]) {
+    crate::arch::riscv64::sbi::putstr("user boot post-commit candidate rejected payload_state=");
+    crate::arch::riscv64::sbi::putchar(ctx.user_boot_payload.state().code());
+    crate::arch::riscv64::sbi::putstr(" elf_state=");
+    crate::arch::riscv64::sbi::putchar(ctx.elf_object.state().code());
+    crate::arch::riscv64::sbi::putstr(" path_valid=");
+    crate::arch::riscv64::sbi::putchar(if valid_selected_path(path) {
+        b'1'
+    } else {
+        b'0'
+    });
+    crate::arch::riscv64::sbi::putchar(b'\n');
 }
 
 #[cfg(app_user_boot)]

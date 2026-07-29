@@ -373,6 +373,10 @@ impl Config {
         LINEAR_MAP_VIRT_START
     }
 
+    pub const fn canonical_user_virt_end(&self) -> usize {
+        1usize << 38
+    }
+
     pub fn phys_to_linear(&self, addr: usize) -> Option<usize> {
         addr.checked_add(self.linear_map_virt_start())
     }

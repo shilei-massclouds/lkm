@@ -70,6 +70,8 @@ Classification meanings:
 - [`device-tree.md`](device-tree.md): DeviceTree unflatten/storage rules used by CorePreparePhase.
 - [`completion.md`](completion.md): `main.spec` 中 reusable Completion primitive 的附加专用规则。
 - [`effective-context.md`](effective-context.md): `main.spec` 中 context/guard primitive 的附加专用规则。
+- [`kernel-address-space.md`](kernel-address-space.md): `main.spec`/BootInit preset 中
+  `KernelAddrSpace`、区域对象、`Vm` controller 与 per-CPU takeover 的共享映射规则。
 
 Coding `.spec` files are forbidden by the repository `coding-spec-check` gate. When a model object file is
 added, removed or changes ownership, update this table in the same specification change.

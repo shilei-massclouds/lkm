@@ -80,7 +80,7 @@ class ModelBuilderTests(unittest.TestCase):
                 "LocalIrqEnablePhase",
                 "IrqOpenPreparePhase",
                 "ProcessPreparePhase",
-                "BootTaskEntryBinding",
+                "RawDtb",
                 "BootInitRestInitPhase",
                 "BootInitScheduleHandoffPhase",
             ],
@@ -99,7 +99,9 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("Computer -> Riscv64Platform [parent]", text)
         self.assertIn("Computer -> OpenSBI [parent]", text)
         self.assertIn("Computer -> Kernel [parent]", text)
-        self.assertIn("Soc -> CpuGroup [parent]", text)
+        self.assertIn("Kernel -> Soc [parent]", text)
+        self.assertIn("Kernel -> CpuGroup [parent]", text)
+        self.assertNotIn("Soc -> CpuGroup [parent]", text)
         self.assertIn("CpuGroup.cpus[0] -> BootCpuRegisters [parent]", text)
         self.assertNotIn("BootCurrentCPU", text)
         self.assertIn("BootTask -> BootInitFlow [parent]", text)
@@ -141,7 +143,9 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("OpenSBI.Enable", text)
         self.assertIn("  -> Kernel.Enable [emits]", text)
         self.assertIn("Kernel.Preset", text)
-        self.assertIn("  -> InterruptType.Preset", text)
+        self.assertIn("BootInitFlow.Preset", text)
+        self.assertIn("  -> KernelAddrSpace.Preset", text)
+        self.assertIn("  -> BootInitFlow.Action.BindBootTaskEntry [drives_action]", text)
         self.assertIn("Kernel.Setup", text)
         self.assertNotIn("\nEntryPreludePhase.", text)
         self.assertIn("EntrySuccessorPhase.Setup", text)
@@ -157,7 +161,10 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn('"Riscv64Platform.Enable" -> "OpenSBI.Enable"', dot)
         self.assertIn('"OpenSBI.Enable" -> "Kernel.Enable"', dot)
         self.assertIn('"Kernel.Enable" -> "BootInitFlow.Preset"', dot)
-        self.assertIn('"BootInitFlow.Preset" -> "InterruptType.Preset"', dot)
+        self.assertIn('"BootInitFlow.Preset" -> "KernelAddrSpace.Preset"', dot)
+        self.assertIn(
+            '"BootInitFlow.Preset" -> "BootInitFlow.Action.BindBootTaskEntry"', dot
+        )
         self.assertIn('"Kernel.Enable" -> "BootInitFlow.Setup"', dot)
         self.assertIn('"Kernel.Enable" -> "BootInitFlow.Enable"', dot)
         self.assertIn('"Kernel.Enable" -> "Scheduler.Action.Schedule"', dot)
@@ -185,7 +192,8 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("  - BootInitFlow.State::Online", text)
         self.assertIn("  - Soc.State::Prepared", text)
         self.assertIn("  - Vm.State::Online", text)
-        self.assertIn("  - SwapperVm.State::Online", text)
+        self.assertIn("  - KernelAddrSpace.State::Online", text)
+        self.assertIn("  - SwapperVm.State::Ready", text)
         self.assertIn("  - MemBlock.State::Offline", text)
         self.assertNotIn("BootArgs.State::", text)
         self.assertIn("Config.State::Online", text)

@@ -105,6 +105,14 @@ enum RunQueueRuntimeState {
     Some,
 }
 
+enum TranslationOwnerKind {
+    None,
+    PhysicalDirect,
+    TrampolineVm,
+    EarlyVm,
+    SwapperVm,
+}
+
 include "cpu.spec";
 include "cpu_group.spec";
 include "trap_type.spec";
@@ -862,16 +870,14 @@ predicate slot_contains<T, U>(slot: FixMapSlotRange<T>, obj: U) -> bool {
     contains(slot, obj)
 }
 
-predicate linear_map_area_reserved<T: Object>(obj: T) -> bool {
-    obj.state == State::Destroyed
-}
+predicate linear_map_area_reserved<T: Object>(obj: T) -> bool;
 
 predicate fixmap_adjacent_to_linear_map<T: Object, U: Object>(fixmap: T, linear_map: U) -> bool {
     adjacent(fixmap, linear_map)
 }
 
-predicate fits_in_kernel_image_map<T: Object, U: VirtualAddressArea>(image: T, map: U) -> bool {
-    contains(map, image)
+predicate fits_in_kernel_image_range<T: Object, U: VirtualAddressArea>(image: T, range: U) -> bool {
+    contains(range, image)
 }
 
 predicate entry_head_text_layout_ready<T>(lds: T) -> bool {
@@ -911,9 +917,9 @@ predicate valid_trampoline_map<T: VirtualAddressArea>(map: T) -> bool {
     map.size >= page_size_min();
 }
 
-predicate swapper_vm_translation_sync_complete<T>(swapper_vm: T) -> bool;
-predicate trampoline_vm_translation_sync_ready_before_satp<T>(trampoline_vm: T) -> bool;
-predicate early_vm_translation_sync_complete<T>(early_vm: T) -> bool;
+predicate swapper_vm_translation_sync_complete<T, C>(swapper_vm: T, cpu: C) -> bool;
+predicate trampoline_vm_translation_sync_complete<T, R>(trampoline_vm: T, cpu_ref: R) -> bool;
+predicate early_vm_translation_sync_complete<T, R>(early_vm: T, cpu_ref: R) -> bool;
 
 type ObjectStorage<T> {
     invariant {
@@ -945,10 +951,6 @@ type KernelImageSegment {
     range: AddrRange;
 }
 
-type KernelImageMap: VirtualAddressArea {
-    range: Derived<VirtAddrRange<KernelImage>, range(Config.kernel_link_addr, Config.kernel_link_addr + Config.kernel_image_va_window_size)>;
-}
-
 type TrampolineMap: VirtualAddressArea {
     phys_start: Derived<PhysAddr<KernelImage>, KernelImage.phys_start>;
     virt_start: Derived<VirtAddr<KernelImage>, Config.kernel_link_addr>;
@@ -978,6 +980,9 @@ type RunQueueRef {
 }
 
 type CpuRef {
+}
+
+type TranslationControllerRef {
 }
 
 type BufferObject {

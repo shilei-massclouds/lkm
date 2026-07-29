@@ -22,6 +22,9 @@ predicate compose_cpu_group_owns_single_indexed_cpu_store() -> bool;
 predicate compose_cpu_embeds_cpu_local_state() -> bool;
 predicate compose_task_flow_sole_cpu_ref_owner() -> bool;
 predicate compose_current_cpu_is_borrowed_capability() -> bool;
+predicate compose_kernel_addr_space_and_vm_are_separate_private_modules() -> bool;
+predicate compose_translation_owner_remains_cpu_local() -> bool;
+predicate compose_translation_controllers_do_not_create_public_api() -> bool;
 
 type CompositionMust {
     invariant {
@@ -71,5 +74,8 @@ type ArceosExCompositionMust {
         compose_cpu_embeds_cpu_local_state();
         compose_task_flow_sole_cpu_ref_owner();
         compose_current_cpu_is_borrowed_capability();
+        compose_kernel_addr_space_and_vm_are_separate_private_modules();
+        compose_translation_owner_remains_cpu_local();
+        compose_translation_controllers_do_not_create_public_api();
     }
 }

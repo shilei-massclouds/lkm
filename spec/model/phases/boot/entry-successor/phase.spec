@@ -2,7 +2,8 @@
  * Entry Successor Phase Specification
  *
  * This subphase starts at start_kernel() and ends after setup_arch()
- * completes paging_init(), where SwapperVm is online and MemBlock has been
+ * completes paging_init(), where the shared SwapperVm controller is Ready,
+ * KernelAddrSpace/Vm are Online, the boot CPU is owned by SwapperVm, and MemBlock has been
  * enabled for later early allocation metadata growth.
  */
 
@@ -150,7 +151,8 @@ object MemBlock: MemoryObject {
                 depends_on {
                     MemBlock.state == State::Ready;
                     Vm.state == State::Online;
-                    SwapperVm.state == State::Online;
+                    SwapperVm.state == State::Ready;
+                    KernelAddrSpace.state == State::Online;
                 }
 
                 ensures {
@@ -356,7 +358,11 @@ object EarlyDtb: ResourceObject {
             on Transition::Preset -> State::Prepared {
                 depends_on {
                     RawDtb.state == State::Ready;
-                    EarlyVm.state == State::Online;
+                    EarlyVm.state == State::Ready;
+                    cpu_active_translation_owner_for_ref_is(
+                        BootCPURef,
+                        TranslationOwnerKind::EarlyVm
+                    );
                 }
 
                 drives {
@@ -1029,7 +1035,7 @@ object SBI: PlatformServiceObject {
 
 /*
  * EntrySuccessorPhase 表示入口后继子阶段对象。它承接入口前导期完成边界，
- * 并推进到 SwapperVm.Online 与 MemBlock.Online。
+ * 并推进到 KernelAddrSpace/Vm Online、BootCPU 的 SwapperVm owner 与 MemBlock.Online。
  */
 object EntrySuccessorPhase: PhaseObject {
     initial_state: State::Base;
@@ -1048,7 +1054,11 @@ object EntrySuccessorPhase: PhaseObject {
                 depends_on {
                     BootInitFlow.state == State::Prepared;
                     Vm.state == State::Ready;
-                    EarlyVm.state == State::Online;
+                    EarlyVm.state == State::Ready;
+                    cpu_active_translation_owner_for_ref_is(
+                        BootCPURef,
+                        TranslationOwnerKind::EarlyVm
+                    );
                     BootTask.state == State::OnCpu;
                     BootInitStack.state == State::Ready;
                     CurrentCPU.trap.interrupt.state == State::Ready;
@@ -1135,8 +1145,13 @@ object EntrySuccessorPhase: PhaseObject {
                     EarlyCon.state == State::Online;
                     MemBlock.state == State::Online;
                     Vm.state == State::Online;
-                    SwapperVm.state == State::Online;
-                    EarlyVm.state == State::Destroyed;
+                    SwapperVm.state == State::Ready;
+                    KernelAddrSpace.state == State::Online;
+                    EarlyVm.state == State::Ready;
+                    cpu_active_translation_owner_for_ref_is(
+                        BootCPURef,
+                        TranslationOwnerKind::SwapperVm
+                    );
                     vmlinux_build_id_deferred(EntrySuccessorPhase);
                     page_address_init_deferred(EntrySuccessorPhase);
                     entry_successor_start_kernel_position_preserved(EntrySuccessorPhase);
@@ -1175,8 +1190,13 @@ object EntrySuccessorPhase: PhaseObject {
                     EarlyCon.state == State::Online;
                     MemBlock.state == State::Online;
                     Vm.state == State::Online;
-                    SwapperVm.state == State::Online;
-                    EarlyVm.state == State::Destroyed;
+                    SwapperVm.state == State::Ready;
+                    KernelAddrSpace.state == State::Online;
+                    EarlyVm.state == State::Ready;
+                    cpu_active_translation_owner_for_ref_is(
+                        BootCPURef,
+                        TranslationOwnerKind::SwapperVm
+                    );
                     vmlinux_build_id_deferred(EntrySuccessorPhase);
                     page_address_init_deferred(EntrySuccessorPhase);
                     entry_successor_start_kernel_position_preserved(EntrySuccessorPhase);

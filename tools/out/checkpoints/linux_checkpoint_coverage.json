@@ -1,5 +1,5 @@
 {
-  "total_checkpoints": 474,
+  "total_checkpoints": 476,
   "mapping_kind_counts": [
     {
       "mapping_kind": "exact",
@@ -11,13 +11,13 @@
     },
     {
       "mapping_kind": "unmapped",
-      "count": 357
+      "count": 359
     }
   ],
   "confidence_counts": [
     {
       "confidence": "none",
-      "count": 357
+      "count": 359
     },
     {
       "confidence": "medium",
@@ -185,6 +185,10 @@
     },
     {
       "family": "InterruptType",
+      "count": 3
+    },
+    {
+      "family": "KernelAddrSpace",
       "count": 3
     },
     {
@@ -560,10 +564,6 @@
       "count": 1
     },
     {
-      "family": "EarlyVm",
-      "count": 1
-    },
-    {
       "family": "ExceptionTable",
       "count": 1
     },
@@ -761,6 +761,10 @@
     },
     {
       "family": "PerfEventCore",
+      "count": 1
+    },
+    {
+      "family": "PhysicalDirect",
       "count": 1
     },
     {
@@ -976,10 +980,6 @@
       "count": 1
     },
     {
-      "family": "TrampolineVm",
-      "count": 1
-    },
-    {
       "family": "TtyLineDisciplineRegistry",
       "count": 1
     },
@@ -1068,5 +1068,5 @@
       "count": 1
     }
   ],
-  "unmapped_singleton_family_count": 171
+  "unmapped_singleton_family_count": 170
 }

@@ -8,6 +8,7 @@ Object-level charter notes live here when they need a dedicated topic file.
 | --- | --- |
 | `CPU` | [`cpu.md`](cpu.md) |
 | `CpuGroup` | [`cpu-group.md`](cpu-group.md) |
+| `KernelAddrSpace` / VM controllers | [`kernel-address-space.md`](kernel-address-space.md) |
 | `Task` | [`task.md`](task.md) |
 | `TaskFlow` | [`task-flow.md`](task-flow.md) |
 | `TrapType` | [`trap-type.md`](trap-type.md) |

@@ -247,8 +247,8 @@ settle 不使用 feedback 闪烁，异常 settle 使用独立红色错误效果�
 frontend CSS 以 `%`/`dvh` 的外壳和 `auto minmax(0, 1fr) auto` 主 grid 建立有界流式尺寸体系；stage
 不设固定高度而占满剩余空间，内部内容以 `min-content`、`fr` 和滚动容器保持可达。间距、圆角、字体、
 卡片 padding 与节点最小宽度使用 `rem`/`ch`、viewport 或 container 比例及 `clamp()`，响应断点使用
-`rem` 或 container query。桌面保持页面无纵向滚动并让 stage 占主要 viewport；窄屏允许页面纵向滚动，
-但页面无横向溢出，必要的横向滚动局限于 stage。
+`rem` 或 container query。桌面和窄屏都保持外层页面固定并让 stage 占据剩余 viewport；元数据与控制栏
+可在窄屏换行，但纵向和必要的横向滚动都局限于 stage，不能形成双重滚动。
 
 header 只显示紧凑品牌、请求标题与四项同行 `label:value` 元数据，不渲染说明句或可见 footer；Protocol
 tooltip 承载 source file 与 model fingerprint。普通 system identity 不渲染 `SYSTEM`，名称和裸状态名

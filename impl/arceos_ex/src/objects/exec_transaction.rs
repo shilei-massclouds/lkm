@@ -1523,7 +1523,31 @@ fn observe_failure(
             ctx.page_allocator.buddy_total_free_pages(),
             ctx.page_allocator.totalram_pages(),
         );
+    } else {
+        crate::arch::riscv64::sbi::putstr("boot exec failure stage=");
+        print_decimal(stage);
+        crate::arch::riscv64::sbi::putstr(" reason=");
+        print_decimal(reason);
+        crate::arch::riscv64::sbi::putstr(" detail=");
+        print_decimal(detail);
+        crate::arch::riscv64::sbi::putchar(b'\n');
     }
+}
+
+#[cfg(app_user_boot)]
+fn print_decimal(mut value: usize) {
+    let mut digits = [0u8; 20];
+    let mut index = digits.len();
+    if value == 0 {
+        crate::arch::riscv64::sbi::putchar(b'0');
+        return;
+    }
+    while value != 0 && index != 0 {
+        index -= 1;
+        digits[index] = b'0' + (value % 10) as u8;
+        value /= 10;
+    }
+    crate::arch::riscv64::sbi::putstr(core::str::from_utf8(&digits[index..]).unwrap_or("?"));
 }
 
 #[cfg(app_user_boot)]

@@ -1,8 +1,11 @@
-use crate::checkpoint::Checkpoint;
+use core::sync::atomic::{AtomicBool, Ordering};
+
+use crate::{arch::riscv64::csr, checkpoint::Checkpoint};
 
 use super::{
     boot_args::BootArgs,
     config::Config,
+    cpu::{Cpu, MAX_CPUS, TranslationOwner},
     fix_map::FixMap,
     kernel_image::KernelImage,
     lds::Lds,
@@ -13,14 +16,16 @@ use super::{
 
 pub struct EarlyVm {
     lifecycle: Lifecycle,
-    translation_sync_complete: bool,
+    satp: usize,
+    translation_sync_complete: [AtomicBool; MAX_CPUS],
 }
 
 impl EarlyVm {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
-            translation_sync_complete: false,
+            satp: 0,
+            translation_sync_complete: [const { AtomicBool::new(false) }; MAX_CPUS],
         }
     }
 
@@ -29,45 +34,30 @@ impl EarlyVm {
         self.lifecycle.state()
     }
 
-    pub const fn translation_sync_complete(&self) -> bool {
-        self.translation_sync_complete
+    pub const fn satp(&self) -> usize {
+        self.satp
     }
 
-    pub fn enable(&mut self, trampoline_vm: &super::trampoline_vm::TrampolineVm) -> EventResult {
-        if self.lifecycle.state() != State::Ready || trampoline_vm.state() != State::Online {
-            return failed_condition(
-                LifecycleEvent::Enable,
-                self.lifecycle.state(),
-                State::Ready,
-                State::Online,
-            );
-        }
-
-        self.translation_sync_complete = true;
-        self.lifecycle.transition(
-            LifecycleEvent::Enable,
-            State::Ready,
-            State::Online,
-            Checkpoint::EarlyVmOnline,
-        )
+    pub fn translation_sync_complete(&self, cpu: &Cpu) -> bool {
+        cpu.logical_id() < MAX_CPUS
+            && self.translation_sync_complete[cpu.logical_id()].load(Ordering::Acquire)
     }
 
-    pub fn cleanup(&mut self, swapper_vm: &super::swapper_vm::SwapperVm) -> EventResult {
-        if self.lifecycle.state() != State::Online || swapper_vm.state() != State::Online {
-            return failed_condition(
-                LifecycleEvent::Cleanup,
-                self.lifecycle.state(),
-                State::Online,
-                State::Destroyed,
-            );
+    pub fn adopt_take_over(&self, cpu: &Cpu) -> bool {
+        if self.lifecycle.state() != State::Ready
+            || cpu.logical_id() >= MAX_CPUS
+            || cpu.active_translation_owner() != TranslationOwner::EarlyVm
+            || csr::read_satp() != self.satp
+            || !cpu.adopt_translation_takeover(
+                TranslationOwner::TrampolineVm,
+                TranslationOwner::EarlyVm,
+                self.satp,
+            )
+        {
+            return false;
         }
-
-        self.lifecycle.transition(
-            LifecycleEvent::Cleanup,
-            State::Online,
-            State::Destroyed,
-            Checkpoint::EarlyVmDestroyed,
-        )
+        self.translation_sync_complete[cpu.logical_id()].store(true, Ordering::Release);
+        true
     }
 
     pub fn preset(
@@ -145,11 +135,28 @@ impl EarlyVm {
             );
         }
 
+        let Some(satp) = static_objects.early_satp(kernel_image) else {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Prepared,
+                State::Ready,
+            );
+        };
+        self.satp = satp;
+
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Prepared,
             State::Ready,
             Checkpoint::EarlyVmReady,
         )
+    }
+
+    pub fn current_on_cpu(&self, cpu: &Cpu) -> bool {
+        self.state() == State::Ready
+            && cpu.active_translation_owner() == TranslationOwner::EarlyVm
+            && csr::read_satp() == self.satp
+            && self.translation_sync_complete(cpu)
     }
 }

@@ -105,8 +105,8 @@ object OpenSBI: FirmwareObject {
                     Lds.state == State::Online;
                     Config.state == State::Online;
                     kernel_elf_linked_from_config_and_lds(Config, Lds);
-                    kernel_boot_image_constructed_from_elf(Config, Lds);
-                    kernel_image_file_constructed();
+                    kernel_boot_artifact_constructed_from_elf(Config, Lds);
+                    kernel_boot_artifact_constructed();
                 }
 
                 may_change {
@@ -173,7 +173,7 @@ object OpenSBI: FirmwareObject {
             Lds.state == State::Online;
             Config.state == State::Online;
             OpenSBI.kernel_load_pa != 0;
-            kernel_image_file_constructed();
+            kernel_boot_artifact_constructed();
             kernel_image_loaded_for_handoff_at(OpenSBI.kernel_load_pa);
             kernel_image_load_pmd_aligned(
                 OpenSBI.kernel_load_pa,

@@ -1,4 +1,4 @@
-use super::{kernel_image::KernelImage, lds::Lds, vm::Vm};
+use super::{cpu::Cpu, kernel_image::KernelImage, lds::Lds, vm::Vm};
 
 pub type VmSetupContinuation = extern "C" fn() -> !;
 
@@ -7,6 +7,7 @@ pub struct VmSetupContext {
     vm: *mut Vm,
     kernel_image: *mut KernelImage,
     lds: *const Lds,
+    boot_cpu: *const Cpu,
     after_switch: usize,
 }
 
@@ -15,18 +16,21 @@ impl VmSetupContext {
         vm: &mut Vm,
         kernel_image: &mut KernelImage,
         lds: &Lds,
+        boot_cpu: &Cpu,
         after_switch: VmSetupContinuation,
     ) -> Option<Self> {
         let vm_virt = kernel_image.runtime_to_link(vm as *mut Vm as usize)?;
         let kernel_image_addr = kernel_image as *mut KernelImage as usize;
         let kernel_image_virt = kernel_image.runtime_to_link(kernel_image_addr)?;
         let lds_virt = kernel_image.runtime_to_link(lds as *const Lds as usize)?;
+        let boot_cpu_virt = kernel_image.runtime_to_link(boot_cpu as *const Cpu as usize)?;
         let after_switch_virt = kernel_image.runtime_to_link(after_switch as usize)?;
 
         Some(Self {
             vm: vm_virt as *mut Vm,
             kernel_image: kernel_image_virt as *mut KernelImage,
             lds: lds_virt as *const Lds,
+            boot_cpu: boot_cpu_virt as *const Cpu,
             after_switch: after_switch_virt,
         })
     }
@@ -36,6 +40,7 @@ static mut VM_SETUP_CONTEXT: VmSetupContext = VmSetupContext {
     vm: core::ptr::null_mut(),
     kernel_image: core::ptr::null_mut(),
     lds: core::ptr::null(),
+    boot_cpu: core::ptr::null(),
     after_switch: 0,
 };
 
@@ -60,6 +65,7 @@ extern "C" fn vm_setup_continuation() -> ! {
     if context.vm.is_null()
         || context.kernel_image.is_null()
         || context.lds.is_null()
+        || context.boot_cpu.is_null()
         || context.after_switch == 0
     {
         crate::arch::riscv64::sbi::system_shutdown();
@@ -68,7 +74,8 @@ extern "C" fn vm_setup_continuation() -> ! {
     let vm = unsafe { &mut *context.vm };
     let kernel_image = unsafe { &mut *context.kernel_image };
     let lds = unsafe { &*context.lds };
-    vm.finish_setup_after_switch(kernel_image, lds);
+    let boot_cpu = unsafe { &*context.boot_cpu };
+    vm.finish_setup_after_switch(kernel_image, lds, boot_cpu);
     let after_switch: VmSetupContinuation = unsafe { core::mem::transmute(context.after_switch) };
     after_switch()
 }

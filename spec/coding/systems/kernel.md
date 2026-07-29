@@ -19,8 +19,10 @@ Rule IDs (MUST):
 Kernel.Preset 只采纳 a0/a1、入口 `satp=0` 与 RV64 物理 PMD 装载对齐要求，不提前宣称当前产物已经
 满足要求。`Config` 与 `Lds` 是初态 Ready 的静态构建输入。完整模型中 Kernel.Setup 必须先接受
 `Config.Enable`，再接受依赖 Config.Online 的 `Lds.Enable`，然后分别验证并建立：Config/Lds 生成
-kernel ELF、ELF 生成 boot Image。两项叶事实共同推导 `kernel_image_file_constructed()`，随后才提交
-Kernel.Ready；Ready 不表示 Image 字节已经装载到待启动物理地址。
+kernel ELF、ELF 生成 kernel boot artifact。两项叶事实共同推导
+`kernel_boot_artifact_constructed()`，随后才提交 Kernel.Ready；Ready 不表示 artifact 字节已经装载
+到待启动物理地址。`KernelImageFile` 是未来文件对象的保留名称，本轮不创建其类型、实例或生命周期；
+运行时 `KernelImage` 只表示固件已加载到内存中的内核映像。
 
 真实 Rust 不重放这一完整构造过程；build、链接产物及 OpenSBI.Enable 交接域保证的物理装载结果是
 进入 canonical Kernel.Enable 发送前边界的外部事实。`systems/kernel.rs` 记录四层规格链，不保存外部规格对象、leaf 或 wrapper lifecycle，
@@ -37,6 +39,10 @@ Kernel.Online。入口 `_start` 必须在 `KernelStarted` 和任何 BootInitFlow
 `satp` 并对非零值 fail-stop；Rust adoption 在 EarlyVm 切换前再次复核。不得用 OpenSBI 的历史 handoff
 记录替代任一次实时检查。`KernelStarted` 仍是接受点，随后 BootInitFlow、首次调度和 KernelInitFlow
 都在 Kernel Ready/Enable 执行上下文中运行。
+
+Enable 接受后先解析 BootCPURef，并由 `PhysicalDirect.TakeOver(BootCPURef)` 从 owner `None` 原子建立
+入口 CPU 的第一个 translation owner，再启动 BootInitFlow。`KernelAddrSpace`、`Vm`、`Soc`、
+`CpuGroup` 是 Kernel 的平级直接子对象；Soc/CpuGroup 之间的启动依赖不表达所有权。
 
 OpenSBI 不负责保证 `sie/sip` 已清零。`BootInitFlow.Preset` 的第一个被驱动叶迁移是
 `InterruptType.Preset`；入口汇编在该边界清零 `sie/sip`，由此首次建立
