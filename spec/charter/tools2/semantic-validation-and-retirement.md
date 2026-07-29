@@ -128,11 +128,14 @@ Context/Lock 进入退出，也没有其它 fresh instance；不能为了填充�
 本组结束用第二条真实上游截断证明。从同一模型初态执行 `-u BootInitFlow.Preset` 时，0013 完成后
 必须先完成 0014–0015，再实际创建 `sig-0016 OpenSBI -> Kernel.Enable`，delivery 为 emits、cause 为
 0013。0016 被 FIFO dequeue 和 Kernel receive，全部入口 guards 成立并进入
-`Kernel.Transition::Enable@Ready`；它随后同步驱动 `sig-0017 Kernel -> Kernel.AcceptEnable` 和
-`sig-0018 Kernel -> BootInitFlow.AssignCpuRef`。0017 必须保持 Kernel Ready 并提交
+`Kernel.Transition::Enable@Ready`；它随后同步驱动 `sig-0017 Kernel -> Kernel.AcceptEnable`、
+`sig-0018 Kernel -> BootInitFlow.AssignCpuRef` 和
+`sig-0019 Kernel -> PhysicalDirect.ActivateOnCpu`。0017 必须保持 Kernel Ready 并提交
 `kernel_enable_accepted(Kernel)`；0018 必须把 `ref(CpuGroup.cpus[0])` 绑定到唯一
-`BootInitFlow.cpu_ref`。紧接着在创建 `BootInitFlow.Preset` 之前 reached：boundary snapshot 等于 0018
-的 after snapshot，Kernel 仍为 Ready、BootInitFlow 仍为 Base、CPU0 与 CpuGroup 均为 Prepared，且
+`BootInitFlow.cpu_ref`；0019 必须验证入口 `satp=0` 与 absent association，并以 InitialActivation 原子
+建立 PhysicalDirect association。紧接着在创建 `BootInitFlow.Preset` 之前 reached：boundary snapshot
+等于 0019 的 after snapshot，Kernel 仍为 Ready、BootInitFlow 仍为 Base、CPU0 与 CpuGroup 均为
+Prepared、BootCPURef 已绑定且 PhysicalDirect 已在 CPU0 激活，并且
 不存在 BootInitFlow lifecycle Signal identity、send/receive 或 handler 事件。因为同步父响应尚未走到
 最终 Online commit，0016 在该有界
 推导中以 `stopped: until_signal_reached` 结束；这表示 handler 已接受且 ancestor 未提交，不是 rejected
@@ -223,8 +226,9 @@ hart、建立 `tp/sp/stvec`，再由 `setup_vm()` 建立 trampoline、early kern
 `relocate_enable_mmu()` 完成 trampoline 到 early page table 的切换。现有 entry checkpoint 与实现把
 Rust 前不可延迟的动作作为同一 BootInitFlow.Preset 的 head segment adoption，并在 VM continuation
 返回、TrapType/虚拟 `tp/sp` 与 Soc 完成后提交 `BootInitFlow.Prepared`；`EntrySuccessorPhase.Started`
-只能出现在其后，属于第 3 组 Setup。物理 checkpoint 的观测时点可以早于 Rust 接受
-`BootInitFlow.Started`，但不能被解释为提前提交 child model Signal 或 BootInitFlow.Prepared。
+只能出现在其后，属于第 3 组 Setup。`BootInitFlow.Started` 必须观察 Preset 已在前三项 Kernel child
+完成后被接受，并位于首个 Preset child action 之前；Rust 可以稍后验证和采用 head handoff facts，但
+这种物理 adoption 时点不得重排 Signal 账本、伪造提前 child commit 或提前提交 BootInitFlow.Prepared。
 
 失败账本按首个边界停止：缺失 Kernel acceptance、BootTask `OnCpu/Live/Invalid` 或 initial-flow binding
 时，0020 必须拒绝且不得创建 0021；缺失/悬空 CpuRef 必须在 0018 写入或 0027 解引用边界拒绝，缺失
@@ -353,7 +357,7 @@ model、coding、适用 compose、实现和 testing 按 authority 顺序一致�
 
 - [系统 Signal 语义](../system-signal.md)
 - [tools2 Signal 动画章程](signal-animation.md)
-- [BootInitFlow 启动执行阶段](../phases/boot-init.md)
+- [BootInitFlow](../phases/boot-init-flow.md)
 - [KernelInitFlow 的 SMP/runtime 叶子阶段](../phases/smp-runtime.md)
 - [KernelInitFlow 的 payload 准备与提交](../phases/payload.md)
 - [运行期实例声明](../objects/dynamic-instance-declaration.md)

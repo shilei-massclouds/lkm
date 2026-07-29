@@ -16,12 +16,14 @@ bool；每个 transition 都即时检查 parent `BootTask` 为 OnCpu。
 | Setup: Prepared -> Ready | 依次驱动 `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、`SchedInitPhase`、`IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、`ProcessPreparePhase`、`BootInitRestInitPhase` 的 Preset | RestInit Online 后提交 `BootInitFlow.Ready`；此时两个新 Task 已完成 Preset/Setup/Enable，initial Flow 仍为 Base |
 | Enable: Ready -> Online | 只驱动 `BootInitScheduleHandoffPhase.Preset` | 该阶段建立 `BootIdleFlow` owner/active binding 并完成可逆切换预检；随后提交 `BootInitFlow.Online`，再进入真实 schedule |
 
-这些 transition 是 Kernel.Enable 的下层过程细化，整个 BootInitFlow 生命周期执行期间 Kernel 保持
-Ready，且入口必须即时验证 Enable 已接受。每个叶子 Online 只能返回 BootInitFlow 当前 transition 的具名 continuation；父 continuation 必须检查
+这些 transition 是 Kernel.Enable 的下层过程细化。Preset 只能在同一 Enable handler 已依次完成
+acceptance、BootCPURef binding 和 PhysicalDirect InitialActivation 后接受；整个 BootInitFlow 生命周期
+执行期间 Kernel 保持 Ready。每个叶子 Online 只能返回 BootInitFlow 当前 transition 的具名 continuation；父 continuation 必须检查
 刚完成的叶子精确 Online，才能启动下一个叶子。
 
 ```text
-OpenSBI -> Kernel.Enable accepts -> Kernel drives BootInitFlow.Preset (BootTask.OnCpu)
+OpenSBI -> Kernel.Enable accepts -> AssignCpuRef -> PhysicalDirect InitialActivation
+  -> Kernel drives BootInitFlow.Preset (BootTask.OnCpu)
   -> entry objects -> BootInitFlow.Prepared
   -> EntrySuccessor -> CorePrepare -> MmCoreInit -> SchedInit
   -> IrqTimeInit -> LocalIrqEnable -> IrqOpenPrepare -> ProcessPrepare
@@ -47,7 +49,9 @@ schedule 返回时才驱动它并进入不返回的 idle loop。
 
 ## Checkpoint
 
-`BootInitFlow.Started/Prepared/Ready/Online` 四个边界保留。`Prepared` 位于全部入口对象动作完成后，
+`BootInitFlow.Started/Prepared/Ready/Online` 四个边界保留。`Startup` 只显示 canonical Preset，不是另一个
+signal；`Started` 只记录 Preset 已接受，必须位于 acceptance/binding/InitialActivation 之后和首个 child
+action 之前，且不推进 Base。`Prepared` 位于全部入口对象动作完成后，
 `Ready` 位于 RestInit Online 后，`Online` 位于 ScheduleHandoff Online 后且真实 switch 前。已删除的
 BP EntryPrelude、Boot 和 Interrupt wrapper checkpoint 不得作为兼容 marker 保留。
 

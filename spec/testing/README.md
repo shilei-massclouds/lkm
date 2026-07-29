@@ -98,14 +98,15 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
   同一次 derive 的 model/derive/view fingerprint 必须一致；compact、verbose 和 animation v3 都只能消费
   该推导，不得各自重建或重排 Signal。
 - 主模型的 `tools2/bin/pyveri -u BootInitFlow.Preset` 必须同样从默认 Human 外部编排开始，并证明实际
-  sender 是 OpenSBI：前 15 个 Signal后，`sig-0016 OpenSBI -> Kernel.Enable` 必须以 emits/cause 0013
+  sender 是 OpenSBI：前 15 个 Signal 后，`sig-0016 OpenSBI -> Kernel.Enable` 必须以 emits/cause 0013
   入队、出队和 receive，全部 Kernel 入口 guard 成功并开始 `Kernel.Transition::Enable@Ready`；随后
-  `sig-0017 Kernel -> Kernel.AcceptEnable` 与 `sig-0018 Kernel -> BootInitFlow.AssignCpuRef` 必须以
-  drives/cause 0016 完成 Action，分别提交 `kernel_enable_accepted(Kernel)` 和
-  `BootInitFlow.cpu_ref = BootCPURef`。在下一个 `BootInitFlow.Preset` 创建前 reached 时，0016 因未提交
-  ancestor 显示 stopped 而不是 rejected/failed，Kernel 仍为 Ready、BootInitFlow 仍为 Base；boundary
-  snapshot 必须等于 0018 after snapshot，且不得存在 BootInitFlow lifecycle Signal identity、
-  send/receive/handler 事件。该验收不得用显式 `-t Kernel.Enable` 的 Human 根 source 证明真实 sender。
+  `sig-0017 Kernel -> Kernel.AcceptEnable`、`sig-0018 Kernel -> BootInitFlow.AssignCpuRef` 和
+  `sig-0019 Kernel -> PhysicalDirect.ActivateOnCpu` 必须以 drives/cause 0016 依次完成 Action，分别提交
+  `kernel_enable_accepted(Kernel)`、`BootInitFlow.cpu_ref = BootCPURef` 和 BootCPU 的 PhysicalDirect
+  InitialActivation。在下一个 `BootInitFlow.Preset` 创建前 reached 时，0016 因未提交 ancestor 显示
+  stopped 而不是 rejected/failed，Kernel 仍为 Ready、BootInitFlow 仍为 Base；boundary snapshot 必须
+  等于 0019 after snapshot，且不得存在 BootInitFlow lifecycle Signal identity、send/receive/handler
+  事件。该验收不得用显式 `-t Kernel.Enable` 的 Human 根 source 证明真实 sender。
 - 提交的 `tools2/scenarios/BootInitFlow.Setup.snapshot.json` 必须与从模型初态执行
   `tools2/bin/pyveri -u BootInitFlow.Setup --snapshot-out /tmp/boot-init-flow-setup-presend.snapshot.json`
   得到的 canonical bytes 逐字节一致，并从仓库根与其它 cwd 重建出相同结果。当前正式模型下其

@@ -39,9 +39,12 @@ handoff 窗口内 CurrentCPU 无法解析。
 
 1. `OpenSBI.Enable` 同步驱动 `CpuGroup.Preset`。
 2. CpuGroup 原子发布 `CpuGroup.cpus[0]` 与自身 Prepared，然后 OpenSBI 异步发送 `Kernel.Enable`。
-3. Kernel 接受 Enable 后把 `ref(CpuGroup.cpus[0])` 绑定到 `BootInitFlow.cpu_ref`。
-4. `BootInitFlow.Preset` 通过 CurrentCPU 推进 CPU0 到 Ready并记录入口 hartid。
-5. 后继平台验证使 CPU0 Online；`CpuGroup.Setup` 再建立 AP 元素和完整拓扑。
+3. Kernel 的 Enable handler 先完成 `Kernel.Action::AcceptEnable`。
+4. 同一 handler 把 `ref(CpuGroup.cpus[0])` 绑定到 `BootInitFlow.cpu_ref`。
+5. 同一 handler 以该 BootCPURef 为目标，原子提交 PhysicalDirect 的 InitialActivation。
+6. 前三项均成功后，Kernel 才同步驱动 `BootInitFlow.Preset`；Preset 通过 CurrentCPU 推进同一 CPU0
+   到 Ready并记录入口 hartid。
+7. 后继平台验证使 CPU0 Online；`CpuGroup.Setup` 再建立 AP 元素和完整拓扑。
 
 外部 OpenSBI 固件不需要实现内核对象；真实内核入口在接受 Kernel Enable 前采用并验证第 1-2 步的
 模型效果，并发布长期 checkpoint。

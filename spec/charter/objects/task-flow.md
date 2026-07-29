@@ -117,9 +117,11 @@ Preset）。Task 再次获得 CPU 时 initial Flow 已非 Base，Task 必须改�
 两条候选必须恰有一条可接受；任何已发送 Signal 被拒绝或处理失败都会使根执行失败，不排队、不重试。
 
 BootTask 是入口特例：它从模型初态已经 OnCpu，因此首次执行不经过 Scheduler 或 Task.Continue。
-OpenSBI 发出 Kernel.Enable 后，Kernel 接受交接并在仍为 Ready 的同一迁移过程中直接驱动
-BootInitFlow.Preset；这不是 Kernel 提交后的异步事件。接收方必须仍为 Base 且 parent BootTask 必须为
-OnCpu，重复启动、绕过 Kernel.Enable 或执行权不匹配立即失败。
+OpenSBI 发出 Kernel.Enable 后，Kernel 在仍为 Ready 的同一迁移过程中依次完成 Enable acceptance、
+把 BootCPURef 赋给 BootInitFlow，以及 PhysicalDirect InitialActivation；三项全部提交后才同步驱动
+BootInitFlow.Preset。这不是 Kernel 提交后的异步事件。`Startup` 只是 Preset 的显示名，`Started` 只是
+Preset 接受 checkpoint。接收方必须仍为 Base 且 parent BootTask 必须为 OnCpu；重复启动、绕过
+Kernel.Enable、缺失 CpuRef/controller association 或执行权不匹配立即失败。
 
 PID 1 的首次 dispatch 是跨栈 continuation：scheduler prepare 校验两侧 FlowRef/context，架构 switch
 保存 BootTask 并恢复 PID 1，随后在 `kernel_init_entry()` 的 finish 边界原子提交 BootTask Suspend、

@@ -70,6 +70,10 @@ authority/context/FlowRef；架构切换建立 next identity，finish 验证该�
 同一 Task 的 Flow handoff 在提交 active binding 前复制 predecessor CpuRef。执行中的 Flow 及其同步
 drives 子过程只能读取；异步 emits 不继承由该字段解析出的 `CurrentCpu` capability。
 
+BootTask 入口写边界必须由同一个 Kernel.Enable handler 按 `AcceptEnable -> AssignCpuRef ->
+PhysicalDirect InitialActivation -> BootInitFlow.Preset` 排序；Preset 接受和 Started checkpoint 都不得
+越过前三项，也不得让首个 child action 提前执行。
+
 Task 收到严格 Continue 后按当前快照选择：initial Flow 为 Base 时只发送 `Preset`；否则只向 Online
 active Flow 发送 `Continue`。两个候选都可接受或都不可接受均为终止错误；不得丢弃、排队重试或降级。
 

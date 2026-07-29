@@ -48,7 +48,7 @@
 ## 当前 TaskFlow 直接子阶段拓扑
 
 当前 topology 的权威定义位于 [`objects/task-flow.md`](objects/task-flow.md)、
-[`phases/boot-init.md`](phases/boot-init.md)、[`phases/smp-runtime.md`](phases/smp-runtime.md) 和
+[`phases/boot-init-flow.md`](phases/boot-init-flow.md)、[`phases/smp-runtime.md`](phases/smp-runtime.md) 和
 [`phases/payload.md`](phases/payload.md)。`BootPhase`、`InterruptPhase`、`SmpRuntimePhase` 与原
 `PayloadPhase` 已删除；本文后续保留的旧名称只用于记录历史分析目录/批次，不再定义对象、parent、
 lifecycle 或 checkpoint。
