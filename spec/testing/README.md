@@ -73,7 +73,8 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
   `interrupt_concurrency_closed()`、`context_is(SystemExclusive)` 或旧的 firmware SIE 事实。
   `tools2/bin/pyveri -t Kernel.Enable` 必须自动使用该 snapshot，derive `initial_snapshot` 与 golden
   完全一致且 Kernel.Enable 被 handler 接受；其后第一个 `InterruptType.Preset` 必须建立
-  `sie/sip == 0` 与 `interrupt_concurrency_closed()`，完整闭包再成功到达 payload
+  `interrupt_class_gates_closed`、`interrupt_pending_cleared` 及分路门控先于待决信号清理的顺序事实，
+  但不得建立 total-gate、fallback 或 `interrupt_concurrency_closed()`；完整闭包再成功到达 payload
   handoff/application 分支。不同 cwd 输出必须一致，陈旧或其它模型 fingerprint 必须拒绝。显式
   `-s` 仍可覆盖默认 golden。
 - `tools2/bin/pyveri -t Computer.Preset` 在没有对应默认文件时必须返回 2；只有省略 `-t` 的默认
@@ -110,8 +111,8 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
 - 提交的 `tools2/scenarios/BootInitFlow.Setup.snapshot.json` 必须与从模型初态执行
   `tools2/bin/pyveri -u BootInitFlow.Setup --snapshot-out /tmp/boot-init-flow-setup-presend.snapshot.json`
   得到的 canonical bytes 逐字节一致，并从仓库根与其它 cwd 重建出相同结果。当前正式模型下其
-  SHA-256 固定为 `65345951619f535a2960227f70aeaff8d3df5ebb8a65f0dacead1cc89aae4f67`，model
-  fingerprint 固定为 `sha256:0e4bf79545ade8d19ac7b3795de0a802698593251776125f0d8bd27b2ef955e1`。
+  SHA-256 固定为 `d75847df85302ebc28711d31b0792763752246b5afaf81d944e22bcb3183bbc5`，model
+  fingerprint 固定为 `sha256:57640370eebe203e1c9afb94871043f7c3219d9db2f022aa07ced9c63462f994`。
   `tools2/bin/pyveri -t BootInitFlow.Setup` 必须自动采用该第 3 组入口 scenario；显式 `-s` 仍优先，
   其它模型必须因 stale fingerprint 拒绝，缺失 canonical scenario 必须在 derive 前返回 2。
 - `-u BootInitFlow.Setup` 的真实上游推导必须精确包含 52 个 Signal，并逐项固定

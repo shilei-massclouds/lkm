@@ -1113,15 +1113,15 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
    描述：当前阶段的中断控制对象，用于封闭中断进入路径，避免入口前导期被异步中断打断。
 
-   * `preset` - 屏蔽中断子开关
-     * 初始状态：记录 `sie` 与 `sip` 的当前值。
-     * 执行动作：清零 `sie` 与 `sip`，作为防御式预置动作。
-     * 结束状态：`InterruptType` 进入 `Prepared`，验证 `sie` 与 `sip` 确实已经清零，确保各类中断子开关与挂起状态已经被清理。
+   * `preset` - 关闭中断分路门控并清空待决信号
+     * 初始状态：BootCPU 已经发布，其 CPU-local 中断资源仍为 `Base`。
+     * 执行动作：先关闭 BootCPU 的全部中断分路门控，再清空这些门控上的全部待决中断信号。
+     * 结束状态：`InterruptType` 进入 `Prepared`，确保随后启动过程不受中断信号干扰；本动作不改变或判定中断总门控，也不安装 handler、fallback 或正式分派框架。
 
-   * `setup` - 关闭中断总开关
-     * 初始状态：`InterruptType` 已进入 `Prepared`，记录 `sstatus` 的当前值。
-     * 执行动作：清除 `sstatus` 中控制 supervisor interrupt enable 的总开关位。这里的动作仍属于防御式过程，即即使固件交接时已经关闭中断，内核入口仍再次规范化总开关状态。
-     * 结束状态：`InterruptType` 进入 `Ready`，验证 `sstatus` 的 supervisor interrupt enable 位已经清除，确保中断进入路径在子开关和总开关两个层面都被封闭。
+   * `setup` - 关闭中断总门控
+     * 初始状态：`InterruptType` 已进入 `Prepared`。
+     * 执行动作：关闭 BootCPU 的中断总门控。这里的动作仍属于防御式过程，即使固件交接时已经关闭总门控，内核入口仍再次规范化其状态。
+     * 结束状态：`InterruptType` 进入 `Ready`，确保中断进入路径在分路门控和总门控两个层面都被封闭。
 
 5. `陷入资源`（`TrapType`）
 
@@ -3821,10 +3821,10 @@ boot/primary hart 事实并精确建立
 `BootCpuRegisters.a0 == BootArgs.boot_hartid` 和
 `BootCpuRegisters.a1 == BootArgs.dtb_pa`、`BootCpuRegisters.satp == 0`，随后同步驱动
 `CpuGroup.Preset` 原子发布 `CpuGroup.cpus[0]` 与 CpuGroup Prepared，再 emits Kernel.Enable；它不
-负责清零 `sie/sip`。CpuGroup 效果由真实内核入口 adoption，不要求修改外部固件。实际字节放置可以由
+负责关闭 BootCPU 的中断分路门控或清空待决中断信号。CpuGroup 效果由真实内核入口 adoption，不要求修改外部固件。实际字节放置可以由
 QEMU/loader 完成；OpenSBI.Enable 交接域保证其结果，不虚构
 固件内部复制。Kernel 在 Ready 内 drives BootInitFlow，后者的 Preset 首先由
-InterruptType 清零 `sie/sip` 并建立中断封闭事实，再推进首次 Scheduler 调度和 KernelInitFlow；
+InterruptType 关闭 BootCPU 的全部中断分路门控、清空其待决中断信号并建立相应事实，再推进首次 Scheduler 调度和 KernelInitFlow；
 `PayloadHandoffPreparePhase.Online` 后提交
 Online，再 emits `KernelInitFlow.CommitPayloadHandoff`。其余启动相关寄存器由入口阶段逐步更新。
 全局 `Startup` 仍规范化为 `Preset`，不重绑定为 `Enable`。

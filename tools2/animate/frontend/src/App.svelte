@@ -306,6 +306,9 @@
       {#if moment}
         <h2>{moment.transfer?.from || moment.source} <span>— {moment.signal} →</span> {moment.transfer?.to || moment.target}</h2>
         <p>{responseText()}</p>
+        {#if moment.handler.description}
+          <p class="model-description"><strong>Model：</strong>{moment.handler.description}</p>
+        {/if}
         {#if moment.kind !== 'request' && moment.outcome !== 'completed'}
           <p class="reason"><strong>{moment.outcome}</strong>{moment.reason ? ` · ${moment.reason}` : ''}</p>
         {/if}

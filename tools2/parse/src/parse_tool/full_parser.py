@@ -100,6 +100,71 @@ def _strip_comments(text: str) -> str:
     return "".join(result)
 
 
+def _normalize_description(lines: list[str]) -> str | None:
+    normalized: list[str] = []
+    for line in lines:
+        value = line.strip()
+        if value.startswith("*"):
+            value = value[1:].lstrip()
+        normalized.append(value.rstrip())
+    while normalized and not normalized[0]:
+        normalized.pop(0)
+    while normalized and not normalized[-1]:
+        normalized.pop()
+    description = "\n".join(normalized).strip()
+    return description or None
+
+
+def _leading_description(text: str, start_line: int) -> str | None:
+    """Return a declaration-adjacent Model comment as display-only metadata."""
+
+    lines = text.splitlines()
+    index = start_line - 2
+    if index < 0:
+        return None
+    stripped = lines[index].strip()
+    if stripped.startswith("//"):
+        first = index
+        while first >= 0 and lines[first].strip().startswith("//"):
+            first -= 1
+        return _normalize_description(
+            [line.strip()[2:].lstrip() for line in lines[first + 1 : index + 1]]
+        )
+    if not stripped.endswith("*/"):
+        return None
+    first = index
+    while first >= 0 and "/*" not in lines[first]:
+        first -= 1
+    if first < 0:
+        return None
+    raw = "\n".join(lines[first : index + 1])
+    if re.fullmatch(r"\s*/\*.*?\*/\s*", raw, re.S) is None:
+        return None
+    body = raw[raw.find("/*") + 2 : raw.rfind("*/")]
+    return _normalize_description(body.splitlines())
+
+
+def _attach_handler_descriptions(value: Any, source_text: str) -> None:
+    if isinstance(value, list):
+        for item in value:
+            _attach_handler_descriptions(item, source_text)
+        return
+    if not isinstance(value, dict):
+        return
+    span = value.get("span")
+    if (
+        value.get("kind") in {"Transition", "Action"}
+        and isinstance(value.get("name"), str)
+        and isinstance(span, dict)
+        and isinstance(span.get("start_line"), int)
+    ):
+        description = _leading_description(source_text, span["start_line"])
+        if description is not None:
+            value["description"] = description
+    for child in value.values():
+        _attach_handler_descriptions(child, source_text)
+
+
 def _matching_brace(text: str, opening: int, segment: Segment) -> int:
     depth = 0
     in_string = False
@@ -788,7 +853,8 @@ def parse_full_spec(path: str | Path) -> dict[str, Any]:
         if resolved in seen:
             return
         try:
-            text = _strip_comments(resolved.read_text(encoding="utf-8"))
+            source_text = resolved.read_text(encoding="utf-8")
+            text = _strip_comments(source_text)
             members = _split_members(text, path=source_file, start_line=1)
         except (OSError, UnicodeError, ValueError, StructuralFailure) as exc:
             if isinstance(exc, StructuralFailure):
@@ -814,9 +880,13 @@ def parse_full_spec(path: str | Path) -> dict[str, Any]:
                 elif head == "enum":
                     document["enums"].append(_enum(member))
                 elif head == "type":
-                    document["types"].append(_type(member, diagnostics))
+                    declaration = _type(member, diagnostics)
+                    _attach_handler_descriptions(declaration, source_text)
+                    document["types"].append(declaration)
                 elif head in {"object", "system"}:
-                    document["systems"].append(_system(member, diagnostics))
+                    declaration = _system(member, diagnostics)
+                    _attach_handler_descriptions(declaration, source_text)
+                    document["systems"].append(declaration)
                 elif head == "external":
                     document["externals"].append(_external(member, diagnostics))
                 elif head in {"predicate", "function"}:

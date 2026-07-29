@@ -42,13 +42,19 @@ outcome 必须保持原 outcome 和结构化 reason。没有自身 snapshot stat
 祖先是结构容器，不得获得伪造状态。外部 `Human` 等不属于 model parent 树的端点仍可作为独立端点
 显示。
 
+Model 中紧邻 Transition 或 Action 声明之前的注释可作为该 handler 的人类可读说明。
+它不增加前置条件、完成事实或执行步骤，也不参与 guard 求值或 handler 选择；但当
+当前 moment 解析到该 handler 时，动画底部必须把这段说明与通用的请求/响应信息一同显示。
+没有这种注释时保持现有显示，不从 Charter、Coding、Impl 或显示名称反向编造说明。
+
 ## 发布协议与播放器
 
 animate 输出内嵌 `lkm.spec.signal-animation` version `3` 的自包含 HTML。animation v3 是由 v8 输入
 确定生成的播放协议：`moments` 与 `frames` 一一对应；moment ID 固定为 `<signal-id>:request`、
 `<signal-id>:feedback`、`<signal-id>:settle` 或 `<signal-id>:terminal`，kind 与 ID 后缀一致。
 每个 moment 保留 event sequence、Signal/cause identity、source/target/name/delivery、handler、
-outcome/reason 和 Transition before/after；每个 frame 以 `moment_id` 关联时刻。trace 同时记录
+outcome/reason 和 Transition before/after；handler 若有 Model 注释说明则同时保留。每个 frame 以
+`moment_id` 关联时刻。trace 同时记录
 `total_signals`、`total_moments` 和 reached boundary。JSON 必须安全内嵌，HTML 必须原子写入；协议或
 I/O 失败不得留下半成品。
 

@@ -35,7 +35,7 @@ export interface AnimationMoment {
   target: string;
   signal: string;
   delivery: string;
-  handler: { id: string | null; kind: HandlerKind };
+  handler: { id: string | null; kind: HandlerKind; description?: string };
   outcome: 'completed' | 'rejected' | 'failed' | 'truncated' | 'stopped';
   reason: string | null;
   transfer: { from: string; to: string } | null;

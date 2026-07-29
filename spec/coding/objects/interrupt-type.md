@@ -4,7 +4,11 @@ Each `TrapType` embeds one `InterruptType`. It directly owns the CPU-local total
 pending state (`sie`/`sip`), handler bindings, and nested save/disable/restore bookkeeping. PLIC/IrqChip objects still
 own device-source gates.
 
-- `Preset` closes `SIE`, clears `sie`/`sip`, and installs a fatal fallback.
+- For the BootCPU `Preset`, lower the model requirement to close every interrupt class gate as `csrw sie, zero`, then
+  lower the model requirement to clear every pending interrupt signal as `csrw sip, zero`. The instruction order is
+  mandatory: the `sie` write completes before the `sip` write.
+- `Preset` must not read, write, adopt, or infer `sstatus.SIE`; it does not install a handler, fallback, or formal
+  dispatch framework. In particular, `sie == 0` is not evidence that the CPU-local total gate is closed.
 - `Setup` binds timer/external handlers while leaving the total gate closed.
 - `Enable` opens the total gate only after class routing is ready.
 - `SaveAndDisable` records the prior `SIE` value by nesting depth; `Restore` consumes exactly the matching saved value.

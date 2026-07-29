@@ -163,6 +163,75 @@ class SignalPipelineTests(unittest.TestCase):
                 "  Root -- Observe --> Sink\n",
             )
 
+    def test_handler_model_comments_are_display_metadata_through_view(self) -> None:
+        source = """
+            system Root {
+                initial_state: State::Base;
+                state State::Base {
+                    transitions {
+                        /*
+                         * First close every branch gate.
+                         * Then clear every pending signal.
+                         */
+                        on Transition::Start -> State::Ready { }
+                    }
+                }
+                state State::Ready {
+                    actions {
+                        // Observe the stable result.
+                        // Do not change lifecycle state.
+                        on Action::Inspect { }
+                    }
+                }
+            }
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            spec = root / "comments.spec"
+            work = root / "work"
+            spec.write_text(textwrap.dedent(source), encoding="utf-8")
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    driver_main(
+                        [
+                            str(spec),
+                            "--signal",
+                            "Root.Start",
+                            "--work-dir",
+                            str(work),
+                        ]
+                    ),
+                    0,
+                )
+            ast = read_json(work / "ast.json")["document"]
+            ast_handlers = {
+                handler["name"]: handler
+                for state in ast["systems"][0]["states"]
+                for handler in state["handlers"]
+            }
+            self.assertEqual(
+                ast_handlers["Start"]["description"],
+                "First close every branch gate.\nThen clear every pending signal.",
+            )
+            self.assertEqual(
+                ast_handlers["Inspect"]["description"],
+                "Observe the stable result.\nDo not change lifecycle state.",
+            )
+            model = read_json(work / "model.json")["model"]
+            self.assertEqual(
+                model["systems"]["Root"]["states"]["Base"]["handlers"][0][
+                    "description"
+                ],
+                ast_handlers["Start"]["description"],
+            )
+            derivation = read_json(work / "derive.json")
+            view = read_json(work / "view.json")
+            for payload in (derivation, view):
+                self.assertEqual(
+                    payload["signals"][0]["handler"]["description"],
+                    ast_handlers["Start"]["description"],
+                )
+
     def test_external_orchestration_drives_then_enqueues_emits_and_explicit_is_single(self) -> None:
         source = """
             external Human {
@@ -3515,7 +3584,19 @@ class SignalPipelineTests(unittest.TestCase):
                 "interrupt_pending_cleared(CpuGroup.cpus[0].trap.interrupt)",
                 interrupt_facts,
             )
-            self.assertIn("interrupt_concurrency_closed", interrupt_facts)
+            self.assertIn(
+                "interrupt_class_gates_closed_before_pending_cleared(CpuGroup.cpus[0].trap.interrupt)",
+                interrupt_facts,
+            )
+            self.assertNotIn("interrupt_concurrency_closed", interrupt_facts)
+            self.assertNotIn(
+                "interrupt_total_gate_closed(CpuGroup.cpus[0].trap.interrupt)",
+                interrupt_facts,
+            )
+            self.assertNotIn(
+                "interrupt_fallback_ready(CpuGroup.cpus[0].trap.interrupt)",
+                interrupt_facts,
+            )
 
             bypass_work = root / "kernel-bypass-lower-flow"
             bypass = subprocess.run(
@@ -4170,6 +4251,7 @@ class SignalPipelineTests(unittest.TestCase):
                 "interrupt_concurrency_closed",
                 "interrupt_class_gates_closed(CpuGroup.cpus[0].trap.interrupt)",
                 "interrupt_pending_cleared(CpuGroup.cpus[0].trap.interrupt)",
+                "interrupt_class_gates_closed_before_pending_cleared(CpuGroup.cpus[0].trap.interrupt)",
                 "assert:BootCpuRegisters.gp == phys_addr(Lds.global_pointer)",
                 "assert:BootCpuRegisters.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack)",
                 "assert:BootCpuRegisters.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode)",
@@ -4248,14 +4330,14 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(snapshot.read_bytes(), BOOT_INIT_SETUP_SCENARIO.read_bytes())
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "ef4622ba1f7f36c94c4e08f4cc3aeb9674fa3586e9da90f4584e997594c4e0ca",
+                "d75847df85302ebc28711d31b0792763752246b5afaf81d944e22bcb3183bbc5",
             )
             self.assertEqual(
                 {
                     derivation["model_fingerprint"], model["model_fingerprint"],
                     view["model_fingerprint"], saved["model_fingerprint"],
                 },
-                {"sha256:552e742222dc1c65610e023c52130fbb211d0b6f95878c2931e8b6958d2ce36d"},
+                {"sha256:57640370eebe203e1c9afb94871043f7c3219d9db2f022aa07ced9c63462f994"},
             )
             with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
                 compact_text = render_text(view)

@@ -185,6 +185,10 @@ completed/rejected/failed 的 `drives` 或同步根请求生成 `<signal-id>:fee
 source→target，feedback 为 target→source，settle/terminal 没有 transfer。每个 moment 还记录 event
 sequence、Signal/cause identity、source/target/name/delivery、handler kind/name、reason 和 Transition
 的真实 before/after state。
+紧邻 `Transition`/`Action` 声明之前的 `/* ... */` 或连续 `//` Model 注释规范化为
+handler 的可选 `description`，由 parse→model→derive→view 原样传递，animate 只在已解析
+handler 的 moment 中投影该字段。`description` 不参与 guard、choice、Signal 顺序、snapshot
+或 lifecycle 求值；前端在底部以独立的 Model 说明行显示，字段缺失时不显示占位文字。
 `trace` 同时记录 `total_signals` 与 `total_moments`；`moments` 与 `frames` 一一对应，frame 使用
 `moment_id`。条件、invariant、FIFO、wait 和其它 evidence event 不生成 moment。
 

@@ -3,7 +3,9 @@
  *
  * This file is extracted from spec/charter/main.md.
  * It is intended to be parsed by verifier/modeling tools.
- * Rust/C style comments are for human readers and should be ignored by tools.
+ * Rust/C style comments do not add formal predicates or executable behavior.
+ * A comment immediately preceding a Transition or Action may additionally be
+ * carried as that handler's human-readable animation description.
  *
  * Global rule:
  * - entries in a drives block form an ordered derivation queue and must be

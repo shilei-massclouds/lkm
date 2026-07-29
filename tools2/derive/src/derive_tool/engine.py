@@ -2179,6 +2179,8 @@ class Engine:
                 handler.get("composed_type_processes", [])
             ),
         }
+        if handler.get("description") is not None:
+            signal["handler"]["description"] = handler["description"]
         try:
             bindings = self.bind_payload(signal, handler)
         except DerivationProblem as exc:

@@ -243,6 +243,7 @@ dd {
 .step-copy h2 span { color: #3e6650; }
 .step-copy p { margin: 0; color: #647168; font-size: clamp(.68rem, .8cqi, .8rem); }
 .counter { color: #3e6650 !important; font-size: clamp(.6rem, .7cqi, .7rem) !important; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.model-description { flex-basis: 100%; color: #354a3e !important; white-space: pre-line; }
 .reason { color: #9f2f2f !important; }
 
 @media (prefers-color-scheme: dark) {
@@ -257,6 +258,7 @@ dd {
   .signal-overlay text { stroke: #17211c; fill: #93d4ab; }
   .transport button:disabled { color: #738078; border-color: #34463b; background: #223029; }
   .step-copy { border-color: #34463b; background: #1d2a23; }
+  .model-description { color: #c7d5cc !important; }
 }
 
 @container player (max-width: 58rem) {

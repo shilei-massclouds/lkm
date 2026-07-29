@@ -169,7 +169,7 @@ cause chain 和最后稳定 snapshot。
 | `sig-0018` | `Kernel -> BootInitFlow.AssignCpuRef` | drives / 0016 | `BootInitFlow.Action::AssignCpuRef@process`；唯一写入 `BootCPURef -> CpuGroup.cpus[0]` |
 | `sig-0019` | `Kernel -> PhysicalDirect.ActivateOnCpu` | drives / 0016 | Action；验证入口 `satp=0` 与 absent association，以 InitialActivation 把 CPU0 原子关联到 PhysicalDirect |
 | `sig-0020` | `Kernel -> BootInitFlow.Preset` | drives / 0016 | `BootInitFlow.Transition::Preset@Base`；在一个 `SingleTaskContext` 内等待 0021–0052 后提交 Prepared |
-| `sig-0021` | `BootInitFlow -> InterruptType.Preset` | drives / 0020 | Base -> Prepared，关闭 `sie/sip` 并建立中断默认 fallback |
+| `sig-0021` | `BootInitFlow -> InterruptType.Preset` | drives / 0020 | Base -> Prepared；先关闭 CPU0 的全部中断分路门控，再清空这些门控上的全部待决中断信号；不改变总门控或建立 fallback |
 | `sig-0022` | `BootInitFlow -> KernelAddrSpace.Preset` | drives / 0020 | 等待 0023–0026 后 Base -> Prepared，建立地址区域布局 |
 | `sig-0023` | `KernelAddrSpace -> LinearMap.Preset` | drives / 0022 | Base -> Ready，固定从 `PAGE_OFFSET` 开始的物理线性映射区域 |
 | `sig-0024` | `KernelAddrSpace -> UserSpaceReserve.Preset` | drives / 0022 | Base -> Ready，保留 canonical 用户地址范围 |
@@ -221,7 +221,7 @@ TrampolineVm/EarlyVm 为 Ready。不存在独立入口 binding snapshot，也不
 instance 或 lifecycle。不得创建 `BootInitFlow.Setup` identity，也不得出现它的 send、receive、handler
 或 Context 事件。
 
-Linux 6.12 的 RISC-V `head.S` 依次关闭 `sie/sip`、建立 `gp`、禁用 FPU/vector、清 BSS、保存 boot
+Linux 6.12 的 RISC-V `head.S` 依次关闭 BootCPU 的全部中断分路门控并清空其待决中断信号、建立 `gp`、禁用 FPU/vector、清 BSS、保存 boot
 hart、建立 `tp/sp/stvec`，再由 `setup_vm()` 建立 trampoline、early kernel mapping 和 FDT fixmap，
 `relocate_enable_mmu()` 完成 trampoline 到 early page table 的切换。现有 entry checkpoint 与实现把
 Rust 前不可延迟的动作作为同一 BootInitFlow.Preset 的 head segment adoption，并在 VM continuation

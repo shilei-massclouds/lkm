@@ -48,8 +48,10 @@ Enable handler 必须依次完成 `AcceptEnable`、把解析到的 BootCPURef �
 `CpuGroup` 是 Kernel 的平级直接子对象；Soc/CpuGroup 之间的启动依赖不表达所有权。
 
 OpenSBI 不负责保证 `sie/sip` 已清零。`BootInitFlow.Preset` 的第一个被驱动叶迁移是
-`InterruptType.Preset`；入口汇编在该边界清零 `sie/sip`，由此首次建立
-`interrupt_concurrency_closed()`。这发生在 Kernel.Enable 已接受之后、其余入口前导动作之前。
+`InterruptType.Preset`；入口汇编必须先执行 `csrw sie, zero` 映射全部中断分路门控关闭，再执行
+`csrw sip, zero` 映射全部待决中断信号清空。该边界不得读写或推断 `sstatus.SIE`，也不得建立
+handler、fallback、正式分派框架或 `interrupt_concurrency_closed()`。这发生在 Kernel.Enable 已接受
+之后、其余入口前导动作之前。
 
 `PayloadHandoffPreparePhase.Online` 表示应用环境的全部可逆准备已经完成。KernelInitFlow 随后先提交
 Online，再由 `systems::kernel` 验证完整下层闭包并原子提交 Kernel.Online；`KernelOnline` 必须严格位于

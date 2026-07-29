@@ -190,6 +190,26 @@ class SignalAnimationTests(unittest.TestCase):
         )
         self.assertIsNone(animation["moments"][5]["transfer"])
 
+    def test_animation_projects_optional_model_handler_description(self) -> None:
+        view = deepcopy(self.view)
+        description = "Close every branch gate before clearing pending signals."
+        view["signals"][0]["handler"]["description"] = description
+        animation = build_animation(self.model, view)
+        root_moments = [
+            moment
+            for moment in animation["moments"]
+            if moment["signal_id"] == view["signals"][0]["id"]
+        ]
+        self.assertTrue(root_moments)
+        self.assertTrue(
+            all(moment["handler"]["description"] == description for moment in root_moments)
+        )
+
+        invalid = deepcopy(view)
+        invalid["signals"][0]["handler"]["description"] = ""
+        with self.assertRaisesRegex(ProtocolError, "handler.description"):
+            build_animation(self.model, invalid)
+
     def test_frames_reveal_targets_and_keep_first_seen_sibling_order(self) -> None:
         animation = build_animation(self.model, self.view)
         self.assertEqual(animation["initial_frame"]["sibling_order"], {})
@@ -771,7 +791,7 @@ class SignalAnimationTests(unittest.TestCase):
                 derivation["model_fingerprint"],
                 view["model_fingerprint"],
             },
-            {"sha256:552e742222dc1c65610e023c52130fbb211d0b6f95878c2931e8b6958d2ce36d"},
+            {"sha256:57640370eebe203e1c9afb94871043f7c3219d9db2f022aa07ced9c63462f994"},
         )
         animation = build_animation(model, view)
         self.assertEqual(animation["trace"]["total_signals"], 52)

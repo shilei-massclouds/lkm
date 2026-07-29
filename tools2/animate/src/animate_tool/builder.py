@@ -150,9 +150,17 @@ def _project_signal(
             raise ProtocolError(f"{label}.handler has an unknown structure")
         handler_id = _required_string(handler, "id", label=f"{label}.handler")
         handler_kind = handler["kind"]
+        handler_description = handler.get("description")
+        if handler_description is not None and (
+            not isinstance(handler_description, str) or not handler_description.strip()
+        ):
+            raise ProtocolError(
+                f"{label}.handler.description must be a non-empty string or null"
+            )
     else:
         handler_id = None
         handler_kind = None
+        handler_description = None
     outcome = signal.get("outcome")
     if outcome not in _OUTCOMES:
         raise ProtocolError(f"{label}.outcome is not an animation v3 outcome: {outcome!r}")
@@ -171,6 +179,9 @@ def _project_signal(
             raise ProtocolError(f"{label} target {target!r} has an undeclared snapshot state")
     elif before_state is not None or after_state is not None:
         raise ProtocolError(f"{label} stateless target {target!r} must use null snapshot state")
+    projected_handler = {"id": handler_id, "kind": handler_kind}
+    if handler_description is not None:
+        projected_handler["description"] = handler_description
     return {
         "signal_index": index,
         "signal_id": signal_id,
@@ -180,7 +191,7 @@ def _project_signal(
         "signal": name,
         "delivery": delivery,
         "coordinate": deepcopy(signal.get("coordinate")),
-        "handler": {"id": handler_id, "kind": handler_kind},
+        "handler": projected_handler,
         "outcome": outcome,
         "reason": reason,
         "response": {

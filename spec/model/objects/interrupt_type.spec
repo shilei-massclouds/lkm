@@ -64,13 +64,17 @@ type InterruptType: ResourceObject {
 
     state State::Base {
         transitions {
+            /*
+             * 对 BootCPU，先关闭它的全部中断分路门控，再清空这些门控上的
+             * 全部待决中断信号，使随后启动过程不受中断信号干扰。本边界
+             * 不改变或判定中断总门控，也不建立 handler、fallback 或正式
+             * 分派框架。
+             */
             on Transition::Preset -> State::Prepared {
                 ensures {
-                    interrupt_total_gate_closed(self);
                     interrupt_class_gates_closed(self);
                     interrupt_pending_cleared(self);
-                    interrupt_fallback_ready(self);
-                    interrupt_concurrency_closed;
+                    interrupt_class_gates_closed_before_pending_cleared(self);
                 }
             }
         }
@@ -78,9 +82,7 @@ type InterruptType: ResourceObject {
 
     state State::Prepared {
         invariant {
-            interrupt_total_gate_closed(self);
             interrupt_class_gates_closed(self);
-            interrupt_fallback_ready(self);
         }
         transitions {
             on Transition::Setup -> State::Ready {
@@ -121,6 +123,6 @@ predicate interrupt_total_gate_closed<I: InterruptType>(interrupt: I) -> bool;
 predicate interrupt_total_gate_open<I: InterruptType>(interrupt: I) -> bool;
 predicate interrupt_class_gates_closed<I: InterruptType>(interrupt: I) -> bool;
 predicate interrupt_pending_cleared<I: InterruptType>(interrupt: I) -> bool;
-predicate interrupt_fallback_ready<I: InterruptType>(interrupt: I) -> bool;
+predicate interrupt_class_gates_closed_before_pending_cleared<I: InterruptType>(interrupt: I) -> bool;
 predicate interrupt_handler_bindings_ready<I: InterruptType>(interrupt: I) -> bool;
 predicate interrupt_dispatch_ready<I: InterruptType>(interrupt: I) -> bool;

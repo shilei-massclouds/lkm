@@ -28,14 +28,20 @@ const animation: AnimationTrace = {
     {
       index: 0, id: 'sig-0001:request', kind: 'request', event_sequence: 2,
       signal_id: 'sig-0001', cause_id: null, source: 'Human', target: 'Root',
-      signal: 'Start', delivery: 'root', handler: { id: 'Root.Transition::Start', kind: 'Transition' },
+      signal: 'Start', delivery: 'root', handler: {
+        id: 'Root.Transition::Start', kind: 'Transition',
+        description: '先关闭全部中断分路门控，再清空全部待决中断信号。'
+      },
       outcome: 'completed', reason: null, transfer: { from: 'Human', to: 'Root' },
       response: { before_state: 'Base', after_state: 'Ready' }
     },
     {
       index: 1, id: 'sig-0001:feedback', kind: 'feedback', event_sequence: 4,
       signal_id: 'sig-0001', cause_id: null, source: 'Human', target: 'Root',
-      signal: 'Start', delivery: 'root', handler: { id: 'Root.Transition::Start', kind: 'Transition' },
+      signal: 'Start', delivery: 'root', handler: {
+        id: 'Root.Transition::Start', kind: 'Transition',
+        description: '先关闭全部中断分路门控，再清空全部待决中断信号。'
+      },
       outcome: 'completed', reason: null, transfer: { from: 'Root', to: 'Human' },
       response: { before_state: 'Base', after_state: 'Ready' }
     },
@@ -92,6 +98,7 @@ describe('deterministic moment navigation', () => {
     expect(nodes()).toEqual(['Human', 'Root']);
     expect(document.querySelector('[data-node-id="Root"]')?.getAttribute('data-state')).toBe('Base');
     expect(document.body.textContent).toContain('请求到达：root');
+    expect(document.querySelector('.model-description')?.textContent).toContain('先关闭全部中断分路门控');
     next.click();
     await settle();
     expect(document.querySelector('[data-node-id="Root"]')?.getAttribute('data-state')).toBe('Ready');

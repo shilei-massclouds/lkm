@@ -110,7 +110,7 @@ Linux 6.12 `Documentation/arch/riscv/boot.rst` 与当前 RV64 Image contract 提
   确认静态 `BootTask` 与入口 ABI，并精确检查
   `BootCpuRegisters.a0 == BootArgs.boot_hartid`、
   `BootCpuRegisters.a1 == BootArgs.dtb_pa` 与 `BootCpuRegisters.satp == 0`；不得把整组寄存器已准备完成
-  作为前置，也不得要求 OpenSBI 已经清零 `sie/sip`。Kernel 在 Ready 内先同步驱动
+  作为前置，也不得要求 OpenSBI 已经关闭 BootCPU 的中断分路门控或清空其待决中断信号。Kernel 在 Ready 内先同步驱动
   `Kernel.Action::AcceptEnable` 完成交接 acceptance，再把 `ref(CpuGroup.cpus[0])` 绑定到
   `BootInitFlow.cpu_ref`，随后同步驱动
   `PhysicalDirect.Action::ActivateOnCpu(BootCPURef)`，以 `InitialActivation` 原子建立启动 CPU 的首个
@@ -132,8 +132,9 @@ Linux 6.12 `Documentation/arch/riscv/boot.rst` 与当前 RV64 Image contract 提
 一次。`BootInitFlow` 是 `BootTask.initial_flow` 指向的 TaskFlow；Kernel.Enable 必须先完成自身
 acceptance、BootCPURef binding 与 PhysicalDirect InitialActivation，再同步驱动其
 Preset/Setup/Enable。`Startup` 只显示 canonical Preset；`BootInitFlow.Started` 只记录 Preset 已接受，
-位于第一个 child action 之前。Preset 的第一个入口动作由启动 CPU 自有的 `InterruptType.Preset` 直接关闭
-总门控和分类门控、清除 pending，建立 `interrupt_concurrency_closed`，再编排其余入口对象并提交 Prepared。该动作对应
+位于第一个 child action 之前。Preset 的第一个入口动作由启动 CPU 自有的 `InterruptType.Preset` 先关闭
+全部中断分路门控，再清空这些门控上的全部待决中断信号；该动作不改变或判定中断总门控，也不建立
+handler、fallback 或正式分派框架。随后 BootInitFlow 再编排其余入口对象并提交 Prepared。该动作对应
 Linux `_start_kernel` 的防御性中断屏蔽，也是 Kernel 而非 OpenSBI 的责任。Setup 直接顺序驱动
 `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、`SchedInitPhase`、
 `IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、`ProcessPreparePhase`、

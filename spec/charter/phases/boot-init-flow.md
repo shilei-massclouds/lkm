@@ -16,6 +16,9 @@ PhaseObject，它从 `_start` 开始承载并编排启动执行片段，同时�
   BootInitFlow 必须仍为 Base、parent BootTask 必须为 OnCpu，并在第一个直接 child action 之前记录
   `BootInitFlow.Started` checkpoint；全部入口事实成立后才提交 `BootInitFlow.Prepared`。任一前置失败、
   重复启动或执行权不匹配都使根执行失败，且不得启动或部分提交 BootInitFlow.Preset。
+- `BootInitFlow.Preset` 的第一个直接 child 是 BootCPU 的 `InterruptType.Preset`。它先关闭 BootCPU 的
+  全部中断分路门控，再清空这些门控上的全部待决中断信号；该 child 不改变或判定中断总门控，也不
+  提前建立 handler、fallback 或正式分派框架。
 - Setup 直接顺序驱动 `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、
   `SchedInitPhase`、`IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、
   `ProcessPreparePhase` 和 `BootInitRestInitPhase`。最后一个叶子 Online 后提交
