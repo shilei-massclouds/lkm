@@ -791,7 +791,7 @@ class SignalAnimationTests(unittest.TestCase):
                 derivation["model_fingerprint"],
                 view["model_fingerprint"],
             },
-            {"sha256:3b134570391ac51a38f0fff4be5484f8acad3ad6e3d45e510a5b6064df779056"},
+            {"sha256:7c4f5499891b2350d005ddd713b0bc6bb91066ec021cd2297dc8c1aaf615c5ed"},
         )
         animation = build_animation(model, view)
         self.assertEqual(animation["trace"]["total_signals"], 53)

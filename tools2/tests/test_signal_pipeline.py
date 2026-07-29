@@ -4138,6 +4138,10 @@ class SignalPipelineTests(unittest.TestCase):
                 "关闭 BootCPU 的浮点运算和向量运算能力。内核态默认禁止使用这些能力，只在明确受控的执行区间内才允许临时打开，随即关闭。用户态根据任务需要和系统策略打开。",
             )
             self.assertEqual(
+                " ".join(derivation["signals"][23]["handler"]["description"].split()),
+                "为内核映像的BSS段清零，让落到该段的全局变量初值为零。清零完成后，BSS 作为普通可写内存使用。",
+            )
+            self.assertEqual(
                 derivation["signals"][27]["selector_resolutions"],
                 [
                     {
@@ -4269,6 +4273,8 @@ class SignalPipelineTests(unittest.TestCase):
                 "interrupt_pending_cleared(CpuGroup.cpus[0].trap.interrupt)",
                 "interrupt_class_gates_closed_before_pending_cleared(CpuGroup.cpus[0].trap.interrupt)",
                 "gp_relative_addressing_ready(KernelImage)",
+                "kernel_image_bss_zeroing_completed(KernelImage)",
+                "kernel_image_bss_ordinary_writable(KernelImage)",
                 "cpu_fpu_execution_disabled(CpuGroup.cpus[0])",
                 "cpu_vector_execution_disabled(CpuGroup.cpus[0])",
                 "cpu_kernel_fpu_vector_default_disabled(CpuGroup.cpus[0])",
@@ -4302,6 +4308,7 @@ class SignalPipelineTests(unittest.TestCase):
                     for item in derivation["signals"]
                 )
             )
+            self.assertNotIn("memory_zeroed(segments.bss.range)", facts)
 
             context_events = [
                 event
@@ -4352,14 +4359,14 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(snapshot.read_bytes(), BOOT_INIT_SETUP_SCENARIO.read_bytes())
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "137b6702ec696e45c44ed98eeb82723e1ff85f2eceb8751fb744308b4645eecd",
+                "c179af99f3fe6a6dfd74bb92fc0d3853afdc5e67e6b118bfb961063638eddf1c",
             )
             self.assertEqual(
                 {
                     derivation["model_fingerprint"], model["model_fingerprint"],
                     view["model_fingerprint"], saved["model_fingerprint"],
                 },
-                {"sha256:3b134570391ac51a38f0fff4be5484f8acad3ad6e3d45e510a5b6064df779056"},
+                {"sha256:7c4f5499891b2350d005ddd713b0bc6bb91066ec021cd2297dc8c1aaf615c5ed"},
             )
             with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
                 compact_text = render_text(view)

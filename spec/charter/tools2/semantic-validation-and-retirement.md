@@ -172,7 +172,7 @@ cause chain 和最后稳定 snapshot。
 | `sig-0021` | `BootInitFlow -> InterruptType.Preset` | drives / 0020 | Base -> Prepared；先关闭 CPU0 的全部中断分路门控，再清空这些门控上的全部待决中断信号；不改变总门控或建立 fallback |
 | `sig-0022` | `BootInitFlow -> KernelImage.Preset` | drives / 0020 | Base -> Prepared，建立相对 `gp` 寻址基准 |
 | `sig-0023` | `BootInitFlow -> CpuGroup.cpus[0].DisableFpuVectorExecution` | drives / 0020 | Action；CurrentCPU 解析到 CPU0，关闭浮点与向量执行状态并建立受控使用策略 |
-| `sig-0024` | `BootInitFlow -> KernelImage.Setup` | drives / 0020 | Prepared -> Ready，提交 BSS 清零与映像虚拟范围事实 |
+| `sig-0024` | `BootInitFlow -> KernelImage.Setup` | drives / 0020 | Prepared -> Ready，提交 BSS 清零完成、普通可写与映像虚拟范围事实 |
 | `sig-0025` | `BootInitFlow -> KernelAddrSpace.Preset` | drives / 0020 | 等待 0026–0027 后 Base -> Prepared，建立地址区域布局 |
 | `sig-0026` | `KernelAddrSpace -> LinearMap.Preset` | drives / 0025 | Base -> Ready，固定从 `PAGE_OFFSET` 开始的物理线性映射区域 |
 | `sig-0027` | `KernelAddrSpace -> UserSpaceReserve.Preset` | drives / 0025 | Base -> Ready，保留 canonical 用户地址范围 |

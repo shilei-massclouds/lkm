@@ -1,6 +1,8 @@
 /* Kernel image loaded in memory before the entry prelude begins. */
 
 predicate gp_relative_addressing_ready<I: ImageObject>(image: I) -> bool;
+predicate kernel_image_bss_zeroing_completed<I: ImageObject>(image: I) -> bool;
+predicate kernel_image_bss_ordinary_writable<I: ImageObject>(image: I) -> bool;
 
 object KernelImage: ImageObject {
     initial_state: State::Base;
@@ -53,7 +55,7 @@ object KernelImage: ImageObject {
 
         transitions {
             /*
-             * Setup 清零 BSS 段，使内核映像进入早期可运行状态。
+             * 为内核映像的BSS段清零，让落到该段的全局变量初值为零。清零完成后，BSS 作为普通可写内存使用。
              */
             on Transition::Setup -> State::Ready {
                 depends_on {
@@ -66,7 +68,8 @@ object KernelImage: ImageObject {
 
                 ensures {
                     phys_start == OpenSBI.kernel_load_pa;
-                    memory_zeroed(segments.bss.range);
+                    kernel_image_bss_zeroing_completed(self);
+                    kernel_image_bss_ordinary_writable(self);
                     fits_in_kernel_image_range(self, virt_range);
                     gp_relative_addressing_ready(KernelImage);
                 }
@@ -75,7 +78,8 @@ object KernelImage: ImageObject {
     }
 
     /*
-     * Ready 表示 BSS 已清零，且相对 gp 寻址机制在当前执行环境中保持可用。
+     * Ready 表示 BSS 清零已经完成、BSS 可作为普通可写内存使用，
+     * 且相对 gp 寻址机制在当前执行环境中保持可用。
      */
     state State::Ready {
         invariant {
@@ -83,7 +87,8 @@ object KernelImage: ImageObject {
             segments.bss.range == range(Lds.bss_start, Lds.bss_end);
             inside(segments.bss.range.start, segments.bss.range.end, start, end);
             phys_start == OpenSBI.kernel_load_pa;
-            memory_zeroed(segments.bss.range);
+            kernel_image_bss_zeroing_completed(self);
+            kernel_image_bss_ordinary_writable(self);
             fits_in_kernel_image_range(self, virt_range);
             gp_relative_addressing_ready(KernelImage);
         }
@@ -114,6 +119,8 @@ object KernelImage: ImageObject {
             segments.bss.range == range(Lds.bss_start, Lds.bss_end);
             inside(segments.bss.range.start, segments.bss.range.end, start, end);
             phys_start == OpenSBI.kernel_load_pa;
+            kernel_image_bss_zeroing_completed(self);
+            kernel_image_bss_ordinary_writable(self);
             gp_relative_addressing_ready(KernelImage);
         }
     }

@@ -14,6 +14,9 @@ Model 的 `gp_relative_addressing_ready(KernelImage)` 降低为以下 RISC-V64 �
 正式参考配置不启用 `CONFIG_SHADOW_CALL_STACK`，因此 `gp/x3` 可用于 global-pointer 约定。若配置改为
 由 Shadow Call Stack 占用 `gp/x3`，必须重新决定本 Model 能力的 lowering，不能继续执行上述初始化。
 
+当前 formal 非 XIP 路径的 `KernelImage.Setup` 必须由入口汇编为 BSS 段清零。XIP 路径不属于当前
+formal lowering，记录为 deferred。
+
 Mapping: charter [`kernel-image.md`](../../charter/objects/kernel-image.md), model
 [`kernel_image.spec`](../../model/objects/kernel_image.spec), implementation
 [`kernel_image.rs`](../../../impl/arceos_ex/src/objects/kernel_image.rs) and entry/translation assembly.

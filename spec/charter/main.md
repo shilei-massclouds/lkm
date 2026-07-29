@@ -1142,7 +1142,8 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 6. `内核映像`（`KernelImage`）
 
    `KernelImage` 的权威规格见 [`objects/kernel-image.md`](objects/kernel-image.md)。入口前导期为其建立
-   相对 `gp` 寻址基准，支持对内核映像中全局数据的快速访问机制。BSS 处理仍是独立的 Setup 责任。
+   相对 `gp` 寻址基准，支持对内核映像中全局数据的快速访问机制，并为内核映像的BSS段清零，让落到
+   该段的全局变量初值为零。
 
 7. `物理内存空间`（`Physical Memory Space`，`PM`）
 

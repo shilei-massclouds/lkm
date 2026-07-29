@@ -37,10 +37,8 @@ Preset 横跨三个物理实现段，但仍是 BootInitFlow 的一个 model tran
 Online invariant 的完整对象事实并提交 `BootInitFlow.Prepared`；随后由 BootInitFlow 自身直接启动
 Setup 的第一个叶阶段，不回调 Kernel。
 
-`KernelImage.Setup` 的 BSS 清零事实必须在 head 清零循环完成点记录到不属于 BSS 的 handoff storage，
-并由 Rust adoption 消费。不得在进入 Rust、消费早先的 BootInitFlow.Started checkpoint 后
-重新要求整段 BSS 仍为零：checkpoint handler、诊断缓冲区和其它已启动静态对象可以从这一刻起合法写入
-BSS。handoff fact 只证明清零循环已完成，不改变后续 BSS 的正常可写语义。
+`KernelImage.Setup` 在当前 formal 非 XIP 路径中由入口汇编为 BSS 段清零。清零完成后，BSS 按 Model
+作为普通可写内存使用。
 
 `DisableFpuVectorExecution` 是 CPU action，不是 BootInitFlow 私有 action，也不属于 CpuGroup。Rust
 adoption 必须通过 BootInitFlow 的 CpuRef 解析到 `CpuGroup.cpus[0]`，再验证该 CPU 的 FS/VS 已关闭；
