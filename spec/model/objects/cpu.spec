@@ -19,6 +19,17 @@ type CPU: CPUObject {
     }
 
     processes {
+        Action::AssignHartid(hartid: HartId) {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Prepared
+                    || self.state == State::Ready;
+            }
+            ensures {
+                cpu_hartid_ready(self, hartid);
+            }
+        }
+
         /*
          * 关闭 BootCPU 的浮点运算和向量运算能力。内核态默认禁止使用这些能力，只在明确受控的执行区间内才允许临时打开，随即关闭。用户态根据任务需要和系统策略打开。
          */
@@ -71,9 +82,8 @@ type CPU: CPUObject {
 
     state State::Base {
         transitions {
-            on Transition::Preset(hartid: HartId) -> State::Prepared {
+            on Transition::Preset -> State::Prepared {
                 ensures {
-                    cpu_hartid_ready(self, hartid);
                     cpu_logical_id_derived_from_owned_index(self);
                     cpu_ref_for_owned_index_ready(self);
                     cpu_owns_trap_resource(self, self.trap);

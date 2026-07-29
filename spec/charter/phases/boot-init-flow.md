@@ -22,6 +22,7 @@ PhaseObject，它从 `_start` 开始承载并编排启动执行片段，同时�
 - 建立相对 `gp` 寻址基准后，`BootInitFlow.Preset` 驱动 BootCPU 关闭浮点运算和向量运算能力，再为
   内核映像的BSS段清零，让落到该段的全局变量初值为零。相关执行状态属于 BootCPU；BootInitFlow
   只负责编排，不拥有这些状态。
+- 把内核启动时的第一个参数作为BootCPU的hartid记录下来，以备后续使用。
 - Setup 直接顺序驱动 `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、
   `SchedInitPhase`、`IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、
   `ProcessPreparePhase` 和 `BootInitRestInitPhase`。最后一个叶子 Online 后提交

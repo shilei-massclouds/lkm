@@ -12,6 +12,19 @@ object BootInitFlow: TaskFlow {
     parent: BootTask;
 
     processes {
+        /*
+         * 把内核启动时的第一个参数作为BootCPU的hartid记录下来，以备后续使用。
+         */
+        Action::RecordBootCpuHartid {
+            state_effect: StateEffect::None;
+            depends_on {
+                BootCpuRegisters.a0 == BootArgs.boot_hartid;
+            }
+            ensures {
+                boot_cpu_hartid_recorded_for_later_use(BootCpuRegisters.a0);
+            }
+        }
+
         Action::BindBootTaskEntry(current_task_ref: TaskRef) {
             state_effect: StateEffect::None;
             depends_on {
@@ -78,6 +91,7 @@ object BootInitFlow: TaskFlow {
                         KernelImage.Transition::Preset;
                         CurrentCPU.Action::DisableFpuVectorExecution;
                         KernelImage.Transition::Setup;
+                        BootInitFlow.Action::RecordBootCpuHartid;
                         KernelAddrSpace.Transition::Preset;
                         CurrentCPU.Transition::Setup(true);
                         CurrentCPU.trap.interrupt.Transition::Setup;
@@ -104,6 +118,7 @@ object BootInitFlow: TaskFlow {
                     cpu_kernel_fpu_vector_temporary_enable_requires_controlled_scope(CpuGroup.cpus[0]);
                     cpu_kernel_fpu_vector_disabled_after_controlled_scope(CpuGroup.cpus[0]);
                     cpu_user_fpu_vector_enable_follows_task_need_and_system_policy(CpuGroup.cpus[0]);
+                    boot_cpu_hartid_recorded_for_later_use(BootCpuRegisters.a0);
                     CurrentCPU.trap.interrupt.state == State::Ready;
                     CurrentCPU.trap.state == State::Ready;
                     CurrentCPU.trap.exception.state == State::Prepared;
@@ -145,6 +160,7 @@ object BootInitFlow: TaskFlow {
         invariant {
             BootTask.state == State::OnCpu;
             task_flow_started(self);
+            boot_cpu_hartid_recorded_for_later_use(BootCpuRegisters.a0);
         }
 
         transitions {
@@ -284,6 +300,8 @@ object BootInitFlow: TaskFlow {
         }
     }
 }
+
+predicate boot_cpu_hartid_recorded_for_later_use(hartid: HartId) -> bool;
 
 predicate boot_init_flow_switch_precommit_ready<B, S, T, K>(
     boot_init: B,

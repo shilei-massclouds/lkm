@@ -20,14 +20,15 @@ collection 建立；其它对象只能保存 `CpuRef`，不得复制 CPU state �
 `CpuRef`。
 
 logical ID 仅由 owned collection 的 key 派生，不在 CPU 内维护可漂移的第二份权威值。`hartid` 是
-CPU 实例属性；CpuGroup 必须维护已发布元素间的一一映射，并拒绝重复 hartid。按 logical ID 查找
-hartid 与按 hartid 查找 CpuRef 必须互为反向映射。
+CPU 实例属性；它被赋值后，CpuGroup 必须维护已赋值元素间的一一映射，并拒绝重复
+hartid。对已赋值元素，按 logical ID 查找 hartid 与按 hartid 查找 CpuRef 必须互为反向映射。
 
 ## Lifecycle 与集合状态
 
 CPU 的通用 lifecycle 为 Base → Prepared → Ready → Online。CpuGroup.Preset 在同一原子发布中创建
-`cpus[0]`、记录入口 hartid 并推进它到 Prepared；BootInitFlow.Preset 通过 CurrentCPU 把 CPU0 推进
-到 Ready，后继平台验证再使它 Online。CpuGroup.Setup 根据已验证拓扑创建 AP 元素；AP 的后续
+`cpus[0]` 并推进它到 Prepared；BootInitFlow.Preset 保存入口第一个参数，但不在汇编入口中直接写入
+CPU 对象。后续 `smp_setup_processor_id()` 对应阶段再把保存值写为 BootCPU 的 `hartid`。
+BootInitFlow.Preset 通过 CurrentCPU 把 CPU0 推进到 Ready，后续平台验证再使它 Online。CpuGroup.Setup 根据已验证拓扑创建 AP 元素；AP 的后续
 Ready/Online 仍由对应 CPU 的入口和 hotplug 因果推进。
 
 possible/present/active/online 集合只能从每个已发布 CPU 的状态或属性派生。实现可以缓存位图，但缓存

@@ -35,13 +35,9 @@ type CpuGroupObject {
     state State::Base {
         transitions {
             on Transition::Preset -> State::Prepared {
-                depends_on {
-                    BootArgs.state == State::Online;
-                }
-
                 drives {
                     declare self.cpus[0] of CPU;
-                    self.cpus[0].Transition::Preset(BootArgs.boot_hartid);
+                    self.cpus[0].Transition::Preset;
                 }
 
                 ensures {
@@ -87,25 +83,32 @@ type CpuGroupObject {
 
                 drives {
                     declare self.cpus[1] of CPU;
-                    self.cpus[1].Transition::Preset(1);
+                    self.cpus[1].Transition::Preset;
+                    self.cpus[1].Action::AssignHartid(1);
                     self.cpus[1].Transition::Setup(false);
                     declare self.cpus[2] of CPU;
-                    self.cpus[2].Transition::Preset(2);
+                    self.cpus[2].Transition::Preset;
+                    self.cpus[2].Action::AssignHartid(2);
                     self.cpus[2].Transition::Setup(false);
                     declare self.cpus[3] of CPU;
-                    self.cpus[3].Transition::Preset(3);
+                    self.cpus[3].Transition::Preset;
+                    self.cpus[3].Action::AssignHartid(3);
                     self.cpus[3].Transition::Setup(false);
                     declare self.cpus[4] of CPU;
-                    self.cpus[4].Transition::Preset(4);
+                    self.cpus[4].Transition::Preset;
+                    self.cpus[4].Action::AssignHartid(4);
                     self.cpus[4].Transition::Setup(false);
                     declare self.cpus[5] of CPU;
-                    self.cpus[5].Transition::Preset(5);
+                    self.cpus[5].Transition::Preset;
+                    self.cpus[5].Action::AssignHartid(5);
                     self.cpus[5].Transition::Setup(false);
                     declare self.cpus[6] of CPU;
-                    self.cpus[6].Transition::Preset(6);
+                    self.cpus[6].Transition::Preset;
+                    self.cpus[6].Action::AssignHartid(6);
                     self.cpus[6].Transition::Setup(false);
                     declare self.cpus[7] of CPU;
-                    self.cpus[7].Transition::Preset(7);
+                    self.cpus[7].Transition::Preset;
+                    self.cpus[7].Action::AssignHartid(7);
                     self.cpus[7].Transition::Setup(false);
                 }
 

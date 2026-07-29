@@ -3,8 +3,10 @@
 `Cpu` is the only Rust body for every logical CPU. Its canonical identity is the containing
 `CpuGroup.cpus[logic_id]` slot; boot/AP names are formatting aliases and never allocate state.
 
-- Store `hartid`, lifecycle/possible/present/active/online facts and optional `active_translation_controller` in
-  `Cpu`; derive logical ID from the slot. The association is an atomic CPU-local controller ref, not a page-table
+- Store the authoritative `hartid`, lifecycle/possible/present/active/online facts and optional
+  `active_translation_controller` in `Cpu`; derive logical ID from the slot. The entry assembly's saved boot-hart
+  word is only a handoff value for the later `CPU.Action::AssignHartid`, not another CPU owner and not an assembly
+  requirement to address `Cpu`. The association is an atomic CPU-local controller ref, not a page-table
   state copy. Raw byte `0` means unbound/absent only; `1..=4` encode PhysicalDirect, TrampolineVm, EarlyVm and
   SwapperVm. `TranslationController` itself has only those four real values. Any other nonzero byte is invalid and
   must produce `InvalidTranslationControllerEncoding` or fail-stop on a critical entry path.

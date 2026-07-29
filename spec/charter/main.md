@@ -1213,9 +1213,9 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
    * `preset` - 原子建立启动 CPU
 
-     * 初始状态：`BootArgs.boot_hartid` 已由 RISC-V 启动 ABI 解释出来。
-     * 执行动作：在父 handler 内声明 `self.cpus[0]`，驱动该 CPU 的 `preset()`，并记录它的物理 `hartid` 来自 `BootArgs.boot_hartid`。父对象和子对象的更新必须作为单一原子发布单元；任一步失败都不得留下 collection 元素、索引或稳定 snapshot。
-     * 结束状态：`CpuGroup.cpus[0]` 与 `CPUGroup` 都进入 `Prepared`；`CPUGroup` 不另存 `boot_cpu_hartid`。启动 hartid 的平台有效性检查延迟到入口后继期，随后由 `CurrentCPU` 选择器推进同一 CPU 实例。
+     * 初始状态：启动 CPU 尚未作为 `CpuGroup.cpus[0]` 发布。
+     * 执行动作：在父 handler 内声明 `self.cpus[0]` 并驱动该 CPU 的 `preset()`。父对象和子对象的更新必须作为单一原子发布单元；任一步失败都不得留下 collection 元素、索引或稳定 snapshot。
+     * 结束状态：`CpuGroup.cpus[0]` 与 `CPUGroup` 都进入 `Prepared`；入口第一个参数尚未在这一过程中写入 BootCPU 的 `hartid`。
 
 10. `片上系统`（`SoC`）
 
@@ -1249,14 +1249,15 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 2. 执行 `内核映像.preset()`，建立相对 `gp` 寻址基准。
 3. 驱动 BootCPU 关闭浮点运算和向量运算能力；内核态默认禁止使用，只能在明确受控的执行区间内临时打开并随即关闭，用户态根据任务需要和系统策略打开。
 4. 执行 `内核映像.setup()`，清零 `BSS` 段，使内核映像进入早期可运行状态。
-5. `OpenSBI.Enable` 同步驱动 `处理器管理.preset()`，原子创建 `CpuGroup.cpus[0]` 并驱动它进入 `Prepared`；只有该父子发布全部成功后才发送 `Kernel.Enable`。
-6. 由 `PhysicalDirect.ActivateOnCpu(BootCPURef)` 以 InitialActivation 从 absent 建立 CPU-local association，再调用 `BootInitFlow.BindBootTaskEntry(CurrentTaskRef)` 与根栈 setup，建立物理地址阶段的根任务指针与根栈指针；首次 action 只初始化一次 preempt count。
-7. 执行 `TrapType.preset()`，设置受控早期处理入口，使 `VM` 建立过程中误入的中断或异常能够进入受控停机路径。
-8. 执行 `虚拟内存空间.preset()`，依次推进 `TrampolineVM.setup()` 与 `EarlyVM.setup()`，初始化 `静态对象集合.trampoline_pg_dir` 与 `静态对象集合.early_pg_dir`，为入口前导期的两次页表切换准备条件。
-9. 执行 `虚拟内存空间.setup()`，依次调用 `TrampolineVM.ActivateOnCpu()` 与 `EarlyVM.ActivateOnCpu()`：先完成从物理地址空间到跳板映射的 Handoff，再 Handoff 到 early page table；其中 `内核映像.enable()` 重置 `gp-relative` 寻址方式。controller 仍保持共享 Ready。
-10. `VM.setup()` 完成后，执行 `TrapType.setup()`，设置正式公共处理入口，使 `RISCV64.stvec` 指向 `formal_event_entry`。
-11. 在 `VM.setup()` 完成后，再次调用 `BootInitFlow.BindBootTaskEntry(CurrentTaskRef)` 并执行根栈 setup，分别将 `tp` 与 `sp` 重置为虚拟地址；抢占计数保持首次值。
-12. 执行 `片上系统.preset()`，完成片上系统平台相关的早期预置，并直接提交 `BootInitFlow.Prepared`。
+5. 把内核启动时的第一个参数作为BootCPU的hartid记录下来，以备后续使用。
+6. `OpenSBI.Enable` 同步驱动 `处理器管理.preset()`，原子创建 `CpuGroup.cpus[0]` 并驱动它进入 `Prepared`；只有该父子发布全部成功后才发送 `Kernel.Enable`。
+7. 由 `PhysicalDirect.ActivateOnCpu(BootCPURef)` 以 InitialActivation 从 absent 建立 CPU-local association，再调用 `BootInitFlow.BindBootTaskEntry(CurrentTaskRef)` 与根栈 setup，建立物理地址阶段的根任务指针与根栈指针；首次 action 只初始化一次 preempt count。
+8. 执行 `TrapType.preset()`，设置受控早期处理入口，使 `VM` 建立过程中误入的中断或异常能够进入受控停机路径。
+9. 执行 `虚拟内存空间.preset()`，依次推进 `TrampolineVM.setup()` 与 `EarlyVM.setup()`，初始化 `静态对象集合.trampoline_pg_dir` 与 `静态对象集合.early_pg_dir`，为入口前导期的两次页表切换准备条件。
+10. 执行 `虚拟内存空间.setup()`，依次调用 `TrampolineVM.ActivateOnCpu()` 与 `EarlyVM.ActivateOnCpu()`：先完成从物理地址空间到跳板映射的 Handoff，再 Handoff 到 early page table；其中 `内核映像.enable()` 重置 `gp-relative` 寻址方式。controller 仍保持共享 Ready。
+11. `VM.setup()` 完成后，执行 `TrapType.setup()`，设置正式公共处理入口，使 `RISCV64.stvec` 指向 `formal_event_entry`。
+12. 在 `VM.setup()` 完成后，再次调用 `BootInitFlow.BindBootTaskEntry(CurrentTaskRef)` 并执行根栈 setup，分别将 `tp` 与 `sp` 重置为虚拟地址；抢占计数保持首次值。
+13. 执行 `片上系统.preset()`，完成片上系统平台相关的早期预置，并直接提交 `BootInitFlow.Prepared`。
 
 当前时序图主要表达对象过程的编排顺序，不表达逐项源码对应关系。失败时进入 `FAIL` 状态的错误传播方式，以及每一步更细的依赖检查，后续继续补充。
 
@@ -1315,9 +1316,9 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
     编码阶段对 `StaticBranch` 的最低要求是：提供显式 static key registry，能按 key 名或稳定 ID 查询并更新 key 值；`StaticBranch.set(key, value)` 必须要求 `StaticBranch.state == Ready` 或 `Online`，并在重复设置同一值时保持幂等；早期实现可以先用布尔值或计数值承载 key 状态，不要求立即实现指令 patch，但接口边界要保留后续替换为架构 jump-label patch 的空间。`StaticBranch.enable()` 至少要记录 sealed keys 集合，并在启用后禁止修改已 sealed 的 `ro_after_init` key。当前配置固定 `CONFIG_JUMP_LABEL=y`，因此编码规格不要求实现 `CONFIG_JUMP_LABEL=n` 的退化路径。
 13. `打印缓冲区`（`PrintkBuffer`）：代表 printk 的中间日志缓冲机制。参考 Linux 在 `setup_arch()` 前打印 banner 的时机，`arceos_ex` 也应在早期输出路径中写入自身启动 banner；该输出首先进入 printk 的静态 ring buffer，而不是立即写到后端设备。启动 banner 不应依赖面向 Unikernel 应用的 `axstd::println!`，而应通过内核启动期内部的 `printk`/`println-like` 前端，或直接通过 `PrintkBuffer.write()` action 写入。因此本子阶段应把 `PrintkBuffer.preset()` 放在 `EarlyCon.setup()` 之前，并把启动 banner 输出建模为状态内 `action`。
 14. `早期控制台`（`EarlyCon`）：代表正式 console 建立前的临时输出后端。对于当前 RISC-V64 路径，`EarlyCon.preset/setup/enable` 由 `EarlyParam.setup()` 处理 `earlycon=sbi` 时连续触发；其中 `setup` 基于 SBI DBCN 或 SBI v0.1 console 能力事实建立 SBI 输出后端，`enable` 注册并启用早期控制台，同时把 `PrintkBuffer` 中已经存在的历史输出 replay/flush 到后端。`EarlyCon.handoff/cleanup` 应留给后续正式 `Console` 注册阶段，不属于本子阶段到 `paging_init()` 完成前的核心边界。
-15. `处理器管理`（`CPUGroup`）：`CPUGroup` 通过 `cpus[logical_id]` 唯一拥有统一 `CPU` Type 的全部实例。`BootCPU` 只是 `CpuGroup.cpus[0]` 的角色别名，不拥有状态槽。`OpenSBI.Enable` 驱动 `CpuGroup.preset()` 原子创建 CPU0 与父对象的 Prepared 状态；`Kernel.Enable` 接受后把 `ref(CpuGroup.cpus[0])` 绑定到 `BootInitFlow.cpu_ref`。入口后继期由 `BootInitFlow.Preset` 通过 `CurrentCPU` 推进同一实例到 Ready并记录入口 hartid，后续平台验证再使其 Online；核心准备期 `CpuGroup.setup()` 创建 AP 元素并建立完整拓扑。`CPUGroup` 不另存 `boot_cpu_hartid`，也不维护引用或 view 副本数组。
+15. `处理器管理`（`CPUGroup`）：`CPUGroup` 通过 `cpus[logical_id]` 唯一拥有统一 `CPU` Type 的全部实例。`BootCPU` 只是 `CpuGroup.cpus[0]` 的角色别名，不拥有状态槽。`OpenSBI.Enable` 驱动 `CpuGroup.preset()` 原子创建 CPU0 与父对象的 Prepared 状态；`Kernel.Enable` 接受后把 `ref(CpuGroup.cpus[0])` 绑定到 `BootInitFlow.cpu_ref`。入口前导期只保存第一个启动参数；后续 `smp_setup_processor_id()` 对应阶段再把它写为 BootCPU 的 `hartid`。核心准备期 `CpuGroup.setup()` 创建 AP 元素并建立完整拓扑。`CPUGroup` 不另存 CPU 本体或 view 副本数组。
 
-对 `BootCPU` 而言，Linux `boot_cpu_init()` 会把启动 CPU 同时标记到 `possible`、`present`、`active` 与 `online` 四类 CPU 位图中。规格层不必照搬四个位图实现，但应保留这些语义层次：入口前导期 `BootCPU.preset()` 只记录启动 CPU 的物理 `hartid`；入口后继期 `EarlyDtb.preset()` 建立并发布 `PlatformCpuInfo`，确认该 hartid 属于平台有效集合；随后 `BootCPU.setup()` 对应 present/active 边界，`BootCPU.enable()` 对应 online 边界。
+对 `BootCPU` 而言，Linux 在 `smp_setup_processor_id()` 中先把入口前导期保存的值写为 BootCPU 的物理 `hartid`，随后 `boot_cpu_init()` 把启动 CPU 同时标记到 `possible`、`present`、`active` 与 `online` 四类 CPU 位图中。规格层不必照搬四个位图实现，但应保留这些语义层次：入口前导期只保存启动参数，入口后继期再写入 BootCPU 的 `hartid`，并由 `EarlyDtb.preset()` 建立并发布 `PlatformCpuInfo`。随后 `BootCPU.setup()` 对应 present/active 边界，`BootCPU.enable()` 对应 online 边界。
 
 <p align="center">
   <img src="pic/入口后继期的各个对象.svg" alt="入口后继期对象分类与相互关系" width="900">
@@ -1377,7 +1378,7 @@ Kernel 通过 BootTask/BootInitFlow 串接
 1. 执行 `BootInitStack.enable()`，在入口前导期已经可用的根栈基础上建立栈溢出保护状态，使 `BootInitStack` 从 `Ready` 推进到 `Online`。
 2. 执行 `EarlyDtb.preset()`，从 `RawDtb` 中提取基础平台事实：解析 `/cpus` 建立并发布 `PlatformCpuInfo`，确认启动 hartid 合法；解析 `/memory` 建立并发布 `PhysicalMemory`。
 3. 执行 `InterruptType.setup()`，对应 Linux 中 `local_irq_disable()` 的防御式关中断动作，清除 `sstatus.SIE`，使 `InterruptType` 从 `Prepared` 推进到 `Ready`。
-4. 执行 `BootCPU.boot_cpu_init()`（规格中对应入口后继期的 `BootCPU.setup/enable`），基于 `PlatformCpuInfo` 已确认的启动 hartid，使 `BootCPU` 完成 present/active/online 的语义推进。
+4. 先在 `smp_setup_processor_id()` 对应边界把保存的启动 hartid 写入 BootCPU，再执行 `BootCPU.boot_cpu_init()`（规格中对应入口后继期的 `BootCPU.setup/enable`），使 `BootCPU` 完成 present/active/online 的语义推进。
 5. 执行 `PrintkBuffer.preset()`，建立 printk 静态缓冲机制；随后 `arceos_ex` 启动 banner 可通过启动期内部输出前端或直接通过 `PrintkBuffer.write()` 写入统一 ring buffer。该写入是 `action`，不推进 `PrintkBuffer` 的生命周期状态，也不依赖应用侧 `axstd::println!`。
 6. 执行 `EarlyDtb.setup() / parse_dtb()` 的后续解析用途，提取 kernel command line，解析 FDT header `/memreserve/` 与 `/reserved-memory` 形成 FDT reserved ranges，并触发 `MemBlock.preset()` 和 `CommandLine.preset()`，使 raw view `KernelCmdline` 进入 `Ready`，并形成候选可用物理内存区段和初步边界。
 7. 执行 `InitMM.setup() / setup_initial_init_mm()`，初始化 `BootTask` 的 `InitMM` 子对象，记录 `_stext`、`_etext`、`_edata` 与 `_end` 对应的代码段、数据段和 `brk` 边界；`InitMM.pgd` 仍指向 `swapper_pg_dir`，后续由 `VM.enable()` 使其对应的完整内核页表成为当前地址空间。

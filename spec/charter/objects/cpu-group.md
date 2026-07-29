@@ -20,13 +20,14 @@ candidate 中创建 child、推进所需 child/parent 状态并验证所有 inva
 父状态才一起进入稳定 snapshot。重复 key、错误 key 类型、非 owner 插入、越界、child transition
 失败或父 invariant 失败都拒绝整个 candidate，且不得留下元素、索引、引用或 identity occurrence。
 
-Preset 原子创建 `cpus[0]`、从 BootArgs 记录 hartid，并把 CPU0 与 CpuGroup 一起发布为 Prepared；
+Preset 原子创建 `cpus[0]`，并把 CPU0 与 CpuGroup 一起发布为 Prepared；
 OpenSBI 只有在观察这一 checkpoint 后才发送 Kernel.Enable。Setup 在 DeviceTree/SBI 与 boot CPU
 online 前置满足后创建其余 AP 元素并发布完整拓扑。已发布 key 不得被覆盖或重新编号。
 
 ## 派生视图与引用
 
-CpuGroup 允许按 logical ID 或 hartid 返回经验证的 CpuRef，并从 `cpus[]` 派生 possible、present、
+CpuGroup 允许按 logical ID 返回经验证的 CpuRef，并在 hartid 已赋值后允许按 hartid 反向查找；它从
+`cpus[]` 派生 possible、present、
 active、online 集合。缓存位图仅是派生加速；禁止 `cpu_refs[]`、`CpuView[]`、`SecondaryCpuStore` 或
 其它平行实例集合。CPU 状态变化后，任何集合查询必须观察同一 owned element。
 
@@ -42,9 +43,10 @@ handoff 窗口内 CurrentCPU 无法解析。
 3. Kernel 的 Enable handler 先完成 `Kernel.Action::AcceptEnable`。
 4. 同一 handler 把 `ref(CpuGroup.cpus[0])` 绑定到 `BootInitFlow.cpu_ref`。
 5. 同一 handler 以该 BootCPURef 为目标，原子提交 PhysicalDirect 的 InitialActivation。
-6. 前三项均成功后，Kernel 才同步驱动 `BootInitFlow.Preset`；Preset 通过 CurrentCPU 推进同一 CPU0
-   到 Ready并记录入口 hartid。
-7. 后继平台验证使 CPU0 Online；`CpuGroup.Setup` 再建立 AP 元素和完整拓扑。
+6. 前三项均成功后，Kernel 才同步驱动 `BootInitFlow.Preset`；Preset 保存入口第一个参数，并通过
+   CurrentCPU 推进同一 CPU0 到 Ready，但不在这一汇编阶段写入 CPU0 的 `hartid`。
+7. 后继 `smp_setup_processor_id()` 对应阶段把保存值写为 CPU0 的 `hartid`，再完成平台验证并使
+   CPU0 Online；`CpuGroup.Setup` 随后建立 AP 元素和完整拓扑。
 
 外部 OpenSBI 固件不需要实现内核对象；真实内核入口在接受 Kernel Enable 前采用并验证第 1-2 步的
 模型效果，并发布长期 checkpoint。

@@ -15,6 +15,9 @@
 - 内核入口应显式接收并保存启动 ABI 传入的 `a0` 和 `a1`；可变寄存器在模型中属于
   `BootCPU.BootCpuRegisters`，其寄存器文件由硬件天然提供而不是由工程或平台生命周期构造。
 - OpenSBI 交接时 `BootCpuRegisters.a0` 必须等于初态已存在的 `BootArgs.boot_hartid`。
+- 入口汇编必须把 `a0` 的入口值写入后续阶段仍可读的持久存储位置或变量。实现可先
+  把 `a0` 复制到未被后续入口代码改写的临时寄存器，再保存该副本。这一存储位置只是交接载体，
+  不要求汇编入口寻址或直接写入 `Cpu` 对象中的 `hartid`。
 - OpenSBI 交接时 `BootCpuRegisters.a1` 必须等于初态已存在的 `BootArgs.dtb_pa`。
 - OpenSBI 只确定上述两个交接寄存器；`sp/tp/gp` 和 supervisor CSR 继续由真实入口汇编按阶段更新。
 - BootCPU 的 FS/VS 执行状态及其内核态受控使用策略归 CPU 规格所有；入口 lowering 见
