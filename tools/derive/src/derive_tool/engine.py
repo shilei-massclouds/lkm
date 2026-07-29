@@ -2559,6 +2559,9 @@ class _Deriver:
             object_name=runtime_id,
             transition_name=transition_name,
             state_name=target_state,
+            expression=_process_call_expression(
+                f"{runtime_id}.Transition::{transition_name}", args
+            ),
             source_kind="runtime_transition",
             proof_class="runtime_lifecycle_commit",
             proof_provider=(lifecycle_type.name if lifecycle_type is not None else "derive"),
