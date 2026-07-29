@@ -1,53 +1,49 @@
 # 规格目录
 
-规格文件用于描述内核本身的约束和内核构造过程的约束。
+本目录同时描述内核的核心语义、内核从规格到实现的细化过程，以及支撑这一过程的工作流、装配和验证约束。
 
-# 规格类型
+## 核心语义细化链
 
-按照类型分为两类：
+项目只有一条核心语义细化链：
 
-- `*.md` 是说明性规格，采用自然语言和图示，解释对系统的理解和认识、设计意图和目标、构造思路和策略权衡等等。这类规格首先是站在人类视角建立的，优先保证人类易于理解；同时它们也是人类与AI协同工作的起点，类似于人类对AI提出的原始需求。
-- `*.spec` 是 model、guidance、compose 和 testing 等需要机器检查层的正式规格，采用规格语言定义。
-  coding 是明确例外：它负责把 model 映射到具体 impl，以自然语言 `.md` 为权威来源，不再
-  维护并行的 coding formal 语义。
-
-# 规格构成
-
-说明性规格：
-
-- 本文档是规格的概要说明。
-
-- `charter/main.md`：从人类角度定义的总规格入口，约束所有的正式规格定义。后续专题说明文档继续放在 `charter/` 下。
-- `charter/` 下长期按 `systems/`、`phases/`、`objects/` 和独立专题目录组织说明；
-  `main.md`、`new_charter.md` 和 `pic/` 作为 charter 层公共入口与资产保留。
-
-正式规格：
-
-- `main.spec`：正式规格的顶层索引。而每个包含正式规格的目录都以 `main.spec` 作为本目录的规格索引。
-
-- `model/`：对象、状态、事件、依赖和阶段顺序的正式模型入口。
-- `guidance/`：约束 AI/代码生成器使用规格时的上层行为入口。
-- `coding/`：从模型映射到对象级代码实现的自然语言编码规则入口。
-- `compose/`：对象级实现进入组件封装阶段时的正式约束入口。
-- `testing/`：从模型和编码规格生成、指导或审查测试用例的正式约束入口。
-
-`charter/`、`model/` 和 `coding/` 以 `systems/`、`phases/`、`objects/` 为最低公共层次；各目录仍可保留
-`pic/`、正式入口文件、通用说明或其它职责明确的专题目录。Computer 是唯一顶层系统，不再另设工程对象层。
-
-各个规格层之间自上向下排列，上级约束下级，下级是对上级的明确、细化或后续：
-
-![规格层次约束](charter/pic/spec-level.svg)
-
-# 变更工作流与权威层级
-
-最终权威层级始终是：
-
-```text
-charter -> model -> coding -> applicable compose -> impl -> testing/tests
+```mermaid
+flowchart LR
+    Charter["Charter<br/>人类可理解的设计意图"] --> Model["Model<br/>形式化与精确化"]
+    Model --> Coding["Coding<br/>Model 到代码的映射"]
+    Coding --> Impl["Impl<br/>实现共同要求的效果"]
 ```
 
-工作流只规定当轮修改和确认的顺序，不改变这一权威关系。未明确指定时使用默认
-`charter-first`，从 charter 确定设计意图后沿上述层级向下闭合。只有用户明确声明本轮
-`model-first` 并提供 model 调整方案时，才允许先进行 model-only 调整和确认；确认后必须先向上
-闭合 charter，再沿 coding、适用的 compose、impl、testing/tests 向下闭合。完整门禁见
-[`guidance/README.md`](guidance/README.md) 和 [`guidance/generation.spec`](guidance/generation.spec)。
+- `charter/`：以符合人类直觉的自然语言定义设计意图、目标、概念和长期边界，是最高语义权威。
+- `model/`：以偏形式化语言精确化 Charter，定义对象、状态、事件、依赖和证明边界；只能细化 Charter，不得改变其含义。
+- `coding/`：约束 Model 到代码的映射，可以具体到数据结构、算法、函数和模块内落点、内存布局、寄存器及架构/语言安全边界；不得覆盖 Charter 或 Model。
+- `impl/`：实现 Charter、Model 和 Coding 共同要求的效果，不具有根据现有代码反向解释规格的权力。
+
+每个下层都必须满足所有适用上层约束。只有全部适用上层都未约束的细节，下层才可局部自由选择；若这种选择形成新的可观察行为、接口或对象边界，必须先提升到适当的核心规格层明确，再沿核心链向下闭合。
+
+## 支撑职责
+
+以下目录支撑核心链，但不进入核心语义权威链：
+
+- `guidance/`：约束 AI、代码生成器和变更过程如何读取、修改、审查和验证各层，是工作流约束，不定义内核语义。
+- `compose/`：在适用时约束对象级代码如何装配、封装和发布，位于 Coding 到 Impl 的装配路径；它不得改变 Coding 已确定的映射或更高层语义。Compose 与 Coding 冲突时以 Coding 为准。
+- `testing/`：约束如何从核心规格选择验证目标、构造场景和执行测试，是验证旁支。测试与核心规格冲突时，应修正测试或不符合规格的实现，不得修改高层规格来迎合现有测试结果。
+
+Guidance、Compose 和 Testing 可以约束各自负责的流程、装配或验收产物，但都不能用这些局部约束反向定义 Charter、Model、Coding 或 Impl 应有的核心语义。
+
+## 文件与目录入口
+
+- `*.md` 是自然语言说明性规格。Charter 首先保证人类可理解；Coding 也以自然语言 `.md` 为唯一权威来源。
+- `*.spec` 是需要机器解析和检查的正式规格，供 Model、Guidance、Compose 和 Testing 使用。形式化表达不改变上述语义权威关系。
+- `main.spec` 是正式规格的顶层索引；每个包含正式规格的目录也以 `main.spec` 作为本目录入口。
+- `charter/main.md` 是总 Charter 入口；专题说明继续放在 `charter/` 下。
+- `charter/`、`model/` 和 `coding/` 以 `systems/`、`phases/`、`objects/` 为最低公共层次；各目录仍可保留 `pic/`、正式入口文件、通用说明或其它职责明确的专题目录。Computer 是唯一顶层系统，不再另设工程对象层。
+
+旧的 Excalidraw/SVG 层级图资产继续保留用于历史参考，但本页 Mermaid 图和文字定义是当前顶层层级说明。
+
+## 变更工作流
+
+默认使用 `charter-first`：先在 Charter 确定设计意图，再按 `Charter -> Model -> Coding -> Impl` 审查和闭合核心语义。每轮先确定最高受影响核心层，并对 Charter、Model、Coding、Impl 依次留下“已修改”或“已审查、无需修改”的结论；适用的 Compose 装配约束和 Testing 验收约束作为旁支一并审查。
+
+计划、roadmap、现有实现、Compose 或测试不得反向覆盖较高核心层。若 Charter 含义不清或目标与 Charter 冲突，应停止并回到 Charter 决策；Charter 锁仍须获得对具体文件的显式解锁授权。
+
+只有用户明确声明本轮 `model-first` 并提供 Model 调整方案时，才允许先执行 Model-only 调整和确认。该例外只改变当轮修改与确认顺序，不改变 Charter 的最终最高语义权威；确认后仍须先向上闭合 Charter，再使 Model 符合 Charter，并继续闭合 Coding、Impl 及适用旁支。完整门禁见 [`guidance/README.md`](guidance/README.md) 和 [`guidance/generation.spec`](guidance/generation.spec)。

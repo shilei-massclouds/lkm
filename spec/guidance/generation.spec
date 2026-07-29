@@ -2,8 +2,9 @@
  * AI/code-generator behavior specification.
  *
  * These predicates constrain AI/code-generation behavior before, during and
- * after generating artifacts from specifications. They are intentionally
- * above model, coding, compose and testing semantics.
+ * after generating artifacts from specifications. Guidance governs the
+ * workflow around the core semantic refinement chain; it is not itself a
+ * higher semantic authority than charter, model, coding or implementation.
  */
 
 predicate guidance_agent_must_read_generation_principles_before_implementation() -> bool;
@@ -17,9 +18,22 @@ predicate guidance_agent_must_run_make_test_after_code_change() -> bool;
 predicate guidance_agent_must_keep_temporary_layer_inconsistency_uncommitted() -> bool;
 predicate guidance_agent_must_review_each_applicable_layer_and_change_only_affected_layers() -> bool;
 predicate guidance_agent_must_require_explicit_commit_authorization() -> bool;
+predicate guidance_agent_must_treat_charter_as_human_readable_top_semantic_authority() -> bool;
+predicate guidance_agent_must_make_model_only_formalize_and_refine_charter() -> bool;
+predicate guidance_agent_must_make_coding_only_constrain_model_to_code_mapping() -> bool;
+predicate guidance_agent_must_make_impl_only_realize_charter_model_coding_effect() -> bool;
+predicate guidance_lower_core_layer_must_preserve_all_applicable_higher_constraints() -> bool;
+predicate guidance_lower_core_layer_may_choose_only_when_all_higher_layers_are_unconstrained() -> bool;
+predicate guidance_agent_must_promote_new_observable_contract_to_appropriate_core_specification() -> bool;
+predicate guidance_agent_must_treat_guidance_compose_testing_as_supporting_responsibilities() -> bool;
+predicate guidance_supporting_responsibilities_must_not_override_core_semantics() -> bool;
 predicate guidance_agent_must_default_to_charter_first() -> bool;
 predicate guidance_agent_must_follow_charter_first_layer_order() -> bool;
 predicate guidance_agent_must_resolve_conflicts_by_charter_first_authority() -> bool;
+predicate guidance_agent_must_identify_highest_affected_core_layer_before_changes() -> bool;
+predicate guidance_agent_must_record_each_core_layer_closure_outcome() -> bool;
+predicate guidance_agent_must_not_use_implementation_tests_roadmap_or_compose_to_override_higher_core_layers() -> bool;
+predicate guidance_agent_must_stop_for_charter_decision_when_intent_is_unclear_or_conflicting() -> bool;
 predicate guidance_agent_must_require_explicit_user_trigger_for_model_first() -> bool;
 predicate guidance_agent_must_use_user_provided_model_first_adjustment() -> bool;
 predicate guidance_agent_must_record_and_verify_model_first_baseline() -> bool;
@@ -30,6 +44,7 @@ predicate guidance_agent_must_close_model_first_charter_upward_before_downward_l
 predicate guidance_agent_must_preserve_confirmed_model_meaning_during_charter_closure() -> bool;
 predicate guidance_agent_must_return_unclosable_charter_to_model_decision() -> bool;
 predicate guidance_agent_must_finish_model_first_validation() -> bool;
+predicate guidance_agent_must_keep_charter_as_final_semantic_authority_in_model_first() -> bool;
 predicate guidance_agent_must_treat_charter_lock_as_higher_priority_than_change_order() -> bool;
 predicate guidance_agent_must_not_treat_change_request_as_implicit_unlock_authorization() -> bool;
 predicate guidance_agent_must_only_suggest_changes_to_locked_charter() -> bool;
@@ -61,8 +76,9 @@ type GenerationAgentWorkflow {
          * Step 1: read principles and concrete requirements.
          *
          * Before generating or modifying an artifact, the AI/code generator
-         * must read the applicable generation principles and the concrete
-         * model/coding/compose/testing requirements for the requested target.
+         * must read the applicable generation principles, the concrete core
+         * Charter/Model/Coding requirements, and any applicable supporting
+         * Compose/Testing requirements for the requested target.
          */
         guidance_agent_must_read_generation_principles_before_implementation();
         guidance_agent_must_read_concrete_spec_requirements_before_implementation();
@@ -88,6 +104,46 @@ type GenerationAgentWorkflow {
     }
 }
 
+type CoreSemanticRefinementAuthority {
+    invariant {
+        /*
+         * The only core semantic refinement chain is Charter -> Model ->
+         * Coding -> Impl. Charter states design intent in human-readable
+         * language and remains the top semantic authority. Model may make
+         * that intent precise and checkable, but must not change its meaning.
+         * Coding may constrain the mapping to data structures, algorithms,
+         * memory layout, registers and other code-level choices, but must not
+         * redefine Charter or Model. Impl only realizes their combined effect
+         * and cannot be used to reinterpret them from current code behavior.
+         */
+        guidance_agent_must_treat_charter_as_human_readable_top_semantic_authority();
+        guidance_agent_must_make_model_only_formalize_and_refine_charter();
+        guidance_agent_must_make_coding_only_constrain_model_to_code_mapping();
+        guidance_agent_must_make_impl_only_realize_charter_model_coding_effect();
+
+        /*
+         * Every lower core layer preserves all applicable higher constraints,
+         * not merely the adjacent layer. A lower layer may choose a detail
+         * only when every applicable higher layer leaves it unconstrained. If
+         * that choice creates observable behavior, an interface or a specified
+         * object boundary, the contract must first be promoted to the
+         * appropriate core specification layer and closed downward again.
+         */
+        guidance_lower_core_layer_must_preserve_all_applicable_higher_constraints();
+        guidance_lower_core_layer_may_choose_only_when_all_higher_layers_are_unconstrained();
+        guidance_agent_must_promote_new_observable_contract_to_appropriate_core_specification();
+
+        /*
+         * Guidance governs workflow, Compose governs applicable assembly, and
+         * Testing governs validation. These are supporting responsibilities,
+         * not members of the core semantic authority chain, and none may
+         * override Charter, Model, Coding or the conforming effect of Impl.
+         */
+        guidance_agent_must_treat_guidance_compose_testing_as_supporting_responsibilities();
+        guidance_supporting_responsibilities_must_not_override_core_semantics();
+    }
+}
+
 type RepositoryChangeWorkflow {
     invariant {
         /*
@@ -101,7 +157,7 @@ type RepositoryChangeWorkflow {
         /*
          * Behavior, interface, object-boundary and Linux differential
          * semantics changes must follow one of the named change workflows.
-         * Applicable specifications must be updated before implementation.
+         * Applicable core specifications must be updated before implementation.
          */
         guidance_agent_must_update_spec_before_behavior_implementation();
 
@@ -114,9 +170,11 @@ type RepositoryChangeWorkflow {
 
         /*
          * Cross-layer closure is reviewable and uncommitted until complete.
-         * Every applicable layer must be reviewed, but a layer changes only
-         * when its semantics, mapping, composition or acceptance contract is
-         * affected. A commit always requires explicit user authorization.
+         * Each core layer must have an explicit closure outcome, and every
+         * applicable supporting responsibility must be reviewed. A layer or
+         * branch changes only when its semantics, mapping, composition or
+         * acceptance contract is affected. A commit always requires explicit
+         * user authorization.
          */
         guidance_agent_must_keep_temporary_layer_inconsistency_uncommitted();
         guidance_agent_must_review_each_applicable_layer_and_change_only_affected_layers();
@@ -196,19 +254,33 @@ type CharterFirstChangeWorkflow {
     invariant {
         /*
          * Charter-first is the default change workflow. The user or charter
-         * establishes design intent, then affected layers close top-down in
-         * this order: charter, model, coding, applicable compose,
-         * implementation, then testing/tests.
+         * establishes design intent, then the core semantic layers close
+         * top-down in this order: Charter, Model, Coding, Impl. Applicable
+         * Compose assembly and Testing validation are reviewed as supporting
+         * responsibilities rather than inserted into that authority chain.
          */
         guidance_agent_must_default_to_charter_first();
         guidance_agent_must_follow_charter_first_layer_order();
 
         /*
-         * Cross-layer conflicts are resolved by the same authority order.
-         * Plans, roadmaps, existing implementation and tests do not override
-         * an applicable higher layer.
+         * Before changes, identify the highest affected core layer. Record a
+         * changed or reviewed-and-unchanged closure outcome for Charter,
+         * Model, Coding and Impl in that order, without requiring a new fixed
+         * declaration artifact.
+         */
+        guidance_agent_must_identify_highest_affected_core_layer_before_changes();
+        guidance_agent_must_record_each_core_layer_closure_outcome();
+
+        /*
+         * Cross-layer conflicts are resolved by the same core authority order.
+         * Existing implementation, tests, roadmaps and Compose do not override
+         * an applicable higher core layer. If Charter intent is unclear or the
+         * target conflicts with it, stop downward closure and return to a
+         * Charter decision.
          */
         guidance_agent_must_resolve_conflicts_by_charter_first_authority();
+        guidance_agent_must_not_use_implementation_tests_roadmap_or_compose_to_override_higher_core_layers();
+        guidance_agent_must_stop_for_charter_decision_when_intent_is_unclear_or_conflicting();
     }
 }
 
@@ -262,10 +334,13 @@ type ModelFirstChangeWorkflow {
         /*
          * Model-first is selected only when the user explicitly declares the
          * round model-first and supplies the proposed model adjustment. The
-         * agent must not choose the scope or behavior slice itself.
+         * agent must not choose the scope or behavior slice itself. This is an
+         * exception to modification order only; Charter remains the final top
+         * semantic authority.
          */
         guidance_agent_must_require_explicit_user_trigger_for_model_first();
         guidance_agent_must_use_user_provided_model_first_adjustment();
+        guidance_agent_must_keep_charter_as_final_semantic_authority_in_model_first();
 
         /*
          * Before editing, record the baseline commit, worktree state, relevant
@@ -284,9 +359,10 @@ type ModelFirstChangeWorkflow {
         guidance_agent_must_wait_for_explicit_model_first_confirmation();
 
         /*
-         * After confirmation, close charter upward without changing the
-         * confirmed model meaning, then close coding, applicable compose,
-         * implementation and testing/tests downward in authority order.
+         * After confirmation, close Charter upward without changing the
+         * confirmed Model meaning, ensure Model conforms to Charter, then close
+         * Coding and Impl downward. Applicable Compose and Testing are reviewed
+         * as supporting responsibilities rather than semantic authorities.
          */
         guidance_agent_must_close_model_first_charter_upward_before_downward_layers();
         guidance_agent_must_preserve_confirmed_model_meaning_during_charter_closure();

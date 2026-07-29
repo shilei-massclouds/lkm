@@ -1,8 +1,8 @@
 # Guidance 规格
 
-本目录记录约束 AI 或其它代码生成器行为的上层指导规格。
+本目录记录约束 AI 或其它代码生成器行为的工作流规格。
 
-这些规则不重新定义 model、coding、compose 或 testing 语义，而是规定生成器在使用这些规格时必须遵守的工作流。例如生成测试用例时，应先阅读原则和具体规格要求，再实现，最后检查结果是否符合原则和要求。
+Guidance 是支撑 `Charter -> Model -> Coding -> Impl` 核心语义细化链的旁支职责，不是位于核心层之上的语义权威。这些规则不重新定义 Charter、Model、Coding、Impl、Compose 或 Testing 的语义，而是规定生成器在使用它们时必须遵守的工作流。例如生成测试用例时，应先阅读原则和具体规格要求，再实现，最后检查结果是否符合原则和要求。
 
 正式规格入口是 [`main.spec`](main.spec)。
 
@@ -11,32 +11,37 @@
 所有 AI 或代码生成器参与的仓库变更必须遵守以下共同硬约束：
 
 - 不要猜测修复。遇到问题时，必须先通过可复现观测逐步缩小范围，再下结论和改代码。
-- 规格先于实现。功能、接口、已承诺对象边界或 Linux 差分语义变更，必须先按下述某个具名工作流闭合适用规格，再改实现；代理不得自行选择实现切片并从 `impl` 开始。
+- 核心语义只有 `Charter -> Model -> Coding -> Impl` 一条细化链。Charter 是人类可理解的最高语义权威；Model 只能形式化和精确化 Charter；Coding 只能约束 Model 到数据结构、算法、内存布局、寄存器等代码落点的映射；Impl 只能实现前三层共同要求的效果。
+- 下层必须保留所有适用上层约束。只有全部适用上层均未约束的细节，下层才可局部自由选择；若自由选择形成新的可观察行为、接口或对象边界，必须提升到适当的核心规格层闭合。
+- 每轮开始修改前，先确定最高受影响核心层；随后按 Charter、Model、Coding、Impl 顺序审查，并分别记录“已修改”或“已审查、无需修改”的闭合结论。结论可记录在当轮计划、差异说明或交付说明中，不要求新增固定格式的声明文件。
+- Guidance 只约束工作流，Compose 只约束适用的装配路径，Testing 只约束验证。三者都不得反向定义核心语义；Compose 与 Coding 冲突时以 Coding 为准，测试与核心规格冲突时修正测试或不符合规格的实现。
+- 规格先于实现。功能、接口、已承诺对象边界或 Linux 差分语义变更，必须先按下述某个具名工作流闭合适用核心规格，再改实现；代理不得自行选择实现切片并从 `impl` 开始。
+- 计划、roadmap、现有实现、测试和 Compose 都不能反向覆盖较高核心层。若 Charter 含义不清或目标与 Charter 冲突，停止向下闭合并回到 Charter 决策。
 - 每次修改代码后，最终回归必须在仓库根目录运行 `make test`。Focused test 只能用于中间定位，不能替代最终回归。
-- 临时的跨层不一致只能存在于未提交工作区。每个适用层都必须审查，但只修改语义、映射、组合或验收责任实际受影响的层；提交始终需要用户明确授权。
+- 临时的跨层不一致只能存在于未提交工作区。核心四层必须逐层记录闭合结论，适用的 Compose 和 Testing 旁支也必须审查；只修改责任实际受影响的层，提交始终需要用户明确授权。
 
 ### `charter-first`
 
-`charter-first` 是默认工作流。用户或 charter 先确定设计意图，然后按以下权威顺序闭合：
+`charter-first` 是默认工作流。用户或 Charter 先确定设计意图，然后按唯一核心语义细化顺序闭合：
 
 ```text
-charter -> model -> coding -> applicable compose -> impl -> testing/tests
+Charter -> Model -> Coding -> Impl
 ```
 
-层间冲突默认按这一顺序处理。计划、roadmap、现有实现或测试结果都不能反向覆盖更高层权威。
+适用的 Compose 在 Coding 到 Impl 的装配路径中审查，Testing 在核心规格和实现确定后负责验证；它们是旁支，不加入上述权威链。层间冲突按核心链顺序处理。Charter 不足以确定含义时不得从现有代码、测试、roadmap 或 Compose 猜测意图，必须回到 Charter 决策；锁定 Charter 仍须按下文获得对具体文件的显式解锁授权。
 
 ### `model-first`
 
-`model-first` 是用户显式触发的当轮修改顺序，不是代理可以自行选择的快捷方式，也不改变最终权威层级。每轮必须遵守：
+`model-first` 是用户显式触发的当轮修改顺序，不是代理可以自行选择的快捷方式。它只改变修改与确认顺序，不改变 Charter 的最终最高语义权威。每轮必须遵守：
 
 1. 用户明确声明本轮使用 `model-first`，并提供要评审的 model 调整方案；代理不得自行选择范围或行为切片。
 2. 修改前记录基线提交、工作区状态、相关行为和测试，并在仓库根目录直接运行 `make test`，确认基线通过。
-3. 第一阶段只修改 model，运行适用的专项校验，然后向用户展示实际 diff 和校验结果。此阶段不得修改 charter、coding、compose、impl 或 testing/tests。
-4. 等待用户明确确认 model 调整；确认前不得进入其它层。
-5. 确认后，先在不改变已确认 model 含义的前提下向上闭合 charter，再按 coding、适用的 compose、impl、testing/tests 顺序向下闭合。
-6. 如果 charter 无法在不改变已确认 model 含义的情况下闭合，必须停止并回到 model 决策阶段，不得静默改写 model 或 charter 意图。
-7. 每层都必须审查，但只修改实际受影响的层。临时不一致只能存在于未提交工作区，不得形成中间提交或跨轮遗留。
-8. 轮末运行全部适用的专项校验、focused tests、`git diff --check` 和仓库根目录直接 `make test`。全部层级闭合并验证通过后轮次才完成；提交仍需明确授权。
+3. 第一阶段只修改 Model，运行适用的专项校验，然后向用户展示实际 diff 和校验结果。此阶段不得修改 Charter、Coding、Compose、Impl 或 Testing/tests。
+4. 等待用户明确确认 Model 调整；确认前不得进入其它层。
+5. 确认后，先在不改变已确认 Model 含义的前提下向上闭合 Charter，并确认 Charter 仍是最终语义权威；再使 Model 与 Charter 一致，按 Coding、Impl 顺序向下闭合，并审查适用的 Compose 和 Testing 旁支。
+6. 如果 Charter 无法在不改变已确认 Model 含义的情况下闭合，或确认后的 Model 与 Charter 冲突，必须停止并回到 Model 决策阶段，不得静默改写 Model 或 Charter 意图。
+7. 对 Charter、Model、Coding、Impl 分别记录闭合结论，适用旁支也须审查；只修改实际受影响的层。临时不一致只能存在于未提交工作区，不得形成中间提交或跨轮遗留。
+8. 轮末运行全部适用的专项校验、focused tests、`git diff --check` 和仓库根目录直接 `make test`。核心层和适用旁支全部闭合并验证通过后轮次才完成；提交仍需明确授权。
 
 ## Charter AI 保护锁
 
