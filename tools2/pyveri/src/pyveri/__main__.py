@@ -12,10 +12,12 @@ from typing import Iterator
 
 def _bootstrap() -> None:
     root = Path(__file__).resolve().parents[3]
-    for name in ("common", "parse", "model", "derive", "check", "view", "render", "animate"):
-        source = str(root / name / "src")
-        if source not in sys.path:
-            sys.path.insert(0, source)
+    sources = sorted(
+        package / "src"
+        for package in root.iterdir()
+        if (package / "pyproject.toml").is_file() and (package / "src").is_dir()
+    )
+    sys.path[:0] = [str(source) for source in sources if str(source) not in sys.path]
 
 
 _bootstrap()

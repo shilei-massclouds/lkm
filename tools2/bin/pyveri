@@ -16,20 +16,12 @@ SCENARIOS_ROOT = TOOLS2_ROOT / "scenarios"
 
 
 def _bootstrap() -> None:
-    for name in (
-        "common",
-        "parse",
-        "model",
-        "derive",
-        "check",
-        "view",
-        "render",
-        "animate",
-        "pyveri",
-    ):
-        source = str(TOOLS2_ROOT / name / "src")
-        if source not in sys.path:
-            sys.path.insert(0, source)
+    sources = sorted(
+        package / "src"
+        for package in TOOLS2_ROOT.iterdir()
+        if (package / "pyproject.toml").is_file() and (package / "src").is_dir()
+    )
+    sys.path[:0] = [str(source) for source in sources if str(source) not in sys.path]
 
 
 def _parser(normalize_signal_request) -> argparse.ArgumentParser:

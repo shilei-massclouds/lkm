@@ -27,7 +27,10 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
 ## tools2 Signal 工具链测试
 
 `tools2` 本轮以完整 `spec/model/main.spec` 和既有最小 fixture 共同验收。独立入口是
-`make -C tools2 test`，不得加入根目录默认 `make test`。测试必须覆盖：
+`make -C tools2 test`，不得加入根目录默认 `make test`。Python 全量和 focused 调用必须通过
+`tools2/bin/test-python` 或由它支撑的 Make target；仓库根的 dotted unittest 调用也必须由
+`tools2.tests` 自动装载所有并列源码包。上述入口不得要求调用者组装 `PYTHONPATH`，并必须有
+清除外部 `PYTHONPATH` 后仍能导入 `pyveri` 及全部阶段包的回归测试。测试必须覆盖：
 
 - 每类 schema/version/producer 校验，含 version 6、拒绝 tools2 v1/v2/v3/v4/v5、老工具/旧 snapshot 和老工具不被
   tools2 产物误用的边界；
@@ -200,7 +203,9 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
   退出码 0/1 保留，以及与 text `-o`、stdout、scenario、snapshot-out 和 work-dir 的组合。编译 bundle
   rebuild 后必须通过 stale check，固定 fixture 生成 `tools2/out/pipeline-animation.html`。
 
-focused test 可用于开发，但最终必须依次运行 parser/model/Kernel focused、`make -C tools2 test`、老
+focused test 可用于开发；标准命令为
+`make -C tools2 test-focused TEST=tools2.tests.<module>.<Class>.<method>`，不得在命令行重述包源码路径。
+最终必须依次运行 parser/model/Kernel focused、`make -C tools2 test`、老
 model/view/render、静态 trace/SVG 重新生成与布局评审、`git diff --check`，再从仓库根目录以不包装、
 不重定向的直接 `make test` 完成回归门禁。
 

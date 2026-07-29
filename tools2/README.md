@@ -7,12 +7,18 @@ Independent first-stage Signal derivation toolchain. It intentionally does not i
 
 ```bash
 make -C tools2 test
+make -C tools2 test-focused TEST=tools2.tests.test_signal_pipeline.SignalPipelineTests.test_drives_and_emits_order
+tools2/bin/test-python tools2.tests.test_signal_animation.SignalAnimationTests.test_animation_projects_optional_model_handler_description -v
 tools2/bin/pyveri
 tools2/bin/pyveri -u Kernel.Enable --snapshot-out /tmp/kernel-enable-presend.snapshot.json
 tools2/bin/pyveri -u Kernel.Enable --html-out tools2/out/main-animation.html
 tools2/bin/pyveri -t Kernel.Enable -u BootInitFlow.Setup --html-out tools2/out/group2-animation.html
 VERBOSE=1 tools2/bin/pyveri -f tools2/tests/fixtures/pipeline.spec -t Root.Start
 ```
+
+The Python test entry discovers every `tools2/<package>/src` next to a `pyproject.toml`; neither full nor focused
+tests require a handwritten `PYTHONPATH`. The dotted unittest form also works directly from the repository root
+because importing `tools2.tests` performs the same discovery.
 
 The default spec is `spec/model/main.spec`. Select another spec with `-f SPEC`, apply a scenario with
 `-s SCENARIO`, and use `--work-dir tools2/build` to retain stage JSON. The shortcut uses unbounded depth and

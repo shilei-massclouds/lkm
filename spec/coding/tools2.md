@@ -7,8 +7,11 @@
 
 源码固定分为 `common`、`parse`、`model`、`derive`、`check`、`view`、`render`、`animate` 和 `pyveri` 九个
 并列包，各包保留自己的 `pyproject.toml`。阶段入口沿用 `lkm-parse`、`lkm-model`、`lkm-derive`、
-`lkm-check`、`lkm-view`、`lkm-render`，新增 `lkm-animate`，driver 仍为 `pyveri`；源码运行使用只包含 `tools2/*/src` 的独立
-`PYTHONPATH`。任何 tools2 Python 文件不得 import `tools/`、老 `common` 或老 `pyveri`。
+`lkm-check`、`lkm-view`、`lkm-render`，新增 `lkm-animate`，driver 仍为 `pyveri`；源码运行时只可把存在
+`pyproject.toml` 的 `tools2/<package>/src` 加入独立源码路径。产品便利入口和测试入口必须从
+`tools2/` 即时发现这些包，调用者不得手写或复制包名列表与 `PYTHONPATH`；新增并列包后，
+focused 与全量测试必须自动使用它。任何 tools2 Python 文件不得 import `tools/`、老 `common` 或
+老 `pyveri`。
 
 `common` 只承载 schema 常量、JSON I/O、source span/diagnostic、稳定 canonical JSON/fingerprint 和
 跨阶段值校验。parse 不依赖后续阶段；model 只依赖 common 和 ast.json；derive 只依赖 common 和
@@ -18,6 +21,11 @@ view.json。driver 通过各阶段公开 Python
 
 目录中的 `build/` 是可清理的保留中间产物目录，`out/` 是用户显式选择的长期输出目录；测试不得
 依赖二者的预存内容。
+
+Python 测试统一由 `tools2/bin/test-python` 装载。无参数时它从仓库顶层发现并执行
+`tools2.tests`；给出 unittest dotted target 时只执行该 focused target。它必须从脚本自身位置解析
+仓库根，不依赖调用者当前目录或外部 `PYTHONPATH`。`tools2.tests` 包自身也必须执行同一类
+动态发现，使仓库根的 `python3 -m unittest tools2.tests...` focused 命令不需要路径前缀。
 
 ## 完整主模型输入与诊断
 

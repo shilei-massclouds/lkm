@@ -1,17 +1,17 @@
 PYTHON ?= python3
 NPM ?= npm
-PYTHONPATH := common/src:parse/src:model/src:derive/src:check/src:view/src:render/src:animate/src:pyveri/src
 FRONTEND := animate/frontend
+DEFAULT_FOCUSED_TEST := tools2.tests.test_signal_pipeline.SignalPipelineTests.test_drives_and_emits_order
 
 .PHONY: test test-python test-focused test-frontend test-browser test-all frontend-build bundle-check
 
 test: test-python
 
 test-python:
-	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m unittest discover -s tests -v
+	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) bin/test-python
 
 test-focused:
-	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m unittest tests.test_signal_pipeline.SignalPipelineTests.test_drives_and_emits_order -v
+	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) bin/test-python $(if $(TEST),$(TEST),$(DEFAULT_FOCUSED_TEST)) -v
 
 test-frontend:
 	$(NPM) --prefix $(FRONTEND) run check
