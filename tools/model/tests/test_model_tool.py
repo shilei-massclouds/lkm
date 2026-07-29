@@ -987,7 +987,7 @@ class ModelToolTests(unittest.TestCase):
                 [
                     "Kernel.Action::AcceptEnable",
                     "BootInitFlow.Action::AssignCpuRef(BootCPURef)",
-                    "PhysicalDirect.Action::TakeOver(BootCPURef)",
+                    "PhysicalDirect.Action::ActivateOnCpu(BootCPURef)",
                     "BootInitFlow.Transition::Preset",
                     "BootInitFlow.Transition::Setup",
                     "BootInitFlow.Transition::Enable",

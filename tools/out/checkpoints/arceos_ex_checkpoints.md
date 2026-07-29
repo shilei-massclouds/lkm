@@ -24,14 +24,14 @@
 | 19 | TrapTypePrepared | TrapType.Prepared | V | impl/arceos_ex/src/checkpoint/mod.rs |
 | 20 | ExceptionTypePrepared | ExceptionType.Prepared | 9 | impl/arceos_ex/src/checkpoint/mod.rs |
 | 21 | TrampolineVmReady | TrampolineVm.Ready | Q | impl/arceos_ex/src/checkpoint/mod.rs |
-| 22 | PhysicalDirectTakeOver | PhysicalDirect.TakeOver | null | impl/arceos_ex/src/checkpoint/mod.rs |
-| 23 | TrampolineVmTakeOver | TrampolineVm.TakeOver | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 22 | PhysicalDirectActivatedOnCpu | PhysicalDirect.ActivatedOnCpu | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 23 | TrampolineVmActivatedOnCpu | TrampolineVm.ActivatedOnCpu | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 24 | RawDtbPrepared | RawDtb.Prepared | Y | impl/arceos_ex/src/checkpoint/mod.rs |
 | 25 | RawDtbReady | RawDtb.Ready | W | impl/arceos_ex/src/checkpoint/mod.rs |
 | 26 | FixMapReady | FixMap.Ready | M | impl/arceos_ex/src/checkpoint/mod.rs |
 | 27 | EarlyVmPrepared | EarlyVm.Prepared | N | impl/arceos_ex/src/checkpoint/mod.rs |
 | 28 | EarlyVmReady | EarlyVm.Ready | J | impl/arceos_ex/src/checkpoint/mod.rs |
-| 29 | EarlyVmTakeOver | EarlyVm.TakeOver | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 29 | EarlyVmActivatedOnCpu | EarlyVm.ActivatedOnCpu | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 30 | KernelAddrSpacePrepared | KernelAddrSpace.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 31 | KernelAddrSpaceReady | KernelAddrSpace.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 32 | VmPrepared | Vm.Prepared | U | impl/arceos_ex/src/checkpoint/mod.rs |
@@ -61,7 +61,7 @@
 | 56 | MemBlockOffline | MemBlock.Offline | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 57 | SwapperVmReady | SwapperVm.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 58 | KernelAddrSpaceOnline | KernelAddrSpace.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
-| 59 | SwapperVmTakeOver | SwapperVm.TakeOver | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 59 | SwapperVmActivatedOnCpu | SwapperVm.ActivatedOnCpu | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 60 | PrintkBufferPrepared | PrintkBuffer.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 61 | EarlyConPrepared | EarlyCon.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 62 | EarlyConReady | EarlyCon.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |

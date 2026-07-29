@@ -735,7 +735,7 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    record["predicate"] == "boot_task_entry_bound_for_active_owner"
+                    record["predicate"] == "boot_task_entry_bound_for_active_controller"
                     and record["proof_class"] == "type_process_ensures"
                     and record["proof_provider"] == "within_context"
                     for record in proved
@@ -806,7 +806,7 @@ class DeriveToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     record["expression"]
-                    == "cpu_translation_owner_matches_live_satp_for_ref(BootCPURef)"
+                    == "cpu_translation_controller_matches_live_satp_for_ref(BootCPURef)"
                     and record["proof_class"] == "type_process_ensures"
                     and record["proof_provider"] == "action_drive"
                     for record in proved
@@ -851,7 +851,7 @@ class DeriveToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     record["expression"]
-                    == "cpu_active_translation_owner_for_ref_is(BootCPURef, TranslationOwnerKind::SwapperVm)"
+                    == "cpu_active_translation_controller_for_ref_is(BootCPURef, TranslationControllerKind::SwapperVm)"
                     and record["proof_class"] == "type_process_ensures"
                     and record["proof_provider"] == "action_drive"
                     for record in proved

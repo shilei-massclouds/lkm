@@ -8,7 +8,10 @@ type CPU: CPUObject {
 
     attrs {
         hartid: HartId;
-        active_translation_owner: TranslationOwnerKind;
+    }
+
+    associations {
+        mutable active_translation_controller: TranslationControllerRef;
     }
 
     owned {
@@ -54,8 +57,8 @@ type CPU: CPUObject {
                     cpu_logical_id_derived_from_owned_index(self);
                     cpu_ref_for_owned_index_ready(self);
                     cpu_owns_trap_resource(self, self.trap);
-                    cpu_active_translation_owner_is(self, TranslationOwnerKind::None);
-                    cpu_translation_owner_is_optional_before_kernel_entry(self);
+                    cpu_active_translation_controller_absent(self);
+                    cpu_translation_controller_association_is_optional_before_kernel_entry(self);
                 }
             }
         }
@@ -66,7 +69,7 @@ type CPU: CPUObject {
             cpu_logical_id_derived_from_owned_index(self);
             cpu_ref_for_owned_index_ready(self);
             cpu_owns_trap_resource(self, self.trap);
-            cpu_translation_owner_is_optional_before_kernel_entry(self);
+            cpu_translation_controller_association_is_optional_before_kernel_entry(self);
         }
 
         transitions {
@@ -75,7 +78,7 @@ type CPU: CPUObject {
                     cpu_possible(self);
                     cpu_present(self);
                     cpu_active_matches_setup(self, active);
-                    cpu_translation_owner_is_valid_for_execution_state(self);
+                    cpu_translation_controller_is_valid_for_execution_state(self);
                 }
             }
         }
@@ -88,7 +91,7 @@ type CPU: CPUObject {
             cpu_owns_trap_resource(self, self.trap);
             cpu_possible(self);
             cpu_present(self);
-            cpu_translation_owner_is_valid_for_execution_state(self);
+            cpu_translation_controller_is_valid_for_execution_state(self);
         }
 
         transitions {
@@ -108,7 +111,7 @@ type CPU: CPUObject {
             cpu_possible(self);
             cpu_present(self);
             cpu_online(self);
-            cpu_translation_owner_is_valid_for_execution_state(self);
+            cpu_translation_controller_is_valid_for_execution_state(self);
         }
     }
 }
@@ -119,9 +122,11 @@ predicate cpu_active_matches_setup<C: CPU>(cpu: C, active: bool) -> bool;
 predicate cpu_ref_dereference_requires_published_element<R: CpuRef>(cpu_ref: R) -> bool;
 predicate cpu_hartid_logical_id_bijection<C: CPU>(cpu: C) -> bool;
 predicate cpu_owns_trap_resource<C: CPU, T: TrapType>(cpu: C, trap: T) -> bool;
-predicate cpu_active_translation_owner_is<C: CPU>(cpu: C, owner: TranslationOwnerKind) -> bool;
-predicate cpu_translation_owner_is_optional_before_kernel_entry<C: CPU>(cpu: C) -> bool;
-predicate cpu_translation_owner_is_valid_for_execution_state<C: CPU>(cpu: C) -> bool;
-predicate cpu_translation_owner_matches_live_satp<C: CPU>(cpu: C) -> bool;
-predicate cpu_translation_owner_matches_live_satp_for_ref<R: CpuRef>(cpu_ref: R) -> bool;
-predicate cpu_translation_owner_replaced_atomically<C: CPU>(cpu: C) -> bool;
+predicate cpu_active_translation_controller_is<C: CPU>(cpu: C, controller: TranslationControllerKind) -> bool;
+predicate cpu_active_translation_controller_absent<C: CPU>(cpu: C) -> bool;
+predicate cpu_active_translation_controller_absent_for_ref<R: CpuRef>(cpu_ref: R) -> bool;
+predicate cpu_translation_controller_association_is_optional_before_kernel_entry<C: CPU>(cpu: C) -> bool;
+predicate cpu_translation_controller_is_valid_for_execution_state<C: CPU>(cpu: C) -> bool;
+predicate cpu_translation_controller_matches_live_satp<C: CPU>(cpu: C) -> bool;
+predicate cpu_translation_controller_matches_live_satp_for_ref<R: CpuRef>(cpu_ref: R) -> bool;
+predicate cpu_translation_controller_association_replaced_atomically<C: CPU>(cpu: C) -> bool;

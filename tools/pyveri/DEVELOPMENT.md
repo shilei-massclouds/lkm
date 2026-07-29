@@ -506,7 +506,7 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --derive
 - `FixMap.Preset` 已用 `ensures { slot_contains(fdt_slot, RawDtb); }` 表达“RawDtb 已被安排到 FDT fixmap 槽位”的transition 后置事实；`EarlyVm.Preset` 作为复合事件，用 `ensures { slot_contains(FixMap.fdt_slot, RawDtb); }` 表达驱动 `RawDtb` 与 `FixMap` 后形成的对外事实。`EarlyVm.Setup` 中重复依赖的同一 `slot_contains(...)` 可由前序已证明事实推出，因此 `fixmap_slot_content/prior_derivation_facts` 这一组当前已收口。
 - `FixMap.Preset` 不再把 `fdt_slot == Config.fixmap.fdt` 当作设置 `fdt_slot` 前的前置条件，而是作为transition 完成后的后置事实；`attrs_accessible(self)` 也由该事件设置槽位后保证。`fits_in_fixmap_slot(...)` 已由 FDT fixmap 槽位容量布局证明，不再作为剩余义务保留。
 - `TrampolineVm.Enable` 已用transition 后置条件证明 `phys_to_virt_transition_completed(TrampolineVm.pg_dir, TrampolineMap)`；`KernelImage.Enable` 已用transition 后置条件证明 `gp_relative_access_ready()`。这两项目前作为具体事件效果收口，而不是引入泛化自动规则。
-- `TrampolineVm.Setup` 证明共享 trampoline controller 的映射 Ready；`EarlyVm.Setup` 证明 `kernel_image_mapping_ready(EarlyVm.pg_dir, KernelImage, KernelImage.virt_range)` 和 fixmap 映射 Ready。`TakeOver(cpu_ref)` 只切换该 CPU 的 owner/live SATP，controller 保持 Ready，不产生全局 Online 或 Cleanup。
+- `TrampolineVm.Setup` 证明共享 trampoline controller 的映射 Ready；`EarlyVm.Setup` 证明 `kernel_image_mapping_ready(EarlyVm.pg_dir, KernelImage, KernelImage.virt_range)` 和 fixmap 映射 Ready。`ActivateOnCpu(cpu_ref)` 只更新该 CPU 的 active controller/live SATP，controller 保持 Ready，不产生全局 Online 或 Cleanup；首次激活与后续 handoff 分别记录为 `InitialActivation` 和 `Handoff`。
 
 #### Step C.1: 收口 trace 输出和注释数据流
 

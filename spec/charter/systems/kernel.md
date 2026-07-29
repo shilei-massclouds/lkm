@@ -143,13 +143,15 @@ Online 后由仍在执行的 Kernel.Enable 驱动 `Scheduler.Action::Schedule`�
 地址空间资源，拥有 `KernelImage`、`FixMap`、`LinearMap` 与 `UserSpaceReserve` 四个区域；
 `RawDtb` 仍是固件物理 blob，通过 FixMap 临时映射。`Vm` 是控制面协调对象，拥有共享的
 `PhysicalDirect`、`TrampolineVm`、`EarlyVm` 与 `SwapperVm` controller。controller 的 Ready 是全局
-事实，当前激活 controller 由每 CPU `active_translation_owner` 表达。BP 按 PhysicalDirect →
-TrampolineVm → EarlyVm → SwapperVm 接管，AP 按 PhysicalDirect → TrampolineVm → SwapperVm 接管；
-旧 controller 不 Cleanup/Destroyed，静态页表保持 Ready。
+事实，当前 activation association 由每 CPU `active_translation_controller` 表达。Kernel 接受真实
+BP 入口时以 `InitialActivation` 从 absent 建立 PhysicalDirect；随后 BP 按 PhysicalDirect →
+TrampolineVm → EarlyVm → SwapperVm Handoff，AP 在各自真实入口以同样的 InitialActivation 建立
+PhysicalDirect，再按 PhysicalDirect → TrampolineVm → SwapperVm Handoff。四个 controller 都通过
+`ActivateOnCpu(cpu_ref)` 提交；旧 controller 不 Cleanup/Destroyed，静态页表保持 Ready。
 
-`BootInitFlow.Action::BindBootTaskEntry(CurrentTaskRef)` 在 PhysicalDirect 和 EarlyVm 接管后各调用一次。
+`BootInitFlow.Action::BindBootTaskEntry(CurrentTaskRef)` 在 PhysicalDirect 和 EarlyVm activation 后各调用一次。
 首次调用只初始化一次入口 preempt count，第二次只把同一 carrier 的 `tp` 改为虚拟地址并保持计数；
-TrampolineVm、owner 缺失或 owner/live SATP 不一致必须诊断并 fail-stop。
+TrampolineVm、controller association 缺失或 controller/live SATP 不一致必须诊断并 fail-stop。
 
 首次调度真实切换先通过 CurrentTask 选择器确认 BootTask，随后提交 context-switch prepare 事实并
 完成物理栈切换；next 栈上的 finish 原子保存/发布 BootTask 断点、消费 KernelInitTask 断点、提交

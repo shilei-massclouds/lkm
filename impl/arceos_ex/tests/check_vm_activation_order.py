@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify the transient BP/AP translation takeover instruction order."""
+"""Verify the transient BP/AP translation activation instruction order."""
 
 from __future__ import annotations
 
@@ -69,6 +69,7 @@ def check_bp(instructions: list[str]) -> None:
             r"sb \w+, 0x28\(a6\)",
             r"sb \w+, 0x29\(a6\)",
             r"sb \w+, 0x2a\(a6\)",
+            r"sb \w+, 0x2b\(a6\)",
             r"sd a0, 0x30\(a6\)",
             r"sd \w+, 0x38\(a6\)",
             r"fence rw, w",
@@ -81,6 +82,7 @@ def check_bp(instructions: list[str]) -> None:
             r"sb \w+, 0x40\(a6\)",
             r"sb \w+, 0x41\(a6\)",
             r"sb \w+, 0x42\(a6\)",
+            r"sb \w+, 0x43\(a6\)",
             r"sd a1, 0x48\(a6\)",
             r"sd \w+, 0x50\(a6\)",
             r"fence rw, w",
@@ -105,6 +107,7 @@ def check_ap(instructions: list[str]) -> None:
             r"sb zero, 0x10\(t3\)",
             r"sb \w+, 0x11\(t3\)",
             r"sb \w+, 0x12\(t3\)",
+            r"sb \w+, 0x13\(t3\)",
             r"sd zero, 0x18\(t3\)",
             r"sd \w+, 0x20\(t3\)",
             r"fence rw, w",
@@ -117,6 +120,7 @@ def check_ap(instructions: list[str]) -> None:
             r"sb \w+, 0x28\(t4\)",
             r"sb \w+, 0x29\(t4\)",
             r"sb \w+, 0x2a\(t4\)",
+            r"sb \w+, 0x2b\(t4\)",
             r"sd t1, 0x30\(t4\)",
             r"sd \w+, 0x38\(t4\)",
             r"fence rw, w",
@@ -129,6 +133,7 @@ def check_ap(instructions: list[str]) -> None:
             r"sb \w+, 0x40\(t4\)",
             r"sb \w+, 0x41\(t4\)",
             r"sb \w+, 0x42\(t4\)",
+            r"sb \w+, 0x43\(t4\)",
             r"sd t2, 0x48\(t4\)",
             r"sd \w+, 0x50\(t4\)",
             r"fence rw, w",
@@ -149,7 +154,7 @@ def main() -> int:
         parser.error(f"ELF does not exist: {args.elf}")
     check_bp(disassemble(args.objdump, args.elf, "arceos_ex_switch_to_early_vm"))
     check_ap(disassemble(args.objdump, args.elf, "arceos_ex_secondary_start_sbi"))
-    print(f"VM takeover instruction order verified: {args.elf}")
+    print(f"VM activation instruction order verified: {args.elf}")
     return 0
 
 

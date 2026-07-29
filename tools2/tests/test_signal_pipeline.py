@@ -3191,14 +3191,14 @@ class SignalPipelineTests(unittest.TestCase):
             )
             bind_body = systems["BootInitFlow"]["handlers_by_name"]["BindBootTaskEntry"][0]["body"]
             bind_guards = next(item["entries"] for item in bind_body if item["kind"] == "depends_on")
-            bind_owner_guard = next(item for item in bind_guards if item["kind"] == "any_of")
+            bind_controller_guard = next(item for item in bind_guards if item["kind"] == "any_of")
             self.assertEqual(
-                {item["arguments"][1]["value"] for item in bind_owner_guard["alternatives"]},
+                {item["arguments"][1]["value"] for item in bind_controller_guard["alternatives"]},
                 {"PhysicalDirect", "EarlyVm", "SwapperVm"},
             )
             self.assertTrue(
                 any(
-                    item.get("name") == "cpu_translation_owner_matches_live_satp_for_ref"
+                    item.get("name") == "cpu_translation_controller_matches_live_satp_for_ref"
                     for item in bind_guards
                 )
             )
@@ -3291,7 +3291,7 @@ class SignalPipelineTests(unittest.TestCase):
                 [
                     (item["target"], item["payload"][0]["value"])
                     for item in signals
-                    if item["name"] == "TakeOver"
+                    if item["name"] == "ActivateOnCpu"
                 ],
                 [
                     ("PhysicalDirect", "BootCPURef"),
@@ -3421,11 +3421,11 @@ class SignalPipelineTests(unittest.TestCase):
             )
             normal_facts = set(normal_data["last_stable_snapshot"]["facts"])
             for fact in (
-                "cpu_active_translation_owner_for_ref_is(BootCPURef,TranslationOwnerKind::SwapperVm)",
-                "cpu_active_translation_owner_for_ref_is(ApCPURef,TranslationOwnerKind::SwapperVm)",
-                "translation_takeover_recorded(BootCPURef,TranslationOwnerKind::TrampolineVm,TranslationOwnerKind::EarlyVm,\"satp_of(EarlyVm.pg_dir, Config.satp_mode)\")",
-                "translation_takeover_to_swapper_recorded(BootCPURef,\"satp_of(SwapperVm.pg_dir, Config.satp_mode)\")",
-                "translation_takeover_to_swapper_recorded(ApCPURef,\"satp_of(SwapperVm.pg_dir, Config.satp_mode)\")",
+                "cpu_active_translation_controller_for_ref_is(BootCPURef,TranslationControllerKind::SwapperVm)",
+                "cpu_active_translation_controller_for_ref_is(ApCPURef,TranslationControllerKind::SwapperVm)",
+                "translation_handoff_recorded(BootCPURef,TranslationControllerKind::TrampolineVm,TranslationControllerKind::EarlyVm,\"satp_of(EarlyVm.pg_dir, Config.satp_mode)\")",
+                "translation_handoff_to_swapper_recorded_from_active_controller(BootCPURef,\"satp_of(SwapperVm.pg_dir, Config.satp_mode)\")",
+                "translation_handoff_to_swapper_recorded_from_active_controller(ApCPURef,\"satp_of(SwapperVm.pg_dir, Config.satp_mode)\")",
             ):
                 self.assertIn(fact, normal_facts)
             self.assertTrue(
@@ -3673,7 +3673,7 @@ class SignalPipelineTests(unittest.TestCase):
             )
 
             self.assertEqual(len(derivation["signals"]), 19)
-            kernel_enable, accept_enable, assign_cpu, physical_takeover = derivation["signals"][-4:]
+            kernel_enable, accept_enable, assign_cpu, physical_activation = derivation["signals"][-4:]
             self.assertEqual(
                 (
                     kernel_enable["id"],
@@ -3746,24 +3746,24 @@ class SignalPipelineTests(unittest.TestCase):
             )
             self.assertEqual(
                 (
-                    physical_takeover["id"],
-                    physical_takeover["source"],
-                    physical_takeover["target"],
-                    physical_takeover["name"],
-                    physical_takeover["delivery"],
-                    physical_takeover["cause_id"],
-                    physical_takeover["handler"]["id"],
-                    physical_takeover["handler"]["kind"],
-                    physical_takeover["outcome"],
+                    physical_activation["id"],
+                    physical_activation["source"],
+                    physical_activation["target"],
+                    physical_activation["name"],
+                    physical_activation["delivery"],
+                    physical_activation["cause_id"],
+                    physical_activation["handler"]["id"],
+                    physical_activation["handler"]["kind"],
+                    physical_activation["outcome"],
                 ),
                 (
                     "sig-0019",
                     "Kernel",
                     "PhysicalDirect",
-                    "TakeOver",
+                    "ActivateOnCpu",
                     "drives",
                     "sig-0016",
-                    "PhysicalDirect.Action::TakeOver@Ready",
+                    "PhysicalDirect.Action::ActivateOnCpu@Ready",
                     "Action",
                     "completed",
                 ),
@@ -3777,7 +3777,7 @@ class SignalPipelineTests(unittest.TestCase):
                 ),
                 ("Ready", "Ready", "Ready", "Ready"),
             )
-            self.assertEqual(boundary["snapshot"], physical_takeover["after_snapshot"])
+            self.assertEqual(boundary["snapshot"], physical_activation["after_snapshot"])
             self.assertEqual(boundary["snapshot"], kernel_enable["after_snapshot"])
             boundary_states = boundary["snapshot"]["states"]
             self.assertEqual(
@@ -3815,8 +3815,8 @@ class SignalPipelineTests(unittest.TestCase):
                 "primary_hart_only_at_kernel_entry",
                 "kernel_enable_accepted(Kernel)",
                 "task_flow_cpu_ref_is(BootInitFlow,BootCPURef)",
-                "cpu_active_translation_owner_for_ref_is(BootCPURef,TranslationOwnerKind::PhysicalDirect)",
-                "translation_takeover_recorded(BootCPURef,TranslationOwnerKind::None,TranslationOwnerKind::PhysicalDirect,0)",
+                "cpu_active_translation_controller_for_ref_is(BootCPURef,TranslationControllerKind::PhysicalDirect)",
+                "translation_initial_activation_recorded(BootCPURef,TranslationControllerKind::PhysicalDirect,0)",
             ):
                 self.assertIn(fact, boundary_facts)
             self.assertFalse(
@@ -3923,7 +3923,7 @@ class SignalPipelineTests(unittest.TestCase):
                 "sig-0018 [drives] Kernel -> BootInitFlow.AssignCpuRef", verbose_text
             )
             self.assertIn(
-                "sig-0019 [drives] Kernel -> PhysicalDirect.TakeOver", verbose_text
+                "sig-0019 [drives] Kernel -> PhysicalDirect.ActivateOnCpu", verbose_text
             )
 
     def test_main_model_boot_init_preset_reaches_setup_boundary_and_snapshot_resumes(self) -> None:
@@ -3975,7 +3975,7 @@ class SignalPipelineTests(unittest.TestCase):
                 (16, "OpenSBI", "Kernel", "Enable", "emits", 13, "Transition", "Ready", "Ready", "stopped"),
                 (17, "Kernel", "Kernel", "AcceptEnable", "drives", 16, "Action", "Ready", "Ready", "completed"),
                 (18, "Kernel", "BootInitFlow", "AssignCpuRef", "drives", 16, "Action", "Base", "Base", "completed"),
-                (19, "Kernel", "PhysicalDirect", "TakeOver", "drives", 16, "Action", "Ready", "Ready", "completed"),
+                (19, "Kernel", "PhysicalDirect", "ActivateOnCpu", "drives", 16, "Action", "Ready", "Ready", "completed"),
                 (20, "Kernel", "BootInitFlow", "Preset", "drives", 16, "Transition", "Base", "Prepared", "completed"),
                 (21, "BootInitFlow", "CpuGroup.cpus[0].trap.interrupt", "Preset", "drives", 20, "Transition", "Base", "Prepared", "completed"),
                 (22, "BootInitFlow", "KernelAddrSpace", "Preset", "drives", 20, "Transition", "Base", "Prepared", "completed"),
@@ -4002,8 +4002,8 @@ class SignalPipelineTests(unittest.TestCase):
                 (43, "Vm", "KernelAddrSpace", "Setup", "drives", 37, "Transition", "Prepared", "Ready", "completed"),
                 (44, "Vm", "EarlyVm", "Setup", "drives", 37, "Transition", "Prepared", "Ready", "completed"),
                 (45, "BootInitFlow", "Vm", "Setup", "drives", 20, "Transition", "Prepared", "Ready", "completed"),
-                (46, "Vm", "TrampolineVm", "TakeOver", "drives", 45, "Action", "Ready", "Ready", "completed"),
-                (47, "Vm", "EarlyVm", "TakeOver", "drives", 45, "Action", "Ready", "Ready", "completed"),
+                (46, "Vm", "TrampolineVm", "ActivateOnCpu", "drives", 45, "Action", "Ready", "Ready", "completed"),
+                (47, "Vm", "EarlyVm", "ActivateOnCpu", "drives", 45, "Action", "Ready", "Ready", "completed"),
                 (48, "Vm", "KernelImage", "Enable", "drives", 45, "Transition", "Ready", "Online", "completed"),
                 (49, "BootInitFlow", "CpuGroup.cpus[0].trap", "Setup", "drives", 20, "Transition", "Prepared", "Ready", "completed"),
                 (50, "BootInitFlow", "BootInitFlow", "BindBootTaskEntry", "drives", 20, "Action", "Base", "Base", "completed"),
@@ -4173,10 +4173,10 @@ class SignalPipelineTests(unittest.TestCase):
                 "assert:BootCpuRegisters.gp == phys_addr(Lds.global_pointer)",
                 "assert:BootCpuRegisters.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack)",
                 "assert:BootCpuRegisters.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode)",
-                "boot_task_entry_bound_for_active_owner(CpuGroup.cpus[0],BootTask)",
+                "boot_task_entry_bound_for_active_controller(CpuGroup.cpus[0],BootTask)",
                 "boot_task_entry_preempt_count_initialized_once(BootTask)",
                 "boot_task_entry_preempt_count_preserved(BootTask)",
-                "cpu_active_translation_owner_for_ref_is(BootCPURef,TranslationOwnerKind::EarlyVm)",
+                "cpu_active_translation_controller_for_ref_is(BootCPURef,TranslationControllerKind::EarlyVm)",
                 "trap_formal_entry_ready(CpuGroup.cpus[0].trap)",
                 "early_vm_translation_sync_complete(EarlyVm,BootCPURef)",
                 "translation_controller_retired_for_cpu(TrampolineVm,BootCPURef)",
@@ -4248,14 +4248,14 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(snapshot.read_bytes(), BOOT_INIT_SETUP_SCENARIO.read_bytes())
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "65345951619f535a2960227f70aeaff8d3df5ebb8a65f0dacead1cc89aae4f67",
+                "ef4622ba1f7f36c94c4e08f4cc3aeb9674fa3586e9da90f4584e997594c4e0ca",
             )
             self.assertEqual(
                 {
                     derivation["model_fingerprint"], model["model_fingerprint"],
                     view["model_fingerprint"], saved["model_fingerprint"],
                 },
-                {"sha256:0e4bf79545ade8d19ac7b3795de0a802698593251776125f0d8bd27b2ef955e1"},
+                {"sha256:552e742222dc1c65610e023c52130fbb211d0b6f95878c2931e8b6958d2ce36d"},
             )
             with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
                 compact_text = render_text(view)

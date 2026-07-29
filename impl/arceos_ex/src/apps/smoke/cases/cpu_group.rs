@@ -4,8 +4,8 @@ use crate::{
     context::context,
     objects::{
         cpu::{
-            BOOT_CPU_LOGICAL_ID, CpuRole, TranslationOwner, TranslationState,
-            TranslationTakeoverTrace,
+            BOOT_CPU_LOGICAL_ID, CpuRole, TranslationActivationKind, TranslationActivationTrace,
+            TranslationController, TranslationState,
         },
         printk,
         state::State,
@@ -113,15 +113,23 @@ pub fn run() -> SmokeResult {
             }
             expected.len()
         };
-        let journal = cpu.translation_takeover_journal();
-        if cpu.active_translation_owner() != TranslationOwner::SwapperVm
+        let Ok(journal) = cpu.translation_activation_journal() else {
+            printk::write_str("CpuGroup per-CPU translation journal encoding is invalid\n");
+            return SmokeResult::Failed;
+        };
+        let Some(final_receipt) = journal.receipts[expected_chain - 1] else {
+            printk::write_str("CpuGroup final translation activation receipt is absent\n");
+            return SmokeResult::Failed;
+        };
+        if cpu.active_translation_controller() != Ok(Some(TranslationController::SwapperVm))
             || journal.committed_count != expected_chain
-            || journal.receipts[expected_chain - 1].new_owner != TranslationOwner::SwapperVm
-            || journal.receipts[expected_chain - 1].satp != ctx.vm.swapper_vm().satp()
-            || journal.receipts[expected_chain - 1].commit_sequence != expected_chain
-            || !journal.receipts[expected_chain - 1].synchronization_complete
+            || final_receipt.kind != TranslationActivationKind::Handoff
+            || final_receipt.new_controller != TranslationController::SwapperVm
+            || final_receipt.satp != ctx.vm.swapper_vm().satp()
+            || final_receipt.commit_sequence != expected_chain
+            || !final_receipt.synchronization_complete
         {
-            printk::write_str("CpuGroup per-CPU translation owner journal is invalid\n");
+            printk::write_str("CpuGroup per-CPU translation activation journal is invalid\n");
             return SmokeResult::Failed;
         }
 
@@ -188,89 +196,164 @@ pub fn run() -> SmokeResult {
 
 fn translation_state_negative_cases() -> bool {
     let state = TranslationState::new();
-    let unchanged = |state: &TranslationState, owner, count| {
-        state.owner() == owner && state.committed_count() == count
+    let unchanged = |state: &TranslationState, controller, count| {
+        state.active_controller() == Ok(controller) && state.committed_count() == count
     };
 
-    if state.commit_take_over(
-        TranslationOwner::PhysicalDirect,
-        TranslationOwner::TrampolineVm,
-        0x100,
-        0x100,
-    ) || !unchanged(&state, TranslationOwner::None, 0)
-        || state.commit_take_over(
-            TranslationOwner::None,
-            TranslationOwner::PhysicalDirect,
+    if state.active_controller() != Ok(None)
+        || state.committed_count() != 0
+        || state.commit_activation(
+            TranslationActivationKind::Handoff,
+            Some(TranslationController::PhysicalDirect),
+            TranslationController::TrampolineVm,
+            0x100,
+            0x100,
+        )
+        || !unchanged(&state, None, 0)
+        || state.commit_activation(
+            TranslationActivationKind::InitialActivation,
+            None,
+            TranslationController::PhysicalDirect,
             0,
             1,
         )
-        || !unchanged(&state, TranslationOwner::None, 0)
-        || state.commit_take_over(
-            TranslationOwner::None,
-            TranslationOwner::TrampolineVm,
+        || !unchanged(&state, None, 0)
+        || state.commit_activation(
+            TranslationActivationKind::InitialActivation,
+            None,
+            TranslationController::TrampolineVm,
             0x100,
             0x100,
         )
-        || !unchanged(&state, TranslationOwner::None, 0)
-        || !state.commit_take_over(
-            TranslationOwner::None,
-            TranslationOwner::PhysicalDirect,
+        || !unchanged(&state, None, 0)
+        || !state.commit_activation(
+            TranslationActivationKind::InitialActivation,
+            None,
+            TranslationController::PhysicalDirect,
             0,
             0,
         )
-        || state.commit_take_over(
-            TranslationOwner::None,
-            TranslationOwner::PhysicalDirect,
+        || state.commit_activation(
+            TranslationActivationKind::InitialActivation,
+            None,
+            TranslationController::PhysicalDirect,
             0,
             0,
         )
-        || !unchanged(&state, TranslationOwner::PhysicalDirect, 1)
-        || state.commit_take_over(
-            TranslationOwner::PhysicalDirect,
-            TranslationOwner::EarlyVm,
+        || !unchanged(&state, Some(TranslationController::PhysicalDirect), 1)
+        || state.commit_activation(
+            TranslationActivationKind::Handoff,
+            Some(TranslationController::PhysicalDirect),
+            TranslationController::EarlyVm,
             0x200,
             0x200,
         )
-        || !unchanged(&state, TranslationOwner::PhysicalDirect, 1)
-        || state.commit_take_over(
-            TranslationOwner::PhysicalDirect,
-            TranslationOwner::TrampolineVm,
+        || !unchanged(&state, Some(TranslationController::PhysicalDirect), 1)
+        || state.commit_activation(
+            TranslationActivationKind::Handoff,
+            Some(TranslationController::PhysicalDirect),
+            TranslationController::TrampolineVm,
             0x200,
             0x201,
         )
-        || !unchanged(&state, TranslationOwner::PhysicalDirect, 1)
+        || !unchanged(&state, Some(TranslationController::PhysicalDirect), 1)
+    {
+        return false;
+    }
+
+    let isolated_state = TranslationState::new();
+    if isolated_state.active_controller() != Ok(None) || isolated_state.committed_count() != 0 {
+        return false;
+    }
+
+    let full_state = TranslationState::new();
+    if !full_state.commit_activation(
+        TranslationActivationKind::InitialActivation,
+        None,
+        TranslationController::PhysicalDirect,
+        0,
+        0,
+    ) || !full_state.commit_activation(
+        TranslationActivationKind::Handoff,
+        Some(TranslationController::PhysicalDirect),
+        TranslationController::TrampolineVm,
+        0x100,
+        0x100,
+    ) || !full_state.commit_activation(
+        TranslationActivationKind::Handoff,
+        Some(TranslationController::TrampolineVm),
+        TranslationController::EarlyVm,
+        0x200,
+        0x200,
+    ) || !full_state.commit_activation(
+        TranslationActivationKind::Handoff,
+        Some(TranslationController::EarlyVm),
+        TranslationController::SwapperVm,
+        0x300,
+        0x300,
+    ) || full_state.commit_activation(
+        TranslationActivationKind::Handoff,
+        Some(TranslationController::SwapperVm),
+        TranslationController::TrampolineVm,
+        0x400,
+        0x400,
+    ) || !unchanged(&full_state, Some(TranslationController::SwapperVm), 4)
     {
         return false;
     }
 
     let half_state = TranslationState::new();
-    if !half_state.commit_take_over(
-        TranslationOwner::None,
-        TranslationOwner::PhysicalDirect,
+    if !half_state.commit_activation(
+        TranslationActivationKind::InitialActivation,
+        None,
+        TranslationController::PhysicalDirect,
         0,
         0,
     ) || !half_state.inject_unpublished_receipt_for_test(
-        TranslationOwner::PhysicalDirect,
-        TranslationOwner::TrampolineVm,
+        TranslationActivationKind::Handoff,
+        Some(TranslationController::PhysicalDirect),
+        TranslationController::TrampolineVm,
         0x200,
-    ) || half_state.receipt(1).is_some()
+    ) || half_state.receipt(1) != Ok(None)
         || half_state.committed_count() != 1
-        || half_state.owner() != TranslationOwner::PhysicalDirect
+        || half_state.active_controller() != Ok(Some(TranslationController::PhysicalDirect))
         || half_state.matches_chain(&[
-            TranslationTakeoverTrace::completed(
-                TranslationOwner::None,
-                TranslationOwner::PhysicalDirect,
+            TranslationActivationTrace::completed(
+                TranslationActivationKind::InitialActivation,
+                None,
+                TranslationController::PhysicalDirect,
                 0,
                 1,
             ),
-            TranslationTakeoverTrace::completed(
-                TranslationOwner::PhysicalDirect,
-                TranslationOwner::TrampolineVm,
+            TranslationActivationTrace::completed(
+                TranslationActivationKind::Handoff,
+                Some(TranslationController::PhysicalDirect),
+                TranslationController::TrampolineVm,
                 0x200,
                 2,
             ),
         ])
     {
+        return false;
+    }
+
+    let invalid_controller_state = TranslationState::new();
+    invalid_controller_state.inject_active_controller_raw_for_test(7);
+    if invalid_controller_state.active_controller().is_ok()
+        || invalid_controller_state.committed_count() != 0
+    {
+        return false;
+    }
+
+    let invalid_kind_state = TranslationState::new();
+    invalid_kind_state.inject_committed_receipt_raw_for_test(0, 1, 7);
+    if invalid_kind_state.receipt(0).is_ok() || invalid_kind_state.committed_count() != 1 {
+        return false;
+    }
+
+    let invalid_receipt_controller_state = TranslationState::new();
+    invalid_receipt_controller_state.inject_committed_receipt_raw_for_test(0, 7, 1);
+    if invalid_receipt_controller_state.receipt(0).is_ok() {
         return false;
     }
 

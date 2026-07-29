@@ -43,7 +43,7 @@ else
 VERIFY_TEXT_ARGS := --strict
 endif
 
-.PHONY: build run disk disk-clean fmt fmt-check clippy-check coding-spec-check charter-lock-check verify checkpoints-inventory checkpoints-map-linux checkpoints-coverage checkpoints-instrumentation-plan checkpoints checkpoints-linux-check test test-charter-lock test-basic test-composite test-verify test-checkpoints test-vm-takeover-order test-kunit test-smoke test-stress stress-test difftest-preflight difftest clean
+.PHONY: build run disk disk-clean fmt fmt-check clippy-check coding-spec-check charter-lock-check verify checkpoints-inventory checkpoints-map-linux checkpoints-coverage checkpoints-instrumentation-plan checkpoints checkpoints-linux-check test test-charter-lock test-basic test-composite test-verify test-checkpoints test-vm-activation-order test-kunit test-smoke test-stress stress-test difftest-preflight difftest clean
 
 build:
 	@if [ -n "$(BASIC_TEST_SELECTION_CONFLICT)" ]; then \
@@ -135,7 +135,7 @@ test:
 	$(MAKE) fmt-check
 	$(MAKE) clippy-check
 	$(MAKE) coding-spec-check
-	$(MAKE) test-vm-takeover-order
+	$(MAKE) test-vm-activation-order
 	@bash tools/test_summary.sh "$(MAKE)" "$(SPEC)" "$(KERNEL_DIR)" "$(KUNIT_APP)" "$(abspath $(KUNIT_HANDLERS))" "$(SMOKE_APP)" "$(TEST_PLIC_PROVIDERS)"
 
 test-verify:
@@ -157,8 +157,8 @@ test-checkpoints:
 	python3 tools/checkpoints/summarize_linux_checkpoint_mapping.py --check
 	python3 tools/checkpoints/plan_linux_instrumentation.py --check
 
-test-vm-takeover-order:
-	$(MAKE) -C $(KERNEL_DIR) test-vm-takeover-order APP=$(SMOKE_APP) PLIC_PROVIDER=native
+test-vm-activation-order:
+	$(MAKE) -C $(KERNEL_DIR) test-vm-activation-order APP=$(SMOKE_APP) PLIC_PROVIDER=native
 
 test-kunit:
 	$(MAKE) run TEST=checkpoint-kunit-native

@@ -22,11 +22,9 @@ type CpuGroupObject {
                 cpu_group_cpu_ref_targets(self, ApCPURef, self.cpus[1]);
                 cpu_ref_targets(ApCPURef, self.cpus[1]);
                 cpu_ref_ready(ApCPURef);
-                cpu_active_translation_owner_for_ref_is(
-                    ApCPURef,
-                    TranslationOwnerKind::None
-                );
-                translation_live_satp_for_ref_is(ApCPURef, 0);
+                cpu_active_translation_controller_absent_for_ref(ApCPURef);
+                translation_live_satp_absent_for_ref(ApCPURef);
+                translation_initial_activation_entry_satp_for_ref_is(ApCPURef, 0);
                 self.cpus[1].trap.state == State::Ready;
                 self.cpus[1].trap.interrupt.state == State::Online;
                 self.cpus[1].trap.exception.state == State::Ready;
@@ -54,11 +52,9 @@ type CpuGroupObject {
                     cpu_group_cpu_ref_targets(self, BootCPURef, self.cpus[0]);
                     cpu_ref_targets(BootCPURef, self.cpus[0]);
                     cpu_ref_ready(BootCPURef);
-                    cpu_active_translation_owner_for_ref_is(
-                        BootCPURef,
-                        TranslationOwnerKind::None
-                    );
+                    cpu_active_translation_controller_absent_for_ref(BootCPURef);
                     translation_live_satp_for_ref_is(BootCPURef, 0);
+                    translation_initial_activation_entry_satp_for_ref_is(BootCPURef, 0);
                     cpu_group_uses_logical_id_index(self);
                     cpu_group_boot_cpu_index_zero(self, self.cpus[0]);
                     cpu_group_preset_atomic_publish(self, self.cpus[0]);

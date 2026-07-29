@@ -40,8 +40,8 @@ Kernel.Online。入口 `_start` 必须在 `KernelStarted` 和任何 BootInitFlow
 记录替代任一次实时检查。`KernelStarted` 仍是接受点，随后 BootInitFlow、首次调度和 KernelInitFlow
 都在 Kernel Ready/Enable 执行上下文中运行。
 
-Enable 接受后先解析 BootCPURef，并由 `PhysicalDirect.TakeOver(BootCPURef)` 从 owner `None` 原子建立
-入口 CPU 的第一个 translation owner，再启动 BootInitFlow。`KernelAddrSpace`、`Vm`、`Soc`、
+Enable 接受后先解析 BootCPURef，并由 `PhysicalDirect.ActivateOnCpu(BootCPURef)` 从 absent association
+原子提交 InitialActivation，建立入口 CPU 的第一个 translation controller，再启动 BootInitFlow。`KernelAddrSpace`、`Vm`、`Soc`、
 `CpuGroup` 是 Kernel 的平级直接子对象；Soc/CpuGroup 之间的启动依赖不表达所有权。
 
 OpenSBI 不负责保证 `sie/sip` 已清零。`BootInitFlow.Preset` 的第一个被驱动叶迁移是

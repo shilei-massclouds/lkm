@@ -25,6 +25,14 @@ SmpBringup 的 BP 协调属于 `KernelInitFlow` continuation。`ApEntryPreludePh
 发出 keyed HSM Startup。AP 架构入口验证 boot data、建立 `tp/sp`、激活 Live authority 后启动同 key
 Flow；BP 仅通过 cpu_running/done_up wait/barrier 观察完成。
 
+stopped AP 的 `active_translation_controller` association 必须 absent，并且没有 live SATP；BP 发布的
+boot data 只保存 AP 入口预期 SATP，不代表 AP 已执行 CSR 写入或激活任何 controller。真实
+`ApEntryPreludePhase` 架构入口接受该 CPU 时，必须原子提交 PhysicalDirect 的
+`ActivateOnCpu(cpu_ref, InitialActivation)`，随后以两个 Handoff 依次激活 TrampolineVm 与
+SwapperVm。AP 不经过 EarlyVm；每个 AP 的 association、live SATP、同步事实、journal 和 committed
+count 与 BP 及其它 AP 隔离。`CpuGroup`、`KernelAddrSpace`、`Vm` 或任一 controller 的全局
+Ready/Online 不能代替这些 CPU-local activation 事实。
+
 ## 引用
 
 - [阶段范式](../phase-paradigm.md)

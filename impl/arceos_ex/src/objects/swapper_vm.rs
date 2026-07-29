@@ -4,7 +4,9 @@ use crate::{arch::riscv64::csr, checkpoint::Checkpoint};
 
 use super::{
     config::Config,
-    cpu::{Cpu, MAX_CPUS, TranslationOwner, TranslationTakeoverTrace},
+    cpu::{
+        Cpu, MAX_CPUS, TranslationActivationKind, TranslationActivationTrace, TranslationController,
+    },
     kernel_addr_space::KernelAddrSpace,
     kernel_image::KernelImage,
     lds::Lds,
@@ -111,18 +113,34 @@ impl SwapperVm {
         )
     }
 
-    pub fn take_over(
+    pub fn activate_on_cpu(
         &self,
         cpu: &Cpu,
-        old_owner: TranslationOwner,
         old_satp: usize,
         kernel_addr_space: &KernelAddrSpace,
     ) -> EventResult {
+        let Ok(Some(old_controller)) = cpu.active_translation_controller() else {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        };
         if self.lifecycle.state() != State::Ready
             || kernel_addr_space.state() != State::Online
             || cpu.logical_id() >= MAX_CPUS
-            || cpu.active_translation_owner() != old_owner
-            || csr::read_satp() != old_satp
+            || !matches!(
+                old_controller,
+                TranslationController::TrampolineVm | TranslationController::EarlyVm
+            )
+            || !cpu.translation_activation_preflight(
+                TranslationActivationKind::Handoff,
+                Some(old_controller),
+                TranslationController::SwapperVm,
+                old_satp,
+                csr::read_satp(),
+            )
             || self.satp == 0
         {
             return failed_condition(
@@ -136,12 +154,13 @@ impl SwapperVm {
         csr::write_satp(self.satp);
         csr::sfence_vma();
         let observed_satp = csr::read_satp();
-        if !cpu.commit_translation_takeover(
-            old_owner,
-            TranslationOwner::SwapperVm,
+        if !cpu.commit_translation_activation(
+            TranslationActivationKind::Handoff,
+            Some(old_controller),
+            TranslationController::SwapperVm,
             self.satp,
             observed_satp,
-        ) || !self.complete_arch_take_over(cpu, old_owner)
+        ) || !self.complete_arch_activation_on(cpu, old_controller)
         {
             return failed_condition(
                 LifecycleEvent::Enable,
@@ -150,25 +169,30 @@ impl SwapperVm {
                 State::Ready,
             );
         }
-        crate::checkpoint::checkpoint(Checkpoint::SwapperVmTakeOver);
+        crate::checkpoint::checkpoint(Checkpoint::SwapperVmActivatedOnCpu);
         Ok(())
     }
 
-    pub fn complete_arch_take_over(&self, cpu: &Cpu, old_owner: TranslationOwner) -> bool {
-        let (index, sequence) = match old_owner {
-            TranslationOwner::TrampolineVm => (2, 3),
-            TranslationOwner::EarlyVm => (3, 4),
+    pub fn complete_arch_activation_on(
+        &self,
+        cpu: &Cpu,
+        old_controller: TranslationController,
+    ) -> bool {
+        let (index, sequence) = match old_controller {
+            TranslationController::TrampolineVm => (2, 3),
+            TranslationController::EarlyVm => (3, 4),
             _ => return false,
         };
         if self.lifecycle.state() != State::Ready
             || cpu.logical_id() >= MAX_CPUS
-            || cpu.active_translation_owner() != TranslationOwner::SwapperVm
+            || cpu.active_translation_controller() != Ok(Some(TranslationController::SwapperVm))
             || csr::read_satp() != self.satp
             || !cpu.translation_receipt_matches(
                 index,
-                TranslationTakeoverTrace::completed(
-                    old_owner,
-                    TranslationOwner::SwapperVm,
+                TranslationActivationTrace::completed(
+                    TranslationActivationKind::Handoff,
+                    Some(old_controller),
+                    TranslationController::SwapperVm,
                     self.satp,
                     sequence,
                 ),
@@ -180,16 +204,16 @@ impl SwapperVm {
         true
     }
 
-    pub fn takeover_complete_for(&self, cpu: &Cpu) -> bool {
+    pub fn activation_complete_on(&self, cpu: &Cpu) -> bool {
         self.state() == State::Ready
             && cpu.logical_id() < MAX_CPUS
-            && cpu.active_translation_owner() == TranslationOwner::SwapperVm
+            && cpu.active_translation_controller() == Ok(Some(TranslationController::SwapperVm))
             && self.translation_sync_complete(cpu)
     }
 
     pub fn current_on_cpu(&self, cpu: &Cpu) -> bool {
         self.state() == State::Ready
-            && cpu.active_translation_owner() == TranslationOwner::SwapperVm
+            && cpu.active_translation_controller() == Ok(Some(TranslationController::SwapperVm))
             && csr::read_satp() == self.satp
             && self.translation_sync_complete(cpu)
     }

@@ -642,7 +642,7 @@ def default_mapping_rules() -> dict[str, MappingRule]:
             confidence="medium",
             notes="RISC-V64 setup_vm() trampoline page-table construction interval.",
         ),
-        "TrampolineVm.TakeOver": MappingRule(
+        "TrampolineVm.ActivatedOnCpu": MappingRule(
             mapping_kind="exact",
             linux_file="arch/riscv/kernel/head.S",
             linux_symbol="relocate_enable_mmu",
@@ -692,7 +692,7 @@ def default_mapping_rules() -> dict[str, MappingRule]:
             confidence="high",
             notes="RISC-V64 setup_vm() constructs the early kernel page table.",
         ),
-        "EarlyVm.TakeOver": MappingRule(
+        "EarlyVm.ActivatedOnCpu": MappingRule(
             mapping_kind="exact",
             linux_file="arch/riscv/kernel/head.S",
             linux_symbol="relocate_enable_mmu",

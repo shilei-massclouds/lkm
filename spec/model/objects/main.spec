@@ -105,12 +105,16 @@ enum RunQueueRuntimeState {
     Some,
 }
 
-enum TranslationOwnerKind {
-    None,
+enum TranslationControllerKind {
     PhysicalDirect,
     TrampolineVm,
     EarlyVm,
     SwapperVm,
+}
+
+enum TranslationActivationKind {
+    InitialActivation,
+    Handoff,
 }
 
 include "cpu.spec";

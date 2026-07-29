@@ -38,21 +38,24 @@ This file is the testing authority for CPU ownership, references and the
   the absence of a second boot/current CPU or current-task store. `current_cpu()`
   must derive the effective Flow through CurrentTask, dereference that Flow's
   CpuRef and reject any Task/Flow/CPU disagreement.
-- The same smoke boundary must observe each CPU's final translation owner and
-  complete ordered takeover journal. BP records
-  `None -> PhysicalDirect -> TrampolineVm -> EarlyVm -> SwapperVm`; every AP
-  records `None -> PhysicalDirect -> TrampolineVm -> SwapperVm` and no EarlyVm
-  receipt. Every record carries the canonical CPU, old/new owner, installed
-  SATP, completed synchronization and contiguous one-based sequence, while the shared
-  `PhysicalDirect`, `TrampolineVm`, `EarlyVm` and `SwapperVm` controllers remain
-  `Ready` rather than being destroyed by any CPU-local handoff.
-- Negative CPU translation-state tests cover wrong old owner, target/live SATP
+- The same smoke boundary must observe each CPU's optional active translation
+  controller and complete ordered activation journal. BP records an absent
+  association followed by
+  `PhysicalDirect -> TrampolineVm -> EarlyVm -> SwapperVm`; every AP records an
+  absent association followed by
+  `PhysicalDirect -> TrampolineVm -> SwapperVm` and no EarlyVm receipt. Every
+  record carries the canonical CPU, activation kind, old/new controller,
+  installed SATP, completed synchronization and contiguous one-based sequence,
+  while the shared `PhysicalDirect`, `TrampolineVm`, `EarlyVm` and `SwapperVm`
+  controllers remain `Ready` rather than being destroyed by any CPU-local
+  handoff.
+- Negative CPU translation-state tests cover wrong old controller, target/live SATP
   mismatch, duplicate and out-of-order receipts, release count hiding a
   half-written slot, and exact/overflowing trampoline-window endpoints. Every
-  rejected commit preserves owner and committed journal count.
+  rejected commit preserves the active controller and committed journal count.
 - A disassembly test included by the root regression checks both BP and AP
   entry symbols and proves that target SATP installation and required
-  `sfence.vma` precede journal fill, owner publication and the release-published
+  `sfence.vma` precede journal fill, controller publication and the release-published
   committed count. Final runtime state is not sufficient evidence for this
   transient ordering contract.
 - Focused tool tests cover indexed publication/rollback and selector isolation;

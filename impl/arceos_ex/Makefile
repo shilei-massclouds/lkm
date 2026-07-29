@@ -144,7 +144,7 @@ RUSTFLAGS := \
 	$(PLIC_PROVIDER_LINK_ARGS) \
 	$(EXTRA_RUSTFLAGS)
 
-.PHONY: build run legacy-run generate fmt fmt-check clippy-check test-vm-takeover-order disk legacy-disk disk-clean legacy-disk-clean rootfs-tarball rootfs-overlay rootfs-file-overlay rootfs-ltp-overlay clean
+.PHONY: build run legacy-run generate fmt fmt-check clippy-check test-vm-activation-order disk legacy-disk disk-clean legacy-disk-clean rootfs-tarball rootfs-overlay rootfs-file-overlay rootfs-ltp-overlay clean
 
 build: generate $(KERNEL_BIN)
 
@@ -172,8 +172,8 @@ clippy-check:
 		$(CLIPPY_FLAGS) \
 		-o "$$output"
 
-test-vm-takeover-order: $(KERNEL_ELF)
-	$(PYTHON) tests/check_vm_takeover_order.py --objdump "$(RUST_OBJDUMP)" --elf "$(KERNEL_ELF)"
+test-vm-activation-order: $(KERNEL_ELF)
+	$(PYTHON) tests/check_vm_activation_order.py --objdump "$(RUST_OBJDUMP)" --elf "$(KERNEL_ELF)"
 
 $(LINKER): $(MODEL_SPECS) $(CODEGEN_SOURCES) Makefile
 	mkdir -p $(ROOT)/tools/out/codegen

@@ -201,11 +201,11 @@ lifecycle，也不产生第二次 Kernel Enable 接受。
 ### BootInitFlow.Preset 的入口前导步骤
 
 `BootInitFlow.Preset` 通过可重复调用的 `Action::BindBootTaskEntry(CurrentTaskRef)` 按“PhysicalDirect
-下物理 `tp` binding → VM controller takeover → EarlyVm 下虚拟 `tp` binding”建立调度器运行前的
+下物理 `tp` binding → VM controller activation handoff → EarlyVm 下虚拟 `tp` binding”建立调度器运行前的
 初始抢占关闭条件。首次物理调用初始化一次 preempt count；后续虚拟调用保持该计数。该 action 不是
 Task、TaskRef、Flow 或独立 lifecycle，不改变 PID 0 identity。`BootTask` 在入口前已经由静态初始化器
 构造为 OnCpu；本步骤只验证其稳定 storage、PID 0、`TaskRef::BOOT`、canonical identity、当前 CPU
-translation owner 与 live SATP。
+active translation controller 与 live SATP。
 
 ### BootInitFlow 的引导叶子
 

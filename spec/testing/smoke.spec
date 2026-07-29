@@ -406,21 +406,21 @@ type SmokeTestGenerationMust {
         testing_cpu_group_smoke_must_cover_unique_logical_ids_and_hartids();
 
         /*
-         * Per-CPU translation ownership:
+         * Per-CPU translation activation:
          *
-         * CpuGroup smoke coverage must observe the live owner and final
-         * takeover journal independently for every CPU. The boot CPU records
-         * PhysicalDirect -> TrampolineVm -> EarlyVm -> SwapperVm, while APs
-         * record PhysicalDirect -> TrampolineVm -> SwapperVm with no EarlyVm;
-         * every receipt must record the installed SATP, completed
+         * CpuGroup smoke coverage must observe the optional active controller
+         * and activation journal independently for every CPU. The boot CPU
+         * records PhysicalDirect -> TrampolineVm -> EarlyVm -> SwapperVm,
+         * while APs record PhysicalDirect -> TrampolineVm -> SwapperVm with no
+         * EarlyVm; every receipt must record the installed SATP, completed
          * synchronization and a contiguous commit sequence. Negative coverage
-         * must reject wrong old owner/SATP, duplicate or out-of-order receipt,
+         * must reject wrong old controller/SATP, duplicate or out-of-order receipt,
          * half publication and trampoline-window boundary overflow without
          * advancing the visible journal.
          */
-        testing_cpu_group_smoke_must_cover_per_cpu_translation_owner();
-        testing_cpu_group_smoke_must_cover_bp_and_ap_takeover_paths();
-        testing_cpu_group_smoke_must_cover_translation_takeover_trace();
+        testing_cpu_group_smoke_must_cover_per_cpu_translation_activation();
+        testing_cpu_group_smoke_must_cover_bp_and_ap_activation_paths();
+        testing_cpu_group_smoke_must_cover_translation_activation_trace();
 
         /*
          * KUnit default:

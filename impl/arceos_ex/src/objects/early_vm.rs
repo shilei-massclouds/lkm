@@ -5,7 +5,9 @@ use crate::{arch::riscv64::csr, checkpoint::Checkpoint};
 use super::{
     boot_args::BootArgs,
     config::Config,
-    cpu::{Cpu, MAX_CPUS, TranslationOwner, TranslationTakeoverTrace},
+    cpu::{
+        Cpu, MAX_CPUS, TranslationActivationKind, TranslationActivationTrace, TranslationController,
+    },
     fix_map::FixMap,
     kernel_image::KernelImage,
     lds::Lds,
@@ -43,16 +45,17 @@ impl EarlyVm {
             && self.translation_sync_complete[cpu.logical_id()].load(Ordering::Acquire)
     }
 
-    pub fn complete_arch_take_over(&self, cpu: &Cpu) -> bool {
+    pub fn complete_arch_activation_on(&self, cpu: &Cpu) -> bool {
         if self.lifecycle.state() != State::Ready
             || cpu.logical_id() >= MAX_CPUS
-            || cpu.active_translation_owner() != TranslationOwner::EarlyVm
+            || cpu.active_translation_controller() != Ok(Some(TranslationController::EarlyVm))
             || csr::read_satp() != self.satp
             || !cpu.translation_receipt_matches(
                 2,
-                TranslationTakeoverTrace::completed(
-                    TranslationOwner::TrampolineVm,
-                    TranslationOwner::EarlyVm,
+                TranslationActivationTrace::completed(
+                    TranslationActivationKind::Handoff,
+                    Some(TranslationController::TrampolineVm),
+                    TranslationController::EarlyVm,
                     self.satp,
                     3,
                 ),
@@ -159,7 +162,7 @@ impl EarlyVm {
 
     pub fn current_on_cpu(&self, cpu: &Cpu) -> bool {
         self.state() == State::Ready
-            && cpu.active_translation_owner() == TranslationOwner::EarlyVm
+            && cpu.active_translation_controller() == Ok(Some(TranslationController::EarlyVm))
             && csr::read_satp() == self.satp
             && self.translation_sync_complete(cpu)
     }

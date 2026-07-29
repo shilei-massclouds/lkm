@@ -25,10 +25,10 @@ Preset 横跨三个物理实现段，但仍是 BootInitFlow 的一个 model tran
 | 段 | model drives 与实现 |
 | --- | --- |
 | `_start` head | `InterruptType.Preset` 清 `sie/sip`；入口私有动作禁用 FPU/vector；清 BSS；adopt boot hart/stack |
-| `preset_until_vm_switch()` | 读取 Kernel Enable 前已发布的 `CpuGroup.cpus[0]`；确认 `PhysicalDirect.TakeOver`，调用 `BindBootTaskEntry(TaskRef::BOOT)` 建立物理 `tp`/首次 preempt 事实；通过 BootInitFlow 的 CpuRef 解析 `CurrentCPU.Setup`，驱动 `KernelAddrSpace.Preset`、`TrapType.Preset`、`ExceptionType.Preset` 和 `Vm.Preset` |
+| `preset_until_vm_switch()` | 读取 Kernel Enable 前已发布的 `CpuGroup.cpus[0]`；确认 `PhysicalDirect.ActivateOnCpu` 的 InitialActivation，调用 `BindBootTaskEntry(TaskRef::BOOT)` 建立物理 `tp`/首次 preempt 事实；通过 BootInitFlow 的 CpuRef 解析 `CurrentCPU.Setup`，驱动 `KernelAddrSpace.Preset`、`TrapType.Preset`、`ExceptionType.Preset` 和 `Vm.Preset` |
 | `after_vm_setup()` | `Vm.Setup` 的 Trampoline→Early continuation 返回后调用同一 `BindBootTaskEntry` 建立虚拟 `tp` 且保持 preempt count，再驱动 `TrapType.Setup`、`BootInitStack.Setup` 和 `Soc.Preset` |
 
-`Vm.Setup` 必须在同一个 Preset 内通过 per-CPU `TakeOver` 完成 TrampolineVm 到 EarlyVm 的切换，并通过
+`Vm.Setup` 必须在同一个 Preset 内通过 per-CPU `ActivateOnCpu` 完成 TrampolineVm 到 EarlyVm 的 Handoff，并通过
 `after_vm_setup_continuation()` 回到 BootInitFlow owner。全部 drives 成功后直接检查原入口 Phase
 Online invariant 的完整对象事实并提交 `BootInitFlow.Prepared`；随后由 BootInitFlow 自身直接启动
 Setup 的第一个叶阶段，不回调 Kernel。
@@ -40,8 +40,8 @@ BSS。handoff fact 只证明清零循环已完成，不改变后续 BSS 的正�
 
 `BindBootTaskEntry` 是本 Flow 的可重复 action，不保存 Base/Prepared/Ready 私有状态，不加入公共
 `Context`，也不发 lifecycle checkpoint。每次调用在修改 `tp` 前验证 BootTask、`TaskRef::BOOT`、当前
-CPU owner 与 live SATP；PhysicalDirect 首次调用且仅首次初始化入口 preempt count，EarlyVm/SwapperVm
-调用保持该 count 并绑定同一 carrier 的虚拟地址。Trampoline、owner 缺失、SATP 不匹配或 carrier
+CPU controller association 与 live SATP；PhysicalDirect 首次调用且仅首次初始化入口 preempt count，EarlyVm/SwapperVm
+调用保持该 count 并绑定同一 carrier 的虚拟地址。Trampoline、controller 缺失、SATP 不匹配或 carrier
 不一致必须记录稳定诊断并沿既有 shutdown 路径 fail-stop。该 action 不承担 CurrentTask lifecycle、
 accessor 或权威存储职责；BootInitFlow 生效后 `CurrentTask` 必须直接解析为 BootTask。
 
@@ -69,5 +69,5 @@ accessor 或权威存储职责；BootInitFlow 生效后 `CurrentTask` 必须直�
 - RISC-V early alternatives (`apply_early_boot_alternatives`) 在 `Vm.Preset` 中保持显式 deferred。
 - head 汇编只执行 Rust 前不可延迟的架构动作；已完成动作由 Rust adoption 进入对象状态，不重复 checkpoint。
 - `init_task_storage` 与 linker-visible 地址继续归 `objects/boot_task.rs`；汇编只引用该符号。
-- PhysicalDirect→TrampolineVm→EarlyVm 的 per-CPU translation owner、同步事实和 continuation identity 必须保持。
+- PhysicalDirect→TrampolineVm→EarlyVm 的 per-CPU translation controller、同步事实和 continuation identity 必须保持。
 - `Started` 不是第五种状态，不新增 `Flow.Base` checkpoint。

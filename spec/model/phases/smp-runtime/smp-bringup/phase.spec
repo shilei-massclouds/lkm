@@ -545,12 +545,18 @@ object ApEntryPreludePhase: PhaseObject {
                     sbi_hart_boot_data_per_secondary_cpu(CpuStartProvider, CpuGroup);
                     secondary_idle_task_per_secondary_cpu(CpuGroup);
                     secondary_cpus_present_but_not_online(CpuGroup);
+                    cpu_active_translation_controller_absent_for_ref(ApCPURef);
+                    translation_live_satp_absent_for_ref(ApCPURef);
+                    translation_initial_activation_entry_satp_for_ref_is(
+                        ApCPURef,
+                        0
+                    );
                 }
 
                 drives {
-                    PhysicalDirect.Action::TakeOver(ApCPURef);
-                    TrampolineVm.Action::TakeOver(ApCPURef);
-                    SwapperVm.Action::TakeOver(ApCPURef);
+                    PhysicalDirect.Action::ActivateOnCpu(ApCPURef);
+                    TrampolineVm.Action::ActivateOnCpu(ApCPURef);
+                    SwapperVm.Action::ActivateOnCpu(ApCPURef);
                 }
 
                 ensures {
@@ -564,9 +570,9 @@ object ApEntryPreludePhase: PhaseObject {
                     ap_kernel_fpu_vector_disabled(CpuGroup);
                     ap_interrupts_masked_on_entry(CpuGroup);
                     ap_switches_to_swapper_vm(SwapperVm);
-                    cpu_active_translation_owner_for_ref_is(
+                    cpu_active_translation_controller_for_ref_is(
                         ApCPURef,
-                        TranslationOwnerKind::SwapperVm
+                        TranslationControllerKind::SwapperVm
                     );
                     ap_formal_trap_entry_installed(CurrentCPU.trap, CurrentCPU.trap.exception);
                     ap_entry_boot_data_logical_id_matches_target(CpuGroup);

@@ -359,9 +359,9 @@ object EarlyDtb: ResourceObject {
                 depends_on {
                     RawDtb.state == State::Ready;
                     EarlyVm.state == State::Ready;
-                    cpu_active_translation_owner_for_ref_is(
+                    cpu_active_translation_controller_for_ref_is(
                         BootCPURef,
-                        TranslationOwnerKind::EarlyVm
+                        TranslationControllerKind::EarlyVm
                     );
                 }
 
@@ -1055,9 +1055,9 @@ object EntrySuccessorPhase: PhaseObject {
                     BootInitFlow.state == State::Prepared;
                     Vm.state == State::Ready;
                     EarlyVm.state == State::Ready;
-                    cpu_active_translation_owner_for_ref_is(
+                    cpu_active_translation_controller_for_ref_is(
                         BootCPURef,
-                        TranslationOwnerKind::EarlyVm
+                        TranslationControllerKind::EarlyVm
                     );
                     BootTask.state == State::OnCpu;
                     BootInitStack.state == State::Ready;
@@ -1148,9 +1148,9 @@ object EntrySuccessorPhase: PhaseObject {
                     SwapperVm.state == State::Ready;
                     KernelAddrSpace.state == State::Online;
                     EarlyVm.state == State::Ready;
-                    cpu_active_translation_owner_for_ref_is(
+                    cpu_active_translation_controller_for_ref_is(
                         BootCPURef,
-                        TranslationOwnerKind::SwapperVm
+                        TranslationControllerKind::SwapperVm
                     );
                     vmlinux_build_id_deferred(EntrySuccessorPhase);
                     page_address_init_deferred(EntrySuccessorPhase);
@@ -1193,9 +1193,9 @@ object EntrySuccessorPhase: PhaseObject {
                     SwapperVm.state == State::Ready;
                     KernelAddrSpace.state == State::Online;
                     EarlyVm.state == State::Ready;
-                    cpu_active_translation_owner_for_ref_is(
+                    cpu_active_translation_controller_for_ref_is(
                         BootCPURef,
-                        TranslationOwnerKind::SwapperVm
+                        TranslationControllerKind::SwapperVm
                     );
                     vmlinux_build_id_deferred(EntrySuccessorPhase);
                     page_address_init_deferred(EntrySuccessorPhase);

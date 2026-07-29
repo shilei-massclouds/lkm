@@ -81,9 +81,9 @@ logical-id 的 initial idle Flow。AP 首次 Suspend 才产生第一个可恢复
 
 `tp` 的物理/虚拟绑定与早期 preemption 事实由可重复调用的
 `BootInitFlow.Action::BindBootTaskEntry(current_task_ref)` 建立，不属于 Task carrier lifecycle，也不
-建立独立 binding 对象或 snapshot state。`PhysicalDirect` owner 下首次调用绑定物理 carrier，并且
-只在这一次把 preempt count 初始化为入口关闭值；`EarlyVm` 或 `SwapperVm` owner 下调用绑定同一
-carrier 的虚拟地址并保持已有 count。`TrampolineVm`、缺失 owner、owner 与 live SATP 不一致、错误
+建立独立 binding 对象或 snapshot state。`PhysicalDirect` active controller 下首次调用绑定物理 carrier，并且
+只在这一次把 preempt count 初始化为入口关闭值；`EarlyVm` 或 `SwapperVm` active controller 下调用绑定同一
+carrier 的虚拟地址并保持已有 count。`TrampolineVm`、缺失 controller association、controller 与 live SATP 不一致、错误
 TaskRef 或错误 carrier 都必须在修改 `tp` 前记录诊断并 fail-stop。入口各阶段只能验证
 `BootTask.OnCpu` 稳定 invariant，不能推进或重放其生命周期。
 

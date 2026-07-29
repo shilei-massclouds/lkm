@@ -243,8 +243,8 @@
   },
   {
     "checkpoint_index": 22,
-    "checkpoint_name": "PhysicalDirect.TakeOver",
-    "checkpoint_variant": "PhysicalDirectTakeOver",
+    "checkpoint_name": "PhysicalDirect.ActivatedOnCpu",
+    "checkpoint_variant": "PhysicalDirectActivatedOnCpu",
     "linux_file": null,
     "linux_symbol": null,
     "linux_anchor": null,
@@ -254,8 +254,8 @@
   },
   {
     "checkpoint_index": 23,
-    "checkpoint_name": "TrampolineVm.TakeOver",
-    "checkpoint_variant": "TrampolineVmTakeOver",
+    "checkpoint_name": "TrampolineVm.ActivatedOnCpu",
+    "checkpoint_variant": "TrampolineVmActivatedOnCpu",
     "linux_file": "arch/riscv/kernel/head.S",
     "linux_symbol": "relocate_enable_mmu",
     "linux_anchor": "relocate_enable_mmu line 106: csrw CSR_SATP, a0",
@@ -320,8 +320,8 @@
   },
   {
     "checkpoint_index": 29,
-    "checkpoint_name": "EarlyVm.TakeOver",
-    "checkpoint_variant": "EarlyVmTakeOver",
+    "checkpoint_name": "EarlyVm.ActivatedOnCpu",
+    "checkpoint_variant": "EarlyVmActivatedOnCpu",
     "linux_file": "arch/riscv/kernel/head.S",
     "linux_symbol": "relocate_enable_mmu",
     "linux_anchor": "relocate_enable_mmu line 122: csrw CSR_SATP, a2",
@@ -650,8 +650,8 @@
   },
   {
     "checkpoint_index": 59,
-    "checkpoint_name": "SwapperVm.TakeOver",
-    "checkpoint_variant": "SwapperVmTakeOver",
+    "checkpoint_name": "SwapperVm.ActivatedOnCpu",
+    "checkpoint_variant": "SwapperVmActivatedOnCpu",
     "linux_file": null,
     "linux_symbol": null,
     "linux_anchor": null,

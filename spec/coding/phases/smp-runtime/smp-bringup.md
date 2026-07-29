@@ -46,11 +46,13 @@ boot-data 指针/`logical_id` 对应目标 slot，boot-data stack pointer 等于
 失败必须输出稳定 phase/logical-id/state/check 诊断并 fail-stop。
 
 AP 入口还必须执行独立的 per-CPU translation chain：MMU-off 时先由
-`PhysicalDirect.TakeOver(ApCPURef)` 建立 owner，随后切到共享 trampoline 页表并由
-`TrampolineVm.TakeOver` 记录 owner/sync，最后直接由 `SwapperVm.TakeOver` 切到最终页表。AP 不经过
-EarlyVm。每一步都验证旧 owner 与该 AP 的 live SATP，并记录 logical-id、旧/新 owner、SATP 与 fence；
-BP 的 owner 不得被 AP 写入。AP adoption 只有在 `KernelAddrSpace/Vm` 全局 Online、三个 controller
-Ready 且目标 CPU owner/live SATP 均为 Swapper 时才能成功。Trampoline 页表保持全局 Ready，不 Cleanup。
+`PhysicalDirect.ActivateOnCpu(ApCPURef)` 从 absent 建立 InitialActivation，随后切到共享 trampoline
+页表并由 `TrampolineVm.ActivateOnCpu` 记录 Handoff/sync，最后直接由
+`SwapperVm.ActivateOnCpu` Handoff 到最终页表。AP 不经过 EarlyVm。stopped AP 的 association 和 live
+SATP 必须 absent；boot data 只发布入口期望值。每一步都验证 kind、准确旧 controller 与该 AP 的 live
+SATP，并记录 logical-id、kind、optional old/new controller、SATP 与 fence；BP 的 association 不得被
+AP 写入。AP adoption 只有在 `KernelAddrSpace/Vm` 全局 Online、三个 controller Ready 且目标 CPU
+controller/live SATP 均为 Swapper 时才能成功。Trampoline 页表保持全局 Ready，不 Cleanup。
 
 `CpuStartProvider` 当前仍是 BP 聚合对象：SMP8 下某个 target 的 HSM return/AP entry 可以早于
 全部 target 请求结束后的 `CpuStartProvider.Ready` checkpoint。HSM 前 BP 必须先验证并 release
@@ -90,7 +92,7 @@ hart_start with secondary_start_sbi as entry and per-AP boot data whose ABI pref
 exactly Linux `{task_ptr, stack_ptr}` as opaque data. BP records the target TaskRef,
 FlowRef and logical-id as the keyed Startup cause. The current ordered booting path must not add a
 spinwait fallback unless the model is extended first.
-ABI prefix 后的实现私有字段可以发布 trampoline/swapper SATP 与目标 CPU owner storage 地址；这些字段
+ABI prefix 后的实现私有字段可以发布 trampoline/swapper SATP 与目标 CPU translation-state storage 地址；这些字段
 必须与 target logical-id 一致并遵守既有 release/acquire boot-data ordering。
 
 #### AP subphases

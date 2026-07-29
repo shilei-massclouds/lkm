@@ -155,15 +155,15 @@
   },
   {
     "index": 22,
-    "variant": "PhysicalDirectTakeOver",
-    "name": "PhysicalDirect.TakeOver",
+    "variant": "PhysicalDirectActivatedOnCpu",
+    "name": "PhysicalDirect.ActivatedOnCpu",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
     "index": 23,
-    "variant": "TrampolineVmTakeOver",
-    "name": "TrampolineVm.TakeOver",
+    "variant": "TrampolineVmActivatedOnCpu",
+    "name": "TrampolineVm.ActivatedOnCpu",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
@@ -204,8 +204,8 @@
   },
   {
     "index": 29,
-    "variant": "EarlyVmTakeOver",
-    "name": "EarlyVm.TakeOver",
+    "variant": "EarlyVmActivatedOnCpu",
+    "name": "EarlyVm.ActivatedOnCpu",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
@@ -414,8 +414,8 @@
   },
   {
     "index": 59,
-    "variant": "SwapperVmTakeOver",
-    "name": "SwapperVm.TakeOver",
+    "variant": "SwapperVmActivatedOnCpu",
+    "name": "SwapperVm.ActivatedOnCpu",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },

@@ -3,7 +3,7 @@ use crate::{arch::riscv64::csr, checkpoint::Checkpoint};
 use super::{
     boot_args::BootArgs,
     config::Config,
-    cpu::{Cpu, TranslationOwner, TranslationTakeoverTrace},
+    cpu::{Cpu, TranslationActivationKind, TranslationActivationTrace, TranslationController},
     early_vm::EarlyVm,
     fix_map::FixMap,
     kernel_addr_space::KernelAddrSpace,
@@ -107,7 +107,8 @@ impl Vm {
             || self.trampoline_vm.state() != State::Ready
             || self.early_vm.state() != State::Ready
             || self.physical_direct.state() != State::Ready
-            || boot_cpu.active_translation_owner() != TranslationOwner::PhysicalDirect
+            || boot_cpu.active_translation_controller()
+                != Ok(Some(TranslationController::PhysicalDirect))
             || csr::read_satp() != 0
         {
             crate::arch::riscv64::sbi::system_shutdown();
@@ -174,17 +175,17 @@ impl Vm {
         let expected_chain =
             boot_early_translation_chain(self.trampoline_vm.satp(), self.early_vm.satp());
         if !boot_cpu.verify_translation_chain(&expected_chain, csr::read_satp())
-            || !self.physical_direct.complete_arch_take_over(boot_cpu)
-            || !self.trampoline_vm.complete_arch_take_over(boot_cpu)
+            || !self.physical_direct.complete_arch_activation_on(boot_cpu)
+            || !self.trampoline_vm.complete_arch_activation_on(boot_cpu)
         {
             crate::arch::riscv64::sbi::system_shutdown();
         }
-        crate::checkpoint::checkpoint(Checkpoint::TrampolineVmTakeOver);
+        crate::checkpoint::checkpoint(Checkpoint::TrampolineVmActivatedOnCpu);
 
-        if !self.early_vm.complete_arch_take_over(boot_cpu) {
+        if !self.early_vm.complete_arch_activation_on(boot_cpu) {
             crate::arch::riscv64::sbi::system_shutdown();
         }
-        crate::checkpoint::checkpoint(Checkpoint::EarlyVmTakeOver);
+        crate::checkpoint::checkpoint(Checkpoint::EarlyVmActivatedOnCpu);
 
         let result = kernel_image.enable(lds);
         if result.is_err() {
@@ -231,12 +232,8 @@ impl Vm {
 
         kernel_addr_space.enable(&self.swapper_vm)?;
         self.kernel_addr_space_online_observed = true;
-        self.swapper_vm.take_over(
-            boot_cpu,
-            TranslationOwner::EarlyVm,
-            self.early_vm.satp(),
-            kernel_addr_space,
-        )?;
+        self.swapper_vm
+            .activate_on_cpu(boot_cpu, self.early_vm.satp(), kernel_addr_space)?;
 
         self.lifecycle.transition(
             LifecycleEvent::Enable,
@@ -246,8 +243,8 @@ impl Vm {
         )
     }
 
-    pub fn take_over_physical(&self, cpu: &Cpu) -> EventResult {
-        self.physical_direct.take_over(cpu)
+    pub fn activate_physical_on_cpu(&self, cpu: &Cpu) -> EventResult {
+        self.physical_direct.activate_on_cpu(cpu)
     }
 
     pub fn entry_prelude_ready(&self) -> bool {
@@ -261,7 +258,7 @@ impl Vm {
     pub fn entry_prelude_ready_for(&self, cpu: &Cpu) -> bool {
         self.lifecycle.state() == State::Ready
             && self.entry_prelude_ready()
-            && self.physical_direct.takeover_complete_for(cpu)
+            && self.physical_direct.activation_complete_on(cpu)
             && self.trampoline_vm.translation_sync_complete(cpu)
             && self.early_vm.current_on_cpu(cpu)
     }
@@ -286,20 +283,20 @@ impl Vm {
             ap_translation_chain(self.trampoline_vm.satp(), self.swapper_vm.satp());
         self.entry_successor_ready()
             && cpu.verify_translation_chain(&expected_chain, live_satp)
-            && self.physical_direct.complete_arch_take_over(cpu)
-            && self.trampoline_vm.complete_arch_take_over(cpu)
+            && self.physical_direct.complete_arch_activation_on(cpu)
+            && self.trampoline_vm.complete_arch_activation_on(cpu)
             && self
                 .swapper_vm
-                .complete_arch_take_over(cpu, TranslationOwner::TrampolineVm)
+                .complete_arch_activation_on(cpu, TranslationController::TrampolineVm)
     }
 
     pub fn ap_translation_ready(&self, cpu: &Cpu) -> bool {
         let expected_chain =
             ap_translation_chain(self.trampoline_vm.satp(), self.swapper_vm.satp());
         self.entry_successor_ready()
-            && self.physical_direct.takeover_complete_for(cpu)
+            && self.physical_direct.activation_complete_on(cpu)
             && self.trampoline_vm.translation_sync_complete(cpu)
-            && self.swapper_vm.takeover_complete_for(cpu)
+            && self.swapper_vm.activation_complete_on(cpu)
             && cpu.translation_chain_matches(&expected_chain)
     }
 
@@ -319,23 +316,26 @@ impl Vm {
 fn boot_early_translation_chain(
     trampoline_satp: usize,
     early_satp: usize,
-) -> [TranslationTakeoverTrace; 3] {
+) -> [TranslationActivationTrace; 3] {
     [
-        TranslationTakeoverTrace::completed(
-            TranslationOwner::None,
-            TranslationOwner::PhysicalDirect,
+        TranslationActivationTrace::completed(
+            TranslationActivationKind::InitialActivation,
+            None,
+            TranslationController::PhysicalDirect,
             0,
             1,
         ),
-        TranslationTakeoverTrace::completed(
-            TranslationOwner::PhysicalDirect,
-            TranslationOwner::TrampolineVm,
+        TranslationActivationTrace::completed(
+            TranslationActivationKind::Handoff,
+            Some(TranslationController::PhysicalDirect),
+            TranslationController::TrampolineVm,
             trampoline_satp,
             2,
         ),
-        TranslationTakeoverTrace::completed(
-            TranslationOwner::TrampolineVm,
-            TranslationOwner::EarlyVm,
+        TranslationActivationTrace::completed(
+            TranslationActivationKind::Handoff,
+            Some(TranslationController::TrampolineVm),
+            TranslationController::EarlyVm,
             early_satp,
             3,
         ),
@@ -347,15 +347,16 @@ pub(crate) fn boot_translation_chain(
     trampoline_satp: usize,
     early_satp: usize,
     swapper_satp: usize,
-) -> [TranslationTakeoverTrace; 4] {
+) -> [TranslationActivationTrace; 4] {
     let early = boot_early_translation_chain(trampoline_satp, early_satp);
     [
         early[0],
         early[1],
         early[2],
-        TranslationTakeoverTrace::completed(
-            TranslationOwner::EarlyVm,
-            TranslationOwner::SwapperVm,
+        TranslationActivationTrace::completed(
+            TranslationActivationKind::Handoff,
+            Some(TranslationController::EarlyVm),
+            TranslationController::SwapperVm,
             swapper_satp,
             4,
         ),
@@ -365,23 +366,26 @@ pub(crate) fn boot_translation_chain(
 pub(crate) fn ap_translation_chain(
     trampoline_satp: usize,
     swapper_satp: usize,
-) -> [TranslationTakeoverTrace; 3] {
+) -> [TranslationActivationTrace; 3] {
     [
-        TranslationTakeoverTrace::completed(
-            TranslationOwner::None,
-            TranslationOwner::PhysicalDirect,
+        TranslationActivationTrace::completed(
+            TranslationActivationKind::InitialActivation,
+            None,
+            TranslationController::PhysicalDirect,
             0,
             1,
         ),
-        TranslationTakeoverTrace::completed(
-            TranslationOwner::PhysicalDirect,
-            TranslationOwner::TrampolineVm,
+        TranslationActivationTrace::completed(
+            TranslationActivationKind::Handoff,
+            Some(TranslationController::PhysicalDirect),
+            TranslationController::TrampolineVm,
             trampoline_satp,
             2,
         ),
-        TranslationTakeoverTrace::completed(
-            TranslationOwner::TrampolineVm,
-            TranslationOwner::SwapperVm,
+        TranslationActivationTrace::completed(
+            TranslationActivationKind::Handoff,
+            Some(TranslationController::TrampolineVm),
+            TranslationController::SwapperVm,
             swapper_satp,
             3,
         ),

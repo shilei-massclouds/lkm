@@ -9,7 +9,7 @@
  * BootTask 的定义集中在 task.spec。入口 tp binding 是 BootInitFlow 的
  * 可重复 Action，不创建独立对象、状态或 snapshot identity。
  */
-predicate boot_task_entry_bound_for_active_owner<C: CPU, T: Task>(cpu: C, task: T) -> bool;
+predicate boot_task_entry_bound_for_active_controller<C: CPU, T: Task>(cpu: C, task: T) -> bool;
 predicate boot_task_entry_preempt_count_initialized_once<T: Task>(task: T) -> bool;
 predicate boot_task_entry_preempt_count_preserved<T: Task>(task: T) -> bool;
 predicate boot_task_entry_binding_diagnostic_clear() -> bool;
@@ -219,9 +219,9 @@ object KernelImage: ImageObject {
             on Transition::Enable -> State::Online {
                 depends_on {
                     EarlyVm.state == State::Ready;
-                    cpu_active_translation_owner_for_ref_is(
+                    cpu_active_translation_controller_for_ref_is(
                         BootCPURef,
-                        TranslationOwnerKind::EarlyVm
+                        TranslationControllerKind::EarlyVm
                     );
                 }
 
@@ -582,6 +582,7 @@ object KernelAddrSpace: AddressSpaceObject {
                 ensures {
                     kernel_addr_space_final_swapper_mappings_published(self, SwapperVm);
                     kernel_addr_space_online_is_not_all_cpus_switched(self);
+                    translation_controller_readiness_does_not_imply_cpu_activation(SwapperVm);
                 }
             }
         }
@@ -592,6 +593,7 @@ object KernelAddrSpace: AddressSpaceObject {
             SwapperVm.state == State::Ready;
             kernel_addr_space_final_swapper_mappings_published(self, SwapperVm);
             kernel_addr_space_online_is_not_all_cpus_switched(self);
+            translation_controller_readiness_does_not_imply_cpu_activation(SwapperVm);
             kernel_mappings_exclude_user_reserve(self, UserSpaceReserve);
         }
     }
@@ -604,25 +606,31 @@ object PhysicalDirect: PrepareObject {
 
     state State::Ready {
         actions {
-            on Action::TakeOver(cpu_ref: CpuRef) {
+            on Action::ActivateOnCpu(cpu_ref: CpuRef) {
                 depends_on {
                     cpu_ref_dereference_requires_published_element(cpu_ref);
-                    cpu_active_translation_owner_for_ref_is(
-                        cpu_ref,
-                        TranslationOwnerKind::None
-                    );
-                    translation_live_satp_for_ref_is(cpu_ref, 0);
+                    cpu_active_translation_controller_absent_for_ref(cpu_ref);
+                    translation_initial_activation_entry_satp_for_ref_is(cpu_ref, 0);
                 }
 
                 ensures {
-                    cpu_active_translation_owner_for_ref_is(
+                    translation_live_satp_for_ref_is(cpu_ref, 0);
+                    cpu_active_translation_controller_for_ref_is(
                         cpu_ref,
-                        TranslationOwnerKind::PhysicalDirect
+                        TranslationControllerKind::PhysicalDirect
                     );
-                    translation_takeover_recorded(cpu_ref, TranslationOwnerKind::None, TranslationOwnerKind::PhysicalDirect, 0);
-                    translation_takeover_fence_complete(cpu_ref);
-                    translation_takeover_owner_replaced_atomically(cpu_ref);
-                    cpu_translation_owner_matches_live_satp_for_ref(cpu_ref);
+                    translation_activation_kind_is(
+                        cpu_ref,
+                        TranslationActivationKind::InitialActivation
+                    );
+                    translation_initial_activation_recorded(
+                        cpu_ref,
+                        TranslationControllerKind::PhysicalDirect,
+                        0
+                    );
+                    translation_activation_fence_complete(cpu_ref);
+                    translation_activation_committed_atomically(cpu_ref);
+                    cpu_translation_controller_matches_live_satp_for_ref(cpu_ref);
                 }
             }
         }
@@ -682,14 +690,14 @@ object Vm: KernelObject {
         transitions {
             on Transition::Setup -> State::Ready {
                 drives {
-                    TrampolineVm.Action::TakeOver(BootCPURef);
-                    EarlyVm.Action::TakeOver(BootCPURef);
+                    TrampolineVm.Action::ActivateOnCpu(BootCPURef);
+                    EarlyVm.Action::ActivateOnCpu(BootCPURef);
                     KernelImage.Transition::Enable;
                 }
 
                 ensures {
-                    cpu_active_translation_owner_is(CpuGroup.cpus[0], TranslationOwnerKind::EarlyVm);
-                    cpu_active_translation_owner_for_ref_is(BootCPURef, TranslationOwnerKind::EarlyVm);
+                    cpu_active_translation_controller_is(CpuGroup.cpus[0], TranslationControllerKind::EarlyVm);
+                    cpu_active_translation_controller_for_ref_is(BootCPURef, TranslationControllerKind::EarlyVm);
                     BootCpuRegisters.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode);
                     early_vm_translation_sync_complete(EarlyVm, CpuGroup.cpus[0]);
                     vm_transition_stvec_released_to_trap(BootCpuRegisters.stvec, CurrentCPU.trap);
@@ -706,7 +714,7 @@ object Vm: KernelObject {
             SwapperVm.state == State::Base;
             KernelAddrSpace.state == State::Ready;
             KernelImage.state == State::Online;
-            cpu_active_translation_owner_is(CpuGroup.cpus[0], TranslationOwnerKind::EarlyVm);
+            cpu_active_translation_controller_is(CpuGroup.cpus[0], TranslationControllerKind::EarlyVm);
             BootCpuRegisters.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode);
             early_vm_translation_sync_complete(EarlyVm, CpuGroup.cpus[0]);
         }
@@ -716,12 +724,12 @@ object Vm: KernelObject {
                 drives {
                     SwapperVm.Transition::Setup;
                     KernelAddrSpace.Transition::Enable;
-                    SwapperVm.Action::TakeOver(BootCPURef);
+                    SwapperVm.Action::ActivateOnCpu(BootCPURef);
                 }
 
                 ensures {
-                    cpu_active_translation_owner_is(CpuGroup.cpus[0], TranslationOwnerKind::SwapperVm);
-                    cpu_active_translation_owner_for_ref_is(BootCPURef, TranslationOwnerKind::SwapperVm);
+                    cpu_active_translation_controller_is(CpuGroup.cpus[0], TranslationControllerKind::SwapperVm);
+                    cpu_active_translation_controller_for_ref_is(BootCPURef, TranslationControllerKind::SwapperVm);
                     BootCpuRegisters.satp == satp_of(SwapperVm.pg_dir, Config.satp_mode);
                     swapper_vm_translation_sync_complete(SwapperVm, CpuGroup.cpus[0]);
                 }
@@ -736,7 +744,7 @@ object Vm: KernelObject {
             EarlyVm.state == State::Ready;
             SwapperVm.state == State::Ready;
             KernelAddrSpace.state == State::Online;
-            cpu_active_translation_owner_is(CpuGroup.cpus[0], TranslationOwnerKind::SwapperVm);
+            cpu_active_translation_controller_is(CpuGroup.cpus[0], TranslationControllerKind::SwapperVm);
             BootCpuRegisters.satp == satp_of(SwapperVm.pg_dir, Config.satp_mode);
             swapper_vm_translation_sync_complete(SwapperVm, CpuGroup.cpus[0]);
         }
@@ -788,7 +796,7 @@ object TrampolineVm: AddressSpaceObject {
         }
     }
 
-    /* Ready 是共享 controller 的稳定页表准备状态；每 CPU 激活由 TakeOver 表达。 */
+    /* Ready 是共享 controller 的稳定页表准备状态；每 CPU 激活由 ActivateOnCpu 表达。 */
     state State::Ready {
         invariant {
             attrs_accessible(self);
@@ -797,13 +805,13 @@ object TrampolineVm: AddressSpaceObject {
         }
 
         actions {
-            on Action::TakeOver(cpu_ref: CpuRef) {
+            on Action::ActivateOnCpu(cpu_ref: CpuRef) {
                 depends_on {
                     KernelImage.state == State::Ready
                         || KernelImage.state == State::Online;
-                    cpu_active_translation_owner_for_ref_is(
+                    cpu_active_translation_controller_for_ref_is(
                         cpu_ref,
-                        TranslationOwnerKind::PhysicalDirect
+                        TranslationControllerKind::PhysicalDirect
                     );
                     translation_live_satp_for_ref_is(cpu_ref, 0);
                 }
@@ -818,19 +826,23 @@ object TrampolineVm: AddressSpaceObject {
                         satp_of(TrampolineVm.pg_dir, Config.satp_mode)
                     );
                     translation_stvec_borrowed_for_ref(cpu_ref, TrampolineVm);
-                    cpu_active_translation_owner_for_ref_is(
+                    cpu_active_translation_controller_for_ref_is(
                         cpu_ref,
-                        TranslationOwnerKind::TrampolineVm
+                        TranslationControllerKind::TrampolineVm
                     );
-                    translation_takeover_recorded(
+                    translation_activation_kind_is(
                         cpu_ref,
-                        TranslationOwnerKind::PhysicalDirect,
-                        TranslationOwnerKind::TrampolineVm,
+                        TranslationActivationKind::Handoff
+                    );
+                    translation_handoff_recorded(
+                        cpu_ref,
+                        TranslationControllerKind::PhysicalDirect,
+                        TranslationControllerKind::TrampolineVm,
                         satp_of(TrampolineVm.pg_dir, Config.satp_mode)
                     );
-                    translation_takeover_fence_complete(cpu_ref);
-                    translation_takeover_owner_replaced_atomically(cpu_ref);
-                    cpu_translation_owner_matches_live_satp_for_ref(cpu_ref);
+                    translation_activation_fence_complete(cpu_ref);
+                    translation_activation_committed_atomically(cpu_ref);
+                    cpu_translation_controller_matches_live_satp_for_ref(cpu_ref);
                 }
             }
         }
@@ -935,12 +947,12 @@ object EarlyVm: PrepareObject {
         }
 
         actions {
-            on Action::TakeOver(cpu_ref: CpuRef) {
+            on Action::ActivateOnCpu(cpu_ref: CpuRef) {
                 depends_on {
                     TrampolineVm.state == State::Ready;
-                    cpu_active_translation_owner_for_ref_is(
+                    cpu_active_translation_controller_for_ref_is(
                         cpu_ref,
-                        TranslationOwnerKind::TrampolineVm
+                        TranslationControllerKind::TrampolineVm
                     );
                     translation_live_satp_for_ref_is(
                         cpu_ref,
@@ -958,19 +970,23 @@ object EarlyVm: PrepareObject {
                     early_vm_translation_sync_complete(EarlyVm, cpu_ref);
                     kernel_image_accessible(KernelImage, KernelImage.virt_range);
                     fixmap_slot_accessible(FixMap.fdt_slot);
-                    cpu_active_translation_owner_for_ref_is(
+                    cpu_active_translation_controller_for_ref_is(
                         cpu_ref,
-                        TranslationOwnerKind::EarlyVm
+                        TranslationControllerKind::EarlyVm
                     );
-                    translation_takeover_recorded(
+                    translation_activation_kind_is(
                         cpu_ref,
-                        TranslationOwnerKind::TrampolineVm,
-                        TranslationOwnerKind::EarlyVm,
+                        TranslationActivationKind::Handoff
+                    );
+                    translation_handoff_recorded(
+                        cpu_ref,
+                        TranslationControllerKind::TrampolineVm,
+                        TranslationControllerKind::EarlyVm,
                         satp_of(EarlyVm.pg_dir, Config.satp_mode)
                     );
-                    translation_takeover_fence_complete(cpu_ref);
-                    translation_takeover_owner_replaced_atomically(cpu_ref);
-                    cpu_translation_owner_matches_live_satp_for_ref(cpu_ref);
+                    translation_activation_fence_complete(cpu_ref);
+                    translation_activation_committed_atomically(cpu_ref);
+                    cpu_translation_controller_matches_live_satp_for_ref(cpu_ref);
                     translation_controller_retired_for_cpu(TrampolineVm, cpu_ref);
                 }
             }
@@ -1050,17 +1066,17 @@ object SwapperVm: PrepareObject {
         }
 
         actions {
-            on Action::TakeOver(cpu_ref: CpuRef) {
+            on Action::ActivateOnCpu(cpu_ref: CpuRef) {
                 depends_on {
                     KernelAddrSpace.state == State::Online;
-                    cpu_active_translation_owner_for_ref_is(
+                    cpu_active_translation_controller_for_ref_is(
                         cpu_ref,
-                        TranslationOwnerKind::EarlyVm
-                    ) || cpu_active_translation_owner_for_ref_is(
+                        TranslationControllerKind::EarlyVm
+                    ) || cpu_active_translation_controller_for_ref_is(
                         cpu_ref,
-                        TranslationOwnerKind::TrampolineVm
+                        TranslationControllerKind::TrampolineVm
                     );
-                    cpu_translation_owner_matches_live_satp_for_ref(cpu_ref);
+                    cpu_translation_controller_matches_live_satp_for_ref(cpu_ref);
                 }
 
                 ensures {
@@ -1072,11 +1088,19 @@ object SwapperVm: PrepareObject {
                     );
                     swapper_vm_current_on_cpu(SwapperVm, cpu_ref);
                     swapper_vm_translation_sync_complete(SwapperVm, cpu_ref);
-                    cpu_active_translation_owner_for_ref_is(cpu_ref, TranslationOwnerKind::SwapperVm);
-                    translation_takeover_to_swapper_recorded(cpu_ref, satp_of(SwapperVm.pg_dir, Config.satp_mode));
-                    translation_takeover_fence_complete(cpu_ref);
-                    translation_takeover_owner_replaced_atomically(cpu_ref);
-                    cpu_translation_owner_matches_live_satp_for_ref(cpu_ref);
+                    cpu_active_translation_controller_for_ref_is(cpu_ref, TranslationControllerKind::SwapperVm);
+                    translation_activation_kind_is(
+                        cpu_ref,
+                        TranslationActivationKind::Handoff
+                    );
+                    translation_handoff_to_swapper_recorded_from_active_controller(
+                        cpu_ref,
+                        satp_of(SwapperVm.pg_dir, Config.satp_mode)
+                    );
+                    translation_handoff_old_controller_recorded_from_active_association(cpu_ref);
+                    translation_activation_fence_complete(cpu_ref);
+                    translation_activation_committed_atomically(cpu_ref);
+                    cpu_translation_controller_matches_live_satp_for_ref(cpu_ref);
                 }
             }
         }

@@ -27,24 +27,33 @@ Kernel
 `RawDtb` 是固件提供的物理 blob，不是 `KernelAddrSpace` 的子区域。
 
 `KernelAddrSpace.Online` 表示最终 `SwapperVm` 映射已发布到这一地址空间；它不表示所有 CPU 已经
-切换 SATP。`Vm.Online` 是控制面已经发布最终 controller 的全局边界，也不代替 CPU-local owner。
+切换 SATP。`Vm.Online` 是控制面已经发布最终 controller 的全局边界，也不代替任何 CPU-local
+activation。controller 对象和它们的页表全局共享；activation relation、live SATP、同步完成事实与
+activation journal 都按 CPU 独立。
 
-## 每 CPU active translation owner
+## 每 CPU active translation controller
 
-`CPU.active_translation_owner` 是可选的 typed controller reference。已经执行内核入口的 CPU 必须
-恰有一个 owner；仅被发现、尚未进入内核的 AP 可以为空。`PhysicalDirect`、`TrampolineVm`、
-`EarlyVm` 与 `SwapperVm` 是共享 translation controller：页表/控制器 Ready 状态是全局事实，
-激活归属是每 CPU 事实。
+`CPU.active_translation_controller` 是可选的 typed association。已经执行内核入口的 CPU 必须
+恰有关联一个 controller；仅被发现、尚未进入内核的 stopped AP 必须为 absent，而且不得预置该 CPU
+的 live SATP。AP 启动协议可以预先发布入口预期使用的 SATP 值，但该值在 AP 真正进入架构入口前只是
+boot-data expectation。`PhysicalDirect`、`TrampolineVm`、`EarlyVm` 与 `SwapperVm` 是共享
+translation controller：页表/控制器 Ready 状态是全局事实，激活关联是每 CPU 事实。
 
-四个 controller 使用统一的 `Action::TakeOver(cpu_ref)`：先验证 controller Ready、CpuRef 有效、
-旧 owner 与 live SATP 一致，再按控制器规则写 SATP 并完成所需 fence，最后原子替换目标 CPU owner。
-trace 必须记录 canonical CPU、旧/新 owner、写入的 SATP 与同步事实。失败必须在 SATP 和 owner 修改前
-记录诊断并 fail-stop；旧 controller 只是不再被该 CPU 使用，不进入 Cleanup/Destroyed。
+四个 controller 使用统一的 `Action::ActivateOnCpu(cpu_ref)`。当 association absent 时，action kind
+必须是 `InitialActivation`，新 controller 必须是 `PhysicalDirect`，并验证入口 live SATP 为零；当
+association present 时，action kind 必须是 `Handoff`，并验证准确的旧 controller 与 live SATP
+一致。随后 action 按目标 controller 规则写 SATP、完成所需 fence，并把 kind、canonical CPU、
+optional old controller、新 controller、写入的 SATP 与同步事实作为一个原子 activation commit
+发布。失败必须在 SATP、association、journal 和 committed count 出现任何部分提交前记录诊断并
+fail-stop；旧 controller 只是不再被该 CPU 使用，不进入 Cleanup/Destroyed。
 
-BP 的 owner 链是 `PhysicalDirect -> TrampolineVm -> EarlyVm -> SwapperVm`；AP 的链是
-`PhysicalDirect -> TrampolineVm -> SwapperVm`。`EarlyVm.TakeOver` 完成时 trampoline 对当前 CPU
-同步退役，但静态 trampoline 页表保持 Ready，供以后 AP 复用。`EarlyVm` 同样保持 Ready；BP 切换
-到 SwapperVm 不销毁共享 controller。
+BP 在 Kernel 真实入口接受边界建立
+`absent -InitialActivation-> PhysicalDirect -Handoff-> TrampolineVm -Handoff-> EarlyVm -Handoff-> SwapperVm`。
+AP 在真实 `ApEntryPreludePhase` 架构入口建立
+`absent -InitialActivation-> PhysicalDirect -Handoff-> TrampolineVm -Handoff-> SwapperVm`，不经过
+EarlyVm。EarlyVm activation 完成时 trampoline 只对该 CPU 退役，但静态 trampoline 页表保持
+Ready，供以后 AP 复用。EarlyVm 同样保持 Ready；BP 切换到 SwapperVm 不销毁共享 controller。
+任何 controller、`KernelAddrSpace` 或 `Vm` 的 Ready/Online 聚合状态都不能推出某个 CPU 已激活它。
 
 ## KernelImage 与构建产物命名
 

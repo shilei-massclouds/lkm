@@ -36,15 +36,15 @@ arceos_ex_switch_to_early_vm:
      * to the virtual stvec label that is covered by the trampoline mapping.
      * The sfence.vma before writing trampoline satp and the sfence.vma after
      * writing early satp are the implementation facts required by
-     * TrampolineVm.TakeOver and EarlyVm.TakeOver.
+     * TrampolineVm.ActivateOnCpu and EarlyVm.ActivateOnCpu.
      */
     la      t0, 1f
     add     t0, t0, a5
     csrw    stvec, t0
     csrr    t0, satp
     bnez    t0, .Lbp_translation_fail
-    lbu     t0, {state_owner_offset}(a6)
-    li      t1, {physical_owner}
+    lbu     t0, {state_controller_offset}(a6)
+    li      t1, {physical_controller}
     bne     t0, t1, .Lbp_translation_fail
     ld      t0, {state_count_offset}(a6)
     li      t1, 1
@@ -61,24 +61,26 @@ arceos_ex_switch_to_early_vm:
     csrr    t0, satp
     bne     t0, a0, .Lbp_translation_fail
 
-    li      t0, {physical_owner}
+    li      t0, {physical_controller}
     sb      t0, {bp_trampoline_old_offset}(a6)
-    li      t0, {trampoline_owner}
+    li      t0, {trampoline_controller}
     sb      t0, {bp_trampoline_new_offset}(a6)
     li      t0, 1
     sb      t0, {bp_trampoline_sync_offset}(a6)
+    li      t0, {handoff_kind}
+    sb      t0, {bp_trampoline_kind_offset}(a6)
     sd      a0, {bp_trampoline_satp_offset}(a6)
     li      t0, 2
     sd      t0, {bp_trampoline_sequence_offset}(a6)
     fence   rw, w
-    li      t0, {trampoline_owner}
-    sb      t0, {state_owner_offset}(a6)
+    li      t0, {trampoline_controller}
+    sb      t0, {state_controller_offset}(a6)
     fence   rw, w
     li      t0, 2
     sd      t0, {state_count_offset}(a6)
 
-    lbu     t0, {state_owner_offset}(a6)
-    li      t1, {trampoline_owner}
+    lbu     t0, {state_controller_offset}(a6)
+    li      t1, {trampoline_controller}
     bne     t0, t1, .Lbp_translation_fail
     ld      t0, {state_count_offset}(a6)
     li      t1, 2
@@ -88,17 +90,19 @@ arceos_ex_switch_to_early_vm:
     csrr    t0, satp
     bne     t0, a1, .Lbp_translation_fail
 
-    li      t0, {trampoline_owner}
+    li      t0, {trampoline_controller}
     sb      t0, {bp_early_old_offset}(a6)
-    li      t1, {early_owner}
+    li      t1, {early_controller}
     sb      t1, {bp_early_new_offset}(a6)
     li      t0, 1
     sb      t0, {bp_early_sync_offset}(a6)
+    li      t0, {handoff_kind}
+    sb      t0, {bp_early_kind_offset}(a6)
     sd      a1, {bp_early_satp_offset}(a6)
     li      t0, 3
     sd      t0, {bp_early_sequence_offset}(a6)
     fence   rw, w
-    sb      t1, {state_owner_offset}(a6)
+    sb      t1, {state_controller_offset}(a6)
     fence   rw, w
     li      t0, 3
     sd      t0, {state_count_offset}(a6)
@@ -131,21 +135,24 @@ arceos_ex_enter_user_mode:
     mv      sp, a2
     sret
 "#,
-    state_owner_offset = const crate::objects::cpu::TRANSLATION_STATE_OWNER_OFFSET,
+    state_controller_offset = const crate::objects::cpu::TRANSLATION_STATE_CONTROLLER_OFFSET,
     state_count_offset = const crate::objects::cpu::TRANSLATION_STATE_COMMITTED_COUNT_OFFSET,
-    bp_trampoline_old_offset = const crate::objects::cpu::TRANSLATION_STATE_JOURNAL_OFFSET + crate::objects::cpu::TRANSLATION_RECEIPT_SIZE + crate::objects::cpu::TRANSLATION_RECEIPT_OLD_OWNER_OFFSET,
-    bp_trampoline_new_offset = const crate::objects::cpu::TRANSLATION_STATE_JOURNAL_OFFSET + crate::objects::cpu::TRANSLATION_RECEIPT_SIZE + crate::objects::cpu::TRANSLATION_RECEIPT_NEW_OWNER_OFFSET,
+    bp_trampoline_old_offset = const crate::objects::cpu::TRANSLATION_STATE_JOURNAL_OFFSET + crate::objects::cpu::TRANSLATION_RECEIPT_SIZE + crate::objects::cpu::TRANSLATION_RECEIPT_OLD_CONTROLLER_OFFSET,
+    bp_trampoline_new_offset = const crate::objects::cpu::TRANSLATION_STATE_JOURNAL_OFFSET + crate::objects::cpu::TRANSLATION_RECEIPT_SIZE + crate::objects::cpu::TRANSLATION_RECEIPT_NEW_CONTROLLER_OFFSET,
     bp_trampoline_sync_offset = const crate::objects::cpu::TRANSLATION_STATE_JOURNAL_OFFSET + crate::objects::cpu::TRANSLATION_RECEIPT_SIZE + crate::objects::cpu::TRANSLATION_RECEIPT_SYNC_COMPLETE_OFFSET,
+    bp_trampoline_kind_offset = const crate::objects::cpu::TRANSLATION_STATE_JOURNAL_OFFSET + crate::objects::cpu::TRANSLATION_RECEIPT_SIZE + crate::objects::cpu::TRANSLATION_RECEIPT_KIND_OFFSET,
     bp_trampoline_satp_offset = const crate::objects::cpu::TRANSLATION_STATE_JOURNAL_OFFSET + crate::objects::cpu::TRANSLATION_RECEIPT_SIZE + crate::objects::cpu::TRANSLATION_RECEIPT_SATP_OFFSET,
     bp_trampoline_sequence_offset = const crate::objects::cpu::TRANSLATION_STATE_JOURNAL_OFFSET + crate::objects::cpu::TRANSLATION_RECEIPT_SIZE + crate::objects::cpu::TRANSLATION_RECEIPT_SEQUENCE_OFFSET,
-    bp_early_old_offset = const crate::objects::cpu::TRANSLATION_STATE_JOURNAL_OFFSET + 2 * crate::objects::cpu::TRANSLATION_RECEIPT_SIZE + crate::objects::cpu::TRANSLATION_RECEIPT_OLD_OWNER_OFFSET,
-    bp_early_new_offset = const crate::objects::cpu::TRANSLATION_STATE_JOURNAL_OFFSET + 2 * crate::objects::cpu::TRANSLATION_RECEIPT_SIZE + crate::objects::cpu::TRANSLATION_RECEIPT_NEW_OWNER_OFFSET,
+    bp_early_old_offset = const crate::objects::cpu::TRANSLATION_STATE_JOURNAL_OFFSET + 2 * crate::objects::cpu::TRANSLATION_RECEIPT_SIZE + crate::objects::cpu::TRANSLATION_RECEIPT_OLD_CONTROLLER_OFFSET,
+    bp_early_new_offset = const crate::objects::cpu::TRANSLATION_STATE_JOURNAL_OFFSET + 2 * crate::objects::cpu::TRANSLATION_RECEIPT_SIZE + crate::objects::cpu::TRANSLATION_RECEIPT_NEW_CONTROLLER_OFFSET,
     bp_early_sync_offset = const crate::objects::cpu::TRANSLATION_STATE_JOURNAL_OFFSET + 2 * crate::objects::cpu::TRANSLATION_RECEIPT_SIZE + crate::objects::cpu::TRANSLATION_RECEIPT_SYNC_COMPLETE_OFFSET,
+    bp_early_kind_offset = const crate::objects::cpu::TRANSLATION_STATE_JOURNAL_OFFSET + 2 * crate::objects::cpu::TRANSLATION_RECEIPT_SIZE + crate::objects::cpu::TRANSLATION_RECEIPT_KIND_OFFSET,
     bp_early_satp_offset = const crate::objects::cpu::TRANSLATION_STATE_JOURNAL_OFFSET + 2 * crate::objects::cpu::TRANSLATION_RECEIPT_SIZE + crate::objects::cpu::TRANSLATION_RECEIPT_SATP_OFFSET,
     bp_early_sequence_offset = const crate::objects::cpu::TRANSLATION_STATE_JOURNAL_OFFSET + 2 * crate::objects::cpu::TRANSLATION_RECEIPT_SIZE + crate::objects::cpu::TRANSLATION_RECEIPT_SEQUENCE_OFFSET,
-    early_owner = const crate::objects::cpu::TranslationOwner::EarlyVm as u8,
-    physical_owner = const crate::objects::cpu::TranslationOwner::PhysicalDirect as u8,
-    trampoline_owner = const crate::objects::cpu::TranslationOwner::TrampolineVm as u8,
+    early_controller = const crate::objects::cpu::TranslationController::EarlyVm as u8,
+    physical_controller = const crate::objects::cpu::TranslationController::PhysicalDirect as u8,
+    trampoline_controller = const crate::objects::cpu::TranslationController::TrampolineVm as u8,
+    handoff_kind = const crate::objects::cpu::TranslationActivationKind::Handoff as u8,
     trap_context_task_offset = const crate::objects::trap_type::TRAP_ENTRY_CONTEXT_TASK_OFFSET,
 );
 

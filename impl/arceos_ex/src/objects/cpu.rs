@@ -11,99 +11,142 @@ use core::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 pub(crate) const MAX_CPUS: usize = 16;
 pub(crate) const BOOT_CPU_LOGICAL_ID: usize = 0;
 pub(crate) const TRANSLATION_JOURNAL_CAPACITY: usize = 4;
-pub(crate) const TRANSLATION_STATE_OWNER_OFFSET: usize = 0;
+pub(crate) const TRANSLATION_STATE_CONTROLLER_OFFSET: usize = 0;
 pub(crate) const TRANSLATION_STATE_COMMITTED_COUNT_OFFSET: usize = 8;
 pub(crate) const TRANSLATION_STATE_JOURNAL_OFFSET: usize = 16;
 pub(crate) const TRANSLATION_RECEIPT_SIZE: usize = 24;
-pub(crate) const TRANSLATION_RECEIPT_OLD_OWNER_OFFSET: usize = 0;
-pub(crate) const TRANSLATION_RECEIPT_NEW_OWNER_OFFSET: usize = 1;
+pub(crate) const TRANSLATION_RECEIPT_OLD_CONTROLLER_OFFSET: usize = 0;
+pub(crate) const TRANSLATION_RECEIPT_NEW_CONTROLLER_OFFSET: usize = 1;
 pub(crate) const TRANSLATION_RECEIPT_SYNC_COMPLETE_OFFSET: usize = 2;
+pub(crate) const TRANSLATION_RECEIPT_KIND_OFFSET: usize = 3;
 pub(crate) const TRANSLATION_RECEIPT_SATP_OFFSET: usize = 8;
 pub(crate) const TRANSLATION_RECEIPT_SEQUENCE_OFFSET: usize = 16;
 
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum TranslationOwner {
-    None = 0,
+pub enum TranslationController {
     PhysicalDirect = 1,
     TrampolineVm = 2,
     EarlyVm = 3,
     SwapperVm = 4,
 }
 
-impl TranslationOwner {
-    const fn decode(value: u8) -> Self {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct InvalidTranslationControllerEncoding {
+    pub raw: u8,
+}
+
+impl TranslationController {
+    const fn decode(value: u8) -> Result<Self, InvalidTranslationControllerEncoding> {
         match value {
-            1 => Self::PhysicalDirect,
-            2 => Self::TrampolineVm,
-            3 => Self::EarlyVm,
-            4 => Self::SwapperVm,
-            _ => Self::None,
+            1 => Ok(Self::PhysicalDirect),
+            2 => Ok(Self::TrampolineVm),
+            3 => Ok(Self::EarlyVm),
+            4 => Ok(Self::SwapperVm),
+            raw => Err(InvalidTranslationControllerEncoding { raw }),
+        }
+    }
+
+    const fn decode_optional(
+        value: u8,
+    ) -> Result<Option<Self>, InvalidTranslationControllerEncoding> {
+        if value == 0 {
+            Ok(None)
+        } else {
+            match Self::decode(value) {
+                Ok(controller) => Ok(Some(controller)),
+                Err(error) => Err(error),
+            }
+        }
+    }
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TranslationActivationKind {
+    InitialActivation = 1,
+    Handoff = 2,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct InvalidTranslationActivationKindEncoding {
+    pub raw: u8,
+}
+
+impl TranslationActivationKind {
+    const fn decode(value: u8) -> Result<Self, InvalidTranslationActivationKindEncoding> {
+        match value {
+            1 => Ok(Self::InitialActivation),
+            2 => Ok(Self::Handoff),
+            raw => Err(InvalidTranslationActivationKindEncoding { raw }),
         }
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[allow(dead_code)]
-pub struct TranslationTakeoverTrace {
-    pub old_owner: TranslationOwner,
-    pub new_owner: TranslationOwner,
+pub struct TranslationActivationTrace {
+    pub kind: TranslationActivationKind,
+    pub old_controller: Option<TranslationController>,
+    pub new_controller: TranslationController,
     pub satp: usize,
     pub synchronization_complete: bool,
     pub commit_sequence: usize,
 }
 
-impl TranslationTakeoverTrace {
+impl TranslationActivationTrace {
     pub const fn completed(
-        old_owner: TranslationOwner,
-        new_owner: TranslationOwner,
+        kind: TranslationActivationKind,
+        old_controller: Option<TranslationController>,
+        new_controller: TranslationController,
         satp: usize,
         commit_sequence: usize,
     ) -> Self {
         Self {
-            old_owner,
-            new_owner,
+            kind,
+            old_controller,
+            new_controller,
             satp,
             synchronization_complete: true,
             commit_sequence,
-        }
-    }
-
-    const fn empty() -> Self {
-        Self {
-            old_owner: TranslationOwner::None,
-            new_owner: TranslationOwner::None,
-            satp: 0,
-            synchronization_complete: false,
-            commit_sequence: 0,
         }
     }
 }
 
 #[derive(Clone, Copy)]
 #[cfg_attr(not(app_smoke), allow(dead_code))]
-pub struct TranslationTakeoverJournal {
+pub struct TranslationActivationJournal {
     pub committed_count: usize,
-    pub receipts: [TranslationTakeoverTrace; TRANSLATION_JOURNAL_CAPACITY],
+    pub receipts: [Option<TranslationActivationTrace>; TRANSLATION_JOURNAL_CAPACITY],
 }
 
 #[repr(C)]
-struct TranslationTakeoverReceipt {
-    old_owner: AtomicU8,
-    new_owner: AtomicU8,
+struct TranslationActivationReceipt {
+    old_controller: AtomicU8,
+    new_controller: AtomicU8,
     synchronization_complete: AtomicU8,
-    reserved: [u8; 5],
+    kind: AtomicU8,
+    reserved: [u8; 4],
     satp: AtomicUsize,
     commit_sequence: AtomicUsize,
 }
 
-impl TranslationTakeoverReceipt {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InvalidTranslationActivationReceiptEncoding {
+    Controller(InvalidTranslationControllerEncoding),
+    Kind(InvalidTranslationActivationKindEncoding),
+    Synchronization(u8),
+    Shape,
+}
+
+impl TranslationActivationReceipt {
     const fn new() -> Self {
         Self {
-            old_owner: AtomicU8::new(TranslationOwner::None as u8),
-            new_owner: AtomicU8::new(TranslationOwner::None as u8),
+            old_controller: AtomicU8::new(0),
+            new_controller: AtomicU8::new(0),
             synchronization_complete: AtomicU8::new(0),
-            reserved: [0; 5],
+            kind: AtomicU8::new(0),
+            reserved: [0; 4],
             satp: AtomicUsize::new(0),
             commit_sequence: AtomicUsize::new(0),
         }
@@ -111,65 +154,100 @@ impl TranslationTakeoverReceipt {
 
     fn write(
         &self,
-        old_owner: TranslationOwner,
-        new_owner: TranslationOwner,
+        kind: TranslationActivationKind,
+        old_controller: Option<TranslationController>,
+        new_controller: TranslationController,
         satp: usize,
         commit_sequence: usize,
     ) {
-        self.old_owner.store(old_owner as u8, Ordering::Relaxed);
-        self.new_owner.store(new_owner as u8, Ordering::Relaxed);
+        self.old_controller.store(
+            old_controller.map_or(0, |value| value as u8),
+            Ordering::Relaxed,
+        );
+        self.new_controller
+            .store(new_controller as u8, Ordering::Relaxed);
         self.synchronization_complete.store(1, Ordering::Relaxed);
+        self.kind.store(kind as u8, Ordering::Relaxed);
         self.satp.store(satp, Ordering::Relaxed);
         self.commit_sequence
             .store(commit_sequence, Ordering::Relaxed);
     }
 
-    fn read(&self) -> TranslationTakeoverTrace {
-        TranslationTakeoverTrace {
-            old_owner: TranslationOwner::decode(self.old_owner.load(Ordering::Relaxed)),
-            new_owner: TranslationOwner::decode(self.new_owner.load(Ordering::Relaxed)),
-            satp: self.satp.load(Ordering::Relaxed),
-            synchronization_complete: self.synchronization_complete.load(Ordering::Relaxed) == 1,
-            commit_sequence: self.commit_sequence.load(Ordering::Relaxed),
+    fn read(
+        &self,
+    ) -> Result<TranslationActivationTrace, InvalidTranslationActivationReceiptEncoding> {
+        let kind = TranslationActivationKind::decode(self.kind.load(Ordering::Relaxed))
+            .map_err(InvalidTranslationActivationReceiptEncoding::Kind)?;
+        let old_controller =
+            TranslationController::decode_optional(self.old_controller.load(Ordering::Relaxed))
+                .map_err(InvalidTranslationActivationReceiptEncoding::Controller)?;
+        let new_controller =
+            TranslationController::decode(self.new_controller.load(Ordering::Relaxed))
+                .map_err(InvalidTranslationActivationReceiptEncoding::Controller)?;
+        let synchronization = self.synchronization_complete.load(Ordering::Relaxed);
+        if synchronization != 1 {
+            return Err(
+                InvalidTranslationActivationReceiptEncoding::Synchronization(synchronization),
+            );
         }
+        if (kind == TranslationActivationKind::InitialActivation && old_controller.is_some())
+            || (kind == TranslationActivationKind::Handoff && old_controller.is_none())
+        {
+            return Err(InvalidTranslationActivationReceiptEncoding::Shape);
+        }
+        Ok(TranslationActivationTrace {
+            kind,
+            old_controller,
+            new_controller,
+            satp: self.satp.load(Ordering::Relaxed),
+            synchronization_complete: true,
+            commit_sequence: self.commit_sequence.load(Ordering::Relaxed),
+        })
     }
 }
 
 #[repr(C, align(64))]
 pub(crate) struct TranslationState {
-    active_owner: AtomicU8,
+    active_controller: AtomicU8,
     reserved: [u8; 7],
     committed_count: AtomicUsize,
-    journal: [TranslationTakeoverReceipt; TRANSLATION_JOURNAL_CAPACITY],
+    journal: [TranslationActivationReceipt; TRANSLATION_JOURNAL_CAPACITY],
 }
 
 const _: () = {
     assert!(
-        core::mem::offset_of!(TranslationState, active_owner) == TRANSLATION_STATE_OWNER_OFFSET
+        core::mem::offset_of!(TranslationState, active_controller)
+            == TRANSLATION_STATE_CONTROLLER_OFFSET
     );
     assert!(
         core::mem::offset_of!(TranslationState, committed_count)
             == TRANSLATION_STATE_COMMITTED_COUNT_OFFSET
     );
     assert!(core::mem::offset_of!(TranslationState, journal) == TRANSLATION_STATE_JOURNAL_OFFSET);
-    assert!(core::mem::size_of::<TranslationTakeoverReceipt>() == TRANSLATION_RECEIPT_SIZE);
+    assert!(core::mem::size_of::<TranslationActivationReceipt>() == TRANSLATION_RECEIPT_SIZE);
+    assert!(core::mem::align_of::<TranslationActivationReceipt>() == 8);
     assert!(
-        core::mem::offset_of!(TranslationTakeoverReceipt, old_owner)
-            == TRANSLATION_RECEIPT_OLD_OWNER_OFFSET
+        core::mem::offset_of!(TranslationActivationReceipt, old_controller)
+            == TRANSLATION_RECEIPT_OLD_CONTROLLER_OFFSET
     );
     assert!(
-        core::mem::offset_of!(TranslationTakeoverReceipt, new_owner)
-            == TRANSLATION_RECEIPT_NEW_OWNER_OFFSET
+        core::mem::offset_of!(TranslationActivationReceipt, new_controller)
+            == TRANSLATION_RECEIPT_NEW_CONTROLLER_OFFSET
     );
     assert!(
-        core::mem::offset_of!(TranslationTakeoverReceipt, synchronization_complete)
+        core::mem::offset_of!(TranslationActivationReceipt, synchronization_complete)
             == TRANSLATION_RECEIPT_SYNC_COMPLETE_OFFSET
     );
     assert!(
-        core::mem::offset_of!(TranslationTakeoverReceipt, satp) == TRANSLATION_RECEIPT_SATP_OFFSET
+        core::mem::offset_of!(TranslationActivationReceipt, kind)
+            == TRANSLATION_RECEIPT_KIND_OFFSET
     );
     assert!(
-        core::mem::offset_of!(TranslationTakeoverReceipt, commit_sequence)
+        core::mem::offset_of!(TranslationActivationReceipt, satp)
+            == TRANSLATION_RECEIPT_SATP_OFFSET
+    );
+    assert!(
+        core::mem::offset_of!(TranslationActivationReceipt, commit_sequence)
             == TRANSLATION_RECEIPT_SEQUENCE_OFFSET
     );
 };
@@ -177,77 +255,117 @@ const _: () = {
 impl TranslationState {
     pub(crate) const fn new() -> Self {
         Self {
-            active_owner: AtomicU8::new(TranslationOwner::None as u8),
+            active_controller: AtomicU8::new(0),
             reserved: [0; 7],
             committed_count: AtomicUsize::new(0),
-            journal: [const { TranslationTakeoverReceipt::new() }; TRANSLATION_JOURNAL_CAPACITY],
+            journal: [const { TranslationActivationReceipt::new() }; TRANSLATION_JOURNAL_CAPACITY],
         }
     }
 
-    pub(crate) fn owner(&self) -> TranslationOwner {
-        TranslationOwner::decode(self.active_owner.load(Ordering::Acquire))
+    pub(crate) fn active_controller(
+        &self,
+    ) -> Result<Option<TranslationController>, InvalidTranslationControllerEncoding> {
+        TranslationController::decode_optional(self.active_controller.load(Ordering::Acquire))
     }
 
     pub(crate) fn committed_count(&self) -> usize {
         self.committed_count.load(Ordering::Acquire)
     }
 
-    pub(crate) fn commit_take_over(
+    pub(crate) fn activation_preflight(
         &self,
-        old_owner: TranslationOwner,
-        new_owner: TranslationOwner,
+        kind: TranslationActivationKind,
+        old_controller: Option<TranslationController>,
+        new_controller: TranslationController,
+        expected_old_satp: usize,
+        live_satp: usize,
+    ) -> bool {
+        let committed_count = self.committed_count();
+        committed_count < TRANSLATION_JOURNAL_CAPACITY
+            && self.active_controller().ok() == Some(old_controller)
+            && live_satp == expected_old_satp
+            && translation_activation_allowed(kind, old_controller, new_controller, committed_count)
+    }
+
+    pub(crate) fn commit_activation(
+        &self,
+        kind: TranslationActivationKind,
+        old_controller: Option<TranslationController>,
+        new_controller: TranslationController,
         target_satp: usize,
         live_satp: usize,
     ) -> bool {
         let committed_count = self.committed_count();
         if committed_count >= TRANSLATION_JOURNAL_CAPACITY
-            || self.active_owner.load(Ordering::Acquire) != old_owner as u8
+            || self.active_controller().ok() != Some(old_controller)
             || live_satp != target_satp
-            || !translation_transition_allowed(old_owner, new_owner)
+            || !translation_activation_allowed(
+                kind,
+                old_controller,
+                new_controller,
+                committed_count,
+            )
         {
             return false;
         }
 
         let commit_sequence = committed_count + 1;
-        self.journal[committed_count].write(old_owner, new_owner, target_satp, commit_sequence);
-        self.active_owner.store(new_owner as u8, Ordering::Release);
+        self.journal[committed_count].write(
+            kind,
+            old_controller,
+            new_controller,
+            target_satp,
+            commit_sequence,
+        );
+        self.active_controller
+            .store(new_controller as u8, Ordering::Release);
         self.committed_count
             .store(commit_sequence, Ordering::Release);
         true
     }
 
-    pub(crate) fn receipt(&self, index: usize) -> Option<TranslationTakeoverTrace> {
-        (index < self.committed_count() && index < TRANSLATION_JOURNAL_CAPACITY)
-            .then(|| self.journal[index].read())
+    pub(crate) fn receipt(
+        &self,
+        index: usize,
+    ) -> Result<Option<TranslationActivationTrace>, InvalidTranslationActivationReceiptEncoding>
+    {
+        if index < self.committed_count() && index < TRANSLATION_JOURNAL_CAPACITY {
+            self.journal[index].read().map(Some)
+        } else {
+            Ok(None)
+        }
     }
 
     #[cfg_attr(not(app_smoke), allow(dead_code))]
-    fn journal(&self) -> TranslationTakeoverJournal {
+    fn journal(
+        &self,
+    ) -> Result<TranslationActivationJournal, InvalidTranslationActivationReceiptEncoding> {
         let committed_count = self.committed_count();
-        let mut receipts = [TranslationTakeoverTrace::empty(); TRANSLATION_JOURNAL_CAPACITY];
+        let mut receipts = [None; TRANSLATION_JOURNAL_CAPACITY];
         let mut index = 0;
         while index < committed_count && index < TRANSLATION_JOURNAL_CAPACITY {
-            receipts[index] = self.journal[index].read();
+            receipts[index] = Some(self.journal[index].read()?);
             index += 1;
         }
-        TranslationTakeoverJournal {
+        Ok(TranslationActivationJournal {
             committed_count,
             receipts,
-        }
+        })
     }
 
-    pub(crate) fn matches_chain(&self, expected: &[TranslationTakeoverTrace]) -> bool {
+    pub(crate) fn matches_chain(&self, expected: &[TranslationActivationTrace]) -> bool {
         if expected.is_empty()
             || expected.len() > TRANSLATION_JOURNAL_CAPACITY
             || self.committed_count() != expected.len()
-            || self.owner() != expected[expected.len() - 1].new_owner
+            || self.active_controller().ok()
+                != Some(Some(expected[expected.len() - 1].new_controller))
         {
             return false;
         }
 
         let mut index = 0;
         while index < expected.len() {
-            if self.journal[index].read() != expected[index] {
+            if self.journal[index].read().ok() != Some(expected[index]) {
                 return false;
             }
             index += 1;
@@ -255,7 +373,7 @@ impl TranslationState {
         true
     }
 
-    fn verify_live_chain(&self, expected: &[TranslationTakeoverTrace], live_satp: usize) -> bool {
+    fn verify_live_chain(&self, expected: &[TranslationActivationTrace], live_satp: usize) -> bool {
         self.matches_chain(expected)
             && expected
                 .last()
@@ -265,33 +383,85 @@ impl TranslationState {
     #[cfg(app_smoke)]
     pub(crate) fn inject_unpublished_receipt_for_test(
         &self,
-        old_owner: TranslationOwner,
-        new_owner: TranslationOwner,
+        kind: TranslationActivationKind,
+        old_controller: Option<TranslationController>,
+        new_controller: TranslationController,
         satp: usize,
     ) -> bool {
         let index = self.committed_count();
         if index >= TRANSLATION_JOURNAL_CAPACITY {
             return false;
         }
-        self.journal[index].write(old_owner, new_owner, satp, index + 1);
+        self.journal[index].write(kind, old_controller, new_controller, satp, index + 1);
         true
+    }
+
+    #[cfg(app_smoke)]
+    pub(crate) fn inject_active_controller_raw_for_test(&self, raw: u8) {
+        self.active_controller.store(raw, Ordering::Release);
+    }
+
+    #[cfg(app_smoke)]
+    pub(crate) fn inject_committed_receipt_raw_for_test(
+        &self,
+        old_controller: u8,
+        new_controller: u8,
+        kind: u8,
+    ) {
+        self.journal[0]
+            .old_controller
+            .store(old_controller, Ordering::Relaxed);
+        self.journal[0]
+            .new_controller
+            .store(new_controller, Ordering::Relaxed);
+        self.journal[0]
+            .synchronization_complete
+            .store(1, Ordering::Relaxed);
+        self.journal[0].kind.store(kind, Ordering::Relaxed);
+        self.journal[0].satp.store(0, Ordering::Relaxed);
+        self.journal[0].commit_sequence.store(1, Ordering::Relaxed);
+        self.active_controller.store(
+            TranslationController::PhysicalDirect as u8,
+            Ordering::Release,
+        );
+        self.committed_count.store(1, Ordering::Release);
     }
 }
 
-const fn translation_transition_allowed(
-    old_owner: TranslationOwner,
-    new_owner: TranslationOwner,
+const fn translation_activation_allowed(
+    kind: TranslationActivationKind,
+    old_controller: Option<TranslationController>,
+    new_controller: TranslationController,
+    committed_count: usize,
 ) -> bool {
     matches!(
-        (old_owner, new_owner),
-        (TranslationOwner::None, TranslationOwner::PhysicalDirect)
-            | (
-                TranslationOwner::PhysicalDirect,
-                TranslationOwner::TrampolineVm
-            )
-            | (TranslationOwner::TrampolineVm, TranslationOwner::EarlyVm)
-            | (TranslationOwner::TrampolineVm, TranslationOwner::SwapperVm)
-            | (TranslationOwner::EarlyVm, TranslationOwner::SwapperVm)
+        (kind, old_controller, new_controller, committed_count),
+        (
+            TranslationActivationKind::InitialActivation,
+            None,
+            TranslationController::PhysicalDirect,
+            0
+        ) | (
+            TranslationActivationKind::Handoff,
+            Some(TranslationController::PhysicalDirect),
+            TranslationController::TrampolineVm,
+            1
+        ) | (
+            TranslationActivationKind::Handoff,
+            Some(TranslationController::TrampolineVm),
+            TranslationController::EarlyVm,
+            2
+        ) | (
+            TranslationActivationKind::Handoff,
+            Some(TranslationController::TrampolineVm),
+            TranslationController::SwapperVm,
+            2
+        ) | (
+            TranslationActivationKind::Handoff,
+            Some(TranslationController::EarlyVm),
+            TranslationController::SwapperVm,
+            3
+        )
     )
 }
 
@@ -503,8 +673,10 @@ impl Cpu {
         self.role
     }
 
-    pub fn active_translation_owner(&self) -> TranslationOwner {
-        self.translation_state.owner()
+    pub fn active_translation_controller(
+        &self,
+    ) -> Result<Option<TranslationController>, InvalidTranslationControllerEncoding> {
+        self.translation_state.active_controller()
     }
 
     pub(crate) fn translation_state_storage(&self) -> *mut TranslationState {
@@ -518,48 +690,75 @@ impl Cpu {
             .map(|end| (start, end))
     }
 
-    pub(crate) fn commit_translation_takeover(
+    pub(crate) fn translation_activation_preflight(
         &self,
-        old_owner: TranslationOwner,
-        new_owner: TranslationOwner,
+        kind: TranslationActivationKind,
+        old_controller: Option<TranslationController>,
+        new_controller: TranslationController,
+        expected_old_satp: usize,
+        live_satp: usize,
+    ) -> bool {
+        self.translation_state.activation_preflight(
+            kind,
+            old_controller,
+            new_controller,
+            expected_old_satp,
+            live_satp,
+        )
+    }
+
+    pub(crate) fn commit_translation_activation(
+        &self,
+        kind: TranslationActivationKind,
+        old_controller: Option<TranslationController>,
+        new_controller: TranslationController,
         target_satp: usize,
         live_satp: usize,
     ) -> bool {
-        self.translation_state
-            .commit_take_over(old_owner, new_owner, target_satp, live_satp)
+        self.translation_state.commit_activation(
+            kind,
+            old_controller,
+            new_controller,
+            target_satp,
+            live_satp,
+        )
     }
 
     pub(crate) fn translation_receipt_matches(
         &self,
         index: usize,
-        expected: TranslationTakeoverTrace,
+        expected: TranslationActivationTrace,
     ) -> bool {
-        self.translation_state.receipt(index) == Some(expected)
+        self.translation_state.receipt(index).ok() == Some(Some(expected))
     }
 
     pub(crate) fn verify_translation_chain(
         &self,
-        expected: &[TranslationTakeoverTrace],
+        expected: &[TranslationActivationTrace],
         live_satp: usize,
     ) -> bool {
         self.translation_state
             .verify_live_chain(expected, live_satp)
     }
 
-    pub fn translation_chain_matches(&self, expected: &[TranslationTakeoverTrace]) -> bool {
+    pub fn translation_chain_matches(&self, expected: &[TranslationActivationTrace]) -> bool {
         self.translation_state.matches_chain(expected)
     }
 
     #[cfg_attr(not(app_smoke), allow(dead_code))]
-    pub fn translation_takeover_journal(&self) -> TranslationTakeoverJournal {
+    pub fn translation_activation_journal(
+        &self,
+    ) -> Result<TranslationActivationJournal, InvalidTranslationActivationReceiptEncoding> {
         self.translation_state.journal()
     }
 
     #[allow(dead_code)]
-    pub fn translation_takeover_trace(&self) -> TranslationTakeoverTrace {
+    pub fn translation_activation_trace(
+        &self,
+    ) -> Result<Option<TranslationActivationTrace>, InvalidTranslationActivationReceiptEncoding>
+    {
         self.translation_state
             .receipt(self.translation_state.committed_count().saturating_sub(1))
-            .unwrap_or(TranslationTakeoverTrace::empty())
     }
 
     pub const fn is_possible(&self) -> bool {

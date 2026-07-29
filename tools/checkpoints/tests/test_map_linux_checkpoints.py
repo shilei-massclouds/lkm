@@ -756,13 +756,13 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
             ),
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=31,
-                variant="TrampolineVmTakeOver",
-                name="TrampolineVm.TakeOver",
+                variant="TrampolineVmActivatedOnCpu",
+                name="TrampolineVm.ActivatedOnCpu",
             ),
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=33,
-                variant="EarlyVmTakeOver",
-                name="EarlyVm.TakeOver",
+                variant="EarlyVmActivatedOnCpu",
+                name="EarlyVm.ActivatedOnCpu",
             ),
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=42,
@@ -973,8 +973,8 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
             ),
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=31,
-                variant="TrampolineVmTakeOver",
-                name="TrampolineVm.TakeOver",
+                variant="TrampolineVmActivatedOnCpu",
+                name="TrampolineVm.ActivatedOnCpu",
             ),
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=37,
@@ -983,8 +983,8 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
             ),
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=38,
-                variant="EarlyVmTakeOver",
-                name="EarlyVm.TakeOver",
+                variant="EarlyVmActivatedOnCpu",
+                name="EarlyVm.ActivatedOnCpu",
             ),
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=43,
@@ -1003,10 +1003,10 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
         self.assertEqual(by_name["BootInitFlow.Started"].linux_symbol, "_start")
         self.assertIn("definition line", by_name["BootInitFlow.Started"].linux_anchor)
         self.assertIn("tail start_kernel", by_name["BootInitFlow.Prepared"].linux_anchor)
-        self.assertEqual(by_name["TrampolineVm.TakeOver"].linux_symbol, "relocate_enable_mmu")
-        self.assertIn("csrw CSR_SATP, a0", by_name["TrampolineVm.TakeOver"].linux_anchor)
+        self.assertEqual(by_name["TrampolineVm.ActivatedOnCpu"].linux_symbol, "relocate_enable_mmu")
+        self.assertIn("csrw CSR_SATP, a0", by_name["TrampolineVm.ActivatedOnCpu"].linux_anchor)
         self.assertIn("create_kernel_page_table", by_name["EarlyVm.Ready"].linux_anchor)
-        self.assertIn("csrw CSR_SATP, a2", by_name["EarlyVm.TakeOver"].linux_anchor)
+        self.assertIn("csrw CSR_SATP, a2", by_name["EarlyVm.ActivatedOnCpu"].linux_anchor)
         self.assertIn("handle_exception", by_name["TrapType.Ready"].linux_anchor)
 
     def test_syscall_macro_parser_handles_wrappers_and_rejects_conditional_clone(self) -> None:

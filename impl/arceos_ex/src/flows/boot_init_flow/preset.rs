@@ -7,7 +7,7 @@ use crate::{
     context::Context,
     objects::{
         boot_args::BootArgs,
-        cpu::TranslationOwner,
+        cpu::TranslationController,
         soc::Soc,
         state::{EventResult, LifecycleEvent, State, failed_condition},
         task::TaskRef,
@@ -270,8 +270,8 @@ extern "C" fn boot_init_flow_preset_rust_entry(hartid: usize, dtb_pa: usize) -> 
         crate::arch::riscv64::sbi::system_shutdown()
     };
     crate::phases::shutdown_on_error(
-        ctx.vm.take_over_physical(boot_cpu),
-        "arceos_ex physical translation takeover failed\n",
+        ctx.vm.activate_physical_on_cpu(boot_cpu),
+        "arceos_ex physical translation activation failed\n",
     );
     crate::checkpoint::checkpoint(Checkpoint::BootInitFlowStarted);
     crate::phases::shutdown_on_error(
@@ -540,8 +540,8 @@ fn bind_boot_task_entry(ctx: &Context, current_task_ref: TaskRef) -> EventResult
         return bind_boot_task_entry_failed(4);
     }
 
-    match boot_cpu.active_translation_owner() {
-        TranslationOwner::PhysicalDirect => {
+    match boot_cpu.active_translation_controller() {
+        Ok(Some(TranslationController::PhysicalDirect)) => {
             if csr::read_satp() != 0 || ctx.kernel_image.state() != State::Ready {
                 return bind_boot_task_entry_failed(5);
             }
@@ -553,9 +553,10 @@ fn bind_boot_task_entry(ctx: &Context, current_task_ref: TaskRef) -> EventResult
                 Ordering::Acquire,
             );
         }
-        TranslationOwner::EarlyVm | TranslationOwner::SwapperVm => {
-            let expected_satp = if boot_cpu.active_translation_owner() == TranslationOwner::EarlyVm
-            {
+        Ok(Some(
+            controller @ (TranslationController::EarlyVm | TranslationController::SwapperVm),
+        )) => {
+            let expected_satp = if controller == TranslationController::EarlyVm {
                 ctx.vm.early_vm_satp()
             } else {
                 ctx.vm.swapper_vm().satp()
@@ -569,7 +570,7 @@ fn bind_boot_task_entry(ctx: &Context, current_task_ref: TaskRef) -> EventResult
             }
             csr::write_tp(init_task_virt);
         }
-        TranslationOwner::None | TranslationOwner::TrampolineVm => {
+        Ok(None | Some(TranslationController::TrampolineVm)) | Err(_) => {
             return bind_boot_task_entry_failed(6);
         }
     }

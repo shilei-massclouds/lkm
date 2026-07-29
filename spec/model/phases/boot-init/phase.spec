@@ -17,20 +17,20 @@ object BootInitFlow: TaskFlow {
             depends_on {
                 task_ref_ready(current_task_ref);
                 task_ref_targets(current_task_ref, BootTask);
-                cpu_active_translation_owner_for_ref_is(
+                cpu_active_translation_controller_for_ref_is(
                     BootCPURef,
-                    TranslationOwnerKind::PhysicalDirect
-                ) || cpu_active_translation_owner_for_ref_is(
+                    TranslationControllerKind::PhysicalDirect
+                ) || cpu_active_translation_controller_for_ref_is(
                     BootCPURef,
-                    TranslationOwnerKind::EarlyVm
-                ) || cpu_active_translation_owner_for_ref_is(
+                    TranslationControllerKind::EarlyVm
+                ) || cpu_active_translation_controller_for_ref_is(
                     BootCPURef,
-                    TranslationOwnerKind::SwapperVm
+                    TranslationControllerKind::SwapperVm
                 );
-                cpu_translation_owner_matches_live_satp_for_ref(BootCPURef);
+                cpu_translation_controller_matches_live_satp_for_ref(BootCPURef);
             }
             ensures {
-                boot_task_entry_bound_for_active_owner(
+                boot_task_entry_bound_for_active_controller(
                     CpuGroup.cpus[0],
                     BootTask
                 );
@@ -66,9 +66,9 @@ object BootInitFlow: TaskFlow {
                     task_flow_start_binding_consistent(self);
                     task_concurrency_closed();
                     BootCpuRegisters.satp == 0;
-                    cpu_active_translation_owner_for_ref_is(
+                    cpu_active_translation_controller_for_ref_is(
                         BootCPURef,
-                        TranslationOwnerKind::PhysicalDirect
+                        TranslationControllerKind::PhysicalDirect
                     );
                 }
 
@@ -116,9 +116,9 @@ object BootInitFlow: TaskFlow {
                     Vm.state == State::Ready;
                     TrampolineVm.state == State::Ready;
                     EarlyVm.state == State::Ready;
-                    cpu_active_translation_owner_for_ref_is(
+                    cpu_active_translation_controller_for_ref_is(
                         BootCPURef,
-                        TranslationOwnerKind::EarlyVm
+                        TranslationControllerKind::EarlyVm
                     );
                     CpuGroup.cpus[0].state == State::Ready;
                     CpuGroup.state == State::Prepared;

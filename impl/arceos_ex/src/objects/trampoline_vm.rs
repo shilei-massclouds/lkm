@@ -4,7 +4,9 @@ use crate::checkpoint::Checkpoint;
 
 use super::{
     config::Config,
-    cpu::{Cpu, MAX_CPUS, TranslationOwner, TranslationTakeoverTrace},
+    cpu::{
+        Cpu, MAX_CPUS, TranslationActivationKind, TranslationActivationTrace, TranslationController,
+    },
     kernel_image::KernelImage,
     lds::Lds,
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
@@ -44,15 +46,16 @@ impl TrampolineVm {
             && self.translation_sync_complete[cpu.logical_id()].load(Ordering::Acquire)
     }
 
-    pub fn complete_arch_take_over(&self, cpu: &Cpu) -> bool {
+    pub fn complete_arch_activation_on(&self, cpu: &Cpu) -> bool {
         if self.lifecycle.state() != State::Ready
             || cpu.logical_id() >= MAX_CPUS
             || self.satp == 0
             || !cpu.translation_receipt_matches(
                 1,
-                TranslationTakeoverTrace::completed(
-                    TranslationOwner::PhysicalDirect,
-                    TranslationOwner::TrampolineVm,
+                TranslationActivationTrace::completed(
+                    TranslationActivationKind::Handoff,
+                    Some(TranslationController::PhysicalDirect),
+                    TranslationController::TrampolineVm,
                     self.satp,
                     2,
                 ),

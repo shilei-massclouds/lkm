@@ -24,31 +24,34 @@
 `KernelImageFile` 是未来文件对象的保留名称。本轮不得新增这个类型、实例、生命周期或兼容 alias；构建
 层事实使用 kernel ELF 和 kernel boot artifact，运行时 `KernelImage` 只描述内存中映像。
 
-## 共享 controller 与每 CPU 接管
+## 共享 controller 与每 CPU activation
 
 `Vm` 直接拥有 `PhysicalDirect`、`TrampolineVm`、`EarlyVm`、`SwapperVm`。四个对象是共享
 translation controller；页表/映射准备状态是全局 `Ready`，激活状态只保存在各 CPU 的
-`active_translation_owner`。不为 Trampoline/Early/Swapper 建立全局 Online/Destroyed 状态，也不保留
+`active_translation_controller` optional association。不为 Trampoline/Early/Swapper 建立全局 Online/Destroyed 状态，也不保留
 `TrampolineVm.Cleanup`、`EarlyVm.Cleanup` 或同义 checkpoint/snapshot。
 
-每个 controller 实现统一的 `take_over(cpu_ref)` 事务：
+每个 controller 实现统一的 `activate_on_cpu(cpu_ref)` 事务：
 
-1. 解析 CpuRef 并验证 controller Ready、允许的旧 owner 以及旧 owner 对应的 live `satp`。
+1. 解析 CpuRef 并验证 controller Ready。InitialActivation 要求 absent association、入口 SATP=0 且
+   目标 PhysicalDirect；Handoff 要求准确的旧 controller 以及对应的 live `satp`。
 2. 按 controller 规则写入目标 `satp` 并执行所需 `sfence.vma`；PhysicalDirect 的目标 SATP 为 0。
-3. 在同一 CPU translation-state 的下一 journal 槽位记录旧/新 owner、SATP、同步事实和提交序号，
-   发布唯一 owner，最后以 release committed count 原子公开完整 receipt。任一前置检查失败不得修改
-   owner、SATP 或可见 trace；提交期不一致必须 fail-stop。
+3. 在同一 CPU translation-state 的下一 journal 槽位记录 kind、optional old/new controller、SATP、
+   同步事实和提交序号，发布唯一 association，最后以 release committed count 原子公开完整 receipt。
+   任一前置检查失败不得修改 association、SATP 或可见 trace；提交期不一致必须 fail-stop。
 
-BP/AP 的汇编切换与 Rust 验证属于同一个 TakeOver，不是两个 action。`complete_arch_take_over` 或
-`complete_*_translation_chain` 一类内部 Rust 接口只能核对汇编已提交的完整 journal、最终 owner 与
-当前 CPU live SATP，再更新 controller 的每 CPU 同步事实；不得再次写 owner、追加 receipt 或覆盖
-trace。BP 设置及 AP boot-data 发布前都必须证明整个 translation-state 存储（不只是 owner 字节）位于
+BP/AP 的汇编切换与 Rust 验证属于同一个 ActivateOnCpu，不是两个 action。
+`complete_arch_activation_on` 或 `complete_*_translation_chain` 一类内部 Rust 接口只能核对汇编已提交
+的完整 journal、最终 controller 与当前 CPU live SATP，再更新 controller 的每 CPU 同步事实；不得
+再次写 association、追加 receipt 或覆盖 trace。BP 设置及 AP boot-data 发布前都必须证明整个
+translation-state 存储（不只是 association 字节）位于
 共享 trampoline 映射窗口内，端点溢出或边界越界必须在启动 CPU 前 fail-stop。
 
-BP 接管链固定为 `PhysicalDirect -> TrampolineVm -> EarlyVm -> SwapperVm`；AP 链固定为
-`PhysicalDirect -> TrampolineVm -> SwapperVm`。从 Trampoline 切到 Early 只使前者对该 CPU 退役；
+BP activation 链固定为 `absent -> PhysicalDirect -> TrampolineVm -> EarlyVm -> SwapperVm`；AP 链固定为
+`absent -> PhysicalDirect -> TrampolineVm -> SwapperVm`。首条为 InitialActivation，其余均为 Handoff。
+从 Trampoline 切到 Early 只使前者对该 CPU 退役；
 静态 trampoline 页表继续 Ready，供随后 AP 使用。下游阶段检查 `KernelAddrSpace/Vm` Online、相关
-controller Ready，并只在语义确实依赖当前执行 CPU 时校验其 owner/live SATP。
+controller Ready，并只在语义确实依赖当前执行 CPU 时校验其 association/live SATP。
 
 ## RawDtb 边界
 

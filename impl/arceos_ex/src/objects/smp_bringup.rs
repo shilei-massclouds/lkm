@@ -3,11 +3,12 @@ use core::sync::atomic::Ordering;
 
 use super::{
     cpu::{
-        MAX_CPUS, TRANSLATION_RECEIPT_NEW_OWNER_OFFSET, TRANSLATION_RECEIPT_OLD_OWNER_OFFSET,
-        TRANSLATION_RECEIPT_SATP_OFFSET, TRANSLATION_RECEIPT_SEQUENCE_OFFSET,
-        TRANSLATION_RECEIPT_SIZE, TRANSLATION_RECEIPT_SYNC_COMPLETE_OFFSET,
-        TRANSLATION_STATE_COMMITTED_COUNT_OFFSET, TRANSLATION_STATE_JOURNAL_OFFSET,
-        TRANSLATION_STATE_OWNER_OFFSET, TranslationOwner,
+        MAX_CPUS, TRANSLATION_RECEIPT_KIND_OFFSET, TRANSLATION_RECEIPT_NEW_CONTROLLER_OFFSET,
+        TRANSLATION_RECEIPT_OLD_CONTROLLER_OFFSET, TRANSLATION_RECEIPT_SATP_OFFSET,
+        TRANSLATION_RECEIPT_SEQUENCE_OFFSET, TRANSLATION_RECEIPT_SIZE,
+        TRANSLATION_RECEIPT_SYNC_COMPLETE_OFFSET, TRANSLATION_STATE_COMMITTED_COUNT_OFFSET,
+        TRANSLATION_STATE_CONTROLLER_OFFSET, TRANSLATION_STATE_JOURNAL_OFFSET,
+        TranslationActivationKind, TranslationController,
     },
     cpu_control::RawSpinLock,
     cpu_group::CpuGroup,
@@ -284,29 +285,32 @@ arceos_ex_secondary_start_sbi:
     beqz    t4, .Lap_translation_fail
     csrr    t0, satp
     bnez    t0, .Lap_translation_fail
-    lbu     t0, {state_owner_offset}(t3)
+    lbu     t0, {state_controller_offset}(t3)
     bnez    t0, .Lap_translation_fail
     ld      t0, {state_count_offset}(t3)
     bnez    t0, .Lap_translation_fail
 
     sfence.vma
     sb      zero, {ap_physical_old_offset}(t3)
-    li      t0, {physical_owner}
+    li      t0, {physical_controller}
     sb      t0, {ap_physical_new_offset}(t3)
     li      a0, 1
     sb      a0, {ap_physical_sync_offset}(t3)
+    li      a0, {initial_activation_kind}
+    sb      a0, {ap_physical_kind_offset}(t3)
     sd      zero, {ap_physical_satp_offset}(t3)
+    li      a0, 1
     sd      a0, {ap_physical_sequence_offset}(t3)
     fence   rw, w
-    sb      t0, {state_owner_offset}(t3)
+    sb      t0, {state_controller_offset}(t3)
     fence   rw, w
     sd      a0, {state_count_offset}(t3)
 
     la      t0, 1f
     add     t0, t0, s2
     csrw    stvec, t0
-    lbu     t0, {state_owner_offset}(t3)
-    li      a0, {physical_owner}
+    lbu     t0, {state_controller_offset}(t3)
+    li      a0, {physical_controller}
     bne     t0, a0, .Lap_translation_fail
     ld      t0, {state_count_offset}(t3)
     li      a0, 1
@@ -317,22 +321,24 @@ arceos_ex_secondary_start_sbi:
 1:
     csrr    t0, satp
     bne     t0, t1, .Lap_translation_fail
-    li      t0, {physical_owner}
+    li      t0, {physical_controller}
     sb      t0, {ap_trampoline_old_offset}(t4)
-    li      t0, {trampoline_owner}
+    li      t0, {trampoline_controller}
     sb      t0, {ap_trampoline_new_offset}(t4)
     li      a0, 1
     sb      a0, {ap_trampoline_sync_offset}(t4)
+    li      a0, {handoff_kind}
+    sb      a0, {ap_trampoline_kind_offset}(t4)
     sd      t1, {ap_trampoline_satp_offset}(t4)
     li      a0, 2
     sd      a0, {ap_trampoline_sequence_offset}(t4)
     fence   rw, w
-    sb      t0, {state_owner_offset}(t4)
+    sb      t0, {state_controller_offset}(t4)
     fence   rw, w
     sd      a0, {state_count_offset}(t4)
 
-    lbu     t0, {state_owner_offset}(t4)
-    li      a0, {trampoline_owner}
+    lbu     t0, {state_controller_offset}(t4)
+    li      a0, {trampoline_controller}
     bne     t0, a0, .Lap_translation_fail
     ld      t0, {state_count_offset}(t4)
     li      a0, 2
@@ -341,17 +347,19 @@ arceos_ex_secondary_start_sbi:
     sfence.vma
     csrr    t0, satp
     bne     t0, t2, .Lap_translation_fail
-    li      t0, {trampoline_owner}
+    li      t0, {trampoline_controller}
     sb      t0, {ap_swapper_old_offset}(t4)
-    li      t0, {swapper_owner}
+    li      t0, {swapper_controller}
     sb      t0, {ap_swapper_new_offset}(t4)
     li      a0, 1
     sb      a0, {ap_swapper_sync_offset}(t4)
+    li      a0, {handoff_kind}
+    sb      a0, {ap_swapper_kind_offset}(t4)
     sd      t2, {ap_swapper_satp_offset}(t4)
     li      a0, 3
     sd      a0, {ap_swapper_sequence_offset}(t4)
     fence   rw, w
-    sb      t0, {state_owner_offset}(t4)
+    sb      t0, {state_controller_offset}(t4)
     fence   rw, w
     sd      a0, {state_count_offset}(t4)
 
@@ -376,27 +384,32 @@ arceos_ex_secondary_start_sbi:
     rust_entry_offset = const AP_BOOT_DATA_RUST_ENTRY_OFFSET,
     translation_state_phys_offset = const AP_BOOT_DATA_TRANSLATION_STATE_PHYS_OFFSET,
     translation_state_virt_offset = const AP_BOOT_DATA_TRANSLATION_STATE_VIRT_OFFSET,
-    state_owner_offset = const TRANSLATION_STATE_OWNER_OFFSET,
+    state_controller_offset = const TRANSLATION_STATE_CONTROLLER_OFFSET,
     state_count_offset = const TRANSLATION_STATE_COMMITTED_COUNT_OFFSET,
-    ap_physical_old_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + TRANSLATION_RECEIPT_OLD_OWNER_OFFSET,
-    ap_physical_new_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + TRANSLATION_RECEIPT_NEW_OWNER_OFFSET,
+    ap_physical_old_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + TRANSLATION_RECEIPT_OLD_CONTROLLER_OFFSET,
+    ap_physical_new_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + TRANSLATION_RECEIPT_NEW_CONTROLLER_OFFSET,
     ap_physical_sync_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + TRANSLATION_RECEIPT_SYNC_COMPLETE_OFFSET,
+    ap_physical_kind_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + TRANSLATION_RECEIPT_KIND_OFFSET,
     ap_physical_satp_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + TRANSLATION_RECEIPT_SATP_OFFSET,
     ap_physical_sequence_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + TRANSLATION_RECEIPT_SEQUENCE_OFFSET,
-    ap_trampoline_old_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + TRANSLATION_RECEIPT_SIZE + TRANSLATION_RECEIPT_OLD_OWNER_OFFSET,
-    ap_trampoline_new_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + TRANSLATION_RECEIPT_SIZE + TRANSLATION_RECEIPT_NEW_OWNER_OFFSET,
+    ap_trampoline_old_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + TRANSLATION_RECEIPT_SIZE + TRANSLATION_RECEIPT_OLD_CONTROLLER_OFFSET,
+    ap_trampoline_new_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + TRANSLATION_RECEIPT_SIZE + TRANSLATION_RECEIPT_NEW_CONTROLLER_OFFSET,
     ap_trampoline_sync_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + TRANSLATION_RECEIPT_SIZE + TRANSLATION_RECEIPT_SYNC_COMPLETE_OFFSET,
+    ap_trampoline_kind_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + TRANSLATION_RECEIPT_SIZE + TRANSLATION_RECEIPT_KIND_OFFSET,
     ap_trampoline_satp_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + TRANSLATION_RECEIPT_SIZE + TRANSLATION_RECEIPT_SATP_OFFSET,
     ap_trampoline_sequence_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + TRANSLATION_RECEIPT_SIZE + TRANSLATION_RECEIPT_SEQUENCE_OFFSET,
-    ap_swapper_old_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + 2 * TRANSLATION_RECEIPT_SIZE + TRANSLATION_RECEIPT_OLD_OWNER_OFFSET,
-    ap_swapper_new_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + 2 * TRANSLATION_RECEIPT_SIZE + TRANSLATION_RECEIPT_NEW_OWNER_OFFSET,
+    ap_swapper_old_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + 2 * TRANSLATION_RECEIPT_SIZE + TRANSLATION_RECEIPT_OLD_CONTROLLER_OFFSET,
+    ap_swapper_new_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + 2 * TRANSLATION_RECEIPT_SIZE + TRANSLATION_RECEIPT_NEW_CONTROLLER_OFFSET,
     ap_swapper_sync_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + 2 * TRANSLATION_RECEIPT_SIZE + TRANSLATION_RECEIPT_SYNC_COMPLETE_OFFSET,
+    ap_swapper_kind_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + 2 * TRANSLATION_RECEIPT_SIZE + TRANSLATION_RECEIPT_KIND_OFFSET,
     ap_swapper_satp_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + 2 * TRANSLATION_RECEIPT_SIZE + TRANSLATION_RECEIPT_SATP_OFFSET,
     ap_swapper_sequence_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + 2 * TRANSLATION_RECEIPT_SIZE + TRANSLATION_RECEIPT_SEQUENCE_OFFSET,
-    physical_owner = const TranslationOwner::PhysicalDirect as u8,
-    swapper_owner = const TranslationOwner::SwapperVm as u8,
+    physical_controller = const TranslationController::PhysicalDirect as u8,
+    swapper_controller = const TranslationController::SwapperVm as u8,
     swapper_satp_offset = const AP_BOOT_DATA_SWAPPER_SATP_OFFSET,
-    trampoline_owner = const TranslationOwner::TrampolineVm as u8,
+    trampoline_controller = const TranslationController::TrampolineVm as u8,
+    initial_activation_kind = const TranslationActivationKind::InitialActivation as u8,
+    handoff_kind = const TranslationActivationKind::Handoff as u8,
     trampoline_satp_offset = const AP_BOOT_DATA_TRAMPOLINE_SATP_OFFSET,
     sstatus_fpu_vector_mask = const SSTATUS_FPU_VECTOR_MASK,
     stack_ptr_offset = const AP_BOOT_DATA_STACK_PTR_OFFSET,
@@ -1145,7 +1158,7 @@ impl CpuStartProvider {
             };
             let cpu_ref = cpu.cpu_ref();
             let hartid = cpu.hartid();
-            if cpu.active_translation_owner() != TranslationOwner::None {
+            if cpu.active_translation_controller() != Ok(None) {
                 return false;
             }
             if !vm

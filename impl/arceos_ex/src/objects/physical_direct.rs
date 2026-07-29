@@ -3,18 +3,20 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use crate::{arch::riscv64::csr, checkpoint::Checkpoint};
 
 use super::{
-    cpu::{Cpu, MAX_CPUS, TranslationOwner},
+    cpu::{
+        Cpu, MAX_CPUS, TranslationActivationKind, TranslationActivationTrace, TranslationController,
+    },
     state::{EventResult, LifecycleEvent, State, failed_condition},
 };
 
 pub struct PhysicalDirect {
-    takeover_complete: [AtomicBool; MAX_CPUS],
+    activation_complete: [AtomicBool; MAX_CPUS],
 }
 
 impl PhysicalDirect {
     pub const fn new() -> Self {
         Self {
-            takeover_complete: [const { AtomicBool::new(false) }; MAX_CPUS],
+            activation_complete: [const { AtomicBool::new(false) }; MAX_CPUS],
         }
     }
 
@@ -22,10 +24,16 @@ impl PhysicalDirect {
         State::Ready
     }
 
-    pub fn take_over(&self, cpu: &Cpu) -> EventResult {
+    pub fn activate_on_cpu(&self, cpu: &Cpu) -> EventResult {
         if cpu.logical_id() >= MAX_CPUS
-            || cpu.active_translation_owner() != TranslationOwner::None
-            || csr::read_satp() != 0
+            || cpu.active_translation_controller() != Ok(None)
+            || !cpu.translation_activation_preflight(
+                TranslationActivationKind::InitialActivation,
+                None,
+                TranslationController::PhysicalDirect,
+                0,
+                csr::read_satp(),
+            )
         {
             return failed_condition(
                 LifecycleEvent::Enable,
@@ -35,9 +43,10 @@ impl PhysicalDirect {
             );
         }
         csr::sfence_vma();
-        if !cpu.commit_translation_takeover(
-            TranslationOwner::None,
-            TranslationOwner::PhysicalDirect,
+        if !cpu.commit_translation_activation(
+            TranslationActivationKind::InitialActivation,
+            None,
+            TranslationController::PhysicalDirect,
             0,
             csr::read_satp(),
         ) {
@@ -48,18 +57,19 @@ impl PhysicalDirect {
                 State::Ready,
             );
         }
-        self.takeover_complete[cpu.logical_id()].store(true, Ordering::Release);
-        crate::checkpoint::checkpoint(Checkpoint::PhysicalDirectTakeOver);
+        self.activation_complete[cpu.logical_id()].store(true, Ordering::Release);
+        crate::checkpoint::checkpoint(Checkpoint::PhysicalDirectActivatedOnCpu);
         Ok(())
     }
 
-    pub fn complete_arch_take_over(&self, cpu: &Cpu) -> bool {
+    pub fn complete_arch_activation_on(&self, cpu: &Cpu) -> bool {
         if cpu.logical_id() >= MAX_CPUS
             || !cpu.translation_receipt_matches(
                 0,
-                super::cpu::TranslationTakeoverTrace::completed(
-                    TranslationOwner::None,
-                    TranslationOwner::PhysicalDirect,
+                TranslationActivationTrace::completed(
+                    TranslationActivationKind::InitialActivation,
+                    None,
+                    TranslationController::PhysicalDirect,
                     0,
                     1,
                 ),
@@ -67,12 +77,12 @@ impl PhysicalDirect {
         {
             return false;
         }
-        self.takeover_complete[cpu.logical_id()].store(true, Ordering::Release);
+        self.activation_complete[cpu.logical_id()].store(true, Ordering::Release);
         true
     }
 
-    pub fn takeover_complete_for(&self, cpu: &Cpu) -> bool {
+    pub fn activation_complete_on(&self, cpu: &Cpu) -> bool {
         cpu.logical_id() < MAX_CPUS
-            && self.takeover_complete[cpu.logical_id()].load(Ordering::Acquire)
+            && self.activation_complete[cpu.logical_id()].load(Ordering::Acquire)
     }
 }
