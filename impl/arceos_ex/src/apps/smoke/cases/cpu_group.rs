@@ -1,10 +1,16 @@
 use crate::{
     apps::smoke::SmokeResult,
+    arch::riscv64::csr,
     context::context,
     objects::{
-        cpu::{BOOT_CPU_LOGICAL_ID, CpuRole, TranslationOwner},
+        cpu::{
+            BOOT_CPU_LOGICAL_ID, CpuRole, TranslationOwner, TranslationState,
+            TranslationTakeoverTrace,
+        },
         printk,
         state::State,
+        trampoline_vm::trampoline_window_contains_range,
+        vm::{ap_translation_chain, boot_translation_chain},
     },
 };
 
@@ -85,19 +91,37 @@ pub fn run() -> SmokeResult {
             return SmokeResult::Failed;
         }
 
-        let takeover = cpu.translation_takeover_trace();
-        let expected_old_owner = if logical_id == BOOT_CPU_LOGICAL_ID {
-            TranslationOwner::EarlyVm
+        let expected_chain = if logical_id == BOOT_CPU_LOGICAL_ID {
+            let expected = boot_translation_chain(
+                ctx.vm.trampoline_vm().satp(),
+                ctx.vm.early_vm_satp(),
+                ctx.vm.swapper_vm().satp(),
+            );
+            if csr::read_satp() != ctx.vm.swapper_vm().satp()
+                || !cpu.translation_chain_matches(&expected)
+            {
+                printk::write_str("CpuGroup boot translation journal is invalid\n");
+                return SmokeResult::Failed;
+            }
+            expected.len()
         } else {
-            TranslationOwner::TrampolineVm
+            let expected =
+                ap_translation_chain(ctx.vm.trampoline_vm().satp(), ctx.vm.swapper_vm().satp());
+            if !cpu.translation_chain_matches(&expected) {
+                printk::write_str("CpuGroup AP translation journal is invalid\n");
+                return SmokeResult::Failed;
+            }
+            expected.len()
         };
+        let journal = cpu.translation_takeover_journal();
         if cpu.active_translation_owner() != TranslationOwner::SwapperVm
-            || takeover.old_owner != expected_old_owner
-            || takeover.new_owner != TranslationOwner::SwapperVm
-            || takeover.satp != ctx.vm.swapper_vm().satp()
-            || !takeover.synchronization_complete
+            || journal.committed_count != expected_chain
+            || journal.receipts[expected_chain - 1].new_owner != TranslationOwner::SwapperVm
+            || journal.receipts[expected_chain - 1].satp != ctx.vm.swapper_vm().satp()
+            || journal.receipts[expected_chain - 1].commit_sequence != expected_chain
+            || !journal.receipts[expected_chain - 1].synchronization_complete
         {
-            printk::write_str("CpuGroup per-CPU translation owner trace is invalid\n");
+            printk::write_str("CpuGroup per-CPU translation owner journal is invalid\n");
             return SmokeResult::Failed;
         }
 
@@ -133,6 +157,10 @@ pub fn run() -> SmokeResult {
         printk::write_str("CpuGroup exposes CPU outside possible boundary\n");
         return SmokeResult::Failed;
     }
+    if !translation_state_negative_cases() {
+        printk::write_str("CpuGroup translation-state negative coverage failed\n");
+        return SmokeResult::Failed;
+    }
     printk::write_fmt(format_args!(
         "CpuGroup topology:\n  Possible CPUs : {}\n  Secondary CPUs: {}\n  Boot hartid   : {}\n",
         count,
@@ -156,6 +184,100 @@ pub fn run() -> SmokeResult {
     }
 
     SmokeResult::Passed
+}
+
+fn translation_state_negative_cases() -> bool {
+    let state = TranslationState::new();
+    let unchanged = |state: &TranslationState, owner, count| {
+        state.owner() == owner && state.committed_count() == count
+    };
+
+    if state.commit_take_over(
+        TranslationOwner::PhysicalDirect,
+        TranslationOwner::TrampolineVm,
+        0x100,
+        0x100,
+    ) || !unchanged(&state, TranslationOwner::None, 0)
+        || state.commit_take_over(
+            TranslationOwner::None,
+            TranslationOwner::PhysicalDirect,
+            0,
+            1,
+        )
+        || !unchanged(&state, TranslationOwner::None, 0)
+        || state.commit_take_over(
+            TranslationOwner::None,
+            TranslationOwner::TrampolineVm,
+            0x100,
+            0x100,
+        )
+        || !unchanged(&state, TranslationOwner::None, 0)
+        || !state.commit_take_over(
+            TranslationOwner::None,
+            TranslationOwner::PhysicalDirect,
+            0,
+            0,
+        )
+        || state.commit_take_over(
+            TranslationOwner::None,
+            TranslationOwner::PhysicalDirect,
+            0,
+            0,
+        )
+        || !unchanged(&state, TranslationOwner::PhysicalDirect, 1)
+        || state.commit_take_over(
+            TranslationOwner::PhysicalDirect,
+            TranslationOwner::EarlyVm,
+            0x200,
+            0x200,
+        )
+        || !unchanged(&state, TranslationOwner::PhysicalDirect, 1)
+        || state.commit_take_over(
+            TranslationOwner::PhysicalDirect,
+            TranslationOwner::TrampolineVm,
+            0x200,
+            0x201,
+        )
+        || !unchanged(&state, TranslationOwner::PhysicalDirect, 1)
+    {
+        return false;
+    }
+
+    let half_state = TranslationState::new();
+    if !half_state.commit_take_over(
+        TranslationOwner::None,
+        TranslationOwner::PhysicalDirect,
+        0,
+        0,
+    ) || !half_state.inject_unpublished_receipt_for_test(
+        TranslationOwner::PhysicalDirect,
+        TranslationOwner::TrampolineVm,
+        0x200,
+    ) || half_state.receipt(1).is_some()
+        || half_state.committed_count() != 1
+        || half_state.owner() != TranslationOwner::PhysicalDirect
+        || half_state.matches_chain(&[
+            TranslationTakeoverTrace::completed(
+                TranslationOwner::None,
+                TranslationOwner::PhysicalDirect,
+                0,
+                1,
+            ),
+            TranslationTakeoverTrace::completed(
+                TranslationOwner::PhysicalDirect,
+                TranslationOwner::TrampolineVm,
+                0x200,
+                2,
+            ),
+        ])
+    {
+        return false;
+    }
+
+    trampoline_window_contains_range(0x1000, 0x2000, 0x1f80, 0x80)
+        && !trampoline_window_contains_range(0x1000, 0x2000, 0x1f80, 0x81)
+        && !trampoline_window_contains_range(0x1000, 0x2000, usize::MAX - 3, 8)
+        && !trampoline_window_contains_range(0x1000, 0x2000, 0x1800, 0)
 }
 
 fn role_name(role: CpuRole) -> &'static str {

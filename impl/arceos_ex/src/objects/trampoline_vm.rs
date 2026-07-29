@@ -4,7 +4,7 @@ use crate::checkpoint::Checkpoint;
 
 use super::{
     config::Config,
-    cpu::{Cpu, MAX_CPUS},
+    cpu::{Cpu, MAX_CPUS, TranslationOwner, TranslationTakeoverTrace},
     kernel_image::KernelImage,
     lds::Lds,
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
@@ -14,6 +14,8 @@ use super::{
 pub struct TrampolineVm {
     lifecycle: Lifecycle,
     satp: usize,
+    mapping_virt_start: usize,
+    mapping_virt_end: usize,
     translation_sync_complete: [AtomicBool; MAX_CPUS],
 }
 
@@ -22,6 +24,8 @@ impl TrampolineVm {
         Self {
             lifecycle: Lifecycle::new(State::Base),
             satp: 0,
+            mapping_virt_start: 0,
+            mapping_virt_end: 0,
             translation_sync_complete: [const { AtomicBool::new(false) }; MAX_CPUS],
         }
     }
@@ -40,8 +44,19 @@ impl TrampolineVm {
             && self.translation_sync_complete[cpu.logical_id()].load(Ordering::Acquire)
     }
 
-    pub fn adopt_completed_takeover(&self, cpu: &Cpu) -> bool {
-        if self.lifecycle.state() != State::Ready || cpu.logical_id() >= MAX_CPUS || self.satp == 0
+    pub fn complete_arch_take_over(&self, cpu: &Cpu) -> bool {
+        if self.lifecycle.state() != State::Ready
+            || cpu.logical_id() >= MAX_CPUS
+            || self.satp == 0
+            || !cpu.translation_receipt_matches(
+                1,
+                TranslationTakeoverTrace::completed(
+                    TranslationOwner::PhysicalDirect,
+                    TranslationOwner::TrampolineVm,
+                    self.satp,
+                    2,
+                ),
+            )
         {
             return false;
         }
@@ -88,7 +103,18 @@ impl TrampolineVm {
                 State::Ready,
             );
         };
+        let mapping_virt_start = kernel_image.virt_start();
+        let Some(mapping_virt_end) = mapping_virt_start.checked_add(config.pmd_size()) else {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        };
         self.satp = satp;
+        self.mapping_virt_start = mapping_virt_start;
+        self.mapping_virt_end = mapping_virt_end;
 
         self.lifecycle.transition(
             LifecycleEvent::Setup,
@@ -97,4 +123,46 @@ impl TrampolineVm {
             Checkpoint::TrampolineVmReady,
         )
     }
+
+    pub fn translation_state_mapped(&self, cpu: &Cpu, kernel_image: &KernelImage) -> bool {
+        let Some((runtime_start, runtime_end)) = cpu.translation_state_storage_range() else {
+            return false;
+        };
+        let Some(runtime_last) = runtime_end.checked_sub(1) else {
+            return false;
+        };
+        let Some(virt_start) = kernel_image.runtime_to_link(runtime_start) else {
+            return false;
+        };
+        let Some(virt_last) = kernel_image.runtime_to_link(runtime_last) else {
+            return false;
+        };
+        let Some(virt_end) = virt_last.checked_add(1) else {
+            return false;
+        };
+        let Some(size) = virt_end.checked_sub(virt_start) else {
+            return false;
+        };
+        trampoline_window_contains_range(
+            self.mapping_virt_start,
+            self.mapping_virt_end,
+            virt_start,
+            size,
+        )
+    }
+}
+
+pub(crate) const fn trampoline_window_contains_range(
+    window_start: usize,
+    window_end: usize,
+    range_start: usize,
+    range_size: usize,
+) -> bool {
+    let Some(range_end) = range_start.checked_add(range_size) else {
+        return false;
+    };
+    window_start < window_end
+        && range_size != 0
+        && range_start >= window_start
+        && range_end <= window_end
 }

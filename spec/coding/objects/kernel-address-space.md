@@ -35,8 +35,15 @@ translation controller；页表/映射准备状态是全局 `Ready`，激活状�
 
 1. 解析 CpuRef 并验证 controller Ready、允许的旧 owner 以及旧 owner 对应的 live `satp`。
 2. 按 controller 规则写入目标 `satp` 并执行所需 `sfence.vma`；PhysicalDirect 的目标 SATP 为 0。
-3. 原子替换该 CPU 的 owner，并记录 CPU、旧/新 owner、SATP 和同步事实。任一前置检查失败不得修改
-   owner、SATP 或 trace；提交期不一致必须 fail-stop。
+3. 在同一 CPU translation-state 的下一 journal 槽位记录旧/新 owner、SATP、同步事实和提交序号，
+   发布唯一 owner，最后以 release committed count 原子公开完整 receipt。任一前置检查失败不得修改
+   owner、SATP 或可见 trace；提交期不一致必须 fail-stop。
+
+BP/AP 的汇编切换与 Rust 验证属于同一个 TakeOver，不是两个 action。`complete_arch_take_over` 或
+`complete_*_translation_chain` 一类内部 Rust 接口只能核对汇编已提交的完整 journal、最终 owner 与
+当前 CPU live SATP，再更新 controller 的每 CPU 同步事实；不得再次写 owner、追加 receipt 或覆盖
+trace。BP 设置及 AP boot-data 发布前都必须证明整个 translation-state 存储（不只是 owner 字节）位于
+共享 trampoline 映射窗口内，端点溢出或边界越界必须在启动 CPU 前 fail-stop。
 
 BP 接管链固定为 `PhysicalDirect -> TrampolineVm -> EarlyVm -> SwapperVm`；AP 链固定为
 `PhysicalDirect -> TrampolineVm -> SwapperVm`。从 Trampoline 切到 Early 只使前者对该 CPU 退役；

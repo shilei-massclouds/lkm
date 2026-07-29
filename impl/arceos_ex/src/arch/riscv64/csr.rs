@@ -29,7 +29,7 @@ arceos_ex_switch_to_early_vm:
      * a3 = virtual gp
      * a4 = virtual continuation
      * a5 = kernel virtual offset
-     * a6 = physical address of the current CPU translation-owner byte
+     * a6 = physical address of the current CPU translation-state storage
      *
      * This follows the Linux/RISC-V relocation idea: after writing the
      * trampoline satp, the next physical PC is not mapped, so the CPU traps
@@ -41,20 +41,75 @@ arceos_ex_switch_to_early_vm:
     la      t0, 1f
     add     t0, t0, a5
     csrw    stvec, t0
+    csrr    t0, satp
+    bnez    t0, .Lbp_translation_fail
+    lbu     t0, {state_owner_offset}(a6)
+    li      t1, {physical_owner}
+    bne     t0, t1, .Lbp_translation_fail
+    ld      t0, {state_count_offset}(a6)
+    li      t1, 1
+    bne     t0, t1, .Lbp_translation_fail
+    beqz    a0, .Lbp_translation_fail
+    beqz    a1, .Lbp_translation_fail
     sfence.vma
-    li      t1, {trampoline_owner}
-    sb      t1, 0(a6)
     csrw    satp, a0
     .balign 4
 1:
     mv      sp, a2
     mv      gp, a3
+    add     a6, a6, a5
+    csrr    t0, satp
+    bne     t0, a0, .Lbp_translation_fail
+
+    li      t0, {physical_owner}
+    sb      t0, {bp_trampoline_old_offset}(a6)
+    li      t0, {trampoline_owner}
+    sb      t0, {bp_trampoline_new_offset}(a6)
+    li      t0, 1
+    sb      t0, {bp_trampoline_sync_offset}(a6)
+    sd      a0, {bp_trampoline_satp_offset}(a6)
+    li      t0, 2
+    sd      t0, {bp_trampoline_sequence_offset}(a6)
+    fence   rw, w
+    li      t0, {trampoline_owner}
+    sb      t0, {state_owner_offset}(a6)
+    fence   rw, w
+    li      t0, 2
+    sd      t0, {state_count_offset}(a6)
+
+    lbu     t0, {state_owner_offset}(a6)
+    li      t1, {trampoline_owner}
+    bne     t0, t1, .Lbp_translation_fail
+    ld      t0, {state_count_offset}(a6)
+    li      t1, 2
+    bne     t0, t1, .Lbp_translation_fail
     csrw    satp, a1
     sfence.vma
-    add     a6, a6, a5
+    csrr    t0, satp
+    bne     t0, a1, .Lbp_translation_fail
+
+    li      t0, {trampoline_owner}
+    sb      t0, {bp_early_old_offset}(a6)
     li      t1, {early_owner}
-    sb      t1, 0(a6)
+    sb      t1, {bp_early_new_offset}(a6)
+    li      t0, 1
+    sb      t0, {bp_early_sync_offset}(a6)
+    sd      a1, {bp_early_satp_offset}(a6)
+    li      t0, 3
+    sd      t0, {bp_early_sequence_offset}(a6)
+    fence   rw, w
+    sb      t1, {state_owner_offset}(a6)
+    fence   rw, w
+    li      t0, 3
+    sd      t0, {state_count_offset}(a6)
     jr      a4
+
+.Lbp_translation_fail:
+    li      a7, 8
+    ecall
+2:
+    wfi
+    j       2b
 
     .section .text.user_entry, "ax"
     .align 2
@@ -76,7 +131,20 @@ arceos_ex_enter_user_mode:
     mv      sp, a2
     sret
 "#,
+    state_owner_offset = const crate::objects::cpu::TRANSLATION_STATE_OWNER_OFFSET,
+    state_count_offset = const crate::objects::cpu::TRANSLATION_STATE_COMMITTED_COUNT_OFFSET,
+    bp_trampoline_old_offset = const crate::objects::cpu::TRANSLATION_STATE_JOURNAL_OFFSET + crate::objects::cpu::TRANSLATION_RECEIPT_SIZE + crate::objects::cpu::TRANSLATION_RECEIPT_OLD_OWNER_OFFSET,
+    bp_trampoline_new_offset = const crate::objects::cpu::TRANSLATION_STATE_JOURNAL_OFFSET + crate::objects::cpu::TRANSLATION_RECEIPT_SIZE + crate::objects::cpu::TRANSLATION_RECEIPT_NEW_OWNER_OFFSET,
+    bp_trampoline_sync_offset = const crate::objects::cpu::TRANSLATION_STATE_JOURNAL_OFFSET + crate::objects::cpu::TRANSLATION_RECEIPT_SIZE + crate::objects::cpu::TRANSLATION_RECEIPT_SYNC_COMPLETE_OFFSET,
+    bp_trampoline_satp_offset = const crate::objects::cpu::TRANSLATION_STATE_JOURNAL_OFFSET + crate::objects::cpu::TRANSLATION_RECEIPT_SIZE + crate::objects::cpu::TRANSLATION_RECEIPT_SATP_OFFSET,
+    bp_trampoline_sequence_offset = const crate::objects::cpu::TRANSLATION_STATE_JOURNAL_OFFSET + crate::objects::cpu::TRANSLATION_RECEIPT_SIZE + crate::objects::cpu::TRANSLATION_RECEIPT_SEQUENCE_OFFSET,
+    bp_early_old_offset = const crate::objects::cpu::TRANSLATION_STATE_JOURNAL_OFFSET + 2 * crate::objects::cpu::TRANSLATION_RECEIPT_SIZE + crate::objects::cpu::TRANSLATION_RECEIPT_OLD_OWNER_OFFSET,
+    bp_early_new_offset = const crate::objects::cpu::TRANSLATION_STATE_JOURNAL_OFFSET + 2 * crate::objects::cpu::TRANSLATION_RECEIPT_SIZE + crate::objects::cpu::TRANSLATION_RECEIPT_NEW_OWNER_OFFSET,
+    bp_early_sync_offset = const crate::objects::cpu::TRANSLATION_STATE_JOURNAL_OFFSET + 2 * crate::objects::cpu::TRANSLATION_RECEIPT_SIZE + crate::objects::cpu::TRANSLATION_RECEIPT_SYNC_COMPLETE_OFFSET,
+    bp_early_satp_offset = const crate::objects::cpu::TRANSLATION_STATE_JOURNAL_OFFSET + 2 * crate::objects::cpu::TRANSLATION_RECEIPT_SIZE + crate::objects::cpu::TRANSLATION_RECEIPT_SATP_OFFSET,
+    bp_early_sequence_offset = const crate::objects::cpu::TRANSLATION_STATE_JOURNAL_OFFSET + 2 * crate::objects::cpu::TRANSLATION_RECEIPT_SIZE + crate::objects::cpu::TRANSLATION_RECEIPT_SEQUENCE_OFFSET,
     early_owner = const crate::objects::cpu::TranslationOwner::EarlyVm as u8,
+    physical_owner = const crate::objects::cpu::TranslationOwner::PhysicalDirect as u8,
     trampoline_owner = const crate::objects::cpu::TranslationOwner::TrampolineVm as u8,
     trap_context_task_offset = const crate::objects::trap_type::TRAP_ENTRY_CONTEXT_TASK_OFFSET,
 );
@@ -89,7 +157,7 @@ unsafe extern "C" {
         gp_virt: usize,
         continuation_virt: usize,
         kernel_virt_offset: usize,
-        translation_owner_phys: usize,
+        translation_state_phys: usize,
     ) -> !;
     #[cfg(app_user_boot)]
     fn arceos_ex_enter_user_mode(
@@ -295,7 +363,7 @@ pub unsafe fn switch_to_early_vm(
     gp_virt: usize,
     continuation_virt: usize,
     kernel_virt_offset: usize,
-    translation_owner_phys: usize,
+    translation_state_phys: usize,
 ) -> ! {
     // SAFETY: this is the architecture boundary for Vm.Setup. The caller must
     // provide satp values for initialized TrampolineVm/EarlyVm page tables and
@@ -308,7 +376,7 @@ pub unsafe fn switch_to_early_vm(
             gp_virt,
             continuation_virt,
             kernel_virt_offset,
-            translation_owner_phys,
+            translation_state_phys,
         )
     }
 }

@@ -409,9 +409,14 @@ type SmokeTestGenerationMust {
          * Per-CPU translation ownership:
          *
          * CpuGroup smoke coverage must observe the live owner and final
-         * takeover trace independently for every CPU. The boot CPU reaches
-         * SwapperVm from EarlyVm, while APs reach it from TrampolineVm; every
-         * trace must record the installed SATP and completed synchronization.
+         * takeover journal independently for every CPU. The boot CPU records
+         * PhysicalDirect -> TrampolineVm -> EarlyVm -> SwapperVm, while APs
+         * record PhysicalDirect -> TrampolineVm -> SwapperVm with no EarlyVm;
+         * every receipt must record the installed SATP, completed
+         * synchronization and a contiguous commit sequence. Negative coverage
+         * must reject wrong old owner/SATP, duplicate or out-of-order receipt,
+         * half publication and trampoline-window boundary overflow without
+         * advancing the visible journal.
          */
         testing_cpu_group_smoke_must_cover_per_cpu_translation_owner();
         testing_cpu_group_smoke_must_cover_bp_and_ap_takeover_paths();

@@ -39,11 +39,22 @@ This file is the testing authority for CPU ownership, references and the
   must derive the effective Flow through CurrentTask, dereference that Flow's
   CpuRef and reject any Task/Flow/CPU disagreement.
 - The same smoke boundary must observe each CPU's final translation owner and
-  takeover trace. The BP path ends `EarlyVm -> SwapperVm`; every AP path ends
-  `TrampolineVm -> SwapperVm`. Each record carries the canonical CPU, old/new
-  owner, installed SATP and completed synchronization, while the shared
+  complete ordered takeover journal. BP records
+  `None -> PhysicalDirect -> TrampolineVm -> EarlyVm -> SwapperVm`; every AP
+  records `None -> PhysicalDirect -> TrampolineVm -> SwapperVm` and no EarlyVm
+  receipt. Every record carries the canonical CPU, old/new owner, installed
+  SATP, completed synchronization and contiguous one-based sequence, while the shared
   `PhysicalDirect`, `TrampolineVm`, `EarlyVm` and `SwapperVm` controllers remain
   `Ready` rather than being destroyed by any CPU-local handoff.
+- Negative CPU translation-state tests cover wrong old owner, target/live SATP
+  mismatch, duplicate and out-of-order receipts, release count hiding a
+  half-written slot, and exact/overflowing trampoline-window endpoints. Every
+  rejected commit preserves owner and committed journal count.
+- A disassembly test included by the root regression checks both BP and AP
+  entry symbols and proves that target SATP installation and required
+  `sfence.vma` precede journal fill, owner publication and the release-published
+  committed count. Final runtime state is not sufficient evidence for this
+  transient ordering contract.
 - Focused tool tests cover indexed publication/rollback and selector isolation;
   scheduler and user-flow smoke cover migration and handoff. The final gate
   after implementation changes is the direct repository-root `make test`.

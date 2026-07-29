@@ -5,7 +5,7 @@ use crate::{arch::riscv64::csr, checkpoint::Checkpoint};
 use super::{
     boot_args::BootArgs,
     config::Config,
-    cpu::{Cpu, MAX_CPUS, TranslationOwner},
+    cpu::{Cpu, MAX_CPUS, TranslationOwner, TranslationTakeoverTrace},
     fix_map::FixMap,
     kernel_image::KernelImage,
     lds::Lds,
@@ -43,15 +43,19 @@ impl EarlyVm {
             && self.translation_sync_complete[cpu.logical_id()].load(Ordering::Acquire)
     }
 
-    pub fn adopt_take_over(&self, cpu: &Cpu) -> bool {
+    pub fn complete_arch_take_over(&self, cpu: &Cpu) -> bool {
         if self.lifecycle.state() != State::Ready
             || cpu.logical_id() >= MAX_CPUS
             || cpu.active_translation_owner() != TranslationOwner::EarlyVm
             || csr::read_satp() != self.satp
-            || !cpu.adopt_translation_takeover(
-                TranslationOwner::TrampolineVm,
-                TranslationOwner::EarlyVm,
-                self.satp,
+            || !cpu.translation_receipt_matches(
+                2,
+                TranslationTakeoverTrace::completed(
+                    TranslationOwner::TrampolineVm,
+                    TranslationOwner::EarlyVm,
+                    self.satp,
+                    3,
+                ),
             )
         {
             return false;

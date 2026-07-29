@@ -3,7 +3,7 @@ use crate::{arch::riscv64::csr, checkpoint::Checkpoint};
 use super::{
     boot_args::BootArgs,
     config::Config,
-    cpu::{Cpu, TranslationOwner},
+    cpu::{Cpu, TranslationOwner, TranslationTakeoverTrace},
     early_vm::EarlyVm,
     fix_map::FixMap,
     kernel_addr_space::KernelAddrSpace,
@@ -132,8 +132,14 @@ impl Vm {
         let Some(continuation_virt) = vm_setup::continuation_addr(kernel_image) else {
             crate::arch::riscv64::sbi::system_shutdown();
         };
-        let Some(owner_phys) =
-            kernel_image.runtime_to_phys(boot_cpu.translation_owner_storage() as usize)
+        if !self
+            .trampoline_vm
+            .translation_state_mapped(boot_cpu, kernel_image)
+        {
+            crate::arch::riscv64::sbi::system_shutdown();
+        }
+        let Some(translation_state_phys) =
+            kernel_image.runtime_to_phys(boot_cpu.translation_state_storage() as usize)
         else {
             crate::arch::riscv64::sbi::system_shutdown();
         };
@@ -152,7 +158,7 @@ impl Vm {
                 gp_virt,
                 continuation_virt,
                 kernel_image.virt_offset(),
-                owner_phys,
+                translation_state_phys,
             )
         }
     }
@@ -165,12 +171,17 @@ impl Vm {
     ) {
         crate::checkpoint::enable_post_vm_checkpoints();
 
-        if !self.trampoline_vm.adopt_completed_takeover(boot_cpu) {
+        let expected_chain =
+            boot_early_translation_chain(self.trampoline_vm.satp(), self.early_vm.satp());
+        if !boot_cpu.verify_translation_chain(&expected_chain, csr::read_satp())
+            || !self.physical_direct.complete_arch_take_over(boot_cpu)
+            || !self.trampoline_vm.complete_arch_take_over(boot_cpu)
+        {
             crate::arch::riscv64::sbi::system_shutdown();
         }
         crate::checkpoint::checkpoint(Checkpoint::TrampolineVmTakeOver);
 
-        if !self.early_vm.adopt_take_over(boot_cpu) {
+        if !self.early_vm.complete_arch_take_over(boot_cpu) {
             crate::arch::riscv64::sbi::system_shutdown();
         }
         crate::checkpoint::checkpoint(Checkpoint::EarlyVmTakeOver);
@@ -270,18 +281,26 @@ impl Vm {
         self.entry_successor_ready() && self.swapper_vm.current_on_cpu(cpu)
     }
 
-    pub fn adopt_ap_translation_chain(&self, cpu: &Cpu) -> bool {
+    pub fn complete_ap_translation_chain(&self, cpu: &Cpu, live_satp: usize) -> bool {
+        let expected_chain =
+            ap_translation_chain(self.trampoline_vm.satp(), self.swapper_vm.satp());
         self.entry_successor_ready()
-            && self.physical_direct.adopt_completed_takeover(cpu)
-            && self.trampoline_vm.adopt_completed_takeover(cpu)
-            && self.swapper_vm.adopt_ap_take_over(cpu)
+            && cpu.verify_translation_chain(&expected_chain, live_satp)
+            && self.physical_direct.complete_arch_take_over(cpu)
+            && self.trampoline_vm.complete_arch_take_over(cpu)
+            && self
+                .swapper_vm
+                .complete_arch_take_over(cpu, TranslationOwner::TrampolineVm)
     }
 
     pub fn ap_translation_ready(&self, cpu: &Cpu) -> bool {
+        let expected_chain =
+            ap_translation_chain(self.trampoline_vm.satp(), self.swapper_vm.satp());
         self.entry_successor_ready()
             && self.physical_direct.takeover_complete_for(cpu)
             && self.trampoline_vm.translation_sync_complete(cpu)
-            && self.swapper_vm.current_on_cpu(cpu)
+            && self.swapper_vm.takeover_complete_for(cpu)
+            && cpu.translation_chain_matches(&expected_chain)
     }
 
     pub const fn swapper_vm(&self) -> &SwapperVm {
@@ -295,4 +314,76 @@ impl Vm {
     pub const fn trampoline_vm(&self) -> &TrampolineVm {
         &self.trampoline_vm
     }
+}
+
+fn boot_early_translation_chain(
+    trampoline_satp: usize,
+    early_satp: usize,
+) -> [TranslationTakeoverTrace; 3] {
+    [
+        TranslationTakeoverTrace::completed(
+            TranslationOwner::None,
+            TranslationOwner::PhysicalDirect,
+            0,
+            1,
+        ),
+        TranslationTakeoverTrace::completed(
+            TranslationOwner::PhysicalDirect,
+            TranslationOwner::TrampolineVm,
+            trampoline_satp,
+            2,
+        ),
+        TranslationTakeoverTrace::completed(
+            TranslationOwner::TrampolineVm,
+            TranslationOwner::EarlyVm,
+            early_satp,
+            3,
+        ),
+    ]
+}
+
+#[cfg_attr(not(app_smoke), allow(dead_code))]
+pub(crate) fn boot_translation_chain(
+    trampoline_satp: usize,
+    early_satp: usize,
+    swapper_satp: usize,
+) -> [TranslationTakeoverTrace; 4] {
+    let early = boot_early_translation_chain(trampoline_satp, early_satp);
+    [
+        early[0],
+        early[1],
+        early[2],
+        TranslationTakeoverTrace::completed(
+            TranslationOwner::EarlyVm,
+            TranslationOwner::SwapperVm,
+            swapper_satp,
+            4,
+        ),
+    ]
+}
+
+pub(crate) fn ap_translation_chain(
+    trampoline_satp: usize,
+    swapper_satp: usize,
+) -> [TranslationTakeoverTrace; 3] {
+    [
+        TranslationTakeoverTrace::completed(
+            TranslationOwner::None,
+            TranslationOwner::PhysicalDirect,
+            0,
+            1,
+        ),
+        TranslationTakeoverTrace::completed(
+            TranslationOwner::PhysicalDirect,
+            TranslationOwner::TrampolineVm,
+            trampoline_satp,
+            2,
+        ),
+        TranslationTakeoverTrace::completed(
+            TranslationOwner::TrampolineVm,
+            TranslationOwner::SwapperVm,
+            swapper_satp,
+            3,
+        ),
+    ]
 }

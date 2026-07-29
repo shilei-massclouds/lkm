@@ -72,6 +72,7 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
         &ctx.sbi_ipi,
         &ctx.kernel_image,
         &ctx.static_objects,
+        &ctx.vm,
         &ctx.lds,
         &mut ctx.cpu_add_remove_lock,
         &mut ctx.cpu_hotplug_lock,

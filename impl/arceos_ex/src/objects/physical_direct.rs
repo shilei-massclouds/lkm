@@ -35,10 +35,11 @@ impl PhysicalDirect {
             );
         }
         csr::sfence_vma();
-        if !cpu.replace_translation_owner(
+        if !cpu.commit_translation_takeover(
             TranslationOwner::None,
             TranslationOwner::PhysicalDirect,
             0,
+            csr::read_satp(),
         ) {
             return failed_condition(
                 LifecycleEvent::Enable,
@@ -52,8 +53,18 @@ impl PhysicalDirect {
         Ok(())
     }
 
-    pub fn adopt_completed_takeover(&self, cpu: &Cpu) -> bool {
-        if cpu.logical_id() >= MAX_CPUS {
+    pub fn complete_arch_take_over(&self, cpu: &Cpu) -> bool {
+        if cpu.logical_id() >= MAX_CPUS
+            || !cpu.translation_receipt_matches(
+                0,
+                super::cpu::TranslationTakeoverTrace::completed(
+                    TranslationOwner::None,
+                    TranslationOwner::PhysicalDirect,
+                    0,
+                    1,
+                ),
+            )
+        {
             return false;
         }
         self.takeover_complete[cpu.logical_id()].store(true, Ordering::Release);

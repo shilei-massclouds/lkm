@@ -4,7 +4,7 @@ use crate::{arch::riscv64::csr, checkpoint::Checkpoint};
 
 use super::{
     config::Config,
-    cpu::{Cpu, MAX_CPUS, TranslationOwner},
+    cpu::{Cpu, MAX_CPUS, TranslationOwner, TranslationTakeoverTrace},
     kernel_addr_space::KernelAddrSpace,
     kernel_image::KernelImage,
     lds::Lds,
@@ -135,7 +135,14 @@ impl SwapperVm {
 
         csr::write_satp(self.satp);
         csr::sfence_vma();
-        if !cpu.replace_translation_owner(old_owner, TranslationOwner::SwapperVm, self.satp) {
+        let observed_satp = csr::read_satp();
+        if !cpu.commit_translation_takeover(
+            old_owner,
+            TranslationOwner::SwapperVm,
+            self.satp,
+            observed_satp,
+        ) || !self.complete_arch_take_over(cpu, old_owner)
+        {
             return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
@@ -143,26 +150,41 @@ impl SwapperVm {
                 State::Ready,
             );
         }
-        self.translation_sync_complete[cpu.logical_id()].store(true, Ordering::Release);
         crate::checkpoint::checkpoint(Checkpoint::SwapperVmTakeOver);
         Ok(())
     }
 
-    pub fn adopt_ap_take_over(&self, cpu: &Cpu) -> bool {
+    pub fn complete_arch_take_over(&self, cpu: &Cpu, old_owner: TranslationOwner) -> bool {
+        let (index, sequence) = match old_owner {
+            TranslationOwner::TrampolineVm => (2, 3),
+            TranslationOwner::EarlyVm => (3, 4),
+            _ => return false,
+        };
         if self.lifecycle.state() != State::Ready
             || cpu.logical_id() >= MAX_CPUS
             || cpu.active_translation_owner() != TranslationOwner::SwapperVm
             || csr::read_satp() != self.satp
-            || !cpu.adopt_translation_takeover(
-                TranslationOwner::TrampolineVm,
-                TranslationOwner::SwapperVm,
-                self.satp,
+            || !cpu.translation_receipt_matches(
+                index,
+                TranslationTakeoverTrace::completed(
+                    old_owner,
+                    TranslationOwner::SwapperVm,
+                    self.satp,
+                    sequence,
+                ),
             )
         {
             return false;
         }
         self.translation_sync_complete[cpu.logical_id()].store(true, Ordering::Release);
         true
+    }
+
+    pub fn takeover_complete_for(&self, cpu: &Cpu) -> bool {
+        self.state() == State::Ready
+            && cpu.logical_id() < MAX_CPUS
+            && cpu.active_translation_owner() == TranslationOwner::SwapperVm
+            && self.translation_sync_complete(cpu)
     }
 
     pub fn current_on_cpu(&self, cpu: &Cpu) -> bool {

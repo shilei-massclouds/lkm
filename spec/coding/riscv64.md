@@ -205,9 +205,11 @@ loading trampoline_pg_dir into SATP.
 The minimum acceptable implementation order is:
 1. compute or load the trampoline SATP value,
 2. execute sfence.vma or an equivalent local TLB flush,
-3. only then write SATP to the trampoline value,
-4. only then commit `trampoline_vm_translation_sync_complete(TrampolineVm, cpu_ref)` and atomically publish
-   that CPU's owner.
+3. only then write SATP to the trampoline value and enter a trampoline-mapped virtual address,
+4. verify the live SATP through that virtual execution boundary,
+5. only then fill the next takeover journal receipt, publish that CPU's owner and release-publish its committed count,
+6. let Rust verify that receipt without rewriting it before committing
+   `trampoline_vm_translation_sync_complete(TrampolineVm, cpu_ref)`.
 
 #### Early page table handoff
 
@@ -225,7 +227,9 @@ The minimum acceptable implementation order is:
 1. compute or load the early SATP value,
 2. write SATP,
 3. execute sfence.vma or an equivalent local TLB flush,
-4. only then commit `early_vm_translation_sync_complete(EarlyVm, cpu_ref)` and atomically publish that CPU's owner.
+4. verify the live SATP, then fill and release-publish the next takeover journal receipt and owner,
+5. let Rust verify the complete BP chain without rewriting it before committing
+   `early_vm_translation_sync_complete(EarlyVm, cpu_ref)`.
 
 #### Swapper page table handoff
 
@@ -244,7 +248,15 @@ The minimum acceptable implementation order is:
 1. compute or load the swapper SATP value,
 2. write SATP,
 3. execute sfence.vma or an equivalent local TLB flush,
-4. only then commit `swapper_vm_translation_sync_complete(SwapperVm, cpu_ref)` and atomically publish that CPU's owner.
+4. verify the live SATP, then fill and release-publish the next takeover journal receipt and owner,
+5. let Rust verify the complete BP or AP chain without rewriting it before committing
+   `swapper_vm_translation_sync_complete(SwapperVm, cpu_ref)`.
+
+BP and AP assembly must validate the expected old owner and committed count before any receipt write. BP uses
+`PhysicalDirect -> TrampolineVm -> EarlyVm`; AP uses
+`PhysicalDirect -> TrampolineVm -> SwapperVm`. AP Rust entry verifies the full three-receipt journal, final owner and
+live swapper SATP before publishing any controller per-CPU completion fact. A root-regression disassembly check must
+enforce the real `csrw satp` / `sfence.vma` / journal fill / owner store / committed-count order for both entry paths.
 
 ### Riscv64SchedulerCodingShould
 

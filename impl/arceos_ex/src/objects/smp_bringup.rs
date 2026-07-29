@@ -2,7 +2,13 @@ use core::arch::global_asm;
 use core::sync::atomic::Ordering;
 
 use super::{
-    cpu::{MAX_CPUS, TranslationOwner},
+    cpu::{
+        MAX_CPUS, TRANSLATION_RECEIPT_NEW_OWNER_OFFSET, TRANSLATION_RECEIPT_OLD_OWNER_OFFSET,
+        TRANSLATION_RECEIPT_SATP_OFFSET, TRANSLATION_RECEIPT_SEQUENCE_OFFSET,
+        TRANSLATION_RECEIPT_SIZE, TRANSLATION_RECEIPT_SYNC_COMPLETE_OFFSET,
+        TRANSLATION_STATE_COMMITTED_COUNT_OFFSET, TRANSLATION_STATE_JOURNAL_OFFSET,
+        TRANSLATION_STATE_OWNER_OFFSET, TranslationOwner,
+    },
     cpu_control::RawSpinLock,
     cpu_group::CpuGroup,
     interrupt_type::InterruptType,
@@ -23,6 +29,7 @@ use super::{
     static_objects::StaticObjects,
     task::{Task, TaskBreakpointState, TaskExecutionAuthority, TaskRef},
     task_flow::{TaskFlow, TaskFlowRef},
+    vm::Vm,
 };
 use crate::checkpoint::Checkpoint;
 use crate::flows::boot_idle_flow::BootIdleFlow;
@@ -33,8 +40,8 @@ const AP_BOOT_DATA_TASK_PTR_OFFSET: usize = 0;
 const AP_BOOT_DATA_STACK_PTR_OFFSET: usize = 8;
 const AP_BOOT_DATA_TRAMPOLINE_SATP_OFFSET: usize = 32;
 const AP_BOOT_DATA_SWAPPER_SATP_OFFSET: usize = 40;
-const AP_BOOT_DATA_OWNER_PHYS_OFFSET: usize = 48;
-const AP_BOOT_DATA_OWNER_VIRT_OFFSET: usize = 56;
+const AP_BOOT_DATA_TRANSLATION_STATE_PHYS_OFFSET: usize = 48;
+const AP_BOOT_DATA_TRANSLATION_STATE_VIRT_OFFSET: usize = 56;
 const AP_BOOT_DATA_GP_OFFSET: usize = 64;
 const AP_BOOT_DATA_RUST_ENTRY_OFFSET: usize = 72;
 const AP_BOOT_DATA_VIRT_OFFSET: usize = 80;
@@ -50,8 +57,8 @@ struct SbiHartBootData {
     hartid: usize,
     trampoline_satp: usize,
     swapper_satp: usize,
-    translation_owner_phys: usize,
-    translation_owner_virt: usize,
+    translation_state_phys: usize,
+    translation_state_virt: usize,
     gp: usize,
     rust_entry: usize,
     boot_data_virt: usize,
@@ -71,12 +78,12 @@ const _: () = {
         core::mem::offset_of!(SbiHartBootData, swapper_satp) == AP_BOOT_DATA_SWAPPER_SATP_OFFSET
     );
     assert!(
-        core::mem::offset_of!(SbiHartBootData, translation_owner_phys)
-            == AP_BOOT_DATA_OWNER_PHYS_OFFSET
+        core::mem::offset_of!(SbiHartBootData, translation_state_phys)
+            == AP_BOOT_DATA_TRANSLATION_STATE_PHYS_OFFSET
     );
     assert!(
-        core::mem::offset_of!(SbiHartBootData, translation_owner_virt)
-            == AP_BOOT_DATA_OWNER_VIRT_OFFSET
+        core::mem::offset_of!(SbiHartBootData, translation_state_virt)
+            == AP_BOOT_DATA_TRANSLATION_STATE_VIRT_OFFSET
     );
     assert!(core::mem::offset_of!(SbiHartBootData, gp) == AP_BOOT_DATA_GP_OFFSET);
     assert!(core::mem::offset_of!(SbiHartBootData, rust_entry) == AP_BOOT_DATA_RUST_ENTRY_OFFSET);
@@ -102,8 +109,8 @@ impl SbiHartBootData {
             hartid: usize::MAX,
             trampoline_satp: 0,
             swapper_satp: 0,
-            translation_owner_phys: 0,
-            translation_owner_virt: 0,
+            translation_state_phys: 0,
+            translation_state_virt: 0,
             gp: 0,
             rust_entry: 0,
             boot_data_virt: 0,
@@ -262,8 +269,8 @@ arceos_ex_secondary_start_sbi:
     ld      sp, {stack_ptr_offset}(s0)
     ld      t1, {trampoline_satp_offset}(s0)
     ld      t2, {swapper_satp_offset}(s0)
-    ld      t3, {owner_phys_offset}(s0)
-    ld      t4, {owner_virt_offset}(s0)
+    ld      t3, {translation_state_phys_offset}(s0)
+    ld      t4, {translation_state_virt_offset}(s0)
     ld      t5, {gp_offset}(s0)
     ld      t6, {rust_entry_offset}(s0)
     ld      s1, {boot_data_virt_offset}(s0)
@@ -271,28 +278,95 @@ arceos_ex_secondary_start_sbi:
     ld      s3, {entry_context_offset}(s0)
     ld      s4, {formal_entry_offset}(s0)
 
+    beqz    t1, .Lap_translation_fail
+    beqz    t2, .Lap_translation_fail
+    beqz    t3, .Lap_translation_fail
+    beqz    t4, .Lap_translation_fail
+    csrr    t0, satp
+    bnez    t0, .Lap_translation_fail
+    lbu     t0, {state_owner_offset}(t3)
+    bnez    t0, .Lap_translation_fail
+    ld      t0, {state_count_offset}(t3)
+    bnez    t0, .Lap_translation_fail
+
     sfence.vma
+    sb      zero, {ap_physical_old_offset}(t3)
     li      t0, {physical_owner}
-    sb      t0, 0(t3)
+    sb      t0, {ap_physical_new_offset}(t3)
+    li      a0, 1
+    sb      a0, {ap_physical_sync_offset}(t3)
+    sd      zero, {ap_physical_satp_offset}(t3)
+    sd      a0, {ap_physical_sequence_offset}(t3)
+    fence   rw, w
+    sb      t0, {state_owner_offset}(t3)
+    fence   rw, w
+    sd      a0, {state_count_offset}(t3)
 
     la      t0, 1f
     add     t0, t0, s2
     csrw    stvec, t0
+    lbu     t0, {state_owner_offset}(t3)
+    li      a0, {physical_owner}
+    bne     t0, a0, .Lap_translation_fail
+    ld      t0, {state_count_offset}(t3)
+    li      a0, 1
+    bne     t0, a0, .Lap_translation_fail
     sfence.vma
-    li      t0, {trampoline_owner}
-    sb      t0, 0(t3)
     csrw    satp, t1
     .balign 4
 1:
+    csrr    t0, satp
+    bne     t0, t1, .Lap_translation_fail
+    li      t0, {physical_owner}
+    sb      t0, {ap_trampoline_old_offset}(t4)
+    li      t0, {trampoline_owner}
+    sb      t0, {ap_trampoline_new_offset}(t4)
+    li      a0, 1
+    sb      a0, {ap_trampoline_sync_offset}(t4)
+    sd      t1, {ap_trampoline_satp_offset}(t4)
+    li      a0, 2
+    sd      a0, {ap_trampoline_sequence_offset}(t4)
+    fence   rw, w
+    sb      t0, {state_owner_offset}(t4)
+    fence   rw, w
+    sd      a0, {state_count_offset}(t4)
+
+    lbu     t0, {state_owner_offset}(t4)
+    li      a0, {trampoline_owner}
+    bne     t0, a0, .Lap_translation_fail
+    ld      t0, {state_count_offset}(t4)
+    li      a0, 2
+    bne     t0, a0, .Lap_translation_fail
     csrw    satp, t2
     sfence.vma
+    csrr    t0, satp
+    bne     t0, t2, .Lap_translation_fail
+    li      t0, {trampoline_owner}
+    sb      t0, {ap_swapper_old_offset}(t4)
     li      t0, {swapper_owner}
-    sb      t0, 0(t4)
+    sb      t0, {ap_swapper_new_offset}(t4)
+    li      a0, 1
+    sb      a0, {ap_swapper_sync_offset}(t4)
+    sd      t2, {ap_swapper_satp_offset}(t4)
+    li      a0, 3
+    sd      a0, {ap_swapper_sequence_offset}(t4)
+    fence   rw, w
+    sb      t0, {state_owner_offset}(t4)
+    fence   rw, w
+    sd      a0, {state_count_offset}(t4)
+
     mv      gp, t5
     csrw    sscratch, s3
     csrw    stvec, s4
     mv      a0, s1
     jr      t6
+
+.Lap_translation_fail:
+    li      a7, 8
+    ecall
+2:
+    wfi
+    j       2b
 "#,
     boot_data_virt_offset = const AP_BOOT_DATA_VIRT_OFFSET,
     gp_offset = const AP_BOOT_DATA_GP_OFFSET,
@@ -300,8 +374,25 @@ arceos_ex_secondary_start_sbi:
     formal_entry_offset = const AP_BOOT_DATA_FORMAL_ENTRY_OFFSET,
     kernel_virt_offset_offset = const AP_BOOT_DATA_KERNEL_VIRT_OFFSET_OFFSET,
     rust_entry_offset = const AP_BOOT_DATA_RUST_ENTRY_OFFSET,
-    owner_phys_offset = const AP_BOOT_DATA_OWNER_PHYS_OFFSET,
-    owner_virt_offset = const AP_BOOT_DATA_OWNER_VIRT_OFFSET,
+    translation_state_phys_offset = const AP_BOOT_DATA_TRANSLATION_STATE_PHYS_OFFSET,
+    translation_state_virt_offset = const AP_BOOT_DATA_TRANSLATION_STATE_VIRT_OFFSET,
+    state_owner_offset = const TRANSLATION_STATE_OWNER_OFFSET,
+    state_count_offset = const TRANSLATION_STATE_COMMITTED_COUNT_OFFSET,
+    ap_physical_old_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + TRANSLATION_RECEIPT_OLD_OWNER_OFFSET,
+    ap_physical_new_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + TRANSLATION_RECEIPT_NEW_OWNER_OFFSET,
+    ap_physical_sync_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + TRANSLATION_RECEIPT_SYNC_COMPLETE_OFFSET,
+    ap_physical_satp_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + TRANSLATION_RECEIPT_SATP_OFFSET,
+    ap_physical_sequence_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + TRANSLATION_RECEIPT_SEQUENCE_OFFSET,
+    ap_trampoline_old_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + TRANSLATION_RECEIPT_SIZE + TRANSLATION_RECEIPT_OLD_OWNER_OFFSET,
+    ap_trampoline_new_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + TRANSLATION_RECEIPT_SIZE + TRANSLATION_RECEIPT_NEW_OWNER_OFFSET,
+    ap_trampoline_sync_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + TRANSLATION_RECEIPT_SIZE + TRANSLATION_RECEIPT_SYNC_COMPLETE_OFFSET,
+    ap_trampoline_satp_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + TRANSLATION_RECEIPT_SIZE + TRANSLATION_RECEIPT_SATP_OFFSET,
+    ap_trampoline_sequence_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + TRANSLATION_RECEIPT_SIZE + TRANSLATION_RECEIPT_SEQUENCE_OFFSET,
+    ap_swapper_old_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + 2 * TRANSLATION_RECEIPT_SIZE + TRANSLATION_RECEIPT_OLD_OWNER_OFFSET,
+    ap_swapper_new_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + 2 * TRANSLATION_RECEIPT_SIZE + TRANSLATION_RECEIPT_NEW_OWNER_OFFSET,
+    ap_swapper_sync_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + 2 * TRANSLATION_RECEIPT_SIZE + TRANSLATION_RECEIPT_SYNC_COMPLETE_OFFSET,
+    ap_swapper_satp_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + 2 * TRANSLATION_RECEIPT_SIZE + TRANSLATION_RECEIPT_SATP_OFFSET,
+    ap_swapper_sequence_offset = const TRANSLATION_STATE_JOURNAL_OFFSET + 2 * TRANSLATION_RECEIPT_SIZE + TRANSLATION_RECEIPT_SEQUENCE_OFFSET,
     physical_owner = const TranslationOwner::PhysicalDirect as u8,
     swapper_owner = const TranslationOwner::SwapperVm as u8,
     swapper_satp_offset = const AP_BOOT_DATA_SWAPPER_SATP_OFFSET,
@@ -351,15 +442,19 @@ extern "C" fn arceos_ex_secondary_entry_rust(boot_data: *const SbiHartBootData) 
     let translation_chain_verified = {
         let ctx = crate::context::context_ref();
         ctx.cpu_group.cpu(target_logical_id).is_some_and(|cpu| {
-            data.translation_owner_virt == cpu.translation_owner_storage() as usize
+            data.translation_state_virt == cpu.translation_state_storage() as usize
                 && ctx
                     .kernel_image
-                    .runtime_to_phys(data.translation_owner_virt)
-                    == Some(data.translation_owner_phys)
+                    .runtime_to_phys(data.translation_state_virt)
+                    == Some(data.translation_state_phys)
+                && ctx
+                    .vm
+                    .trampoline_vm()
+                    .translation_state_mapped(cpu, &ctx.kernel_image)
                 && data.trampoline_satp == ctx.vm.trampoline_vm().satp()
                 && data.swapper_satp == ctx.vm.swapper_vm().satp()
                 && observed_satp == data.swapper_satp
-                && ctx.vm.adopt_ap_translation_chain(cpu)
+                && ctx.vm.complete_ap_translation_chain(cpu, observed_satp)
                 && ctx.vm.ap_translation_ready(cpu)
         })
     };
@@ -944,6 +1039,7 @@ impl CpuStartProvider {
         sbi_ipi: &SbiIpi,
         kernel_image: &KernelImage,
         static_objects: &StaticObjects,
+        vm: &Vm,
         lds: &Lds,
         cpu_add_remove_lock: &mut Mutex,
         cpu_hotplug_lock: &mut PerCpuRwSemaphore,
@@ -984,7 +1080,8 @@ impl CpuStartProvider {
             return self.failed_setup();
         }
 
-        if !self.prepare_and_start_secondary_cpus(cpu_group, kernel_image, static_objects, lds) {
+        if !self.prepare_and_start_secondary_cpus(cpu_group, kernel_image, static_objects, vm, lds)
+        {
             let _ = cpu_hotplug_lock.write_unlock_owner(PerCpuRwSemaphoreOwner::KernelInitTask);
             let _ = cpu_add_remove_lock.unlock_owner(MutexOwner::KernelInitTask);
             return self.failed_setup();
@@ -1010,6 +1107,7 @@ impl CpuStartProvider {
         cpu_group: &mut CpuGroup,
         kernel_image: &KernelImage,
         static_objects: &StaticObjects,
+        vm: &Vm,
         lds: &Lds,
     ) -> bool {
         let Some(entry_pa) =
@@ -1050,8 +1148,14 @@ impl CpuStartProvider {
             if cpu.active_translation_owner() != TranslationOwner::None {
                 return false;
             }
-            let translation_owner_virt = cpu.translation_owner_storage() as usize;
-            let Some(translation_owner_phys) = kernel_image.runtime_to_phys(translation_owner_virt)
+            if !vm
+                .trampoline_vm()
+                .translation_state_mapped(cpu, kernel_image)
+            {
+                return false;
+            }
+            let translation_state_virt = cpu.translation_state_storage() as usize;
+            let Some(translation_state_phys) = kernel_image.runtime_to_phys(translation_state_virt)
             else {
                 return false;
             };
@@ -1092,8 +1196,8 @@ impl CpuStartProvider {
                     hartid,
                     trampoline_satp,
                     swapper_satp,
-                    translation_owner_phys,
-                    translation_owner_virt,
+                    translation_state_phys,
+                    translation_state_virt,
                     gp,
                     rust_entry,
                     boot_data_virt,
