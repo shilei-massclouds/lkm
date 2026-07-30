@@ -155,16 +155,21 @@ TrampolineVm → EarlyVm → SwapperVm Handoff，AP 在各自真实入口以同�
 PhysicalDirect，再按 PhysicalDirect → TrampolineVm → SwapperVm Handoff。四个 controller 都通过
 `ActivateOnCpu(cpu_ref)` 提交；旧 controller 不 Cleanup/Destroyed，静态页表保持 Ready。
 
-`CurrentTask.Action::BindTask(BootTask)` 在 PhysicalDirect 和 EarlyVm activation 后各调用一次。首次调用
-建立启动 CPU 到 BootTask 的 binding，第二次保持同一 Task/binding identity 并把 `tp` 刷新为当前虚拟
-地址表示；两次都必须实际写 `tp`。BootTask 的初始禁止抢占来自静态初始化，BindTask 不初始化或改变
-preempt count。TrampolineVm、controller association 缺失或 controller/live SATP 不一致必须诊断并
-fail-stop。本段不约束 `sp`。
+`CurrentTask.Action::BindTaskStack(BootTask, BootTask.stack)` 在 PhysicalDirect activation 后调用一次，
+以单个 boot-only Action 原子建立启动 CPU 到 BootTask 及其 stack 属性的 binding，并实际写物理地址表示
+的 `tp/sp`。EarlyVm activation 后调用
+`CurrentTask.Action::RefreshTaskStack(BootTask, BootTask.stack)`，保持同一 task/stack pair identity 并
+以单个 Action 原子刷新虚拟地址表示的 `tp/sp`。BootTask 的初始禁止抢占来自静态初始化，两种 Action
+均不初始化或改变 preempt count。错误 controller、controller association 缺失或 controller/live SATP
+不一致必须诊断并 fail-stop；任一校验或提交失败不得留下单独更新的 `tp`、`sp` 或 CPU-local binding。
+`BootTask.stack` 是 Task 类型上的静态属性值，不存在独立 stack object/state；两种 Action 不推进
+lifecycle，也不暴露公开 `BindStack` Signal。后续 `BootTask.EnableStackGuard` 只在该属性上建立栈边界/
+溢出保护事实。
 
 首次调度真实切换先通过 CurrentTask 选择器确认 BootTask，随后提交 context-switch prepare 事实并
 完成物理栈切换；next 栈上的 finish 原子保存/发布 BootTask 断点、消费 KernelInitTask 断点、提交
-OnCpu/Live、active Flow 与 `CurrentTask.BindTask(KernelInitTask)`，使 CurrentTask 解析切换到
-KernelInitTask。PID 1 的真实入口直接启动
+OnCpu/Live、active Flow，并由外层 switch commit 把 `BindTask(KernelInitTask)` 的 `tp` 更新与架构恢复
+的 `sp` 一起发布为匹配的 CurrentTask/CurrentStack pair。PID 1 的真实入口直接启动
 `KernelInitFlow.Preset`，不再回调 Kernel
 的 Setup 或 Enable。Preset body 必须在 `kernel_init_entry()` 验证 PID 1 vmalloc stack 后执行。
 

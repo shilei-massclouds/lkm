@@ -164,22 +164,22 @@ cause chain 和最后稳定 snapshot。
 
 | ID | source -> target.Signal | delivery / cause | handler 与提交边界 |
 | --- | --- | --- | --- |
-| `sig-0016` | `OpenSBI -> Kernel.Enable` | emits / 0013 | `Kernel.Transition::Enable@Ready`；等待 0017–0053，边界截断时 Kernel 保持 Ready、outcome 为 stopped |
+| `sig-0016` | `OpenSBI -> Kernel.Enable` | emits / 0013 | `Kernel.Transition::Enable@Ready`；等待 0017–0052，边界截断时 Kernel 保持 Ready、outcome 为 stopped |
 | `sig-0017` | `Kernel -> Kernel.AcceptEnable` | drives / 0016 | `Kernel.Action::AcceptEnable@Ready`；保持 Ready 并提交 Enable acceptance |
 | `sig-0018` | `Kernel -> BootInitFlow.AssignCpuRef` | drives / 0016 | `BootInitFlow.Action::AssignCpuRef@process`；唯一写入 `BootCPURef -> CpuGroup.cpus[0]` |
 | `sig-0019` | `Kernel -> PhysicalDirect.ActivateOnCpu` | drives / 0016 | Action；验证入口 `satp=0` 与 absent association，以 InitialActivation 把 CPU0 原子关联到 PhysicalDirect |
-| `sig-0020` | `Kernel -> BootInitFlow.Preset` | drives / 0016 | `BootInitFlow.Transition::Preset@Base`；在一个 `SingleTaskContext` 内等待 0021–0053 后提交 Prepared |
+| `sig-0020` | `Kernel -> BootInitFlow.Preset` | drives / 0016 | `BootInitFlow.Transition::Preset@Base`；在一个 `SingleTaskContext` 内等待 0021–0052 后提交 Prepared |
 | `sig-0021` | `BootInitFlow -> InterruptType.Preset` | drives / 0020 | Base -> Prepared；先关闭 CPU0 的全部中断分路门控，再清空这些门控上的全部待决中断信号；不改变总门控或建立 fallback |
 | `sig-0022` | `BootInitFlow -> KernelImage.Preset` | drives / 0020 | Base -> Prepared，建立相对 `gp` 寻址基准 |
 | `sig-0023` | `BootInitFlow -> CpuGroup.cpus[0].DisableFpuVectorExecution` | drives / 0020 | Action；CurrentCPU 解析到 CPU0，关闭浮点与向量执行状态并建立受控使用策略 |
 | `sig-0024` | `BootInitFlow -> KernelImage.Setup` | drives / 0020 | Prepared -> Ready，提交 BSS 清零完成、普通可写与映像虚拟范围事实 |
-| `sig-0025` | `BootInitFlow -> KernelAddrSpace.Preset` | drives / 0020 | 等待 0026–0027 后 Base -> Prepared，建立地址区域布局 |
-| `sig-0026` | `KernelAddrSpace -> LinearMap.Preset` | drives / 0025 | Base -> Ready，固定从 `PAGE_OFFSET` 开始的物理线性映射区域 |
-| `sig-0027` | `KernelAddrSpace -> UserSpaceReserve.Preset` | drives / 0025 | Base -> Ready，保留 canonical 用户地址范围 |
-| `sig-0028` | `BootInitFlow -> CpuGroup.cpus[0].Setup` | drives / 0020 | CurrentCPU 解析到 CPU0；Prepared -> Ready |
-| `sig-0029` | `BootInitFlow -> BootCpuLocalInterrupt.Setup` | drives / 0020 | Prepared -> Ready，建立 CPU0 本地中断关闭事实 |
-| `sig-0030` | `BootInitFlow -> CurrentTask.BindTask(BootTask)` | drives / 0020 | 上下文 Action；PhysicalDirect 下首次建立 CPU0 到 BootTask 的 binding 并写物理 `tp`；不初始化 preempt count |
-| `sig-0031` | `BootInitFlow -> BootInitStack.Preset` | drives / 0020 | Base -> Prepared，提交物理入口 `sp` |
+| `sig-0025` | `BootInitFlow -> BootInitFlow.RecordBootCpuHartid` | drives / 0020 | Action；保存入口 a0 原值供后续 hartid 建立使用 |
+| `sig-0026` | `BootInitFlow -> KernelAddrSpace.Preset` | drives / 0020 | 等待 0027–0028 后 Base -> Prepared，建立地址区域布局 |
+| `sig-0027` | `KernelAddrSpace -> LinearMap.Preset` | drives / 0026 | Base -> Ready，固定从 `PAGE_OFFSET` 开始的物理线性映射区域 |
+| `sig-0028` | `KernelAddrSpace -> UserSpaceReserve.Preset` | drives / 0026 | Base -> Ready，保留 canonical 用户地址范围 |
+| `sig-0029` | `BootInitFlow -> CpuGroup.cpus[0].Setup` | drives / 0020 | CurrentCPU 解析到 CPU0；Prepared -> Ready |
+| `sig-0030` | `BootInitFlow -> BootCpuLocalInterrupt.Setup` | drives / 0020 | Prepared -> Ready，建立 CPU0 本地中断关闭事实 |
+| `sig-0031` | `BootInitFlow -> CurrentTask.BindTaskStack(BootTask, BootTask.stack)` | drives / 0020 | 单个 boot-only 上下文 Action；PhysicalDirect 下原子建立 CPU0 task/stack pair 并写物理 `tp/sp`，不初始化 preempt count |
 | `sig-0032` | `BootInitFlow -> TrapType.Preset` | drives / 0020 | Base -> Prepared，安装物理 early event entry |
 | `sig-0033` | `BootInitFlow -> ExceptionType.Preset` | drives / 0020 | 等待 0034–0037 后 Base -> Prepared |
 | `sig-0034` | `ExceptionType -> PageFaultException.Preset` | drives / 0033 | Base -> Prepared |
@@ -199,9 +199,8 @@ cause chain 和最后稳定 snapshot。
 | `sig-0048` | `Vm -> EarlyVm.ActivateOnCpu` | drives / 0046 | Action；CPU0 TrampolineVm -> EarlyVm Handoff，trampoline 仅对该 CPU 退役 |
 | `sig-0049` | `Vm -> KernelImage.Enable` | drives / 0046 | Ready -> Online，确认当前执行环境中的相对 `gp` 寻址机制可用 |
 | `sig-0050` | `BootInitFlow -> TrapType.Setup` | drives / 0020 | Prepared -> Ready，安装正式 event entry |
-| `sig-0051` | `BootInitFlow -> CurrentTask.BindTask(BootTask)` | drives / 0020 | 上下文 Action；EarlyVm 下保持同一 binding identity 并实际刷新虚拟 `tp`；不处理 preempt count |
-| `sig-0052` | `BootInitFlow -> BootInitStack.Setup` | drives / 0020 | Prepared -> Ready，将 init stack `sp` 切到虚拟地址 |
-| `sig-0053` | `BootInitFlow -> Soc.Preset` | drives / 0020 | Base -> Prepared；Soc 与 CpuGroup 是 Kernel 平级子对象 |
+| `sig-0051` | `BootInitFlow -> CurrentTask.RefreshTaskStack(BootTask, BootTask.stack)` | drives / 0020 | 单个 boot-only 上下文 Action；EarlyVm 下保持同一 pair identity 并原子刷新虚拟 `tp/sp` |
+| `sig-0052` | `BootInitFlow -> Soc.Preset` | drives / 0020 | Base -> Prepared；Soc 与 CpuGroup 是 Kernel 平级子对象 |
 
 `sig-0020` 的 handler 进入前必须逐项验证 Kernel acceptance、RISC-V/SBI/OpenSBI、BootCpuRegisters、
 Config/Lds、BootTask `OnCpu/Live/Invalid`、initial-flow binding、task concurrency 和入口 `satp=0`。
@@ -210,13 +209,14 @@ Config/Lds、BootTask `OnCpu/Live/Invalid`、initial-flow binding、task concurr
 CPU0 的唯一 indexed declaration 已在第 1 组完成，不得用最终 `context_is(SystemExclusive)` 事实虚构
 第二个 context、Lock 或实例事件。
 
-最后一个 child 0053 完成后，0020 检查 CPU0 的 CurrentTask binding 仍解析为 BootTask 及 `task_flow_started(BootInitFlow)`，再把
+最后一个 child 0052 完成后，0020 检查 CPU0 的 CurrentTask/CurrentStack binding 仍解析为
+BootTask/BootTask.stack 及 `task_flow_started(BootInitFlow)`，再把
 BootInitFlow 从 Base 提交到 Prepared。此时 Kernel.Enable 的同步 drives 列表下一项是
 `BootInitFlow.Setup`；有界推导必须在创建该 Signal 之前 reached。boundary provenance 的 source/target
 必须是 `Kernel -> BootInitFlow`、canonical signal 必须是 `BootInitFlow.Setup`、delivery 必须是 drives、
 cause 必须是 0016，snapshot 必须等于 0020 的 after snapshot。边界处 Kernel 为 Ready、BootInitFlow
 为 Prepared；CpuGroup、InterruptType、ExceptionType、Soc、KernelAddrSpace 为 Prepared/Ready 边界规定的状态，`CpuGroup.cpus[0]` 为
-Ready 且 active controller 是 EarlyVm，KernelImage 为 Online，TrapType/BootInitStack/Vm/RawDtb/FixMap、
+Ready 且 active controller 是 EarlyVm，KernelImage 为 Online，TrapType/Vm/RawDtb/FixMap、
 TrampolineVm/EarlyVm 为 Ready。不存在独立入口 binding snapshot，也不存在 controller Cleanup/Destroyed。`CurrentCPU` 的 selector resolution 必须记录 source flow
 `BootInitFlow`、source ref `BootCPURef` 与 canonical target `CpuGroup.cpus[0]`；它本身不得拥有 state、
 instance 或 lifecycle。不得创建 `BootInitFlow.Setup` identity，也不得出现它的 send、receive、handler

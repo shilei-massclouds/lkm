@@ -240,6 +240,18 @@ _STATIC_SOURCE_PROOFS = {
             "static_initial_property",
             "linux_static_object_binding",
         ),
+        "task_stack_is_static_initial_property(self, self.stack)": (
+            "static_initial_property",
+            "linux_static_object_binding",
+        ),
+        "task_stack_range_is(self, self.stack, Lds.init_stack_start, Lds.init_stack_end)": (
+            "stack_layout",
+            "linux_linker_script",
+        ),
+        "task_has_unique_stack_attribute(self)": (
+            "task_type_schema",
+            "model_attribute_declaration",
+        ),
         "valid_object_storage(storage)": (
             "object_storage",
             "linux_static_object_binding",
@@ -3409,10 +3421,6 @@ class _Deriver:
                     entry, entry_span, kind, transition, state
                 ):
                     continue
-                elif self._try_prove_stack_layout_fact(
-                    entry, entry_span, kind, transition, state
-                ):
-                    continue
                 elif self._try_prove_prior_fact(
                     entry, entry_span, kind, transition, state
                 ):
@@ -4016,53 +4024,6 @@ class _Deriver:
             predicate=_predicate_name(expression),
             proof_class=proof_class,
             proof_provider=proof_provider,
-        )
-        return True
-
-    def _try_prove_stack_layout_fact(
-        self,
-        expression: str,
-        span: SourceSpan,
-        kind: str,
-        transition: TransitionDef | None,
-        state: StateDef | None,
-    ) -> bool:
-        if kind != "invariant" or state is None:
-            return False
-        if state.object_name != "BootInitStack":
-            return False
-        if (
-            expression.strip()
-            != "Lds.init_stack_end - Lds.init_stack_start >= Config.page_size"
-        ):
-            return False
-
-        if not (
-            self._validate_state("Lds", "Online")
-            and self._validate_state("Config", "Online")
-            and self._validate_state("KernelImage", "Ready")
-        ):
-            return False
-        required = {
-            "boot_stack_size >= page_size",
-            "boot_stack_size == Config.boot_stack_size",
-            "init_stack_end - init_stack_start == boot_stack_size",
-        }
-        if not required.issubset(self.proved_expressions):
-            return False
-
-        self._record(
-            DerivationStatus.PROVED,
-            f"{kind}: {expression}",
-            span,
-            object_name=_context_object(transition, state),
-            transition_name=transition.name if transition is not None else None,
-            state_name=state.name,
-            expression=expression,
-            source_kind=kind,
-            predicate=_predicate_name(expression),
-            proof_class="stack_layout",
-            proof_provider="config_and_linker",
         )
         return True
 

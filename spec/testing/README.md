@@ -114,14 +114,14 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
 - 提交的 `tools2/scenarios/BootInitFlow.Setup.snapshot.json` 必须与从模型初态执行
   `tools2/bin/pyveri -u BootInitFlow.Setup --snapshot-out /tmp/boot-init-flow-setup-presend.snapshot.json`
   得到的 canonical bytes 逐字节一致，并从仓库根与其它 cwd 重建出相同结果。当前正式模型下其
-  SHA-256 固定为 `457fb876ec56fabdf6a819195515cc93c753e313e897f9d8ac7ca956498be35d`，model
-  fingerprint 固定为 `sha256:ce5ffd10a87a67689fabfd6d0ea42bcb309135b72cf12f485cebf11ae20cf8c0`。
+  SHA-256 固定为 `118160c1c179cf8571c8d85d18e96a4f71f04c5f493c88442209ace967e36646`，model
+  fingerprint 固定为 `sha256:7a65211e474cf8a20b35373008ab6c6004f8052bcf1d0ff414be6ee2956b1c90`。
   `tools2/bin/pyveri -t BootInitFlow.Setup` 必须自动采用该第 3 组入口 scenario；显式 `-s` 仍优先，
   其它模型必须因 stale fingerprint 拒绝，缺失 canonical scenario 必须在 derive 前返回 2。
-- `-u BootInitFlow.Setup` 的真实上游推导必须精确包含 54 个 Signal，并逐项固定
-  `sig-0016..sig-0054` 在 charter 因果账本中的 source、target、canonical name、delivery、cause、
-  handler kind/id、target before/after state 和创建顺序。0016 必须是唯一 stopped Signal；0017–0049
-  以及 0050–0054 必须合计为 38 个 completed drives，完整 summary 必须为 53 completed、1 stopped、
+- `-u BootInitFlow.Setup` 的真实上游推导必须精确包含 52 个 Signal，并逐项固定
+  `sig-0016..sig-0052` 在 charter 因果账本中的 source、target、canonical name、delivery、cause、
+  handler kind/id、target before/after state 和创建顺序。0016 必须是唯一 stopped Signal；0017–0052
+  必须合计为 36 个 completed drives，完整 summary 必须为 51 completed、1 stopped、
   0 failed/rejected/truncated/pending。0020 只允许一对 `SingleTaskContext` enter/exit，enter 位于首个
   child send 前、exit 位于最后一个 child response 后和 0020 commit 前；第 1 组只有 CPU0 的一个 indexed declaration，
   第 2 组不得出现 Lock 或其它 fresh-instance event。
@@ -131,16 +131,19 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
   状态必须与 charter 账本一致，`task_flow_started(BootInitFlow)`、中断关闭、BootCPU 浮点/向量默认关闭及受控使用策略、BSS 清零完成且作为普通可写内存使用、`boot_cpu_hartid_recorded_for_later_use(BootCpuRegisters.a0)`、物理/虚拟 `tp/sp/gp`、
   early event、DTB/fixmap、VM translation 和 Soc early-platform 事实必须存在。结构化 Signal 必须把
   `selector_resolutions` 数组必须保留 `CurrentCPU` 的 source flow `BootInitFlow`、source ref `BootCPURef`
-  与 canonical target `CpuGroup.cpus[0]`。两次 BindTask Signal 必须分别展示“首次建立”和“同目标刷新”
-  的 Model 注释；边界 snapshot 必须保存 CPU0 -> BootTask/BootTaskRef/BootInitFlow 的 contextual binding、
-  第二次地址表示与刷新序号。边界不得包含 `BootCurrentCPU`、`BootCpuCurrentTask`、CurrentStack、
-  BindStack 或 `CurrentTaskSlot` state/instance，也不得创建、发送、接收或处理
+  与 canonical target `CpuGroup.cpus[0]`。`BindTaskStack` 与 `RefreshTaskStack` Signal 必须分别展示
+  “首次原子建立”和“同一 pair 原子刷新”的 Model 注释；边界 snapshot 必须保存 CPU0 的
+  CurrentTask -> BootTask/BootTaskRef/BootInitFlow 与 CurrentStack -> BootTask.stack/BootInitFlow 两种
+  contextual binding、EarlyVm 地址表示与 revision 2。边界不得包含 `BootCurrentCPU`、
+  `BootCpuCurrentTask`、`CurrentTaskSlot`、`CurrentStackSlot` 或 Stack object 的 state/instance，也不得
+  创建、发送、接收或处理公开 BindStack Signal；同一 Boot Action 的中间快照不得出现半绑定状态，也不得
+  创建、发送、接收或处理
   BootInitFlow.Setup；该边界不得提前包含 `cpu_hartid_ready(CpuGroup.cpus[0], ...)`。compact text 必须显示 reached/before-send 与 0016 stopped，verbose text 必须保留
   真实 Human root、0020 identity、handler 和 reached boundary，结构化 event 必须保留 context，且两种
   text render 都不得改变 derive/view/snapshot。
-- 同一 `BootInitFlow.Setup` 边界的 animation v3 必须精确包含 54 request、50 feedback、3 settle、
-  1 terminal，共 108 moments。0016 terminal 表示已 receive 的 stopped emits ancestor；0020 feedback
-  必须晚于 0021–0054 的全部嵌套 feedback，
+- 同一 `BootInitFlow.Setup` 边界的 animation v3 必须精确包含 52 request、48 feedback、3 settle、
+  1 terminal，共 104 moments。0016 terminal 表示已 receive 的 stopped emits ancestor；0020 feedback
+  必须晚于 0021–0052 的全部嵌套 feedback，
   0011–0013 仍各自 settle，边界 Signal 不得产生 moment。
 - 第 2 组负例必须从 canonical 快照删除单个真实前提并验证首个失败边界：缺失 Kernel acceptance、
   BootTask `OnCpu/Live/Invalid` 或 initial-flow binding 时不得创建第一个入口 child；缺失入口

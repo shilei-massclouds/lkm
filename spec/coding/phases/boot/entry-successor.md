@@ -10,10 +10,10 @@ continuation，不拥有 CorePrepare sibling 的启动权。
 
 `preset()` 先检查自身精确 Base 和全部 model `depends_on`：EntryPrelude Online，Vm/BootTask/
 KernelImage 状态，KernelAddrSpace Ready、EarlyVm controller Ready、boot CPU controller/live SATP、
-BootInitStack、InterruptType、RawDtb 和 FixMap 状态。检查通过后才
+CurrentStack 与 `BootTask.stack` 一致、InterruptType、RawDtb 和 FixMap 状态。检查通过后才
 发出 `EntrySuccessorPhase.Started`。
 
-随后严格按 model 顺序驱动 BootInitStack.Enable、EarlyDtb.Preset、InterruptType.Setup、
+随后严格按 model 顺序驱动 `BootTask.EnableStackGuard`、EarlyDtb.Preset、InterruptType.Setup、
 BootCPU.Setup/Enable、PrintkBuffer.Preset、EarlyDtb.Setup、InitMM.Setup、EarlyIoremap.Setup、
 SBI.Setup、Params.Preset、MemBlock.Setup、Vm.Enable、MemBlock.Enable 和 EarlyDtb.Cleanup。
 `Vm.Enable` 先准备 SwapperVm，发布 `KernelAddrSpace.Online`，再由

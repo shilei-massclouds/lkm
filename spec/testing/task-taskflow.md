@@ -38,17 +38,20 @@ carrier and its independently-lived `TaskFlow` instances.
 - CopyProcess coverage must accept an OnCpu/Live source whose validated TaskRef
   is the derived `CurrentTaskRef`, and reject Online, Reserved, non-current and mismatched
   TaskRef sources without changing TaskCreationCore or destination state.
-- CurrentTask and CurrentTaskRef tests must prove that neither selector has
-  lifecycle, owned storage, a `CurrentTaskSlot`, system state or instance entries.
-  Snapshot coverage must retain only the CPU-keyed contextual binding facts.
+- CurrentTask, CurrentTaskRef and CurrentStack tests must prove that none has
+  lifecycle, owned storage, a slot, system state or instance entries. Stack must remain
+  a `Task.stack` value attribute rather than an object. Snapshot coverage must retain
+  only the CPU-keyed task/stack contextual binding facts.
   Synchronous continuations inherit the updated binding/effective Flow;
   asynchronous emits resolve independently.
-- BindTask focused coverage must exercise BootTask first binding and same-target
-  refresh, pre-bind CurrentTask rejection, post-bind CurrentTask/CurrentTaskRef,
-  scheduler switch to next, independent bindings for two CPUs, and rejection of
-  parent/owner, active-flow, CPU, OnCpu/Live, TaskRef and non-switch-boundary
-  mismatches. Every rejected BindTask must preserve the exact before snapshot.
-  No case may introduce CurrentStack, BindStack or CurrentTaskSlot semantics.
+- Binding focused coverage must exercise boot-only `BindTaskStack` first binding and
+  `RefreshTaskStack` same-pair refresh, pre-bind CurrentTask/CurrentStack rejection,
+  post-bind CurrentTask/CurrentTaskRef/CurrentStack resolution, general scheduler-only
+  `BindTask(next)`, and independent bindings for two CPUs. Reject wrong parent/owner,
+  active-flow, CPU, OnCpu/Live, TaskRef, stack argument/controller and non-switch
+  boundaries. Every rejection must preserve the exact before snapshot, proving the
+  special Actions never expose a half-bound task/stack pair. No case may introduce a
+  public BindStack Signal, slot or Stack object semantics.
 - Model-tool coverage must exercise multi-level lifecycle inheritance: cumulative
   conditions/facts, base-to-derived drives, post-commit emits, duplicate-side-effect
   rejection and complete override. The legacy and tools2 pipelines must produce the

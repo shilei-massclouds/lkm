@@ -968,15 +968,13 @@ class ModelToolTests(unittest.TestCase):
                     "KernelAddrSpace.Transition::Preset",
                     "CurrentCPU.Transition::Setup(true)",
                     "CurrentCPU.trap.interrupt.Transition::Setup",
-                    "CurrentTask.Action::BindTask(BootTask)",
-                    "BootInitStack.Transition::Preset",
+                    "CurrentTask.Action::BindTaskStack(BootTask, BootTask.stack)",
                     "CurrentCPU.trap.Transition::Preset",
                     "CurrentCPU.trap.exception.Transition::Preset",
                     "Vm.Transition::Preset",
                     "Vm.Transition::Setup",
                     "CurrentCPU.trap.Transition::Setup",
-                    "CurrentTask.Action::BindTask(BootTask)",
-                    "BootInitStack.Transition::Setup",
+                    "CurrentTask.Action::RefreshTaskStack(BootTask, BootTask.stack)",
                     "Soc.Transition::Preset",
                 ],
             )
@@ -1205,10 +1203,11 @@ class ModelToolTests(unittest.TestCase):
     def test_current_task_contextual_bind_action_uses_task_flow_contract(self) -> None:
         source = """
             type Task {}
+            type Stack {}
 
             type TaskFlow {
                 processes {
-                    Action::BindTask(task: Task) {
+                    Action::BindTaskStack(task: Task, stack: Stack) {
                         state_effect: StateEffect::None;
                     }
                 }
@@ -1232,7 +1231,7 @@ class ModelToolTests(unittest.TestCase):
                     transitions {
                         on Transition::Preset -> State::Ready {
                             drives {
-                                CurrentTask.Action::BindTask(BootTask);
+                                CurrentTask.Action::BindTaskStack(BootTask, BootTask.stack);
                             }
                         }
                     }
@@ -1248,15 +1247,15 @@ class ModelToolTests(unittest.TestCase):
             ]["Preset"]
             self.assertEqual(
                 transition["drives"][0]["entries"][0]["text"],
-                "CurrentTask.Action::BindTask(BootTask)",
+                "CurrentTask.Action::BindTaskStack(BootTask, BootTask.stack)",
             )
 
         with tempfile.TemporaryDirectory() as tmp:
             exit_code, stderr, _data = self._run_model_source(
                 Path(tmp),
                 source.replace(
-                    "CurrentTask.Action::BindTask(BootTask)",
-                    "CurrentTask.Action::Missing(BootTask)",
+                    "CurrentTask.Action::BindTaskStack(BootTask, BootTask.stack)",
+                    "CurrentTask.Action::Missing(BootTask, BootTask.stack)",
                 ),
             )
             self.assertEqual(exit_code, 1)

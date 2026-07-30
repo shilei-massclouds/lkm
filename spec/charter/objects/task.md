@@ -58,15 +58,18 @@ Task lifecycle 之外必须保存两组正交状态：
 `TaskThreadContext` 固定物理保存长期 Task continuation 的核心寄存器集合、breakpoint state、经
 slot/generation 校验的 `TaskFlowRef`、可选且同样校验 generation 的 root `TrapFlowRef`，以及真实
 save/restore 观察计数。root 引用通过活动 child FlowRef 链定位当前叶 Flow；不存在活动陷入时必须为
-空。`tp`、CPU-local CurrentTask binding 以及由 effective TaskFlow 解析的 CPU identity 都不属于
-可恢复寄存器现场。Valid context 必须绑定恰好一个仍由该 Task 拥有的
+空。每个 Task 具有且仅具有一个 `stack: Stack` 值类型属性；它描述内核栈的 storage/range，不能声明
+为独立 object、child、ref 或 lifecycle。context 中保存的 `sp` 是该属性所描述栈的可恢复 continuation 游标，不是
+另一份 CurrentStack binding。`tp`、CPU-local CurrentTask/CurrentStack binding 以及由 effective
+TaskFlow 解析的 CPU identity 都不属于可恢复寄存器现场。Valid context 必须绑定恰好一个仍由该 Task 拥有的
 FlowRef；Prepared/Invalid context 不得被 Scheduler 恢复。
 
 `BootTask` 是允许的静态 Task lifecycle override。它没有 Preset、Setup 或 Enable，初始状态为
 `OnCpu/Live/Invalid`，并保留 `OnCpu --Suspend--> Online --Continue--> OnCpu`
 往返。入口初态表示固件/架构入口已把 boot CPU 执行权直接交给该 Task；它不由 Scheduler Continue
 建立，也不依赖尚未建立的 BootRunQueue。该状态同时保证静态 `init_task` storage、
-固定 PID 0、`TaskRef::BOOT` 和 canonical identity；不得把会变化的 `tp`、entry role、preemption 状态
+固定 PID 0、`TaskRef::BOOT`、静态 `stack` 属性和 canonical identity；`BootTask.stack` 对应 Linux
+`init_thread_union` / `init_stack`。不得把会变化的 `tp/sp`、entry role、preemption 状态
 或 active TaskFlow 放入 invariant。boot-only const 初始化器直接构造这一状态，不复用普通 Task
 lifecycle 方法。除这一完整 override 外，不存在实例级 Task lifecycle 权威。
 
@@ -74,23 +77,26 @@ lifecycle 方法。除这一完整 override 外，不存在实例级 Task lifecy
 `init_idle()`/BP 预建结束时它已经是该 CPU 的 `rq->idle/rq->curr`，初态直接为
 `OnCpu/Reserved/Invalid`，不是普通 `Base -> ... -> Online` 发布，也不进入普通 runnable class
 queue。对应 `ApIdleFlow[logical_id]` 已完成 owner/parent/initial binding，但保持 Base。SBI HSM 入口
-只验证 Linux `{task_ptr, stack_ptr}` boot data、加载独立 `tp/sp` 并把 authority 从 Reserved 激活为
+只验证 Linux `{task_ptr, stack_ptr}` boot data、原子建立匹配的 CurrentTask/CurrentStack 并加载对应
+`tp/sp`，再把 authority 从 Reserved 激活为
 Live；它不改变 Task lifecycle，也不发送 Task Enable/Continue。随后 keyed HSM Startup 严格启动同一
 logical-id 的 initial idle Flow。AP 首次 Suspend 才产生第一个可恢复的 Online/Valid 断点，后续切换
 完全使用普通 Suspend/Continue。
 
-`tp` 的物理/虚拟绑定由可重复调用的上下文动作
-`CurrentTask.Action::BindTask(BootTask)` 建立，不属于 Task carrier lifecycle，也不建立独立 binding
-对象、CPU owned child 或 `CurrentTaskSlot`。`PhysicalDirect` active controller 下首次调用建立启动 CPU
-到 BootTask 的 binding；`EarlyVm` 或 `SwapperVm` 下的同目标调用保持 binding identity 并刷新同一
-carrier 的当前地址表示。BootTask 的初始禁止抢占是 boot-only const 初始化器给出的静态属性，BindTask
-不得初始化或改变 preempt count。`TrampolineVm`、缺失 controller association、controller 与 live SATP
-不一致、错误/非唯一 TaskRef、错误 carrier 或跨 CPU 目标都必须在修改 `tp` 前诊断并 fail-stop。入口各
-阶段只能验证 `BootTask.OnCpu/Live` 稳定 invariant，不能推进或重放其 lifecycle。本段不约束 `sp`。
+BootTask 与其 stack 属性的物理/虚拟执行绑定不使用通用 `BindTask`。BootInitFlow 在
+`PhysicalDirect` 下调用 boot-only `CurrentTask.Action::BindTaskStack(BootTask, BootTask.stack)`，原子
+建立启动 CPU 到静态 task/stack pair 的首次 binding 并实际写 `tp/sp`；EarlyVm 接管后调用 boot-only
+`CurrentTask.Action::RefreshTaskStack(BootTask, BootTask.stack)`，保持两种 binding identity 并原子
+刷新同一 carrier/stack 的地址表示。两者不属于 Task lifecycle，也不建立 Stack object、独立 binding
+对象、CPU owned child 或 slot。BootTask 的初始禁止抢占是 boot-only const 初始化器给出的静态属性，
+两种 Action 都不得初始化或改变 preempt count。错误 controller、controller 与 live SATP 不一致、
+错误/非唯一 TaskRef、stack 值不等于 `BootTask.stack`、越界 `sp` 或跨 CPU 目标都必须在提交前诊断并
+fail-stop；失败保持 `tp/sp` 与两种 binding 不变。入口各阶段只能验证 `BootTask.OnCpu/Live` 与静态
+stack 属性，不能推进或重放 Stack lifecycle。
 
 普通 Task 的 `Preset` 统一建立 fresh identity、`TaskRef`、typed initial Flow association、初始 Flow ownership 与 clone
 specification；`Setup` 统一消费 `TaskCreationCore` 已提交的 copy-process 事实，并建立 PID、thread
-context、首次寄存器字节、Prepared breakpoint storage、scheduler entity 和 New/not-enqueued 状态；
+context、唯一内核栈、首次寄存器字节、Prepared breakpoint storage、scheduler entity 和 New/not-enqueued 状态；
 `Enable` 统一消费 running、runqueue publication 与初始 Flow binding，把 Prepared context 绑定该
 FlowRef 并原子发布 `Online/None/Valid`；它不启动 Flow。`BootInitRestInitPhase` 必须完整驱动新 Task
 的 Preset/Setup/Enable：其中 Preset/Setup 对应 carrier 创建与 copy-process 收口，Enable 对应
@@ -102,18 +108,19 @@ flags、provider
 Scheduler 是普通 `Task.Continue` 与 `Task.Suspend` 的唯一发送者。一次真实切换分为 prepare、物理
 switch、finish：prepare 通过 CurrentTask binding 校验 prev `OnCpu/Live/Invalid`、prev active Flow 与
 next `Online/None/Valid` 的 FlowRef/generation；架构 switch 保存 prev、恢复 next 的
-`ra/sp/s0..s11`；正式 switch commit 通过 `CurrentTask.BindTask(next)` 更新 `tp`，next 栈上的 finish
+`ra/sp/s0..s11`；架构 restore 的 next `sp` 与正式 switch commit 中只绑定 task 的
+`CurrentTask.BindTask(next)` / `tp` 更新由外层 switch commit 共同提交 next 的 CurrentStack，next 栈上的 finish
 原子提交 prev `Online/None/Valid`、next `OnCpu/Live/Invalid`、next Flow CpuRef、active Flow、CPU-local
-binding 与观察事实，然后严格
+task/stack binding 与观察事实，然后严格
 Startup/Continue next Flow。若 prev 是
 终止 Task，finish 提交 `OnCpu --Disable--> Offline`，context 保持 Invalid，并在 next 侧 Cleanup，
 不得先制造不可恢复的 Online。`prev == next` 是无动作路径：不发送 Suspend/Continue，不保存/恢复
 context，也不改变 lifecycle、authority、Flow binding、CurrentTask 选择结果或计数。
 
 调度 finish 是普通 Signal 不可观察中间态的原子提交边界：prev 失去执行权、next 获得
-`OnCpu/Live`、next Flow 激活与 CurrentTask BindTask 必须同时可见。除同一 Task 的地址表示刷新外，
-不同目标换绑只能发生在这一正式 commit 边界。terminal switch 必须在回收 prev 前
-先使 next 的 CurrentTask 可解析；identity switch 不改变解析结果。
+`OnCpu/Live`、next Flow 激活与 CurrentTask/CurrentStack pair 必须同时可见。除同一 Task/Stack pair 的
+地址表示刷新外，不同目标换绑只能发生在这一正式 commit 边界。terminal switch 必须在回收 prev 前
+先使 next 的 CurrentTask 与 CurrentStack 可解析；identity switch 不改变两种解析结果。
 
 Task 接受 Continue 并提交 OnCpu 后必须严格启动恰好一个 execution continuation：若 initial Flow 仍为
 Base，则向它发出 Startup（canonical Preset）；否则向唯一 active Flow 发出 Continue。发送前两条候选

@@ -65,9 +65,11 @@ Task.active_flow、该 CPU 上的 OnCpu/Live authority 与唯一 TaskRef generat
 `CurrentCPU` 必须仍可从 BootInitFlow.cpu_ref 独立解析。
 
 Scheduler 切换按 `prepare -> physical save/restore -> next-stack finish` 排序。prepare 只校验双方
-authority/context/FlowRef；架构切换恢复 next context，finish 在正式 commit 中调用
-`CurrentTask.BindTask(next)` 实际更新 `tp`，再原子发布 prev breakpoint、消费 next breakpoint、激活
-next Flow，并让后续 continuation 确认新的 CurrentTask。`next.Continue` 不能由旧 Task 栈提前提交 OnCpu。
+authority/context/FlowRef；架构切换从 next context 恢复 `sp`，finish 在正式 commit 中调用只执行
+`BindCurrentTask(next)` 的 `CurrentTask.BindTask(next)` 实际更新 `tp`。外层 switch commit 随后以 live
+`sp` 和 `next.stack` 发布 CurrentStack，并原子发布 prev breakpoint、消费 next breakpoint、激活 next
+Flow。只有 task/stack pair 都可解析后，后续 continuation 才能确认新的 CurrentTask/CurrentStack；
+`next.Continue` 不能由旧 Task 栈提前提交 OnCpu。
 
 入口与 scheduler commit 是 `cpu_ref` 的仅有写边界。迁移提交在激活新 Flow 前写入目标 CpuRef；
 同一 Task 的 Flow handoff 在提交 active binding 前复制 predecessor CpuRef。执行中的 Flow 及其同步

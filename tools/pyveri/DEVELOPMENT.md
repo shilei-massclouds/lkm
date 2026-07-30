@@ -245,7 +245,7 @@ tools/pyveri/bin/pyveri spec/model/main.spec -T custom-trace.svg -a state,transi
 当前对象填充规则：
 
 - 准备期对象来自 `PreparePhase.Online` 的状态不变量，例如 `Riscv64`、`Lds`、`Config`、`PhysicalMemory`。
-- 入口步骤来自 `BootInitFlow.Preset` 直接驱动的对象与 action，例如 `BindBootTaskEntry`、当前 CPU 的 trap 资源、`KernelAddrSpace`、`Vm`、`BootInitStack` 与 `RawDtb`。
+- 入口步骤来自 `BootInitFlow.Preset` 直接驱动的对象与 action，例如 boot-only `BindTaskStack` / `RefreshTaskStack`、当前 CPU 的 trap 资源、`KernelAddrSpace`、`Vm` 与 `RawDtb`；`BootTask.stack` 是值属性，不是对象。
 - `Computer` 是唯一顶层系统；`Kernel` 承载内核系统阶段树。
 - 阶段对象和子阶段对象只通过左侧单元体现，不在对象列重复显示。
 
@@ -499,7 +499,7 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --derive
 - 事件写寄存器后的状态关系已归入 `register_effect/prior_derivation_facts`，包括 `sie/sip/stvec/tp/sp/gp/satp/sscratch` 的物理地址阶段、EarlyVm 阶段和地址空间切换结果。这类关系不再视为普通 builtin 关系，而是由对应事件的 `may_change` 与前序推导事实支持。
 - `source` 表示可替换的证明来源标识，不应把模型永久固定到某一个 Linux 版本或某一个链接脚本实现；当前用具体来源先收口 RISCV64/Linux 6.12 这条验证路径，后续可增加其它来源并保留相同对象语义。
 - `Lds` 已标注 `source: linker::linux_6_12`。`Lds.Online` 中的 `_start`、`_end`、`__global_pointer$`、`__bss_start`、`__bss_stop`、`init_thread_union + THREAD_SIZE` 等链接脚本布局事实已由窄规则归入 `linux_linker_script` 直接证明；`KernelImage` 的段集合、BSS 段范围和 BSS 落入内核映像范围也由该链接布局来源收口。
-- `Config` 的数值边界、对齐、satp 模式和 fixmap 配置约束已由 `config_source` 收口。`BootInitStack` 的栈容量约束已由 `Lds` 链接布局和 `Config` 页大小共同证明：Linux 链接脚本用 `init_thread_union + THREAD_SIZE` 定义 init stack 边界，RISC-V `THREAD_SIZE = PAGE_SIZE << THREAD_SIZE_ORDER`，因此可推出 `Lds.init_stack_end - Lds.init_stack_start >= Config.page_size`；sp 落入栈范围约束仍由前序 sp 设置事实推出。
+- `Config` 的数值边界、对齐、satp 模式和 fixmap 配置约束已由 `config_source` 收口。`BootTask.stack` 值属性的容量约束由 `Lds` 链接布局和 `Config` 页大小共同证明：Linux 链接脚本用 `init_thread_union + THREAD_SIZE` 定义 init stack 边界，RISC-V `THREAD_SIZE = PAGE_SIZE << THREAD_SIZE_ORDER`；`sp` 落入该属性 range 的约束由两个 boot-only 原子 Action 的寄存器设置事实推出。
 - `Config` 已标注 `source: config::entry_prelude`。`Config.Online` 中的配置项可访问性、页大小/PMD/栈页表空间/内核链接地址/内核映像窗口/satp 模式/fixmap 配置等配置源事实，已由窄规则归入 `config_source` 直接证明；`FixMap`、`LinearMap` 和各 VM 阶段对配置的使用仍保留为后续推导义务。
 - 已引入transition 后置断言块 `ensures { ... }`。`ensures` 表达transition 完成后保证成立的关系，不表示在 invariant 中赋值，也不同于 `may_change` 的“允许改变”。推导器现在可用“进入目标状态的事件 `ensures`”证明该目标状态中完全相同的 invariant；第一批用于消化 `register_effect` 相关寄存器状态关系。
 - 推导器已开始记录已证明表达式，并用前序事实继续证明一小组派生 invariant：`valid_task_ref(BootCpuRegisters.tp)`、`valid_stack_pointer(BootCpuRegisters.sp)` 和 `inside(BootCpuRegisters.sp, ...)` 可由已证明的 `tp/sp` 后置关系推出。

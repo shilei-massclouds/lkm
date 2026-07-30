@@ -763,7 +763,7 @@ class SignalAnimationTests(unittest.TestCase):
         ]
         self.assertEqual(stable_states, ["Base", "Prepared", "Ready", "Online"])
 
-    def test_boot_init_setup_boundary_has_54_signals_and_108_causal_moments(self) -> None:
+    def test_boot_init_setup_boundary_has_52_signals_and_104_causal_moments(self) -> None:
         work = self.root / "boot-init-setup-boundary-work"
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(
@@ -791,17 +791,17 @@ class SignalAnimationTests(unittest.TestCase):
                 derivation["model_fingerprint"],
                 view["model_fingerprint"],
             },
-            {"sha256:20f767313cfcc9c547c8352bd372d2d4b8c4e530ea885591979ed3b4b6e4a08a"},
+            {"sha256:7a65211e474cf8a20b35373008ab6c6004f8052bcf1d0ff414be6ee2956b1c90"},
         )
         animation = build_animation(model, view)
-        self.assertEqual(animation["trace"]["total_signals"], 54)
-        self.assertEqual(animation["trace"]["total_moments"], 108)
+        self.assertEqual(animation["trace"]["total_signals"], 52)
+        self.assertEqual(animation["trace"]["total_moments"], 104)
         self.assertEqual(
             {
                 kind: sum(moment["kind"] == kind for moment in animation["moments"])
                 for kind in ("request", "feedback", "settle", "terminal")
             },
-            {"request": 54, "feedback": 50, "settle": 3, "terminal": 1},
+            {"request": 52, "feedback": 48, "settle": 3, "terminal": 1},
         )
         self.assertEqual(
             [moment["id"] for moment in animation["moments"] if moment["kind"] == "settle"],
@@ -814,7 +814,8 @@ class SignalAnimationTests(unittest.TestCase):
         bind_requests = {
             moment["signal_id"]: moment
             for moment in animation["moments"]
-            if moment["kind"] == "request" and moment["signal"] == "BindTask"
+            if moment["kind"] == "request"
+            and moment["signal"] in {"BindTaskStack", "RefreshTaskStack"}
         }
         self.assertEqual(
             {
@@ -823,9 +824,9 @@ class SignalAnimationTests(unittest.TestCase):
             },
             {
                 "sig-0031":
-                    "首次建立当前 CPU 到 BootTask 的 CurrentTask binding，并写入当前地址表示。",
-                "sig-0052":
-                    "第二次绑定同一 Task：保持 CurrentTask binding identity，并刷新当前地址表示。",
+                    "首次原子建立当前 CPU 到 BootTask/BootTask.stack 的 task-stack binding，并写入物理 tp/sp。",
+                "sig-0051":
+                    "保持同一 BootTask/BootTask.stack binding identity，并原子刷新虚拟 tp/sp。",
             },
         )
         terminal = next(
@@ -857,7 +858,7 @@ class SignalAnimationTests(unittest.TestCase):
         }
         self.assertGreater(
             moment_index["sig-0020:feedback"],
-            max(moment_index[f"sig-{index:04d}:feedback"] for index in range(21, 55)),
+            max(moment_index[f"sig-{index:04d}:feedback"] for index in range(21, 53)),
         )
         self.assertEqual(
             animation["trace"]["boundary"]["normalized_signal"],

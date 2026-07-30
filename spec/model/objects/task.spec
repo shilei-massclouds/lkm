@@ -100,6 +100,10 @@ predicate task_terminal_disable_keeps_breakpoint_invalid<T: Task>(task: T) -> bo
 predicate task_identity_switch_has_no_context_event<T: Task>(task: T) -> bool;
 predicate task_authority_activated_by_hsm<T: Task>(task: T) -> bool;
 predicate task_ap_idle_reserved_for_cpu<T: Task>(task: T) -> bool;
+predicate task_stack_guard_ready<T: Task, S: Stack>(task: T, stack: S) -> bool;
+predicate task_stack_is_static_initial_property<T: Task, S: Stack>(task: T, stack: S) -> bool;
+predicate task_stack_range_is<T: Task, S: Stack, A, B>(task: T, stack: S, start: A, end: B) -> bool;
+predicate task_has_unique_stack_attribute<T: Task>(task: T) -> bool;
 
 predicate boot_task_idle_role_ready<T: Task, R>(
     task: T,
@@ -140,6 +144,13 @@ type TaskThreadContext {
 }
 
 /*
+ * Stack is value metadata carried by Task.stack.  It is not an Object,
+ * ResourceObject, lifecycle carrier, independently declared instance or ref.
+ */
+type Stack {
+}
+
+/*
  * Task is the only reusable carrier type. TaskRuntimeState is an extended
  * runtime state, not lifecycle state. Concrete carrier instances below all
  * have kind Task; behavior-specific distinctions belong to TaskFlow.
@@ -150,6 +161,10 @@ type Task: ResourceObject {
     ext_state: TaskRuntimeState;
     execution_authority: TaskExecutionAuthority;
 
+    attrs {
+        stack: Stack;
+    }
+
     associations {
         initial_flow: TaskFlow;
         mutable active_flow: TaskFlow;
@@ -157,6 +172,20 @@ type Task: ResourceObject {
 
     owned {
         thread_context: TaskThreadContext;
+    }
+
+    processes {
+        Action::EnableStackGuard {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::OnCpu;
+                task_execution_authority_is(self, TaskExecutionAuthority::Live);
+                current_stack_binding_matches_task(CurrentCPU, self, self.stack);
+            }
+            ensures {
+                task_stack_guard_ready(self, self.stack);
+            }
+        }
     }
 
     state State::Base {
@@ -658,10 +687,12 @@ object BootTask: Task {
         storage: ObjectStorage<BootTask>;
         pid: Derived<usize, 0>;
         canonical_ref: Derived<TaskRef, BootTaskRef>;
+        stack: Derived<Stack, stack(Lds.init_stack_start, Lds.init_stack_end)>;
     }
 
     reference linux_6_12 {
         storage = symbol("init_task");
+        stack = symbol("init_stack");
     }
 
     state State::OnCpu {
@@ -676,6 +707,9 @@ object BootTask: Task {
             task_flow_owner_is(BootInitFlow, self);
             task_flow_parent_is(BootInitFlow, self);
             boot_task_preemption_is_static_initial_property(self);
+            task_stack_is_static_initial_property(self, self.stack);
+            task_stack_range_is(self, self.stack, Lds.init_stack_start, Lds.init_stack_end);
+            task_has_unique_stack_attribute(self);
         }
 
         transitions {

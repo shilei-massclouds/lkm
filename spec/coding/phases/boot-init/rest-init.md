@@ -132,9 +132,12 @@ Scheduler counters, `BootRunQueue.curr`, or another stored copy.
 SwitchTo must synchronously send `prev.Suspend`, save the old context, restore
 the next context, and perform the physical stack switch. At the formal switch
 commit, assembly must execute `CurrentTask.BindTask(next)` by writing next's
-currently usable canonical address to `tp/x4`. On the new stack, finish validates
-that raw implementation identity and atomically commits next's `OnCpu/Live`
-state, active Flow, Flow CPU assignment and CPU-local CurrentTask binding. Only the
+currently usable canonical address to `tp/x4`; this Action does not bind stack.
+The surrounding architecture commit separately restores `sp` from next's context,
+validates it against `next.stack`, and publishes CurrentStack. On the new stack,
+finish validates that raw implementation identity and atomically commits next's
+`OnCpu/Live` state, active Flow, Flow CPU assignment and the matching CPU-local
+CurrentTask/CurrentStack pair. Only the
 new Task's entry/resume point may handle `next.Continue`: a Base initial Flow
 accepts strict Startup, otherwise the Online active Flow accepts strict
 Continue. Exactly one handler must accept; rejection or handler failure fails

@@ -646,6 +646,8 @@ class Engine:
             value = self._current_task_target(signal)
         elif first == "CurrentTaskRef":
             value = self._current_task_ref(signal)
+        elif first == "CurrentStack":
+            value = self._current_stack_target(signal)
         elif first == "self":
             value: Any = self.self_value(signal)
         elif first in bindings:
@@ -850,22 +852,6 @@ class Engine:
             self.model, context_flow, "TaskFlow"
         ):
             return False
-        cpu, _ = self._current_cpu_context(context_flow)
-        binding = (
-            self.current.get("contextual_bindings", {})
-            .get("current_task", {})
-            .get(cpu)
-        )
-        if binding is None:
-            return (
-                task == "BootTask"
-                and self.current["references"].get(f"{task}.initial_flow")
-                == context_flow
-                and self.current["references"].get(f"{task}.active_flow")
-                == context_flow
-            )
-        if binding.get("task") == task:
-            return True
         cause_id = signal.get("cause_id")
         cause = self.signal_index.get(cause_id) if cause_id is not None else None
         return bool(
@@ -875,6 +861,39 @@ class Engine:
             and _matches_system_type(
                 self.model, str(cause.get("target")), "SchedulerObject"
             )
+        )
+
+    def _boot_task_stack_boundary_valid(
+        self,
+        signal: dict[str, Any],
+        context_flow: str,
+        task: str,
+        stack: str,
+        *,
+        refresh: bool,
+    ) -> bool:
+        if context_flow != "BootInitFlow" or task != "BootTask":
+            return False
+        if stack != f"{task}.stack":
+            return False
+        if self.current["references"].get(f"{task}.initial_flow") != context_flow:
+            return False
+        if self.current["references"].get(f"{task}.active_flow") != context_flow:
+            return False
+        cpu, _ = self._current_cpu_context(context_flow)
+        contextual = self.current.get("contextual_bindings", {})
+        task_binding = contextual.get("current_task", {}).get(cpu)
+        stack_binding = contextual.get("current_stack", {}).get(cpu)
+        if not refresh:
+            return task_binding is None and stack_binding is None
+        return bool(
+            task_binding is not None
+            and stack_binding is not None
+            and task_binding.get("task") == task
+            and task_binding.get("source_flow") == context_flow
+            and stack_binding.get("task") == task
+            and stack_binding.get("stack") == stack
+            and stack_binding.get("source_flow") == context_flow
         )
 
     def _current_task_address_view(self, cpu: str, cpu_ref: str) -> str:
@@ -908,43 +927,59 @@ class Engine:
         bindings: dict[str, Any],
         candidate: dict[str, Any],
     ) -> None:
+        action = str(signal.get("name"))
         context_flow = self._effective_flow(signal)
         if context_flow is None:
-            raise DerivationProblem("CurrentTask.BindTask requires an effective TaskFlow")
+            raise DerivationProblem(f"CurrentTask.{action} requires an effective TaskFlow")
         task = str(bindings.get("task"))
         if task not in self.systems or not _matches_system_type(
             self.model, task, "Task"
         ):
-            raise DerivationProblem(f"CurrentTask.BindTask target {task} is not a Task")
+            raise DerivationProblem(f"CurrentTask.{action} target {task} is not a Task")
         cpu, cpu_ref = self._current_cpu_context(context_flow)
         active_flow = self.current["references"].get(f"{task}.active_flow")
         if active_flow is None:
             raise DerivationProblem(
-                f"CurrentTask.BindTask target Task {task} has no active Flow"
+                f"CurrentTask.{action} target Task {task} has no active Flow"
             )
         parents = self._fact_targets("task_flow_parent_is", str(active_flow))
         owners = self._fact_targets("task_flow_owner_is", str(active_flow))
         if parents != [task] or owners != [task]:
             raise DerivationProblem(
-                f"CurrentTask.BindTask target Flow {active_flow} parent/owner does not uniquely match {task}"
+                f"CurrentTask.{action} target Flow {active_flow} parent/owner does not uniquely match {task}"
             )
         if self.current["states"].get(task) != "OnCpu":
-            raise DerivationProblem(f"CurrentTask.BindTask target Task {task} is not OnCpu")
+            raise DerivationProblem(f"CurrentTask.{action} target Task {task} is not OnCpu")
         if (
             f"task_execution_authority_is({task},TaskExecutionAuthority::Live)"
             not in self.current["facts"]
         ):
-            raise DerivationProblem(f"CurrentTask.BindTask target Task {task} is not Live")
+            raise DerivationProblem(f"CurrentTask.{action} target Task {task} is not Live")
         target_cpu_ref = self.current["references"].get(f"{active_flow}.cpu_ref")
         if target_cpu_ref is None or self._deref(target_cpu_ref) != cpu:
             raise DerivationProblem(
-                f"CurrentTask.BindTask target Flow {active_flow} does not belong to CPU {cpu}"
+                f"CurrentTask.{action} target Flow {active_flow} does not belong to CPU {cpu}"
             )
         task_ref = self._unique_live_task_ref(task)
-        if not self._current_task_bind_boundary_valid(signal, context_flow, task):
-            raise DerivationProblem(
-                f"CurrentTask.BindTask cannot replace CPU {cpu} outside scheduler switch commit"
-            )
+        stack = str(bindings.get("stack")) if "stack" in bindings else None
+        if action == "BindTask":
+            if not self._current_task_bind_boundary_valid(signal, context_flow, task):
+                raise DerivationProblem(
+                    f"CurrentTask.BindTask cannot replace CPU {cpu} outside scheduler switch commit"
+                )
+        elif action in {"BindTaskStack", "RefreshTaskStack"}:
+            if stack is None or not self._boot_task_stack_boundary_valid(
+                signal,
+                context_flow,
+                task,
+                stack,
+                refresh=action == "RefreshTaskStack",
+            ):
+                raise DerivationProblem(
+                    f"CurrentTask.{action} requires the matching BootTask/stack pair at its boot boundary"
+                )
+        else:
+            raise DerivationProblem(f"unsupported CurrentTask binding action {action}")
 
         current_task_bindings = candidate.setdefault(
             "contextual_bindings", {}
@@ -952,13 +987,13 @@ class Engine:
         previous = current_task_bindings.get(cpu)
         revision = int(previous.get("revision", 0)) + 1 if previous else 1
         address_view = self._current_task_address_view(cpu, cpu_ref)
-        if previous is None:
+        if action == "BindTaskStack":
             signal["handler"]["description"] = (
-                "首次建立当前 CPU 到 BootTask 的 CurrentTask binding，并写入当前地址表示。"
+                "首次原子建立当前 CPU 到 BootTask/BootTask.stack 的 task-stack binding，并写入物理 tp/sp。"
             )
-        elif previous.get("task") == task:
+        elif action == "RefreshTaskStack":
             signal["handler"]["description"] = (
-                "第二次绑定同一 Task：保持 CurrentTask binding identity，并刷新当前地址表示。"
+                "保持同一 BootTask/BootTask.stack binding identity，并原子刷新虚拟 tp/sp。"
             )
         else:
             signal["handler"]["description"] = (
@@ -972,6 +1007,25 @@ class Engine:
             "address_view": address_view,
             "revision": revision,
         }
+
+        if action in {"BindTaskStack", "RefreshTaskStack"}:
+            current_stack_bindings = candidate.setdefault(
+                "contextual_bindings", {}
+            ).setdefault("current_stack", {})
+            previous_stack = current_stack_bindings.get(cpu)
+            stack_revision = (
+                int(previous_stack.get("revision", 0)) + 1
+                if previous_stack
+                else 1
+            )
+            current_stack_bindings[cpu] = {
+                "task": task,
+                "stack": stack,
+                "source_flow": str(active_flow),
+                "source_cpu_ref": cpu_ref,
+                "address_view": address_view,
+                "revision": stack_revision,
+            }
 
         binding_fact_prefixes = (
             f"current_task_binding_committed({cpu},",
@@ -999,6 +1053,40 @@ class Engine:
                 _fact("current_task_binding_is_cpu_local", [cpu]),
             ]
         )
+        if action in {"BindTaskStack", "RefreshTaskStack"}:
+            stack_fact_prefixes = (
+                f"current_stack_binding_committed({cpu},",
+                f"current_stack_binding_address_view_is({cpu},",
+                f"current_stack_binding_revision_is({cpu},",
+            )
+            candidate["facts"] = [
+                fact
+                for fact in candidate["facts"]
+                if not fact.startswith(stack_fact_prefixes)
+            ]
+            current_stack = candidate["contextual_bindings"]["current_stack"][cpu]
+            candidate["facts"].extend(
+                [
+                    _fact("current_stack_binding_committed", [cpu, task, stack]),
+                    _fact(
+                        "current_stack_binding_address_view_is",
+                        [cpu, stack, address_view],
+                    ),
+                    _fact(
+                        "current_stack_binding_revision_is",
+                        [cpu, current_stack["revision"]],
+                    ),
+                    _fact("current_stack_binding_is_cpu_local", [cpu]),
+                    _fact(
+                        "current_stack_binding_matches_task",
+                        [cpu, task, stack],
+                    ),
+                    _fact(
+                        "current_task_stack_binding_pair_consistent",
+                        [cpu, task, stack],
+                    ),
+                ]
+            )
         candidate["facts"] = sorted(set(candidate["facts"]))
 
     def _fact_sources(self, predicate: str, target: str) -> list[str]:
@@ -1020,6 +1108,124 @@ class Engine:
     def _current_task_ref(self, signal: dict[str, Any]) -> str:
         _, reference, _ = self._current_task_context(signal)
         return reference
+
+    def _current_stack_context(self, signal: dict[str, Any]) -> tuple[str, str, str]:
+        flow = self._effective_flow(signal)
+        if flow is None:
+            raise DerivationProblem("CurrentStack requires an effective TaskFlow")
+        cpu, _ = self._current_cpu_context(flow)
+        binding = (
+            self.current.get("contextual_bindings", {})
+            .get("current_stack", {})
+            .get(cpu)
+        )
+        if binding is None:
+            raise DerivationProblem(f"CurrentStack CPU {cpu} has no bound stack")
+        task, _, validated_flow = self._current_task_context(signal)
+        if validated_flow != flow:
+            raise DerivationProblem("CurrentStack effective Flow changed during validation")
+        stack = str(binding.get("stack"))
+        if binding.get("task") != task or stack != f"{task}.stack":
+            raise DerivationProblem(
+                f"CurrentStack CPU {cpu} binding does not match CurrentTask {task}.stack"
+            )
+        if binding.get("source_flow") != flow:
+            raise DerivationProblem(
+                f"CurrentStack CPU {cpu} source Flow does not match effective Flow {flow}"
+            )
+        task_binding = (
+            self.current.get("contextual_bindings", {})
+            .get("current_task", {})
+            .get(cpu, {})
+        )
+        if binding.get("address_view") != task_binding.get("address_view"):
+            raise DerivationProblem(
+                f"CurrentStack CPU {cpu} address view disagrees with CurrentTask"
+            )
+        self._record_selector_resolution(signal, {
+            "selector": "CurrentStack",
+            "source_cpu": cpu,
+            "source_flow": flow,
+            "source_task": task,
+            "target": stack,
+        })
+        return stack, task, flow
+
+    def _current_stack_target(self, signal: dict[str, Any]) -> str:
+        stack, _, _ = self._current_stack_context(signal)
+        return stack
+
+    def _apply_scheduler_stack_commit(
+        self,
+        *,
+        signal: dict[str, Any],
+        handler: dict[str, Any],
+        candidate: dict[str, Any],
+    ) -> None:
+        if handler.get("name") not in {"SwitchTo", "SwitchTerminal"}:
+            return
+        target = str(signal.get("target"))
+        if target not in self.systems or not _matches_system_type(
+            self.model, target, "SchedulerObject"
+        ):
+            return
+        flow = self._effective_flow(signal)
+        if flow is None:
+            raise DerivationProblem("scheduler stack commit requires next effective TaskFlow")
+        cpu, cpu_ref = self._current_cpu_context(flow)
+        task_binding = (
+            candidate.get("contextual_bindings", {})
+            .get("current_task", {})
+            .get(cpu)
+        )
+        if task_binding is None or task_binding.get("source_flow") != flow:
+            raise DerivationProblem(
+                "scheduler stack commit requires the already committed next CurrentTask"
+            )
+        task = str(task_binding.get("task"))
+        stack = f"{task}.stack"
+        stack_bindings = candidate.setdefault(
+            "contextual_bindings", {}
+        ).setdefault("current_stack", {})
+        previous = stack_bindings.get(cpu)
+        revision = int(previous.get("revision", 0)) + 1 if previous else 1
+        address_view = str(task_binding.get("address_view"))
+        stack_bindings[cpu] = {
+            "task": task,
+            "stack": stack,
+            "source_flow": flow,
+            "source_cpu_ref": cpu_ref,
+            "address_view": address_view,
+            "revision": revision,
+        }
+        stack_fact_prefixes = (
+            f"current_stack_binding_committed({cpu},",
+            f"current_stack_binding_address_view_is({cpu},",
+            f"current_stack_binding_revision_is({cpu},",
+            f"current_stack_binding_matches_task({cpu},",
+            f"current_task_stack_binding_pair_consistent({cpu},",
+        )
+        candidate["facts"] = [
+            fact for fact in candidate["facts"]
+            if not fact.startswith(stack_fact_prefixes)
+        ]
+        candidate["facts"].extend(
+            [
+                _fact("current_stack_binding_committed", [cpu, task, stack]),
+                _fact(
+                    "current_stack_binding_address_view_is",
+                    [cpu, stack, address_view],
+                ),
+                _fact("current_stack_binding_revision_is", [cpu, revision]),
+                _fact("current_stack_binding_is_cpu_local", [cpu]),
+                _fact("current_stack_binding_matches_task", [cpu, task, stack]),
+                _fact(
+                    "current_task_stack_binding_pair_consistent",
+                    [cpu, task, stack],
+                ),
+            ]
+        )
+        candidate["facts"] = sorted(set(candidate["facts"]))
 
     def _deref(self, value: Any) -> Any:
         if value in self.systems:
@@ -1162,6 +1368,8 @@ class Engine:
             value = self._current_task_target(signal)
         elif first == "CurrentTaskRef":
             value = self._current_task_ref(signal)
+        elif first == "CurrentStack":
+            value = self._current_stack_target(signal)
         elif first == "self":
             value: Any = self.self_value(signal)
         elif first in bindings:
@@ -1192,11 +1400,11 @@ class Engine:
         if kind == "path":
             path = expression["value"]
             first = path.split(".", 1)[0]
-            if first in {"CurrentCPU", "CurrentTask", "CurrentTaskRef"} or first == "self" or first in bindings:
+            if first in {"CurrentCPU", "CurrentTask", "CurrentTaskRef", "CurrentStack"} or first == "self" or first in bindings:
                 try:
                     return self.resolve_path(path, signal=signal, bindings=bindings)
                 except DerivationProblem:
-                    if first in {"CurrentCPU", "CurrentTask", "CurrentTaskRef"}:
+                    if first in {"CurrentCPU", "CurrentTask", "CurrentTaskRef", "CurrentStack"}:
                         raise
                     base = self.self_value(signal) if first == "self" else bindings[first]
                     suffix = path.split(".", 1)[1] if "." in path else ""
@@ -1503,9 +1711,45 @@ class Engine:
             return reference is not None and self._deref(reference) == values[1]
         if name == "task_flow_cpu_ref_read_only_while_executing" and len(values) == 1:
             return self.current["references"].get(f"{values[0]}.cpu_ref") is not None
-        if name == "current_task_bind_boundary_valid" and len(values) == 2:
+        if name == "current_task_bind_scheduler_commit_boundary_valid" and len(values) == 2:
             return signal is not None and self._current_task_bind_boundary_valid(
                 signal, str(values[0]), str(values[1])
+            )
+        if name in {
+            "boot_task_bind_task_stack_boundary_valid",
+            "boot_task_refresh_task_stack_boundary_valid",
+        } and len(values) == 3:
+            return signal is not None and self._boot_task_stack_boundary_valid(
+                signal,
+                str(values[0]),
+                str(values[1]),
+                str(values[2]),
+                refresh=name == "boot_task_refresh_task_stack_boundary_valid",
+            )
+        if name == "boot_task_stack_argument_matches_task" and len(values) == 2:
+            return str(values[0]) == "BootTask" and str(values[1]) == "BootTask.stack"
+        if name == "current_task_stack_attribute_valid" and len(values) == 2:
+            return str(values[1]) == f"{values[0]}.stack"
+        if name == "current_task_bind_stack_pointer_valid_for_boundary" and len(values) == 3:
+            return str(values[2]) == f"{values[1]}.stack"
+        if name == "current_task_stack_pair_unbound" and len(values) == 1:
+            cpu = str(values[0])
+            contextual = self.current.get("contextual_bindings", {})
+            return (
+                cpu not in contextual.get("current_task", {})
+                and cpu not in contextual.get("current_stack", {})
+            )
+        if name == "current_task_stack_binding_pair_consistent" and len(values) == 3:
+            cpu, task, stack = map(str, values)
+            contextual = self.current.get("contextual_bindings", {})
+            task_binding = contextual.get("current_task", {}).get(cpu)
+            stack_binding = contextual.get("current_stack", {}).get(cpu)
+            return bool(
+                task_binding is not None
+                and stack_binding is not None
+                and task_binding.get("task") == task
+                and stack_binding.get("task") == task
+                and stack_binding.get("stack") == stack
             )
         if name == "current_task_bind_task_has_unique_valid_ref" and len(values) == 1:
             try:
@@ -2179,7 +2423,7 @@ class Engine:
         return (
             call.get("kind") == "call"
             and call.get("receiver") == "CurrentTask"
-            and call.get("name") == "BindTask"
+            and call.get("name") in {"BindTask", "BindTaskStack", "RefreshTaskStack"}
         )
 
     def _resolve_call_receiver(
@@ -2193,7 +2437,7 @@ class Engine:
             flow = self._effective_flow(signal)
             if flow is None:
                 raise DerivationProblem(
-                    "CurrentTask.BindTask requires an effective TaskFlow"
+                    f"CurrentTask.{call.get('name')} requires an effective TaskFlow"
                 )
             return flow, "CurrentTask"
         target = self.resolve_receiver(
@@ -2528,6 +2772,11 @@ class Engine:
                 handler=handler,
                 signal=signal,
                 bindings=bindings,
+                candidate=candidate,
+            )
+            self._apply_scheduler_stack_commit(
+                signal=signal,
+                handler=handler,
                 candidate=candidate,
             )
             self.infer_result(

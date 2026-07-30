@@ -72,18 +72,28 @@ RISC-V64 入口前导期实现必须按地址空间阶段区分可执行代码�
 
 模型层的 `CurrentTask` 是 CPU 执行上下文已提交的 task binding，`CurrentTaskRef` 从该 Task 的唯一
 generation-checked 引用派生；两者都没有 object、槽或 lifecycle。RISC-V64 lowering 参考 Linux，用本
-hart 的 `tp/x4` 承载这一 binding。`CurrentTask.Action::BindTask(task)` 必须由汇编把 task 当时可用的
-canonical 地址写入 `tp`；每次成功调用都必须实际写寄存器，同目标重复调用只刷新地址表示，不创建新
-Task 或 binding identity。内核入口、AP HSM entry、真实及模拟调度提交都必须在任何 Rust
+hart 的 `tp/x4` 承载这一 binding。通用 `CurrentTask.Action::BindTask(task)` 只允许由调度切换 commit
+调用，并且必须由汇编把 task 当时可用的 canonical 地址写入 `tp`；该 Action 不写 `sp`，也不提交
+CurrentStack。架构 switch 在同一个外层 commit 中独立从 next TaskThreadContext 恢复 `sp`，再以
+`next.stack` 校验并发布 CurrentStack。内核入口、AP HSM entry、真实及模拟调度提交都必须在任何 Rust
 Context、scheduler 或 CurrentTask 路径前建立正确的 `tp`；identity switch 保持原值，普通/terminal
 switch 在正式 switch commit 指向 next Task。入口调用位置对应 Linux `la tp, init_task`，调度路径对应
 `__switch_to` 的 `move tp, a1`。集中解析器必须把该地址验证为 canonical Task/TaskRef，
 未知地址、错误 storage class 或 stale generation 都显式失败，不回退到 BootTask、runqueue curr 或缓存。
 
+BootTask 入口不调用通用 `BindTask`。`BindTaskStack(BootTask, BootTask.stack)` 和
+`RefreshTaskStack(BootTask, BootTask.stack)` 必须各自 lowering 为一个连续的 RISC-V 汇编提交块：前者在
+PhysicalDirect 下使用 Linux 对应的 `la tp, init_task`、`la sp, init_thread_union + THREAD_SIZE` 与
+`addi sp, sp, -PT_SIZE_ON_STACK` 建立物理 task/stack pair；后者在 EarlyVm 接管后以相同符号重新装载
+虚拟 `tp/sp`。所有可失败校验必须在进入提交块前完成；两次寄存器写之间不得调用 C/Rust、不得插入可
+失败分支或暴露 checkpoint。提交块成功后才一次性发布 CPU-local task/stack bindings；失败保持
+bindings 与 `tp/sp` 不变。两种 Action 不初始化或修改 preempt count，也不得导出独立 `BindStack` API。
+
 Linux 6.12 的参考路径是：`kernel/sched/core.c::__schedule()` 调用 `switch_to(prev, next, prev)`，RISC-V 宏 `arch/riscv/include/asm/switch_to.h::switch_to` 最终调用 `arch/riscv/kernel/entry.S::__switch_to`；`__switch_to` 保存 `prev->thread`、恢复 `next->thread` 后执行 `move tp, a1`，其中 `a1` 是 next `task_struct`。`arch/riscv/include/asm/current.h` 将 `current` 绑定为 `tp` 上的 `struct task_struct *`。
 
-per-cpu 存储可以作为其它 CPU-local 数据的实现承载方式，但不得把它变成 CurrentTaskSlot、生命周期
-对象或全局单例；CurrentTask 的体系结构执行 binding 仍由本 hart `tp` 承载。
+per-cpu 存储可以作为 contextual binding 的验证快照承载方式，但不得把它变成 CurrentTaskSlot、
+CurrentStackSlot、生命周期对象或全局单例；CurrentTask/CurrentStack 的体系结构执行事实仍分别由本
+hart 的 live `tp/sp` 与 Task.stack 约束。
 Linux PLIC shim 对 `tp` 的临时占用只属于 foreign ABI；正常、错误和嵌套返回路径都必须恢复调用前的
 真实 task `tp`，且在恢复前不得进入 Rust Context、调度或 CurrentTask 解析。
 

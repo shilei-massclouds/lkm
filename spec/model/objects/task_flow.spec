@@ -17,14 +17,13 @@ type TaskFlow: PhaseObject {
 
     processes {
         /*
-         * 首次成功调用建立当前 CPU 到 BootTask 的 binding；同目标再次调用保持
-         * binding identity 并刷新该 Task 的当前地址表示。不同目标只允许在正式
-         * scheduler switch commit，且失败不得留下部分 binding。
+         * 通用任务切换动作只执行 BindCurrentTask(task)。架构 switch 在同一个
+         * scheduler commit 中另行恢复 next sp；BindTask 本身不绑定 stack。
          */
         Action::BindTask(task: Task) {
             state_effect: StateEffect::None;
             depends_on {
-                current_task_bind_boundary_valid(self, task);
+                current_task_bind_scheduler_commit_boundary_valid(self, task);
                 task.state == State::OnCpu;
                 task_execution_authority_is(task, TaskExecutionAuthority::Live);
                 task_active_flow_is(task, task.active_flow);
@@ -32,24 +31,95 @@ type TaskFlow: PhaseObject {
                 task_flow_parent_is(task.active_flow, task);
                 task_flow_cpu_ref_is(task.active_flow, self.cpu_ref);
                 current_task_bind_task_has_unique_valid_ref(task);
-                cpu_active_translation_controller_for_ref_is(
-                    self.cpu_ref,
-                    TranslationControllerKind::PhysicalDirect
-                ) || cpu_active_translation_controller_for_ref_is(
-                    self.cpu_ref,
-                    TranslationControllerKind::EarlyVm
-                ) || cpu_active_translation_controller_for_ref_is(
-                    self.cpu_ref,
-                    TranslationControllerKind::SwapperVm
-                );
                 cpu_translation_controller_matches_live_satp_for_ref(self.cpu_ref);
             }
             ensures {
                 current_task_binding_committed(CurrentCPU, task, task.active_flow);
                 current_task_binding_address_refreshed(CurrentCPU, task);
+                current_task_binding_is_cpu_local(CurrentCPU);
+                current_task_binding_replaced_at_scheduler_commit(CurrentCPU, task);
+                current_task_bind_preserves_preemption_state(task);
+            }
+        }
+
+        /*
+         * BootTask 首次入口例外：一个 Action 原子提交 task/stack pair。
+         * stack 是 Task 的值属性，不是对象，也没有公开 BindStack Signal。
+         */
+        Action::BindTaskStack(task: Task, stack: Stack) {
+            state_effect: StateEffect::None;
+            depends_on {
+                boot_task_bind_task_stack_boundary_valid(self, task, stack);
+                boot_task_stack_argument_matches_task(task, stack);
+                task.state == State::OnCpu;
+                task_execution_authority_is(task, TaskExecutionAuthority::Live);
+                task_active_flow_is(task, self);
+                task_flow_owner_is(self, task);
+                task_flow_parent_is(self, task);
+                current_task_bind_task_has_unique_valid_ref(task);
+                current_task_stack_attribute_valid(task, stack);
+                current_task_bind_stack_pointer_valid_for_boundary(self, task, stack);
+                cpu_active_translation_controller_for_ref_is(
+                    self.cpu_ref,
+                    TranslationControllerKind::PhysicalDirect
+                );
+                cpu_translation_controller_matches_live_satp_for_ref(self.cpu_ref);
+                current_task_stack_pair_unbound(CurrentCPU);
+            }
+            ensures {
+                current_task_binding_committed(CurrentCPU, task, self);
+                current_task_binding_address_refreshed(CurrentCPU, task);
+                current_task_binding_is_cpu_local(CurrentCPU);
+                current_stack_binding_committed(CurrentCPU, task, task.stack);
+                current_stack_pointer_matches_active_controller(CurrentCPU, task, task.stack);
+                current_stack_binding_address_refreshed(CurrentCPU, task.stack);
+                current_stack_binding_is_cpu_local(CurrentCPU);
+                current_task_stack_binding_pair_consistent(CurrentCPU, task, task.stack);
+                boot_task_stack_current_binding_established(CurrentCPU, task, task.stack);
+                boot_task_current_binding_established(CurrentCPU, task);
+                boot_task_bind_task_stack_atomic(CurrentCPU, task, task.stack);
+                current_task_bind_preserves_preemption_state(task);
+                current_stack_bind_preserves_preemption_state(task);
+            }
+        }
+
+        /* EarlyVm 接管后以同一原子 Action 刷新同一 BootTask/stack pair。 */
+        Action::RefreshTaskStack(task: Task, stack: Stack) {
+            state_effect: StateEffect::None;
+            depends_on {
+                boot_task_refresh_task_stack_boundary_valid(self, task, stack);
+                boot_task_stack_argument_matches_task(task, stack);
+                task.state == State::OnCpu;
+                task_execution_authority_is(task, TaskExecutionAuthority::Live);
+                task_active_flow_is(task, self);
+                task_flow_owner_is(self, task);
+                task_flow_parent_is(self, task);
+                current_task_bind_task_has_unique_valid_ref(task);
+                current_task_stack_attribute_valid(task, stack);
+                current_task_bind_stack_pointer_valid_for_boundary(self, task, stack);
+                current_task_stack_binding_pair_consistent(CurrentCPU, task, stack);
+                cpu_active_translation_controller_for_ref_is(
+                    self.cpu_ref,
+                    TranslationControllerKind::EarlyVm
+                );
+                cpu_translation_controller_matches_live_satp_for_ref(self.cpu_ref);
+            }
+            ensures {
+                current_task_binding_committed(CurrentCPU, task, self);
+                current_task_binding_address_refreshed(CurrentCPU, task);
                 current_task_binding_identity_preserved_for_same_task(CurrentCPU, task);
                 current_task_binding_is_cpu_local(CurrentCPU);
+                current_stack_binding_committed(CurrentCPU, task, stack);
+                current_stack_pointer_matches_active_controller(CurrentCPU, task, stack);
+                current_stack_binding_address_refreshed(CurrentCPU, stack);
+                current_stack_binding_identity_preserved_for_same_stack(CurrentCPU, stack);
+                current_stack_binding_is_cpu_local(CurrentCPU);
+                current_task_stack_binding_pair_consistent(CurrentCPU, task, stack);
+                boot_task_stack_current_binding_refreshed_for_active_controller(CurrentCPU, task, stack);
+                boot_task_current_binding_refreshed_for_active_controller(CurrentCPU, task);
+                boot_task_refresh_task_stack_atomic(CurrentCPU, task, stack);
                 current_task_bind_preserves_preemption_state(task);
+                current_stack_bind_preserves_preemption_state(task);
             }
         }
 

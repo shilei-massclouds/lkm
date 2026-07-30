@@ -78,7 +78,7 @@ ExceptionType.{page_fault, syscall, breakpoint, unexpected}
 CurrentCPU := dereference(effective_task_flow.cpu_ref)
 ```
 
-它只能从具有有效 CpuRef 的当前 TaskFlow 构造，包括 BootTask 首次 BindTask 之前的 BootInitFlow。
+它只能从具有有效 CpuRef 的当前 TaskFlow 构造，包括 BootTask 首次 BindTaskStack 之前的 BootInitFlow。
 CurrentCPU 不依赖 CurrentTask 已经绑定。TaskFlow 及其同步 `drives` 子孙继承同一个解析结果；
 异步 `emits` 不继承，接收方必须从自己的 effective TaskFlow 重新解析。每次 trace 必须记录 canonical
 target（如 `CpuGroup.cpus[0]`）和解析来源 Flow/CpuRef，不能只记录字符串 `CurrentCPU`。

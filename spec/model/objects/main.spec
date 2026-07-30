@@ -446,7 +446,10 @@ predicate printk_deferred_section_exited<T>(section: T) -> bool;
 predicate current_task_resolved_target_is<F, R, T>(flow: F, task_ref: R, task: T) -> bool;
 predicate current_task_ref_derived_from_selector<R, T>(task_ref: R, task: T) -> bool;
 predicate current_task_selector_validates_execution<F, T>(flow: F, task: T) -> bool;
-predicate current_task_bind_boundary_valid<F: TaskFlow, T: Task>(flow: F, task: T) -> bool;
+predicate current_task_bind_scheduler_commit_boundary_valid<F: TaskFlow, T: Task>(flow: F, task: T) -> bool;
+predicate boot_task_bind_task_stack_boundary_valid<F: TaskFlow, T: Task, S: Stack>(flow: F, task: T, stack: S) -> bool;
+predicate boot_task_refresh_task_stack_boundary_valid<F: TaskFlow, T: Task, S: Stack>(flow: F, task: T, stack: S) -> bool;
+predicate boot_task_stack_argument_matches_task<T: Task, S: Stack>(task: T, stack: S) -> bool;
 predicate current_task_bind_task_has_unique_valid_ref<T: Task>(task: T) -> bool;
 predicate current_task_binding_committed<C: CPU, T: Task, F: TaskFlow>(cpu: C, task: T, flow: F) -> bool;
 predicate current_task_binding_ref_is<C: CPU, R: TaskRef>(cpu: C, task_ref: R) -> bool;
@@ -455,7 +458,21 @@ predicate current_task_binding_revision_is<C: CPU>(cpu: C, revision: usize) -> b
 predicate current_task_binding_address_refreshed<C: CPU, T: Task>(cpu: C, task: T) -> bool;
 predicate current_task_binding_identity_preserved_for_same_task<C: CPU, T: Task>(cpu: C, task: T) -> bool;
 predicate current_task_binding_is_cpu_local<C: CPU>(cpu: C) -> bool;
+predicate current_task_binding_replaced_at_scheduler_commit<C: CPU, T: Task>(cpu: C, task: T) -> bool;
 predicate current_task_bind_preserves_preemption_state<T: Task>(task: T) -> bool;
+predicate current_task_stack_attribute_valid<T: Task, S: Stack>(task: T, stack: S) -> bool;
+predicate current_task_bind_stack_pointer_valid_for_boundary<F: TaskFlow, T: Task, S: Stack>(flow: F, task: T, stack: S) -> bool;
+predicate current_task_stack_pair_unbound<C: CPU>(cpu: C) -> bool;
+predicate current_stack_binding_committed<C: CPU, T: Task, S: Stack>(cpu: C, task: T, stack: S) -> bool;
+predicate current_stack_pointer_matches_active_controller<C: CPU, T: Task, S: Stack>(cpu: C, task: T, stack: S) -> bool;
+predicate current_stack_binding_address_refreshed<C: CPU, S: Stack>(cpu: C, stack: S) -> bool;
+predicate current_stack_binding_identity_preserved_for_same_stack<C: CPU, S: Stack>(cpu: C, stack: S) -> bool;
+predicate current_stack_binding_is_cpu_local<C: CPU>(cpu: C) -> bool;
+predicate current_stack_binding_matches_task<C: CPU, T: Task, S: Stack>(cpu: C, task: T, stack: S) -> bool;
+predicate current_task_stack_binding_pair_consistent<C: CPU, T: Task, S: Stack>(cpu: C, task: T, stack: S) -> bool;
+predicate current_stack_bind_preserves_preemption_state<T: Task>(task: T) -> bool;
+predicate boot_task_bind_task_stack_atomic<C: CPU, T: Task, S: Stack>(cpu: C, task: T, stack: S) -> bool;
+predicate boot_task_refresh_task_stack_atomic<C: CPU, T: Task, S: Stack>(cpu: C, task: T, stack: S) -> bool;
 predicate task_creation_flow_contract_ready<T>(core: T) -> bool;
 predicate task_clone_args_ready<T>(task: T) -> bool;
 predicate task_creation_copy_process_committed<T, U, V>(core: T, src_task: U, dst_task: V) -> bool;
@@ -1222,6 +1239,16 @@ type SchedulerObject: KernelObject {
                 scheduler_switch_to_core_context_saved(self, prev_ref);
                 scheduler_switch_to_core_context_restored(self, next_ref);
                 scheduler_switch_finish_atomic(self, prev_ref, next_ref);
+                current_stack_binding_committed(
+                    CurrentCPU,
+                    KernelInitTask,
+                    KernelInitTask.stack
+                );
+                current_task_stack_binding_pair_consistent(
+                    CurrentCPU,
+                    KernelInitTask,
+                    KernelInitTask.stack
+                );
                 scheduler_finish_task_switch_done(self, BootRunQueue, prev_ref);
                 scheduler_finish_task_switch_releases_rq_lock(self, BootRunQueue);
                 scheduler_finish_task_switch_restores_preempt_count(self, next_ref);

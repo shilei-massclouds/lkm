@@ -1060,7 +1060,16 @@ object EntrySuccessorPhase: PhaseObject {
                         TranslationControllerKind::EarlyVm
                     );
                     BootTask.state == State::OnCpu;
-                    BootInitStack.state == State::Ready;
+                    current_stack_binding_matches_task(
+                        CpuGroup.cpus[0],
+                        BootTask,
+                        BootTask.stack
+                    );
+                    current_stack_pointer_matches_active_controller(
+                        CpuGroup.cpus[0],
+                        BootTask,
+                        BootTask.stack
+                    );
                     CurrentCPU.trap.interrupt.state == State::Ready;
                     RawDtb.state == State::Ready;
                     FixMap.state == State::Ready;
@@ -1071,7 +1080,7 @@ object EntrySuccessorPhase: PhaseObject {
                 }
 
                 drives {
-                    BootInitStack.Transition::Enable;
+                    BootTask.Action::EnableStackGuard;
                     EarlyDtb.Transition::Preset;
                     CurrentCPU.Transition::Enable;
                     PrintkBuffer.Transition::Preset;
@@ -1131,7 +1140,7 @@ object EntrySuccessorPhase: PhaseObject {
                     context_is(SystemExclusive);
                     early_boot_irqs_disabled_true();
                     BootInitFlow.state == State::Prepared;
-                    BootInitStack.state == State::Online;
+                    task_stack_guard_ready(BootTask, BootTask.stack);
                     CpuGroup.cpus[0].state == State::Online;
                     CurrentCPU.trap.interrupt.state == State::Ready;
                     PrintkBuffer.state == State::Prepared;
@@ -1176,7 +1185,7 @@ object EntrySuccessorPhase: PhaseObject {
                     context_is(SystemExclusive);
                     early_boot_irqs_disabled_true();
                     BootInitFlow.state == State::Prepared;
-                    BootInitStack.state == State::Online;
+                    task_stack_guard_ready(BootTask, BootTask.stack);
                     CpuGroup.cpus[0].state == State::Online;
                     CurrentCPU.trap.interrupt.state == State::Ready;
                     PrintkBuffer.state == State::Prepared;

@@ -51,14 +51,14 @@ Flow handoff 在激活新 Flow 前必须把旧 Flow 的 CpuRef 复制给新 Flow
 同步 drives 子孙继承这一解析来源，异步 emits 不继承。完整 CPU ownership、别名和解引用规则见
 [`CPU`](cpu.md) 与 [`CpuGroup`](cpu-group.md)。
 
-## CurrentTask、BindTask 与 CurrentTaskRef
+## CurrentTask、CurrentStack 与执行绑定
 
 `CurrentTask` 表示 CPU 执行上下文已经提交的当前 Task binding，不直接等同于 effective TaskFlow 的
-parent。`CurrentTask.Action::BindTask(task: Task)` 是建立或刷新这一上下文 binding 的动作；它不声明
-CurrentTask object、owned child、lifecycle 或 `CurrentTaskSlot`。普通 Task 只能在 Scheduler 的正式
-switch commit 边界完成不同目标换绑；BootTask 是入口特例，由自己的 BootInitFlow 在首段指令路径
-完成首次绑定。同一 CPU 对同一 Task 的重复调用保持 binding identity，只刷新该 Task 的当前地址表示；
-不同 CPU 的 binding 彼此隔离。
+parent。`CurrentTask.Action::BindTask(task: Task)` 只执行 `BindCurrentTask(task)`：在 Scheduler 的正式
+switch commit 边界把 CPU-local CurrentTask 换绑到即将运行的普通 Task；它不绑定 stack、不写 `sp`，
+也不声明 CurrentTask object、owned child、lifecycle 或 `CurrentTaskSlot`。架构 switch 在同一个外层
+commit 中独立恢复 next Task 的 `sp`，因此 finish continuation 开始前，CurrentTask 与从 live `sp`
+校验得到的 `CurrentStack == task.stack` 必须同时可解析。不同 CPU 的 binding 彼此隔离。
 
 TaskFlow parent 仍只表达结构归属，不是 current-task 存储。绑定完成后，所选 Task 必须同时是
 effective TaskFlow 的 parent 和 owner，且该 Flow 必须是 Task 的 active Flow；目标必须为该 CPU 上的
@@ -69,8 +69,30 @@ CPU、非 `OnCpu/Live` 或悬空/过期/重复 TaskRef 都必须拒绝，失败�
 TaskFlow 及其同步 `drives` continuation 继承同一 CPU-local binding；异步 `emits` 不继承，接收方从
 自己的执行上下文重新解析。trace 必须记录 canonical CPU、Task、source Flow 和 source TaskRef。
 BootTask 首次绑定前，`CurrentCPU` 可以独立从 `BootInitFlow.cpu_ref` 解引用，不能反向依赖尚未建立的
-CurrentTask。BootTask 的静态初始禁止抢占属性不是 BindTask 的副作用。本段不定义 CurrentStack、
-BindStack 或 `sp`。
+CurrentTask。BootTask 的静态初始禁止抢占属性不是 BindTask 的副作用。
+
+`CurrentStack` 表示同一 CPU 执行上下文已经提交的当前内核栈 binding；它不是 TaskFlow parent、
+`sp` 数值的全局副本，也不声明 object、owned child、lifecycle 或 `CurrentStackSlot`。Stack 是
+`Task.stack` 的值类型属性，不是对象；目标值必须精确等于已绑定 `CurrentTask.stack`，live `sp` 必须
+落在该属性描述的当前地址表示有效范围内。`CurrentStack` 解析先读取 CPU-local stack binding，再与
+CurrentTask、effective TaskFlow、`CurrentTask.stack`、active translation controller 和 live `sp`
+交叉校验；任何不一致都拒绝。不存在可单独调用或发送 Signal 的公开 `BindStack` Action。
+
+`BootTask.stack` 是与静态 `init_task` 一起在镜像中构造的属性值，对应 Linux
+`init_thread_union` / `init_stack`；不存在独立的启动栈对象、状态或引用。BootTask 是
+`BindTask` 的入口例外：BootInitFlow 必须用两个 boot-only 上下文 Action 完成执行绑定。
+`CurrentTask.Action::BindTaskStack(BootTask, BootTask.stack)` 只能在 PhysicalDirect 下首次调用，原子
+建立 task/stack pair；`CurrentTask.Action::RefreshTaskStack(BootTask, BootTask.stack)` 只能在 EarlyVm
+接管后调用，保持同一 pair 的 binding identity 并原子刷新地址表示。两者都是单个 Action/Signal，
+内部执行不可单独调用的 task/stack binding 操作；continuation 不得观察半绑定状态。任一校验或架构
+提交失败都必须保留调用前的 task binding、stack binding、`tp` 与 `sp`，且不得创建新 Task、Stack
+对象或独立 stack identity。
+
+普通调度切换在架构 restore 中从 next TaskThreadContext 恢复 next `sp`，并在同一正式 switch commit
+中调用 `BindTask(next)` 写入 next `tp`。`BindTask` 本身只提交 CurrentTask；外层架构 commit 依据已恢复
+的 live `sp` 与 `next.stack` 提交 CurrentStack，finish continuation 只能在 task/stack pair 同时可解析
+后运行。不同目标的 CurrentStack 换绑只允许发生在该 commit 或 AP 正式入口提交边界；不同 CPU 的两种
+binding 都彼此隔离，snapshot 只保留 CPU-keyed contextual facts。
 
 ## 陷入期间的底层执行权
 

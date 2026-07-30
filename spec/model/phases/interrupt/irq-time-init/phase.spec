@@ -200,7 +200,7 @@ context BootStackCanaryInitContext: Context {
     obj_refs {
         BootStackCanary;
         Randomness;
-        BootInitStack;
+        BootTask;
     }
 }
 
@@ -1945,7 +1945,7 @@ object BootStackCanary: KernelObject {
             on Transition::Setup -> State::Ready {
                 depends_on {
                     Randomness.state == State::Ready;
-                    BootInitStack.state == State::Online;
+                    task_stack_guard_ready(BootTask, BootTask.stack);
                 }
 
                 within BootStackCanaryInitContext {

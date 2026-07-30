@@ -68,15 +68,13 @@ object BootInitFlow: TaskFlow {
                         KernelAddrSpace.Transition::Preset;
                         CurrentCPU.Transition::Setup(true);
                         CurrentCPU.trap.interrupt.Transition::Setup;
-                        CurrentTask.Action::BindTask(BootTask);
-                        BootInitStack.Transition::Preset;
+                        CurrentTask.Action::BindTaskStack(BootTask, BootTask.stack);
                         CurrentCPU.trap.Transition::Preset;
                         CurrentCPU.trap.exception.Transition::Preset;
                         Vm.Transition::Preset;
                         Vm.Transition::Setup;
                         CurrentCPU.trap.Transition::Setup;
-                        CurrentTask.Action::BindTask(BootTask);
-                        BootInitStack.Transition::Setup;
+                        CurrentTask.Action::RefreshTaskStack(BootTask, BootTask.stack);
                         Soc.Transition::Preset;
                     }
                 }
@@ -103,7 +101,6 @@ object BootInitFlow: TaskFlow {
                     RawDtb.state == State::Ready;
                     KernelAddrSpace.state == State::Ready;
                     BootTask.state == State::OnCpu;
-                    BootInitStack.state == State::Ready;
                     Vm.state == State::Ready;
                     TrampolineVm.state == State::Ready;
                     EarlyVm.state == State::Ready;
@@ -118,8 +115,21 @@ object BootInitFlow: TaskFlow {
                     task_ref_ready(BootTaskRef);
                     boot_task_current_binding_established(CpuGroup.cpus[0], BootTask);
                     boot_task_current_binding_refreshed_for_active_controller(CpuGroup.cpus[0], BootTask);
+                    boot_task_stack_current_binding_established(CpuGroup.cpus[0], BootTask, BootTask.stack);
+                    boot_task_stack_current_binding_refreshed_for_active_controller(CpuGroup.cpus[0], BootTask, BootTask.stack);
+                    current_task_stack_binding_pair_consistent(CpuGroup.cpus[0], BootTask, BootTask.stack);
+                    current_stack_binding_matches_task(CpuGroup.cpus[0], BootTask, BootTask.stack);
+                    current_stack_pointer_matches_active_controller(CpuGroup.cpus[0], BootTask, BootTask.stack);
                     boot_task_preemption_is_static_initial_property(BootTask);
-                    boot_task_bind_task_diagnostic_clear();
+                    task_stack_is_static_initial_property(BootTask, BootTask.stack);
+                    task_stack_range_is(
+                        BootTask,
+                        BootTask.stack,
+                        Lds.init_stack_start,
+                        Lds.init_stack_end
+                    );
+                    task_has_unique_stack_attribute(BootTask);
+                    boot_task_task_stack_binding_diagnostic_clear();
                     task_owns_flow(BootTask, self);
                     task_flow_owner_is(self, BootTask);
                     task_flow_parent_is(self, BootTask);

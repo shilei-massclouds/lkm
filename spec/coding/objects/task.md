@@ -23,11 +23,13 @@ TaskFlow 的独立 lifecycle、generation、owner/binding 与 handoff lowering �
   snapshot 都只是集合 lowering；每次成功 fork/clone 必须分配新的 logical Task identity 和 PID，
   并发布指向该 identity 的 fresh `TaskRef`；不得把存储槽地址或测试字段当作可复用 TaskRef。
 
-Rust `Task` 必须是 lifecycle、identity、PID、execution authority、`TaskThreadContext`、typed `initial_flow` 和 Flow ownership 的唯一
+Rust `Task` 必须是 lifecycle、identity、PID、execution authority、唯一 `stack: Stack` 值属性、
+`TaskThreadContext`、typed `initial_flow` 和 Flow ownership 的唯一
 carrier。Boot/KernelInit/Kthreadd/AP/smoke/user-child 角色结构只能保存角色 metadata 或 continuation
 scratch，并委托一个 `Task` core；它们不得另存上述 carrier 字段。linker-visible
 `init_task_storage` 的首地址就是 PID 0 canonical `Task` 地址，`tp`、runqueue 和 CurrentTask 解析
-BootTask API 必须解析到该同一地址。
+BootTask API 必须解析到该同一地址。`Stack` 只能实现为 Task 内的 storage/range 描述值；不得提供对象
+header、状态字段、generation/ref、owned-child 节点或独立 allocation/lifecycle API。
 
 CPU assignment 不属于 Task carrier。`Task` 不得保存 `cpu_id`、`CpuRef` 或同义字段；可恢复执行路径
 的 CPU 归属只存在于对应 `TaskFlow.cpu_ref`。调度器需要 CPU 时必须先解析即将提交/恢复的 Flow。
@@ -48,7 +50,8 @@ entity 和 New/not-enqueued 状态；`Task::enable` 只在调用者已完成 run
 初始 Flow structural binding 后把 context 绑定 initial FlowRef 并原子提交 Online/None/Valid；它不启动
 Flow。Scheduler prepare 必须验证 prev OnCpu/Live/Invalid/active-flow 和 next Online/None/Valid/FlowRef；
 next 栈上的 finish 先验证架构已建立的 next 原始身份，再调用 context save/restore observation，并原子提交 prev
-Online/None/Valid、next OnCpu/Live/Invalid、next active Flow 与 CPU-local CurrentTask binding，然后严格选择 Base initial Flow 的 `Preset` 或 Online active Flow
+Online/None/Valid、next OnCpu/Live/Invalid、next active Flow 与 CPU-local CurrentTask binding；外层
+switch commit 同时以已恢复的 live `sp` 和 `next.stack` 发布 CurrentStack，然后严格选择 Base initial Flow 的 `Preset` 或 Online active Flow
 的 `Continue`。stale generation、无效 context、Reserved authority 或候选歧义必须无状态变化失败。
 terminal task 使用 OnCpu 直接 Disable，context 保持 Invalid；identity switch 完全不调用上述方法。
 `disable/cleanup` 必须继续检查 owned Flow 的 inactive/Destroyed 顺序。角色专用 flag、入口、
@@ -60,16 +63,20 @@ provider、CPU pin 或 global reference publication 不得写入这些通用方�
 解析出的 generation-checked ref 等于该 ref。调用者不得传入 persistent `Online` 状态代替当前执行权；BootTask 不使用名称特判。
 上述任一检查失败必须保持 core 和 destination 不变。
 
-`BootTask` 使用 boot-only const initializer 直接构造 OnCpu/Live/Invalid `init_task_storage` 和固定
-`TaskRef::BOOT`；不得复用普通 Task lifecycle 方法，也不得暴露 `preset/setup/enable` 或兼容 alias。
-早期 `tp` 物理/虚拟地址模式由可重复调用的 `CurrentTask::bind_task(BootTask)` lower；不创建
-entry-binding object、CPU child、lifecycle、兼容名称或 `CurrentTaskSlot`。`PhysicalDirect` owner 下
-首次调用建立 boot CPU binding；`EarlyVm`/`SwapperVm` owner 下保持同一 binding identity 并刷新同一
-carrier 的当前地址。每次成功调用都必须实际把当时可用的 canonical `Task` 地址写入 `tp/x4`。
-BootTask 的初始 preempt count 由 boot-only const initializer 静态构造，BindTask 不初始化或改变它。
-`TrampolineVm`、owner 缺失、owner/live SATP 不一致、错误/非唯一 ref、错误 carrier 或跨 CPU Flow 必须
-在修改 `tp` 前记录诊断并 fail-stop。OnCpu 初态只由固件/架构入口执行权事实建立，不依赖尚未建立的
-runqueue 或 runqueue current；各阶段只能静默验证该 carrier 仍为 OnCpu/canonical。本段不约束 `sp`。
+`BootTask` 使用 boot-only const initializer 直接构造 OnCpu/Live/Invalid `init_task_storage`、固定
+`TaskRef::BOOT` 与静态 `stack(Lds.init_stack_start, Lds.init_stack_end)` 属性；不得复用普通 Task
+lifecycle 方法，也不得暴露 `preset/setup/enable` 或兼容 alias。该 stack 属性对应 linker-visible
+`init_stack` / `init_thread_union`，但不创建 stack object。
+
+早期执行 binding 只由两个 boot-only 入口 bridge 调用：PhysicalDirect 下的
+`CurrentTask::bind_task_stack(BootTask, BootTask.stack)` 原子建立物理 `tp/sp` 与 CPU-local pair；EarlyVm
+下的 `CurrentTask::refresh_task_stack(BootTask, BootTask.stack)` 保持 pair identity 并原子刷新虚拟
+`tp/sp`。bridge 对外是两个单独 Action，但各自内部必须 lowering 为一个连续汇编提交块；不得暴露独立
+`bind_stack` API、半绑定 checkpoint、entry-binding object、CPU child、lifecycle 或 slot。BootTask 的
+初始 preempt count 由 boot-only const initializer 静态构造，两种 Action 均不初始化或改变它。
+`TrampolineVm`、owner 缺失、owner/live SATP 不一致、错误/非唯一 ref、错误 carrier/stack 或跨 CPU
+Flow 必须在修改寄存器前记录诊断并 fail-stop。OnCpu 初态只由固件/架构入口执行权事实建立，不依赖
+尚未建立的 runqueue 或 runqueue current；各阶段只能静默验证该 carrier 仍为 OnCpu/canonical。
 
 ## TaskRef 与 storage
 
@@ -81,7 +88,8 @@ slot；每次把已回收 slot 重新声明为 Task 时 generation 单调递增�
 
 runqueue entry、scheduler event observation、锁 owner route、completed-child/wait record 可以保存当时的
 `TaskRef`，但不得成为当前任务权威副本。`CurrentTask` 是从本 hart `tp` binding 构造的短生命周期
-capability，内部只携带 generation 校验后的 `TaskRef`；BindTask 是唯一修改该执行 binding 的边界。
+capability，内部只携带 generation 校验后的 `TaskRef`；普通调度只用 `BindTask` 修改 task binding，
+BootTask 首绑/刷新则只用两个 boot-only task-stack Action。
 禁止 `CurrentTaskRef`、`UserChild` 等按角色枚举身份接口，也不保留 alias。
 需要名称或 PID 的诊断必须先通过 owner storage 验证 TaskRef，再读取 Task metadata。
 

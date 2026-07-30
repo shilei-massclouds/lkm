@@ -1028,11 +1028,11 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 需要注意的是，`System Exclusive` 仍是当前子阶段的环境前提，但这里先不把它视为当前子阶段新建立的对象；它首先是这一本子阶段中其他对象得以建立的背景条件。
 
-据此，当前可先识别出十类本步骤涉及的核心对象。这里统一采用“中文名 + 英文名”的命名方式；对于约定俗成的工程对象，也可直接使用英文名。需要注意，`物理内存空间` 属于准备期输入对象，不是入口前导步骤新建立的对象；它在本步骤中作为只读资源布局被读取和验证。
+据此，当前可先识别出十项本步骤涉及的核心建模要素，其中九类是对象，一项是 Task 的值属性。这里统一采用“中文名 + 英文名”的命名方式；对于约定俗成的工程对象，也可直接使用英文名。需要注意，`物理内存空间` 属于准备期输入对象，不是入口前导步骤新建立的对象；它在本步骤中作为只读资源布局被读取和验证。
 
 1. `启动执行阶段`，英文名 `BootInitFlow`：`BootTask.initial_flow` 指向的初始 TaskFlow；它继承 PhaseObject，用于把前置环境交接下来的唯一启动执行片段显式纳入内核阶段树。
 2. `启动根任务`，英文名 `BootTask`：镜像入口前已经存在且从模型入口起 OnCpu 的静态 carrier；它对应 Linux 静态 `init_task` / PID 0 / swapper 的身份。
-3. `启动根栈`，英文名 `BootInitStack`：`启动根任务` 的对应栈，作为 `启动根任务` 的子对象；它对应 Linux 静态 `init_thread_union` / init stack 存储。
+3. `启动根任务栈属性`，写作 `BootTask.stack`：Task 类型上的唯一 `stack: Stack` 值属性；它与 BootTask 一起在镜像中构造，对应 Linux 静态 `init_thread_union` / `init_stack` 存储，但不是对象、子对象、引用或 lifecycle。
 4. `中断资源`，英文名 `InterruptType`：当前 CPU 的中断门控与分派资源，是 `TrapType.interrupt`。在本子阶段它首先封闭中断进入路径，确保入口前导期在受控条件下继续执行。
 5. `陷入资源`，英文名 `TrapType`：每个 CPU 独立拥有的公共陷入入口资源；它拥有同一 CPU 的 `InterruptType` 与 `ExceptionType`，维护公共入口及中断/异常分叉前的接收边界。
 6. `内核映像`，英文名 `Kernel Image`：代表内核映像本身，主要维护其各个 `segment` 的信息与状态。
@@ -1051,7 +1051,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 图 8 用于说明入口前导步骤涉及对象的分类与相互关系。该步骤主要涉及流对象、地址空间对象和硬件对象；编排权直接属于 `BootInitFlow.Preset`。
 
-在阶段对象中，`BootInitFlow` 是内核引导过程中最早出现的启动执行阶段。静态 `BootTask` 是其 parent，并从首个入口 checkpoint 起已在 boot CPU 上处于 OnCpu；`BootInitStack` 也是 `BootTask` 子对象。入口后继期还会为 `BootTask` 补充 `InitMM` 子对象，用于描述 Linux `init_mm` 这类根任务关联的地址空间元数据。`TrapType` 是 `InterruptType` 的下级子对象，用于维护中断/异常入口表以及进入中断处理或异常处理之前的公共流程。
+在阶段对象中，`BootInitFlow` 是内核引导过程中最早出现的启动执行阶段。静态 `BootTask` 是其 parent，并从首个入口 checkpoint 起已在 boot CPU 上处于 OnCpu；`BootTask.stack` 是该 Task 的值属性，不是子对象。入口后继期还会为 `BootTask` 补充 `InitMM` 子对象，用于描述 Linux `init_mm` 这类根任务关联的地址空间元数据。`TrapType` 是 `InterruptType` 的下级子对象，用于维护中断/异常入口表以及进入中断处理或异常处理之前的公共流程。
 
 在地址空间对象中，`虚拟内存空间`（`VM`）的空间内容先拆为两个子对象，分别是内核映像和物理内存空间。其中，`物理内存空间` 是准备期输入对象，表示只读的物理资源布局；入口前导期不建立或修改它，只读取它提供的约束。`VM` 的建立过程还包含三个页表子对象：`跳板虚拟内存空间`（`TrampolineVM`）维护并使用 `静态对象集合.trampoline_pg_dir`，`早期虚拟内存空间`（`EarlyVM`）维护并使用 `静态对象集合.early_pg_dir`，`交换虚拟内存空间`（`SwapperVM`）维护并使用 `静态对象集合.swapper_pg_dir`。入口前导期只触发前两个子对象，`SwapperVM` 对应的完整虚拟内存空间由后续阶段继续建立。
 
@@ -1079,35 +1079,37 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 2. `启动根任务`（`BootTask`）
 
    描述：镜像入口前已经存在且 Online 的静态 carrier，对应 Linux 静态 `init_task` / PID 0 /
-   swapper；它是 `BootInitFlow` 与 `BootInitStack` 的父对象。
+   swapper；它是 `BootInitFlow` 的父对象，并具有唯一静态 `stack` 值属性。
 
-   * `setup` - 建立物理地址阶段的根任务指针
+   * `BindTaskStack` - 原子建立物理地址阶段的当前任务与当前栈 binding
 
      * 初始状态：静态根任务结构体实例 `init_task` 有效，且可通过物理地址访问。
-     * 执行动作：设置 `tp` 寄存器，使其指向 `init_task` 的物理地址。
-     * 结束状态：验证 `tp` 寄存器指向有效的 `init_task` 物理地址。
+     * 执行动作：作为单个 boot-only Action，设置 `tp` 指向 `init_task` 的物理地址，并设置 `sp` 指向 `LDS.init_stack_end - Config.PT_SIZE_ON_STACK` 的物理地址。
+     * 结束状态：验证 CPU-local CurrentTask/CurrentStack pair 与 `tp/sp` 同时指向有效的 BootTask/BootTask.stack 物理地址表示。
 
-   * `enable` - 重置根任务指针到虚拟地址
+   * `RefreshTaskStack` - 原子刷新根任务与根栈到虚拟地址
 
      * 初始状态：`VM.setup()` 已完成并进入早期虚拟地址阶段，`tp` 寄存器指向 `init_task` 的物理地址。
-     * 执行动作：让 `tp` 寄存器指向 `init_task` 的虚拟地址。
-     * 结束状态：验证 `tp` 寄存器指向有效的 `init_task` 虚拟地址。
+     * 执行动作：作为单个 boot-only Action，让 `tp` 与 `sp` 分别指向 `init_task` 和 `BootTask.stack` 的虚拟地址表示。
+     * 结束状态：验证 task/stack pair identity 不变，且 CPU-local bindings 与 `tp/sp` 同时刷新为有效虚拟地址表示。
 
-3. `启动根栈`（`BootInitStack`）
+3. `启动根任务栈属性`（`BootTask.stack`）
 
-   描述：`启动根任务` 的对应栈，作为 `启动根任务` 的子对象。
+   描述：`启动根任务` 唯一的静态 `Stack` 值属性；它只描述 storage/range，不具有 object identity、
+   state、ref 或 lifecycle。入口的两个 boot-only Action 原子改变 CPU-local task/stack bindings 与
+   `tp/sp`。
 
-   * `setup` - 建立物理地址阶段的根栈指针
+   * `BindTaskStack` 内部栈操作 - 建立物理地址阶段的当前栈 binding
 
      * 初始状态：`LDS.init_stack_start` 与 `LDS.init_stack_end` 有效，二者均与页对齐，且 `LDS.init_stack_end - LDS.init_stack_start` 大于等于 `1` 个页。
      * 执行动作：先设置 `sp` 寄存器，使其指向 `LDS.init_stack_end` 对应的栈空间高端；然后将 `sp` 减去 `Config.PT_SIZE_ON_STACK`，为 `PTRACE` 区域留出空间。
      * 结束状态：验证 `sp` 寄存器指向有效的根栈物理地址，即 `LDS.init_stack_end - Config.PT_SIZE_ON_STACK`。
 
-   * `setup` - 重置根栈指针到虚拟地址
+   * `RefreshTaskStack` 内部栈操作 - 刷新根栈指针到虚拟地址
 
      * 初始状态：`VM.setup()` 已完成并进入早期虚拟地址阶段，`sp` 寄存器指向 `LDS.init_stack_end - Config.PT_SIZE_ON_STACK` 的物理地址。
      * 执行动作：让 `sp` 寄存器指向 `LDS.init_stack_end - Config.PT_SIZE_ON_STACK` 的虚拟地址。
-     * 结束状态：`根栈` 进入 `Ready`，验证 `sp` 寄存器指向有效的根栈虚拟地址。`Online` 留给后续栈保护机制建立后的正式服务状态。
+     * 结束状态：根栈仍为静态 `Ready`，CurrentStack 保持同一 binding identity，验证 `sp` 寄存器指向有效的根栈虚拟地址。`Online` 留给后续栈保护机制建立后的正式服务状态。
 
 4. `中断资源`（`InterruptType`）
 
@@ -1251,12 +1253,12 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 4. 执行 `内核映像.setup()`，清零 `BSS` 段，使内核映像进入早期可运行状态。
 5. 把内核启动时的第一个参数作为BootCPU的hartid记录下来，以备后续使用。
 6. `OpenSBI.Enable` 同步驱动 `处理器管理.preset()`，原子创建 `CpuGroup.cpus[0]` 并驱动它进入 `Prepared`；只有该父子发布全部成功后才发送 `Kernel.Enable`。
-7. 由 `PhysicalDirect.ActivateOnCpu(BootCPURef)` 以 InitialActivation 从 absent 建立 CPU-local association，再调用 `CurrentTask.BindTask(BootTask)` 与根栈 setup，建立物理地址阶段的 CPU-local 当前任务 binding 与根栈指针；BootTask 的初始禁止抢占来自静态初始化，BindTask 不初始化 preempt count。
+7. 由 `PhysicalDirect.ActivateOnCpu(BootCPURef)` 以 InitialActivation 从 absent 建立 CPU-local association，再调用单个 `CurrentTask.BindTaskStack(BootTask, BootTask.stack)`，原子建立物理地址阶段的 CPU-local task/stack 执行 binding 并实际写入 `tp/sp`；BootTask 的初始禁止抢占来自静态初始化，该 Action 不初始化 preempt count。
 8. 执行 `TrapType.preset()`，设置受控早期处理入口，使 `VM` 建立过程中误入的中断或异常能够进入受控停机路径。
 9. 执行 `虚拟内存空间.preset()`，依次推进 `TrampolineVM.setup()` 与 `EarlyVM.setup()`，初始化 `静态对象集合.trampoline_pg_dir` 与 `静态对象集合.early_pg_dir`，为入口前导期的两次页表切换准备条件。
 10. 执行 `虚拟内存空间.setup()`，依次调用 `TrampolineVM.ActivateOnCpu()` 与 `EarlyVM.ActivateOnCpu()`：先完成从物理地址空间到跳板映射的 Handoff，再 Handoff 到 early page table；其中 `内核映像.enable()` 重置 `gp-relative` 寻址方式。controller 仍保持共享 Ready。
 11. `VM.setup()` 完成后，执行 `TrapType.setup()`，设置正式公共处理入口，使 `RISCV64.stvec` 指向 `formal_event_entry`。
-12. 在 `VM.setup()` 完成后，再次调用 `CurrentTask.BindTask(BootTask)` 并执行根栈 setup，分别将 `tp` 与 `sp` 重置为虚拟地址；同目标 BindTask 保持 binding identity 并实际刷新 `tp`，不处理抢占计数。本段的 CurrentTask 修正不定义根栈 binding 语义。
+12. 在 `VM.setup()` 完成后调用单个 `CurrentTask.RefreshTaskStack(BootTask, BootTask.stack)`，原子将 `tp` 与 `sp` 重置为虚拟地址；同目标 pair 保持两种 binding identity，不处理抢占计数，也不存在 Stack lifecycle。
 13. 执行 `片上系统.preset()`，完成片上系统平台相关的早期预置，并直接提交 `BootInitFlow.Prepared`。
 
 当前时序图主要表达对象过程的编排顺序，不表达逐项源码对应关系。失败时进入 `FAIL` 状态的错误传播方式，以及每一步更细的依赖检查，后续继续补充。
@@ -1307,7 +1309,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 5. `早期设备树对象`（`EarlyDtb`）：入口前导期已按规格前置证明验证并映射原始 `RawDtb`；入口后继期短暂建立 `EarlyDtb`。它通过 `preset` 和 `setup` 分担职责：`EarlyDtb.preset()` 先从原始 `dtb` 中提取最小平台事实，解析 `/cpus` 建立 `PlatformCpuInfo` 并检查启动 hartid 合法，解析 `/memory` 建立 `PhysicalMemory`；`EarlyDtb.setup()` 再完成本子阶段对 DTB 的后续使用，提取 kernel command line，解析 FDT header `/memreserve/` 与 `/reserved-memory` 得到固件和平台保留内存范围，并触发 `MemBlock.preset()` 建立候选物理内存区段。Linux 实现中的 FDT header 校验和扫描主要发生在这一后继期路径中；本规格把 `RawDtb` 有效性提前收口，是为了让 `EarlyVm` 的映射前提可证明。本子阶段末尾 `EarlyDtb` 退出服务。后续正式 OF/DeviceTree 对象若建立，应视为基于原始 `dtb` 或早期解析结果重新建立的运行期对象，不是 `EarlyDtb` 的简单延续。
 6. `命令行管理对象`（`CommandLine`）：代表启动命令行的文本视图管理对象。入口后继期的 `CommandLine.preset()` 建立 raw view，即 `KernelCmdline`，它来自 `EarlyDtb` 解析结果，只保存启动参数文本和必要边界事实，不负责解释每个参数的语义。完成 `parse_dtb()` 后，`CommandLine.state == Prepared`，`KernelCmdline.state == Ready`，供后续参数解析对象使用。`SavedCommandLine` 与 `StaticCommandLine` 是同一 `CommandLine` 对象在核心准备期建立的 saved/static 子视图，不作为新的顶级命令行管理对象。
 7. `参数解析管理对象`（`Params` / `EarlyParam` / `BootParam` / `PayloadParam`）：`Params` 是参数解析类对象的顶层管理者，不属于 `CommandLine`，也不合并命令行文本视图管理。入口后继期由 `Params.preset()` 驱动 `EarlyParam.setup()`，完成第一次 `parse_early_param()`；核心准备期由 `Params.setup()` 驱动 `BootParam.setup()` 和 `PayloadParam.setup()`，实现必须在二者之间保留 `print_unknown_bootoptions()` checkpoint。`EarlyParam.setup()` 依赖 `CommandLine` 的 raw view 和静态 `early_param` handler 表；当前规格要求 `earlycon` handler 必须存在，并在处理 `earlycon=sbi` 时连续驱动 `EarlyCon.preset(config=sbi)`、`EarlyCon.setup()` 和 `EarlyCon.enable()`。这意味着 `EarlyParam` 负责识别并分发参数处理过程，而 `EarlyCon` 仍负责自身后端建立与启用，只是这些对象推进发生在同一个参数处理调用链内部。
-8. `启动根栈`（`BootInitStack`）：入口前导期结束时已经进入 `Ready`，即 `sp` 已经切换到早期虚拟地址。入口后继期继续执行 `BootInitStack.enable()`，建立根栈边界和溢出保护事实，使 `BootInitStack` 进入 `Online`。这里的 `guard/保护` 只是 `enable` 的文档别名，不是单独transition 名；入口前导期的地址切换事件已经统一为 `setup`。
+8. `启动根任务栈保护动作`：入口前导期结束时，`BootTask.stack` 已作为值属性与 CurrentStack binding 一致，`sp` 已切换到早期虚拟地址。入口后继期执行 `BootTask.EnableStackGuard`，在该属性上建立根栈边界和溢出保护事实；该 Action 不推进 BootTask lifecycle，也不存在 Stack 对象或状态迁移。
 9. `根任务地址空间`（`InitMM`）：`BootTask` 的子对象，代表 Linux `init_mm` 对应的根任务地址空间元数据。Linux 中 `init_task.mm == NULL`，但 `init_task.active_mm == &init_mm`；`init_mm.pgd` 静态指向 `swapper_pg_dir`，而 `setup_initial_init_mm(_stext, _etext, _edata, _end)` 会填入内核代码段、数据段与 `brk` 边界。因此，`InitMM` 不是另一个与 `VM`/`SwapperVM` 竞争的页表对象，而是 `BootTask` 关联的 `mm_struct` 抽象，用于把启动根任务与后续完整内核地址空间元数据连接起来。
 10. `早期临时映射服务`（`EarlyIoremap`）：代表 `early_ioremap()` / `early_iounmap()` 使用的早期临时映射机制。它依赖 `FixMap` 已经提供 `FIX_BTMAP` 临时映射区，但不是 `FixMap` 的子对象；`FixMap` 是固定虚拟地址槽位布局，`EarlyIoremap` 则是使用这些槽位的服务对象。`EarlyIoremap.setup()` 对应 Linux `early_ioremap_setup()`，负责初始化各个 boot-time mapping slot 的虚拟起点并确认 `prev_map[]` 为空；后续 `early_ioremap()` 与 `early_iounmap()` 应建模为可重复执行的 `map/unmap` action，而不是生命周期 transition。
 11. `SBI能力视图`（`SBI`）：代表内核基于固件 SBI 接口建立的平台服务能力视图。`SBI.setup()` 对应 Linux `sbi_init()`，只负责探测并记录能力事实，例如 `spec_version`、固件实现标识、以及 `TIME`、`IPI`、`RFENCE`、`SRST`、`DBCN` 等扩展是否可用；它不把 `set_timer`、`send_ipi`、`rfence`、`debug_console_write` 等具体调用建模为自身生命周期 transition。后续对象通过依赖这些能力事实来完成自己的建立，例如 `EarlyCon.setup()` 依赖 `SBI.dbcn_available` 或 legacy console 能力来选择输出后端。
@@ -1328,7 +1330,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
   图 10 入口后继期对象分类与相互关系
 </p>
 
-图 10 用于说明入口后继期涉及对象的分类与相互关系。`入口后继期对象` 作为阶段对象接续 `BootInitFlow.Prepared`，并在 `start_kernel()` 之后编排本子阶段核心对象推进。`EarlyDtb` 基于入口前导期已经验证过的 `RawDtb` 先建立基础平台事实：`PlatformCpuInfo` 与 `PhysicalMemory`；随后它建立早期解析结果，驱动 `CommandLine.preset()` 产出 raw view `KernelCmdline`，同时触发 `MemBlock.preset()` 收集候选可用物理内存区段。`MemBlock.setup()` 再施加保留、裁剪和对齐等约束，形成可安全用于早期分配的物理内存管理状态。`Params.preset()` 再驱动 `EarlyParam` 基于 `CommandLine` 的 raw view 和静态 `early_param` handler 表解析早期参数，当前首先要求识别 `earlycon=sbi`，并在参数处理调用链内部连续驱动 `EarlyCon.preset/setup/enable`。`SwapperVM` 基于 `MemBlock` 和静态页表存储建立完整内核页表，并替换 `EarlyVM` 成为当前地址空间。`EarlyIoremap` 依赖 `FixMap.FIX_BTMAP` 临时映射区，提供 `early_ioremap()` / `early_iounmap()` 这类早期临时映射服务，但它不是 `FixMap` 的子对象。`SBI` 记录固件平台服务能力事实，供后续对象依赖；例如 `EarlyCon.setup()` 只负责使用 `SBI.dbcn_available` 或 legacy console 能力选择输出后端，而不重新探测这些能力。`PrintkBuffer` 与 `EarlyCon` 共同描述早期输出路径。`BootTask`、`InterruptType` 与 `CPUGroup` 作为入口前导期承接对象出现在本图中：`BootTask` 下显式列出 `BootInitStack` 与 `InitMM`；`InterruptType` 继续防御式关闭中断总开关；`CPUGroup` 已拥有 Prepared 的 `cpus[0]`，`BootInitFlow.cpu_ref` 指向该 canonical target，后续 CPU-local 步骤通过 `CurrentCPU` 解析。
+图 10 用于说明入口后继期涉及对象的分类与相互关系。`入口后继期对象` 作为阶段对象接续 `BootInitFlow.Prepared`，并在 `start_kernel()` 之后编排本子阶段核心对象推进。`EarlyDtb` 基于入口前导期已经验证过的 `RawDtb` 先建立基础平台事实：`PlatformCpuInfo` 与 `PhysicalMemory`；随后它建立早期解析结果，驱动 `CommandLine.preset()` 产出 raw view `KernelCmdline`，同时触发 `MemBlock.preset()` 收集候选可用物理内存区段。`MemBlock.setup()` 再施加保留、裁剪和对齐等约束，形成可安全用于早期分配的物理内存管理状态。`Params.preset()` 再驱动 `EarlyParam` 基于 `CommandLine` 的 raw view 和静态 `early_param` handler 表解析早期参数，当前首先要求识别 `earlycon=sbi`，并在参数处理调用链内部连续驱动 `EarlyCon.preset/setup/enable`。`SwapperVM` 基于 `MemBlock` 和静态页表存储建立完整内核页表，并替换 `EarlyVM` 成为当前地址空间。`EarlyIoremap` 依赖 `FixMap.FIX_BTMAP` 临时映射区，提供 `early_ioremap()` / `early_iounmap()` 这类早期临时映射服务，但它不是 `FixMap` 的子对象。`SBI` 记录固件平台服务能力事实，供后续对象依赖；例如 `EarlyCon.setup()` 只负责使用 `SBI.dbcn_available` 或 legacy console 能力选择输出后端，而不重新探测这些能力。`PrintkBuffer` 与 `EarlyCon` 共同描述早期输出路径。`BootTask`、`InterruptType` 与 `CPUGroup` 作为入口前导期承接对象出现在本图中：`BootTask` 下列出 `stack: Stack` 值属性与 `InitMM` 子对象；`InterruptType` 继续防御式关闭中断总开关；`CPUGroup` 已拥有 Prepared 的 `cpus[0]`，`BootInitFlow.cpu_ref` 指向该 canonical target，后续 CPU-local 步骤通过 `CurrentCPU` 解析。
 
 `CPUGroup` 的形式化迁移边界已经落地：`CpuGroup.preset()` 原子建立 `CpuGroup.cpus[0]` 与父对象 Prepared；`BootInitFlow.Preset` 通过已绑定 CpuRef 解析 `CurrentCPU` 并推进 CPU0；`CpuGroup.setup()` 再原子建立 secondary 元素及完整拓扑。`CpuRef` 只引用 collection 元素，别名和派生集合不产生第二份 CPU 状态。
 
@@ -1342,7 +1344,7 @@ Kernel 通过 BootTask/BootInitFlow 串接
 
 - `SwapperVM.state == Online`，且用于构建页表的临时 fixmap slots 已经清理
 - `VM.state == Online`
-- `BootInitStack.state == Online`，表示根栈保护状态已经建立
+- `task_stack_guard_ready(BootTask, BootTask.stack)`，表示根任务 stack 属性的边界与溢出保护事实已经建立
 - `InterruptType.state == Ready`，表示中断子开关和总开关都已经封闭
 - `BootCPU.state == Online`，表示启动 CPU 已记录物理 `hartid`，并基于 `PlatformCpuInfo` 完成 present/active/online 的语义推进
 - `BootInitFlow.cpu_ref == ref(CpuGroup.cpus[0])`，且 trace 中 `CurrentCPU` 的实际 target 是 `CpuGroup.cpus[0]`
@@ -1359,7 +1361,7 @@ Kernel 通过 BootTask/BootInitFlow 串接
 - 早期虚拟地址空间 `EarlyVM` 不再作为当前执行地址空间使用
 - 后续 `setup_arch()` 中 `paging_init()` 之后的初始化过程可以在完整内核虚拟地址空间下继续推进
 
-当前入口后继期的最小形式化对象模型已经围绕 `BootInitStack`、`InitMM`、`InterruptType`、`BootCPU`、`EarlyIoremap`、`SBI`、`CommandLine` raw view、`EarlyParam`、`PrintkBuffer`、`EarlyCon`、`MemBlock`、`EarlyDtb`、`SwapperVM` 和 `VM.enable()` 落地。`jump_label_init()` 在 RISC-V `setup_arch()` 的早段抽象为 `StaticBranch.setup()`；`efi_init()` 暂仍作为当前最小核心路径之外的 deferred 对象。
+当前入口后继期的最小形式化对象模型已经围绕 `BootTask.stack` 及其 guard 事实、`InitMM`、`InterruptType`、`BootCPU`、`EarlyIoremap`、`SBI`、`CommandLine` raw view、`EarlyParam`、`PrintkBuffer`、`EarlyCon`、`MemBlock`、`EarlyDtb`、`SwapperVM` 和 `VM.enable()` 落地。`jump_label_init()` 在 RISC-V `setup_arch()` 的早段抽象为 `StaticBranch.setup()`；`efi_init()` 暂仍作为当前最小核心路径之外的 deferred 对象。
 
 ##### 入口后继期对象构建时序
 
@@ -1375,7 +1377,7 @@ Kernel 通过 BootTask/BootInitFlow 串接
 
 图 11 将入口后继期对象的 `setup` 过程表示为阶段对象对核心对象过程的编排顺序：
 
-1. 执行 `BootInitStack.enable()`，在入口前导期已经可用的根栈基础上建立栈溢出保护状态，使 `BootInitStack` 从 `Ready` 推进到 `Online`。
+1. 执行 `BootTask.EnableStackGuard()`，在入口前导期已经绑定的 `BootTask.stack` 属性上建立栈边界与溢出保护事实；不推进 Task 或 Stack lifecycle。
 2. 执行 `EarlyDtb.preset()`，从 `RawDtb` 中提取基础平台事实：解析 `/cpus` 建立并发布 `PlatformCpuInfo`，确认启动 hartid 合法；解析 `/memory` 建立并发布 `PhysicalMemory`。
 3. 执行 `InterruptType.setup()`，对应 Linux 中 `local_irq_disable()` 的防御式关中断动作，清除 `sstatus.SIE`，使 `InterruptType` 从 `Prepared` 推进到 `Ready`。
 4. 先在 `smp_setup_processor_id()` 对应边界把保存的启动 hartid 写入 BootCPU，再执行 `BootCPU.boot_cpu_init()`（规格中对应入口后继期的 `BootCPU.setup/enable`），使 `BootCPU` 完成 present/active/online 的语义推进。
@@ -1914,7 +1916,7 @@ flowchart LR
 9. `Timekeeper 对象`：覆盖 `timekeeping_init()`。`timekeeping_init()` 是初始化过程名，规格对象采用实际承载状态的 `Timekeeper`：它驱动 `ClocksourceCore.preset()` 与 `JiffiesClocksource.preset()`，再初始化 `tk_core.timekeeper`、shadow/fast timekeeper、wall time、monotonic offset、raw time，并把默认 clocksource 绑定为 `JiffiesClocksource`；后续随机数完整初始化依赖它。
 10. `RISC-V Timer Provider 对象`（暂名 `RiscvTimerProvider`）：覆盖 RISC-V64 `time_init()`。它是 RISC-V 架构 timer 能力的 provider，而不是通用 timer 子系统或单个 timer 实例。当前只建模 `RiscvTimerProvider.setup()`，不引入 `preset()`：在 FDT 路径中读取 `/cpus` 的 `timebase-frequency`，设置 `riscv_timebase` 和 `lpj_fine`，基于 `DeviceTree` 执行 `of_clk_init(NULL)` 初始化 clock provider，再执行 `timer_probe()` 匹配 RISC-V timer driver，建立 clocksource、clockevent、timer IRQ mapping 和 timer hotplug hook，最后执行 tick hrtimer broadcast setup 和 paravirt time 初始化。`SchedClock` 的 generic core 启动由后续 `sched_clock_init()` 单独建模，不并入 `RiscvTimerProvider`。`RiscvTimerProvider.enable()` 预留给后续 timer 中断和 clockevent 服务正式启用；当前子阶段只要求 `RiscvTimerProvider.state == Ready`。
 11. `随机数对象`（`Randomness` 的后续动作）：覆盖 `random_init()`。它承接核心准备期 `random_init_early(command_line)` 已经推进出的 `Randomness.state == Prepared`，必须发生在 `Timekeeper.Ready` 之后，以便使用可用的时间戳和 cycle counter；完成后把 `Randomness` 推进到启动期 `Ready`，供后续 stack canary 和内核随机数使用。
-12. `根任务 stack canary 刷新动作`：覆盖 `boot_init_stack_canary()`。当前 `CONFIG_STACKPROTECTOR=y`、`CONFIG_STACKPROTECTOR_STRONG=y` 且 `CONFIG_STACKPROTECTOR_PER_TASK=y`，该调用在 `Randomness.Ready` 后刷新 `BootTask/current` 的 `stack_canary` 属性；它不建立顶层 `StackCanary` 对象，也不推进 `BootTask` 或 `BootInitStack` 的生命周期状态。
+12. `根任务 stack canary 刷新动作`：覆盖 `boot_init_stack_canary()`。当前 `CONFIG_STACKPROTECTOR=y`、`CONFIG_STACKPROTECTOR_STRONG=y` 且 `CONFIG_STACKPROTECTOR_PER_TASK=y`，该调用在 `Randomness.Ready` 后刷新 `BootTask/current` 的 `stack_canary` 属性；它不建立顶层 `StackCanary` 对象，也不推进 `BootTask` lifecycle；`BootTask.stack` 没有独立 lifecycle。
 13. `PerfEvent / PerfCore 路径`：覆盖 `perf_event_init()`。当前 `CONFIG_PERF_EVENTS=y`，该调用会初始化 generic perf core、PMU registry、per-CPU perf context、perf 内部 `pmus_srcu`、software/clock/tracepoint/uprobe PMU、reboot notifier 和 `perf_event` cache；但它不是当前最小启动闭环的关键功能，本阶段先标为 deferred。后续需要性能计数、perf trace 或 RISC-V PMU 时，再恢复为 `PerfCore.setup()`；RISC-V 硬件 PMU provider 本来也属于后续 `device_initcall(pmu_sbi_devinit)` 路径，不在当前子阶段完成。
 14. `Profiler 路径`：覆盖 `profile_init()`。当前 `CONFIG_PROFILING=y`，但默认命令行未要求 `profile=` 时 `prof_on == 0`，Linux 直接返回，不分配 `prof_buffer`。本阶段先标为 deferred；后续若支持 `profile=` 参数，再恢复为 `KernelProfiler.setup()`，消费 `BootParam.profile` 并建立 profiling buffer。
 15. `SMP CallFunction 对象`：覆盖 `call_function_init()`。它是独立的 generic SMP callback/call-function 基础设施对象，不是 `SbiIpi` 的子对象或别名。它拥有 per-CPU `CallSingleQueueSet` 与 `CallFunctionDataSet`，并通过 `SbiIpi/IpiMux` 提供的 `IPI_CALL_FUNC` 路由投递跨 CPU callback。secondary CPU 尚未启动，因此本阶段只要求 possible CPU 队列初始化以及 boot CPU 的 call-function data 准备完成。

@@ -45,9 +45,11 @@ Setup/Enable 的全部 boot execution 叶子都直接以 `BootInitFlow` 为 pare
 ## 直接叶阶段与物理 namespace
 
 `boot` 只允许作为文件组织 namespace，不表示 `Boot`、`BootPhase`、入口前导 wrapper 或任何其它
-拥有 lifecycle 的对象。`BootInitFlow.Preset` 通过两次 `CurrentTask.BindTask(BootTask)` 直接执行物理/
-虚拟 `tp` binding 和最早入口对象动作，
-全部事实成立后提交 Prepared。`BootInitFlow.Setup` 再按以下顺序直接驱动四个 boot 叶阶段：
+拥有 lifecycle 的对象。`BootInitFlow.Preset` 先以单个
+`CurrentTask.BindTaskStack(BootTask, BootTask.stack)` 原子建立物理 `tp/sp` 与首次 task/stack binding，
+再在 EarlyVm 接管后以单个 `CurrentTask.RefreshTaskStack(BootTask, BootTask.stack)` 保持 identity 并
+原子刷新虚拟地址表示；不存在公开 `BindStack` Signal。全部事实成立后提交 Prepared。
+`BootInitFlow.Setup` 再按以下顺序直接驱动四个 boot 叶阶段：
 
 1. `EntrySuccessorPhase`；
 2. `CorePreparePhase`；
