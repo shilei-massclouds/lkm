@@ -18,7 +18,7 @@
 - 模型对象边界优先于 ArceOS 现有模块边界。
 - 可复用思想、接口形状和成熟实现路径，但不得因为 ArceOS 现有代码结构而改变模型状态迁移。
 - 若 ArceOS 中某个实现步骤覆盖多个模型 transition，目标内核应按模型 transition拆分或显式记录合并理由。
-- 若模型中一个对象需要参考 ArceOS 多处代码，应在实现任务中列出映射关系。
+- 若模型中一个对象需要吸收 ArceOS 多处代码中的实现经验，Coding 只记录最终得到的 Model 到代码表示约束；源码之间的对照关系应由独立 cross-reference 或实现证据承载。
 - Linux 参考主要用于理解机制、阶段语义和验证边界。若规格中已有 Linux 机制提示，优先使用规格；若规格缺少实现细节，可参考本地 Linux 源码 `../linux-6.12/`。
 - 具体编码实现方式优先参考 Rust 内核实现路径，尤其是本项目已有的 `tgoskits/os/arceos_ex` 实验代码和 ArceOS 当前 RISC-V64 启动代码；需要从 Linux 获得的机制必须转化为适合 Rust、ArceOS 风格组件和接口的实现形式，不能直接照搬 Linux 的源码结构、宏体系或汇编组织。
 - `os/arceos` 和已有 `components` 实现视为只读参考；`arceos_ex` 通过新增目录或新增 `_ex` 组件实现。
@@ -72,12 +72,11 @@ KernelInitFlow 直接完成 SMP/runtime 与 payload prepare，再由 commit acti
 当 ArceOS 参考代码与当前模型出现不一致时，按以下顺序处理：
 
 1. 先判断模型是否已有明确语义。如果有，按模型实现。
-2. 若 ArceOS 暴露出模型缺口，先记录缺口，再决定补模型还是写 coding 覆盖。
+2. 若 ArceOS 暴露出模型缺口，先返回 Charter/Model 决策，不得用 Coding 覆盖。
 3. 若只是实现组织差异，允许代码采用不同结构，但必须保留模型 transition可追踪性。
 
 ## 待补充
 
 - `tgoskits` 中 ArceOS 代码的实际路径。
-- 目标内核与 ArceOS 参考模块的映射表。
 - 可直接复用、需要改写、禁止复用的代码分类。
 - `ax-std` / `ax-api` / `ax-feat` 是否需要 `_ex` facade 的最终判断。

@@ -10,5 +10,6 @@
 include "objects/main.spec";
 include "systems/riscv64-platform.spec";
 include "systems/opensbi.spec";
+include "systems/soc.spec";
 include "systems/kernel.spec";
 include "systems/computer.spec";

@@ -21,6 +21,9 @@ CPU/CpuGroup 唯一所有权、CpuRef、CurrentCPU selector 与迁移/Flow hando
 Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报告比较规则见
 [`composite-tests.md`](composite-tests.md)。
 
+具体实现之间的 checkpoint inventory、Linux 静态对照、coverage、marker patch 和 paired difftest 归属见
+[`checkpoint-cross-reference.md`](checkpoint-cross-reference.md)；这些是 Testing/cross-reference 责任，不是 Coding 核心语义。
+
 单轮 kernel/QEMU 基本测试的配置、七阶段流水线、脚本隔离、退出和结构化结果规则见
 [`basic-tests.md`](basic-tests.md)。
 

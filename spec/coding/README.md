@@ -55,6 +55,10 @@ coding。
 上述子目录。后续新增或拆分的专题约束，若主要约束系统、阶段或对象之一，应落入对应目录；构建
 专题保留在本目录根级文件。
 
+与 Model 对齐所需的独立专题文件即使没有专用 Coding 约束也应保留。空专题文件表示该对象没有
+额外 lowering 规则，其全部代码表示直接采用本目录的通用 Coding 规格；空文件不表示缺少审查，
+也不允许实现跳过 Model 中已经声明的约束。
+
 ## `.spec` 迁移结果
 
 Kernel 根审计开始时 coding 目录有 26 个 `.spec`。Kernel 根批次删除不可解析的 `main.spec`
@@ -90,6 +94,10 @@ mapping/build/riscv64/rust 4 个、system 1 个和 object 5 个遗留文件后�
 4. `spec/compose/main.spec`、`spec/compose/*.md`：crate/module 组合和公开接口约束。
 5. 当前实现目录的工程约定：构建、测试和已有抽象；不得反向覆盖前三层。
 
+本目录中的“映射”只表示 Model 到代码表示的约束。Coding 可以吸收 Linux、ArceOS 或其它参考实现提供的机制证据，
+但权威正文必须把结论表达为 Model 对数据结构、算法、寄存器、ABI 或其它代码表示的约束。`arceos_ex` 与参考实现之间的
+源码、函数、符号或 checkpoint mapping 不是 Coding 规格；它们由独立 cross-reference 或验证产物承载，不得反向定义 Model 或 Coding。
+
 ## 模型到代码的默认映射
 
 | 模型元素 | 默认代码落点 |
@@ -102,7 +110,7 @@ mapping/build/riscv64/rust 4 个、system 1 个和 object 5 个遗留文件后�
 | `invariant` | 对象状态保持条件、debug 检查或规格化单元测试 |
 | `drives` | 父对象过程中的调用编排顺序 |
 | `emits` | owner transition 提交后触发的 completion event；Phase 标准用法只连接同对象迁移 |
-| `deferred <id>` | 未实现/未证明责任；实现只能保持显式 unsupported/stub/feature gate，不得隐式宣称完整能力 |
+| `deferred <id>` | 未闭合的 Transition/Action 操作体默认表示为成功空函数，并在成功边界产生 checkpoint；显式 Model 约束仍照常 lowering，checkpoint 不宣称 Deferred 能力已经实现 |
 | `trimmed <id>` | 由当前构建配置、架构、参考输入或编译期 no-op 证明不可达/无操作；不生成运行时 stub |
 
 更细的映射规则见 [`mapping.md`](mapping.md) 和 [`phase-paradigm.md`](phase-paradigm.md)。

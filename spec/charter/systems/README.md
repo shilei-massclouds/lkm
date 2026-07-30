@@ -22,6 +22,7 @@ Computer
 - [`riscv64-platform.md`](riscv64-platform.md)：平台规格、构造与运行交接。
 - [`opensbi.md`](opensbi.md)：固件规格、构造与 Kernel 交接。
 - [`kernel.md`](kernel.md)：Linux/RISC-V64 kernel boot 规格采纳、kernel image 构造、入口交接与内部阶段树。
+- [`soc.md`](soc.md)：底层物理平台抽象、早期初始化及当前 Deferred 边界。
 - [`../objects/kernel-address-space.md`](../objects/kernel-address-space.md)：唯一内核地址空间与区域归属。
 - [`../objects/vm.md`](../objects/vm.md)：地址转换控制面；其四个 controller 由各自独立 Charter 文件定义。
 - [`../objects/cpu.md`](../objects/cpu.md) 与

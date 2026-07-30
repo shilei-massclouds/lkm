@@ -200,7 +200,7 @@ cause chain 和最后稳定 snapshot。
 | `sig-0049` | `Vm -> KernelImage.Enable` | drives / 0046 | Ready -> Online，确认当前执行环境中的相对 `gp` 寻址机制可用 |
 | `sig-0050` | `BootInitFlow -> TrapType.Setup` | drives / 0020 | Prepared -> Ready，安装正式 event entry |
 | `sig-0051` | `BootInitFlow -> CurrentTask.RefreshTaskStack(BootTask, BootTask.stack)` | drives / 0020 | 单个 boot-only 上下文 Action；EarlyVm 下保持同一 pair identity 并原子刷新当前地址表示 |
-| `sig-0052` | `BootInitFlow -> Soc.Preset` | drives / 0020 | Base -> Prepared；Soc 与 CpuGroup 是 Kernel 平级子对象 |
+| `sig-0052` | `BootInitFlow -> Soc.Preset` | drives / 0020 | 执行平台早期初始化边界并从 Base 迁移到 Prepared；具体平台语义当前为 Deferred |
 
 `sig-0020` 的 handler 进入前必须逐项验证 Kernel acceptance、RISC-V/SBI/OpenSBI、BootCpuRegisters、
 Config/Lds、BootTask `OnCpu/Live/Invalid`、initial-flow binding、task concurrency 和入口 `satp=0`。

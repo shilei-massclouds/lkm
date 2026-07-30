@@ -11,7 +11,8 @@ Guidance 是支撑 `Charter -> Model -> Coding -> Impl` 核心语义细化链的
 所有 AI 或代码生成器参与的仓库变更必须遵守以下共同硬约束：
 
 - 不要猜测修复。遇到问题时，必须先通过可复现观测逐步缩小范围，再下结论和改代码。
-- 核心语义只有 `Charter -> Model -> Coding -> Impl` 一条细化链。Charter 是人类可理解的最高语义权威；Model 只能形式化和精确化 Charter；Coding 只能约束 Model 到数据结构、算法、内存布局、寄存器等代码落点的映射；Impl 只能实现前三层共同要求的效果。
+- 核心语义只有 `Charter -> Model -> Coding -> Impl` 一条细化链。Charter 是人类可理解的最高语义权威；Model 只能形式化和精确化 Charter；Coding 只能约束 Model 到数据结构、算法、内存布局、寄存器等代码表示的映射，不负责维护具体实现之间的对照关系；Impl 只能实现前三层共同要求的效果。
+- Linux、ArceOS 或其它参考实现可以作为 Charter/Model 决策、Coding 表示选择和验证的证据。代理不得把 `arceos_ex` 与参考实现的源码、函数、符号或 checkpoint mapping 写成 Coding 核心语义；这类对照属于独立 cross-reference 或验证任务。
 - 下层必须保留所有适用上层约束。只有全部适用上层均未约束的细节，下层才可局部自由选择；若自由选择形成新的可观察行为、接口或对象边界，必须提升到适当的核心规格层闭合。
 - 每轮开始修改前，先确定最高受影响核心层；随后按 Charter、Model、Coding、Impl 顺序审查，并分别记录“已修改”或“已审查、无需修改”的闭合结论。结论可记录在当轮计划、差异说明或交付说明中，不要求新增固定格式的声明文件。
 - Guidance 只约束工作流，Compose 只约束适用的装配路径，Testing 只约束验证。三者都不得反向定义核心语义；Compose 与 Coding 冲突时以 Coding 为准，测试与核心规格冲突时修正测试或不符合规格的实现。

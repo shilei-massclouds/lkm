@@ -7,3 +7,4 @@ System-level coding constraints mirror the unique top-level system tree.
 - [`opensbi.md`](opensbi.md): metadata-only firmware construction and handoff mapping.
 - [`kernel.md`](kernel.md): the implemented Kernel system guidance. It describes
   the orchestration chain that sequences the top-level phase tree.
+- [`soc.md`](soc.md): empty by design; Soc has no specialized lowering constraints and inherits the default Coding rules.

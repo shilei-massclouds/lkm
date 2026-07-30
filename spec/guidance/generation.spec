@@ -113,12 +113,17 @@ type CoreSemanticRefinementAuthority {
          * that intent precise and checkable, but must not change its meaning.
          * Coding may constrain the mapping to data structures, algorithms,
          * memory layout, registers and other code-level choices, but must not
-         * redefine Charter or Model. Impl only realizes their combined effect
-         * and cannot be used to reinterpret them from current code behavior.
+         * redefine Charter or Model. This mapping is only Model-to-code
+         * representation; source, symbol, function and checkpoint mappings
+         * between concrete implementations are separate cross-reference or
+         * validation responsibilities. Impl only realizes their combined
+         * effect and cannot be used to reinterpret them from current code
+         * behavior.
          */
         guidance_agent_must_treat_charter_as_human_readable_top_semantic_authority();
         guidance_agent_must_make_model_only_formalize_and_refine_charter();
         guidance_agent_must_make_coding_only_constrain_model_to_code_mapping();
+        guidance_agent_must_not_put_cross_implementation_mapping_in_coding();
         guidance_agent_must_make_impl_only_realize_charter_model_coding_effect();
 
         /*

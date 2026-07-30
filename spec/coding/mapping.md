@@ -28,7 +28,7 @@ coding 自然语言规则使用以下强度：
 - 代码应保留模型对象、事件、状态和阶段边界的可追踪性。
 - Object Coding Phase 只处理对象级语义，包括对象状态、事件推进、依赖检查和 invariant 检查；crate 边界、公开 facade 和与既有组件体系兼容属于后续 Composition Phase。
 - 若某条映射规则与具体实现发生冲突，应先记录冲突，再决定是补充 coding 规格、调整模型，还是停止实现并报告。
-- 映射规则应服务于未来与 Linux 等参考内核的状态差分。来自同一规格的不同内核实现，应能在相同状态一致点上采集和比较状态。
+- 代码表示应保留 Model 对象、transition 和状态的可追踪性，使独立 Testing 或 cross-reference 任务能在规格状态边界观测实现。Coding 本身不建立两个具体实现之间的对照关系。
 
 ## 对象粒度与层次
 
@@ -161,6 +161,23 @@ transition 函数应尽量只推进一个对象的一次生命周期迁移。若
 
 如果某个操作成功时会推进被建模状态，应建模为 event，而不是 action。例如普通非嵌套自旋锁的 `lock`、`try_lock`、`unlock` 都是操作事件；它们可以反复触发，但每次成功都会提交锁运行状态迁移。
 
+## Deferred Transition/Action 映射
+
+当 Model 把 Transition 或 Action 的具体操作语义标记为 `deferred <id>`，且没有为该操作体给出
+其它代码效果时，默认表示是一个与该 Transition 或 Action 同名的成功空函数，加上成功完成边界的
+checkpoint。空函数不执行被 Deferred 的具体操作，但不得省略同一 process 中已经由 Model 明确
+给出的参数处理、源状态、`depends_on`、非 Deferred 的 `drives`、`within`、`ensures` 或 invariant。
+
+Deferred Transition 仍按普通 Transition 的顺序检查源状态和前置条件；空操作体成功后提交 Model
+规定的目标状态，再产生该目标状态的 checkpoint。Deferred Action 不推进 lifecycle；其空操作体
+成功后产生 `<Object>.<Action>.Exit` completion checkpoint。若专题 Coding 已为该 Action 声明其它
+稳定 completion checkpoint 名称，则采用该名称，不重复产生默认 Exit checkpoint。
+
+这些 checkpoint 只证明 Transition 的状态迁移或 Action 的空实现已经成功经过，不证明 Deferred
+描述的具体能力已经建立，也不关闭对应 boundary。Deferred 不映射为运行时生命周期状态、独立对象
+或 slot。若 Model 要求可观察效果，却既未给出足以实现该效果的约束，也未把该效果纳入 Deferred，
+则属于规格缺口，不得用成功空函数掩盖。
+
 ## 状态与检查点
 
 Phase 对象的四状态存储、精确 source/target 检查和状态 checkpoint 时点采用更严格的
@@ -220,42 +237,19 @@ checkpoint announce 是独立观测路径，不属于 `EarlyCon` 或正式 `Cons
 
 对象推进、状态记录、DTB 检查、页表构造、SBI 能力视图建立和阶段编排应尽量进入 Rust 代码。若必须留在汇编中，应在对应对象 transition中记录该实现边界。
 
-## 未来差分
+## 规格边界可观测性
 
-`arceos_ex` 将来可能与 Linux 或其它由同一规格指导的内核进行状态差分。当前实现虽然不要求完成差分工具，但代码结构应避免破坏这一可能性：
+独立 Testing 或 cross-reference 任务可能比较多个实现，但比较对象和对照表不是 Coding 责任。Coding 只约束代码不应破坏 Model 边界的可观测性：
 
 - 不应把多个模型状态点合并到无法区分的一段不可观测代码中。
 - 不应让关键事实只存在于局部临时变量且无法采集。
 - 不应用平台硬编码替代模型中的对象事实。
 - 关键 checkpoint 的命名应尽量沿用模型对象和状态名称。
 
-### Linux checkpoint mapping-only 规则
-
-Linux checkpoint mapping artifact 只记录可审阅的静态源码锚点。默认参考树是只读
-`../linux-6.12`；mapping pass 不应修改 Linux 源码、不应添加 probe，也不应依赖
-runtime 采集结果来证明锚点。
-
-映射规则只能声明当前能从 Linux 源码复核的边界。若 Linux 没有与 `arceos_ex` 普通对象
-一一对应的对象边界，应使用 `range` 或 `medium` confidence 表达部分对齐；若无法从源码
-稳定证明，checkpoint 必须保持 `unmapped`，并在 notes 中记录具体原因。用户态启动路径允许
-`UserBoot` 与运行期 `UserExec` 复用同一 Linux exec/binfmt/riscv return 锚点，但 notes
-必须区分这是 boot-time init exec 视图还是运行期 exec syscall 视图。
-
-Finalize 末端的 deferred/trimmed checkpoint 只有在 Linux `kernel_init()` 中存在直接可复核
-call site 或状态赋值时才可映射。纯 deferred 语义或缺少本地 Linux 对象边界的 checkpoint
-应继续保留 `unmapped`。
-
-若单个 Linux call-site 同时承载 `arceos_ex` 的阶段边界和对象级事实，mapping artifact 可以
-让多个 checkpoint 复用同一锚点，但每条 notes 必须区分该条记录声明的是 phase boundary、
-object fact 还是 deferred boundary。Runtime Core 窗口中的 `sched_init_smp()` 和
-`page_alloc_init_late()` 属于这种情况：共享锚点不表示 Linux 暴露了多个独立对象，只表示同一
-源码边界可静态复核不同的 `arceos_ex` 语义视图。
-
 ## 待补充
 
 - `arceos_ex` 第一轮对象到 crate/module/struct 的具体映射表。
 - checkpoint 输出格式。
-- 与 Linux 状态差分的采集接口。
 - typestate 与运行期状态字段的选择规则。
 
 ## Rule catalog
@@ -466,57 +460,3 @@ Rule ID: `coding_should_avoid_phase_local_context_accessors` (SHOULD).
 Context accessors should be centralized, for example as
 crate::context::context() and crate::context::context_ref(). Phase
 files should not define their own local objects()/context() accessors.
-
-### LinuxCheckpointMappingRules
-
-#### Static source only
-
-Rule ID: `linux_checkpoint_mapping_must_be_static_source_only` (MUST).
-
-Linux checkpoint mapping artifacts record reviewable anchors in the
-read-only Linux reference tree. The mapping pass must not modify
-Linux source, add probes, or depend on runtime collection to justify
-a mapping.
-
-#### Unproven stays unmapped
-
-Rule ID: `linux_checkpoint_mapping_must_keep_unproven_unmapped` (MUST).
-
-If a checkpoint cannot be tied to a stable Linux source boundary from
-the reference tree, it must remain unmapped and the notes must record
-why no reliable boundary was claimed.
-
-#### Partial boundaries
-
-Rule ID: `linux_checkpoint_mapping_should_mark_partial_boundaries` (SHOULD).
-
-When Linux lacks a local object boundary matching the arceos_ex
-checkpoint, the mapping should use a range or medium confidence to
-make the partial alignment explicit.
-
-#### UserBoot versus UserExec
-
-Rule ID: `linux_checkpoint_mapping_must_distinguish_user_boot_from_user_exec` (MUST).
-
-Boot-time init exec checkpoints may reuse Linux exec/binfmt/return
-anchors that also describe runtime exec syscall checkpoints, but the
-notes must distinguish the boot-time init exec view from the runtime
-exec syscall view.
-
-#### Shared call-site semantics
-
-Rule ID: `linux_checkpoint_mapping_must_distinguish_shared_call_site_semantics` (MUST).
-
-Multiple arceos_ex checkpoints may reuse the same Linux call site
-when a single Linux boundary is the reviewable anchor for a phase
-boundary and one or more object facts. Each mapping note must name
-the semantic view being claimed, such as phase boundary, object fact
-or deferred boundary, so the artifact does not imply distinct Linux
-objects where Linux exposes only one local call-site boundary.
-
-do_basic_setup() object-level checkpoint mappings may reuse direct
-call sites from the same Linux function, including do_initcalls().
-Their notes must distinguish cpuset/cgroup trimmed no-op position
-reservation, driver core deferred boundary, procfs IRQ view deferred
-boundary, constructor table dispatch, initcall table dispatcher, and
-the do_basic_setup() end boundary before the KUnit handoff.
