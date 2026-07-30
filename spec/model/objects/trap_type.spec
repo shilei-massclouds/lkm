@@ -18,6 +18,7 @@ type TrapType: ResourceObject {
 
     state State::Base {
         invariant {
+            trap_type_is_stable_response_carrier(self);
             trap_flow_type_is_common_interrupt_exception_entry(self);
             trap_common_entry_routes_by_event_class(
                 self,
@@ -30,6 +31,7 @@ type TrapType: ResourceObject {
             /* 为所属 CPU 建立临时保护入口，用于处理意外事件并支持测试和缺陷定位。 */
             on Transition::Preset -> State::Prepared {
                 ensures {
+                    trap_type_is_stable_response_carrier(self);
                     trap_flow_type_is_common_interrupt_exception_entry(self);
                     trap_common_entry_routes_by_event_class(
                         self,
@@ -47,6 +49,7 @@ type TrapType: ResourceObject {
 
     state State::Prepared {
         invariant {
+            trap_type_is_stable_response_carrier(self);
             trap_flow_type_is_common_interrupt_exception_entry(self);
             trap_common_entry_routes_by_event_class(
                 self,
@@ -59,12 +62,17 @@ type TrapType: ResourceObject {
             trap_children_owned(self, self.interrupt, self.exception);
         }
         transitions {
+            /* 把所属 CPU 的异常/中断响应入口重置为正式的 TrapFlowType 响应流入口。 */
             on Transition::Setup -> State::Ready {
                 depends_on {
                     self.interrupt.state == State::Ready;
-                    self.exception.state == State::Prepared;
+                    self.exception.state == State::Base;
+                }
+                drives {
+                    self.exception.Transition::Preset;
                 }
                 ensures {
+                    trap_type_is_stable_response_carrier(self);
                     trap_flow_type_is_common_interrupt_exception_entry(self);
                     trap_common_entry_routes_by_event_class(
                         self,
@@ -72,6 +80,9 @@ type TrapType: ResourceObject {
                         self.exception
                     );
                     trap_formal_entry_ready(self);
+                    trap_response_entry_reset_to_formal_trap_flow(self, self.parent);
+                    trap_formal_entry_creates_fresh_trap_flow(self);
+                    exception_fallback_covers_all_causes(self.exception);
                     trap_entry_context_ready(self, self.parent);
                     trap_entry_capacity_checked_per_occurrence(self);
                     trap_emergency_fail_stop_ready(self, self.parent);
@@ -82,6 +93,7 @@ type TrapType: ResourceObject {
 
     state State::Ready {
         invariant {
+            trap_type_is_stable_response_carrier(self);
             trap_flow_type_is_common_interrupt_exception_entry(self);
             trap_common_entry_routes_by_event_class(
                 self,
@@ -89,6 +101,9 @@ type TrapType: ResourceObject {
                 self.exception
             );
             trap_formal_entry_ready(self);
+            trap_response_entry_reset_to_formal_trap_flow(self, self.parent);
+            trap_formal_entry_creates_fresh_trap_flow(self);
+            exception_fallback_covers_all_causes(self.exception);
             trap_entry_context_ready(self, self.parent);
             trap_entry_capacity_checked_per_occurrence(self);
             trap_emergency_fail_stop_ready(self, self.parent);
@@ -114,6 +129,7 @@ type TrapType: ResourceObject {
 
     state State::Online {
         invariant {
+            trap_type_is_stable_response_carrier(self);
             trap_flow_type_is_common_interrupt_exception_entry(self);
             trap_common_entry_routes_by_event_class(
                 self,
@@ -125,6 +141,7 @@ type TrapType: ResourceObject {
     }
 }
 
+predicate trap_type_is_stable_response_carrier<T: TrapType>(trap: T) -> bool;
 predicate trap_flow_type_is_common_interrupt_exception_entry<T: TrapType>(trap: T) -> bool;
 predicate trap_common_entry_routes_by_event_class<T: TrapType, I: InterruptType, E: ExceptionType>(trap: T, interrupt: I, exception: E) -> bool;
 predicate trap_temporary_protection_entry_ready<T: TrapType, P: CPU>(trap: T, cpu: P) -> bool;
@@ -132,6 +149,8 @@ predicate trap_temporary_protection_handles_unexpected_events<T: TrapType>(trap:
 predicate trap_temporary_protection_supports_testing_and_defect_localization<T: TrapType>(trap: T) -> bool;
 predicate trap_children_owned<T: TrapType, I: InterruptType, E: ExceptionType>(trap: T, interrupt: I, exception: E) -> bool;
 predicate trap_formal_entry_ready<T: TrapType>(trap: T) -> bool;
+predicate trap_response_entry_reset_to_formal_trap_flow<T: TrapType, P: CPU>(trap: T, cpu: P) -> bool;
+predicate trap_formal_entry_creates_fresh_trap_flow<T: TrapType>(trap: T) -> bool;
 predicate trap_entry_context_ready<T: TrapType, P: CPU>(trap: T, cpu: P) -> bool;
 predicate trap_entry_capacity_checked_per_occurrence<T: TrapType>(trap: T) -> bool;
 predicate trap_emergency_fail_stop_ready<T: TrapType, P: CPU>(trap: T, cpu: P) -> bool;

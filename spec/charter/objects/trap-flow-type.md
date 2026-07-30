@@ -1,8 +1,9 @@
 # TrapFlowType
 
-`TrapFlowType` 是一次正式陷入的 root occurrence。`Bind` 把 parent 永久绑定到最初接收陷入的
-`TrapType`，保存入口原因、上下文与返回检查点，并建立非零 generation 的 `TrapFlowRef`。即使可调度
-异常随 Task 迁移，该 parent 也不改写。
+`TrapFlowType` 是 `TrapType` 所承载的一次正式陷入响应流，二者的关系如同 `TaskFlow` 与 `Task`：
+`TrapType` 是所属 CPU 上稳定的响应资源，每次正式陷入则建立 fresh `TrapFlowType` root occurrence。
+`Bind` 把 parent 永久绑定到最初接收陷入的 `TrapType`，保存入口原因、上下文与返回检查点，并建立
+非零 generation 的 `TrapFlowRef`。即使可调度异常随 Task 迁移，该 parent 也不改写。
 
 完整 lifecycle 为 Preset（验证入口并保存检查点）→ Setup（分类并同步驱动一个 child Flow）→ Enable
 （处理完成并生成一次性 `TrapReturnToken`）→ Disable/Cleanup（先回收 child 再回收自身）。TrapFlow

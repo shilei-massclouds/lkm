@@ -16,6 +16,7 @@ use super::{
     static_branch::StaticBranch,
     task::{Task, TaskEntry, TaskKind, TaskRef},
     task_flow::{TaskFlow, TaskFlowRef},
+    trap_type::TrapType,
     user_boot::{USER_CHILD_PID, UserAppFlow, UserTaskSet},
 };
 use crate::arch::riscv64::task_switch::{self, TaskSwitchContext};
@@ -861,8 +862,13 @@ impl Scheduler {
         self.schedule_exit_next_ref = next_ref;
         self.schedule_exit_saved_interrupt_count = local_interrupt.saved_and_disabled_count();
         self.schedule_exit_restored_interrupt_count = local_interrupt.restored_count();
-        let resumed =
-            self.cooperative_context_switch(prev_ref, next_ref, kernel_init_task, kthreadd_task)?;
+        let resumed = self.cooperative_context_switch(
+            prev_ref,
+            next_ref,
+            current_cpu.cpu_ref().logical_id(),
+            kernel_init_task,
+            kthreadd_task,
+        )?;
         if resumed {
             self.continue_task_after_switch(
                 prev_ref,
@@ -1314,6 +1320,7 @@ impl Scheduler {
         &mut self,
         prev_ref: TaskRef,
         next_ref: TaskRef,
+        cpu_logical_id: usize,
         kernel_init_task: &mut KernelInitTask,
         kthreadd_task: &mut KthreaddTask,
     ) -> Result<bool, EventError> {
@@ -1370,7 +1377,13 @@ impl Scheduler {
             TaskRef::SMOKE_RWLOCK => self.smoke_rwlock_task.task_ptr(),
             _ => return Ok(false),
         };
-        let sentinel_mask = unsafe { task_switch::switch(&mut *prev, next, next_task_identity) };
+        let trap_entry_context = TrapType::installed_entry_context_address(cpu_logical_id);
+        if trap_entry_context == 0 {
+            self.failed_switch_to()?;
+        }
+        let sentinel_mask = unsafe {
+            task_switch::switch(&mut *prev, next, next_task_identity, trap_entry_context)
+        };
         if sentinel_mask != 0xfff {
             self.failed_switch_to()?;
         }

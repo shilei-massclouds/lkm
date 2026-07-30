@@ -59,7 +59,6 @@ type CPU: CPUObject {
             drives {
                 self.trap.interrupt.Transition::Preset;
                 self.trap.interrupt.Transition::Setup;
-                self.trap.exception.Transition::Preset;
                 self.trap.Transition::Preset;
                 self.trap.Transition::Setup;
                 self.trap.interrupt.Transition::Enable;

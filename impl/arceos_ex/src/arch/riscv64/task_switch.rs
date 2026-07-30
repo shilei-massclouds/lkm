@@ -137,6 +137,7 @@ arceos_ex_task_switch:
      * a0 = prev TaskSwitchContext*
      * a1 = next TaskSwitchContext*
      * a2 = next Task identity pointer (the independent tp/current carrier)
+     * a3 = current CPU TrapEntryContext*
      *
      * Cooperative task context switch: save/restore ra, sp and the
      * callee-saved s-registers. tp is deliberately not context: it is
@@ -175,7 +176,7 @@ arceos_ex_task_switch:
     ld      s11, 104(a1)
 
     /* Commit the selected Task's CPU-local formal trap-entry authority. */
-    csrr    t0, sscratch
+    mv      t0, a3
     beqz    t0, .Ltask_switch_entry_context_rejected
     sd      a2, {trap_context_task_offset}(t0)
     ld      t1, 112(a1)
@@ -213,6 +214,7 @@ unsafe extern "C" {
         prev: *mut TaskSwitchContext,
         next: *const TaskSwitchContext,
         next_task_identity: usize,
+        trap_entry_context: usize,
     );
 }
 
@@ -317,6 +319,7 @@ unsafe extern "C" {
         prev: *mut TaskSwitchContext,
         next: *const TaskSwitchContext,
         next_task_identity: usize,
+        trap_entry_context: usize,
     ) -> usize;
 }
 
@@ -324,6 +327,7 @@ pub unsafe fn switch(
     prev: &mut TaskSwitchContext,
     next: &TaskSwitchContext,
     next_task_identity: usize,
+    trap_entry_context: usize,
 ) -> usize {
     #[cfg(app_smoke)]
     unsafe {
@@ -331,6 +335,7 @@ pub unsafe fn switch(
             prev as *mut TaskSwitchContext,
             next as *const TaskSwitchContext,
             next_task_identity,
+            trap_entry_context,
         )
     }
 
@@ -340,6 +345,7 @@ pub unsafe fn switch(
             prev as *mut TaskSwitchContext,
             next as *const TaskSwitchContext,
             next_task_identity,
+            trap_entry_context,
         );
         0xfff
     }

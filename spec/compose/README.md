@@ -1,5 +1,11 @@
 # Compose 规格
 
+2026-07-30 TrapType.Setup 正式入口复核：`TrapType`、`TrapFlowType`、`ExceptionType` 及四个异常子类型
+继续各自由既有 `arceos_ex::objects` 独立 module 承载；`BootInitFlow` 只编排既有对象，RISC-V64
+`stvec`/`sscratch` 写入仍是 `TrapType` 私有 lowering，不新增 crate、facade、feature、公开 API 或
+响应入口 wrapper。`spec/compose/main.spec` 的 CPU-owned TrapType 组合关系已覆盖本段，正式组合语义
+无需修改。
+
 2026-07-30 入口 VM Preset/Setup 复核：十个相关系统继续位于既有 `arceos_ex::objects` 与 `Context`
 内部，不新增 crate、facade、feature 或公开 API。为保持系统边界，`LinearMap` 与
 `UserSpaceReserve` 从 `KernelAddrSpace` 的裸范围字段拆为各自私有 module；`vm_setup` 仍只是

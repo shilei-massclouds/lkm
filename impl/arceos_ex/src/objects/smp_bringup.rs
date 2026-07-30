@@ -364,8 +364,8 @@ arceos_ex_secondary_start_sbi:
     sd      a0, {state_count_offset}(t4)
 
     mv      gp, t5
-    csrw    sscratch, s3
     csrw    stvec, s4
+    csrw    sscratch, zero
     mv      a0, s1
     jr      t6
 
@@ -1200,7 +1200,10 @@ impl CpuStartProvider {
                 return false;
             }
             let entry_context = cpu.trap().entry_context_address();
-            let formal_entry = super::trap_type::TrapType::formal_entry_address();
+            let Some(formal_entry) = super::trap_type::TrapType::formal_entry_address(cpu_ref)
+            else {
+                return false;
+            };
             unsafe {
                 AP_BOOT_DATA[logical_id] = SbiHartBootData {
                     task_ptr,

@@ -70,7 +70,6 @@ object BootInitFlow: TaskFlow {
                         CurrentCPU.trap.interrupt.Transition::Setup;
                         CurrentTask.Action::BindTaskStack(BootTask, BootTask.stack);
                         CurrentCPU.trap.Transition::Preset;
-                        CurrentCPU.trap.exception.Transition::Preset;
                         Vm.Transition::Preset;
                         Vm.Transition::Setup;
                         CurrentCPU.trap.Transition::Setup;

@@ -39,6 +39,8 @@ type TrapFlowType: FlowObject {
             state_effect: StateEffect::None;
             structural_binding: true;
             ensures {
+                trap_type_is_stable_response_carrier(parent_trap);
+                trap_flow_is_dynamic_response_flow_of(self, parent_trap);
                 trap_flow_parent_is(self, parent_trap);
                 trap_flow_parent_immutable(self);
                 trap_flow_occurrence_fresh(self);
@@ -124,6 +126,7 @@ type TrapFlowType: FlowObject {
 
 predicate trap_flow_ref_targets<R: TrapFlowRef, F: TrapFlowType>(reference: R, flow: F) -> bool;
 predicate trap_flow_ref_generation_valid<R: TrapFlowRef>(reference: R) -> bool;
+predicate trap_flow_is_dynamic_response_flow_of<F: TrapFlowType, T: TrapType>(flow: F, trap: T) -> bool;
 predicate trap_flow_parent_is<F: TrapFlowType, T: TrapType>(flow: F, trap: T) -> bool;
 predicate trap_flow_parent_immutable<F: TrapFlowType>(flow: F) -> bool;
 predicate trap_flow_occurrence_fresh<F: TrapFlowType>(flow: F) -> bool;

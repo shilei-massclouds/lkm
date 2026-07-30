@@ -35,11 +35,14 @@ opportunity before falling back to signal/unsupported handling. These are implem
 the model trap boundary, not permission to invent a second exception resource or Flow chain.
 
 The user kernel stack is a VMALLOC mapping with the modeled alignment and unmapped guard gap. Large
-exec/mm objects stay out of trap-stack frames. `sscratch` always points to the owning CPU's
-`TrapEntryContext`; the context carries the usable kernel-stack bounds, current Task identity, optional root
-TrapFlowRef and that CPU's emergency-stack state. The user-origin prelude preserves user `tp` in the ordinary
-`TrapFrame`, selects the installed kernel-stack top and loads Task identity into kernel `tp`. Kernel-origin
-entry keeps its interrupted `sp`, but uses the same context and capacity check. Both paths compare the complete
+exec/mm objects stay out of trap-stack frames. While the CPU runs in the kernel, `sscratch` is zero; immediately
+before user `sret` it carries the kernel Task identity from `tp`. The formal entry exchanges `tp` and `sscratch`,
+recovers kernel `tp`, and clears `sscratch` before entering ordinary kernel code. The owning CPU's formal entry
+representation resolves its installed `TrapEntryContext` without using `sscratch` as a permanent context pointer;
+the context carries the usable kernel-stack bounds, current Task identity, optional root TrapFlowRef and that CPU's
+emergency-stack state. The user-origin prelude preserves user `tp` in the ordinary `TrapFrame`, selects the installed
+kernel-stack top and loads Task identity into kernel `tp`. Kernel-origin entry keeps its interrupted `sp`, but uses
+the same context and capacity check. Both paths compare the complete
 aligned `TrapFrame + TrapExecutionRecord` range against the installed bounds before saving the ordinary frame.
 
 Insufficient capacity switches to the context's CPU-local, 16-byte-aligned 4 KiB emergency stack before

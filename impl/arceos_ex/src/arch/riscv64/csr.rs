@@ -127,7 +127,7 @@ arceos_ex_enter_user_mode:
      * a4 = current CPU TrapEntryContext
      */
     sd      tp, {trap_context_task_offset}(a4)
-    csrw    sscratch, a4
+    csrw    sscratch, tp
     csrw    sepc, a1
     csrw    sstatus, a3
     csrw    satp, a0
@@ -341,16 +341,9 @@ pub fn sfence_vma_addr(addr: usize) {
     }
 }
 
-#[allow(dead_code)]
 pub fn clear_sscratch() {
     unsafe {
         core::arch::asm!("csrw sscratch, zero", options(nostack, nomem));
-    }
-}
-
-pub fn write_sscratch(value: usize) {
-    unsafe {
-        core::arch::asm!("csrw sscratch, {value}", value = in(reg) value, options(nostack, nomem));
     }
 }
 

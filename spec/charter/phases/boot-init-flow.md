@@ -28,6 +28,13 @@ PhaseObject，它从 `_start` 开始承载并编排启动执行片段，同时�
 - 随后 Preset 依次驱动 `Vm.Preset` 与 `Vm.Setup`。前者准备 `KernelAddrSpace`、`RawDtb`、`FixMap`、
   `TrampolineVm` 和 `EarlyVm`，但不改变当前 CPU；后者使 BootCPU 按 PhysicalDirect → TrampolineVm
   → EarlyVm 切换并提交 `Vm.Ready`。`Vm.Enable` 留给后续 SwapperVm 阶段，本入口前导期不触发。
+- `Vm.Setup` 完成后，Preset 驱动 BootCPU 的 `TrapType.Setup`，把异常/中断响应入口从临时保护入口
+  重置为正式的 `TrapFlowType` 响应流入口。该动作同时驱动 `ExceptionType.Preset`，后者继续驱动
+  page-fault、syscall、breakpoint 与 unexpected 四个异常子类型的 `Preset`；成功后 TrapType 为 Ready，
+  ExceptionType 及四个子类型为 Prepared，但中断仍未开放。
+- 正式响应入口重置完成后，Preset 才调用
+  `CurrentTask.RefreshTaskStack(BootTask, BootTask.stack)`，保持 task/stack binding identity 并原子刷新
+  EarlyVm 下的地址表示；TrapType.Setup 不承担这一执行绑定刷新。
 - Setup 直接顺序驱动 `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、
   `SchedInitPhase`、`IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、
   `ProcessPreparePhase` 和 `BootInitRestInitPhase`。最后一个叶子 Online 后提交

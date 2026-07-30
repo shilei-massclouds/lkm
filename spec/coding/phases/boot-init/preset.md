@@ -29,8 +29,8 @@ Preset 横跨三个物理实现段，但仍是 BootInitFlow 的一个 model tran
 | --- | --- |
 | Kernel entry acceptance | `AcceptEnable` → `AssignCpuRef` → `PhysicalDirect.ActivateOnCpu(InitialActivation)` → 接受 Preset 并记录 `BootInitFlow.Started`；任何 Preset child 尚未启动 |
 | `_start` Preset head | `InterruptType.Preset` 先以 `csrw sie, zero` 实现全部分路门控关闭，再以 `csrw sip, zero` 实现全部待决信号清空；不得由此推断 `sstatus.SIE` 总门控已关闭；随后把 `__global_pointer$` 装入 `gp/x3`，并用 `.option norelax` 保护该初始化，以建立 `gp_relative_addressing_ready(KernelImage)`；`CurrentCPU.Action::DisableFpuVectorExecution` 再以 `li t0, SR_FS_VS` 和 `csrc CSR_STATUS, t0` 同时关闭 BootCPU 的 FS/VS 执行状态；然后清 BSS，把入口 `a0` 的原值保存到持久交接位置 |
-| `preset_until_vm_switch()` | 读取 Kernel Enable 前已发布的 `CpuGroup.cpus[0]`；验证 BootInitFlow 的 CpuRef、PhysicalDirect association、BootTask/TaskRef 与 `BootTask.stack` linker range，然后调用单个 `CurrentTask.BindTaskStack(BootTask, BootTask.stack)` 汇编提交块，原子装载物理 `tp/sp` 并发布首次 task/stack pair；通过 BootInitFlow 的 CpuRef 解析 `CurrentCPU.Setup`，驱动 `KernelAddrSpace.Preset`、`TrapType.Preset`、`ExceptionType.Preset` 和 `Vm.Preset` |
-| `after_vm_setup()` | `Vm.Setup` 的 Trampoline→Early continuation 返回后验证相同 pair 与 EarlyVm/live SATP，再调用单个 `CurrentTask.RefreshTaskStack(BootTask, BootTask.stack)` 汇编提交块，保持 binding identity 并原子刷新虚拟 `tp/sp`，随后驱动 `TrapType.Setup` 和 `Soc.Preset` |
+| `preset_until_vm_switch()` | 读取 Kernel Enable 前已发布的 `CpuGroup.cpus[0]`；验证 BootInitFlow 的 CpuRef、PhysicalDirect association、BootTask/TaskRef 与 `BootTask.stack` linker range，然后调用单个 `CurrentTask.BindTaskStack(BootTask, BootTask.stack)` 汇编提交块，原子装载物理 `tp/sp` 并发布首次 task/stack pair；通过 BootInitFlow 的 CpuRef 解析 `CurrentCPU.Setup`，驱动 `KernelAddrSpace.Preset`、`TrapType.Preset` 和 `Vm.Preset`；不得在这里提前驱动 `ExceptionType.Preset` |
+| `after_vm_setup()` | `Vm.Setup` 的 Trampoline→Early continuation 返回后先驱动 `TrapType.Setup`；该动作驱动 `ExceptionType.Preset` 及四个异常子类型 Preset，把正式响应汇编函数入口写入 `stvec`，并紧接着以 `csrw sscratch, zero` 标记当前处于内核态。随后才调用单个 `CurrentTask.RefreshTaskStack(BootTask, BootTask.stack)` 汇编提交块，保持 binding identity 并原子刷新虚拟 `tp/sp`，最后驱动 `Soc.Preset` |
 
 `Vm.Setup` 必须按 [`Vm Coding`](../../objects/vm.md) 在同一个 Preset 内通过 per-CPU `ActivateOnCpu`
 完成 TrampolineVm 到 EarlyVm 的 Handoff，并通过
@@ -52,6 +52,12 @@ adoption 必须通过 BootInitFlow 的 CpuRef 解析到 `CpuGroup.cpus[0]`，再
 `TrapType.Preset` 必须把 `stvec` 写为一个汇编函数入口。该入口只包含回跳自身的空无限循环；不得加入
 `wfi`、Rust/C 调用、checkpoint、日志、关机请求或其它副作用。写入 `stvec` 的必须是该汇编入口本身，
 不能是 Rust wrapper 或数据对象。
+
+`TrapType.Setup` 必须先完成 `ExceptionType.Preset` 及四个子类型的 fallback 准备，再把 `stvec` 重置为
+正式响应汇编函数入口的当前虚拟地址。该入口是建立 fresh `TrapFlowType` 的架构响应入口；写入值不能
+来自 `satp`、页表、Rust wrapper 或数据对象。所有可失败检查及 entry-context 安装必须在寄存器提交前
+完成；提交顺序必须是先写正式 `stvec`、再执行 `csrw sscratch, zero`。写入前仍由 Preset 保护入口响应，
+写入后不得返回到临时入口、把 `TrapEntryContext` 地址常驻在 `sscratch`，或把异常服务误标为 Online。
 
 `BindTaskStack` 与 `RefreshTaskStack` 是 CPU 执行上下文的两个 boot-only 原子 Action，不保存
 Base/Prepared/Ready 私有状态，不加入公共 `Context`，也不发 lifecycle checkpoint。每次调用在修改

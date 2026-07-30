@@ -114,8 +114,8 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
 - 提交的 `tools2/scenarios/BootInitFlow.Setup.snapshot.json` 必须与从模型初态执行
   `tools2/bin/pyveri -u BootInitFlow.Setup --snapshot-out /tmp/boot-init-flow-setup-presend.snapshot.json`
   得到的 canonical bytes 逐字节一致，并从仓库根与其它 cwd 重建出相同结果。当前正式模型下其
-  SHA-256 固定为 `b30ced6c215612254bacf083af872078faf6156e1bbcf3e7e2c3ab201f92e801`，model
-  fingerprint 固定为 `sha256:3860db031d3c7a2bb405ffe9c7c374080b4da96876a811aa1c22a7a67cfd24e6`。
+  SHA-256 固定为 `1f4bb50eb0ce5c2cec07603b341e9f3ba2f9e2ae9e154000370205ec73565902`，model
+  fingerprint 固定为 `sha256:47a29028ad6afa1522ae0cc7694388ba0301b65687bf4b278c89d135c02894f4`。
   `tools2/bin/pyveri -t BootInitFlow.Setup` 必须自动采用该第 3 组入口 scenario；显式 `-s` 仍优先，
   其它模型必须因 stale fingerprint 拒绝，缺失 canonical scenario 必须在 derive 前返回 2。
 - `-u BootInitFlow.Setup` 的真实上游推导必须精确包含 52 个 Signal，并逐项固定
@@ -128,16 +128,26 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
 - `sig-0032 TrapType.Preset` 前必须已经存在异常/中断共用 `TrapFlowType` 总入口事实；完成后
   `TrapType` 从 Base 进入 Prepared，并新增所属 CPU 临时保护入口、意外事件处理以及测试和缺陷定位
   用途事实。该 Signal 不直接产生 child Signal，动画 request 必须展示对应 Model 注释。
-- `sig-0038 Vm.Preset` 必须只准备 Trampoline/Early 页表、RawDtb/FixMap 与 KernelAddrSpace，完成后
-  BootCPU 仍由 PhysicalDirect 承载且 live SATP 为零；`sig-0041 RawDtb.Preset` 只建立固定头部可读边界，
-  magic 事实必须到 `sig-0042 RawDtb.Setup` 才出现。`sig-0046 Vm.Setup` 才依次完成 Trampoline 与
+- `sig-0033 Vm.Preset` 必须只准备 Trampoline/Early 页表、RawDtb/FixMap 与 KernelAddrSpace，完成后
+  BootCPU 仍由 PhysicalDirect 承载且 live SATP 为零；`sig-0036 RawDtb.Preset` 只建立固定头部可读边界，
+  magic 事实必须到 `sig-0037 RawDtb.Setup` 才出现。`sig-0041 Vm.Setup` 才依次完成 Trampoline 与
   Early activation，并在结束时证明 BootCPU 由 EarlyVm 承载及 `stvec` 已恢复到 TrapType 保护入口。
   两个 Vm Signal 的动画 request 必须展示各自 Model 注释。
+- `sig-0045 TrapType.Setup` 必须在 `Vm.Setup` 后把所属 CPU 的响应入口从临时保护入口重置为正式
+  `TrapFlowType` 入口；其嵌套 `sig-0046 ExceptionType.Preset` 必须先驱动四个异常子类型的 Preset，
+  再由父 Setup 提交 TrapType Ready。Setup 前不得存在正式入口/新鲜响应流/初始异常兜底事实，Setup
+  后必须同时存在 `trap_response_entry_reset_to_formal_trap_flow`、`trap_formal_entry_creates_fresh_trap_flow`
+  与 `exception_initial_fallbacks_prepared`；动画 request 必须展示正式入口 Model 注释。
+- `make test-trap-setup-order` 必须检查实际 RV64 ELF：`TrapType::setup` 仅调用一次
+  `ExceptionType::preset`，随后先写一次 `stvec`、再以 `csrw sscratch, zero` 清零一次 `sscratch`；`stvec`
+  的 PC-relative 目标精确等于四字节对齐的汇编符号 `formal_event_entry`。该函数不得写 `satp`，也不得把
+  非零寄存器值写入 `sscratch`。该检查纳入仓库根 `make test`。
 - `BootInitFlow.Setup` 发送前 boundary 必须来自 `spec/model/systems/kernel.spec` 中 Kernel.Enable 的真实
   drives 位置，source/target 为 `Kernel -> BootInitFlow`、delivery 为 drives、cause 为 0016，snapshot
   精确等于 0020 after snapshot。Kernel 必须保持 Ready、BootInitFlow 必须为 Prepared；入口关键对象
   状态必须与 charter 账本一致，`task_flow_started(BootInitFlow)`、中断关闭、BootCPU 浮点/向量默认关闭及受控使用策略、BSS 清零完成且作为普通可写内存使用、`boot_cpu_hartid_recorded_for_later_use(BootCpuRegisters.a0)`、物理/虚拟 `tp/sp/gp`、
-  临时保护入口、DTB/fixmap、VM translation 和 Soc early-platform 事实必须存在。结构化 Signal 必须把
+  临时保护入口、正式 TrapFlowType 入口、初始异常兜底、DTB/fixmap、VM translation 和 Soc
+  early-platform 事实必须存在。结构化 Signal 必须把
   `selector_resolutions` 数组必须保留 `CurrentCPU` 的 source flow `BootInitFlow`、source ref `BootCPURef`
   与 canonical target `CpuGroup.cpus[0]`。`BindTaskStack` 与 `RefreshTaskStack` Signal 必须分别展示
   “首次原子建立”和“同一 pair 原子刷新”的 Model 注释；边界 snapshot 必须保存 CPU0 的

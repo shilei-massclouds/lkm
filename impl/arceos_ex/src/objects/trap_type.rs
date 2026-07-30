@@ -1,12 +1,12 @@
 use core::{
     arch::global_asm,
-    sync::atomic::{AtomicU32, Ordering},
+    sync::atomic::{AtomicU32, AtomicUsize, Ordering},
 };
 
 use crate::{arch::riscv64::csr, checkpoint::Checkpoint};
 
 use super::{
-    cpu::CpuRef,
+    cpu::{CpuRef, MAX_CPUS},
     current_task::CurrentTaskError,
     exception_type::ExceptionType,
     interrupt_type::InterruptType,
@@ -49,6 +49,10 @@ const TRAP_ENTRY_CONTEXT_SAVED_TP_OFFSET: usize = 88;
 const TRAP_ENTRY_CONTEXT_SAVED_T0_OFFSET: usize = 96;
 const TRAP_ENTRY_CONTEXT_SAVED_T1_OFFSET: usize = 104;
 const TRAP_ENTRY_CONTEXT_SAVED_T6_OFFSET: usize = 112;
+
+#[unsafe(no_mangle)]
+static FORMAL_TRAP_ENTRY_CONTEXTS: [AtomicUsize; MAX_CPUS] =
+    [const { AtomicUsize::new(0) }; MAX_CPUS];
 
 #[repr(C, align(16))]
 pub struct TrapEntryContext {
@@ -347,8 +351,10 @@ formal_event_entry_save_context:
     csrr    t0, stval
     sd      t0, 280(sp)
 
+    mv      s11, t6
     mv      a0, sp
     call    formal_event_entry_rust
+    mv      t6, s11
     li      t0, {trap_return_token_magic}
     bne     a0, t0, .Lformal_trap_return_token_rejected
 
@@ -358,9 +364,11 @@ formal_event_entry_save_context:
     csrw    sstatus, t0
     andi    t1, t0, {sstatus_spp}
     bnez    t1, 3f
-    csrr    t0, sscratch
-    sd      tp, {context_task_offset}(t0)
+    sd      tp, {context_task_offset}(t6)
+    csrw    sscratch, tp
+    j       4f
 3:
+    csrw    sscratch, zero
 4:
 
     ld      ra, 8(sp)
@@ -423,16 +431,49 @@ global_asm!(
     .align 2
     .globl formal_event_entry
 formal_event_entry:
-    /* Preserve every prelude-clobbered register in the CPU entry context. */
-    csrrw   t6, sscratch, t6
-    beqz    t6, .Lformal_event_entry_direct_shutdown
-    sd      sp, {context_saved_sp_offset}(t6)
-    sd      tp, {context_saved_tp_offset}(t6)
-    sd      t0, {context_saved_t0_offset}(t6)
-    sd      t1, {context_saved_t1_offset}(t6)
+    csrrw   tp, sscratch, tp
+    la      tp, FORMAL_TRAP_ENTRY_CONTEXTS
+    ld      tp, 0(tp)
+    j       .Lformal_event_entry_common
+
+    .macro FORMAL_CPU_ENTRY index, offset
+    .align 2
+    .globl formal_event_entry_cpu\index
+formal_event_entry_cpu\index:
+    csrrw   tp, sscratch, tp
+    la      tp, FORMAL_TRAP_ENTRY_CONTEXTS
+    ld      tp, \offset(tp)
+    j       .Lformal_event_entry_common
+    .endm
+
+    FORMAL_CPU_ENTRY 1, 8
+    FORMAL_CPU_ENTRY 2, 16
+    FORMAL_CPU_ENTRY 3, 24
+    FORMAL_CPU_ENTRY 4, 32
+    FORMAL_CPU_ENTRY 5, 40
+    FORMAL_CPU_ENTRY 6, 48
+    FORMAL_CPU_ENTRY 7, 56
+    FORMAL_CPU_ENTRY 8, 64
+    FORMAL_CPU_ENTRY 9, 72
+    FORMAL_CPU_ENTRY 10, 80
+    FORMAL_CPU_ENTRY 11, 88
+    FORMAL_CPU_ENTRY 12, 96
+    FORMAL_CPU_ENTRY 13, 104
+    FORMAL_CPU_ENTRY 14, 112
+    FORMAL_CPU_ENTRY 15, 120
+
+.Lformal_event_entry_common:
+    /* sscratch now holds the interrupted tp; tp locates this CPU's context. */
+    beqz    tp, .Lformal_event_entry_direct_shutdown
+    sd      sp, {context_saved_sp_offset}(tp)
+    sd      t6, {context_saved_t6_offset}(tp)
+    sd      t0, {context_saved_t0_offset}(tp)
+    sd      t1, {context_saved_t1_offset}(tp)
     csrr    t0, sscratch
-    sd      t0, {context_saved_t6_offset}(t6)
-    csrw    sscratch, t6
+    sd      t0, {context_saved_tp_offset}(tp)
+    mv      t6, tp
+    ld      tp, {context_task_offset}(t6)
+    csrw    sscratch, zero
 
     ld      t0, {context_magic_offset}(t6)
     li      t1, {context_magic}
@@ -549,6 +590,21 @@ formal_event_entry:
 unsafe extern "C" {
     fn early_event_entry();
     fn formal_event_entry();
+    fn formal_event_entry_cpu1();
+    fn formal_event_entry_cpu2();
+    fn formal_event_entry_cpu3();
+    fn formal_event_entry_cpu4();
+    fn formal_event_entry_cpu5();
+    fn formal_event_entry_cpu6();
+    fn formal_event_entry_cpu7();
+    fn formal_event_entry_cpu8();
+    fn formal_event_entry_cpu9();
+    fn formal_event_entry_cpu10();
+    fn formal_event_entry_cpu11();
+    fn formal_event_entry_cpu12();
+    fn formal_event_entry_cpu13();
+    fn formal_event_entry_cpu14();
+    fn formal_event_entry_cpu15();
 }
 
 #[unsafe(no_mangle)]
@@ -856,14 +912,29 @@ impl TrapType {
     ) -> bool {
         let emergency_base = self.emergency_stack_base();
         let emergency_top = self.emergency_stack_top();
-        self.entry_context.install(
+        let installed = self.entry_context.install(
             cpu_ref,
             task_identity,
             kernel_stack_base,
             kernel_stack_top,
             emergency_base,
             emergency_top,
-        ) && self.entry_context_address().is_multiple_of(16)
+        ) && self.entry_context_address().is_multiple_of(16);
+        let Some(slot) = FORMAL_TRAP_ENTRY_CONTEXTS.get(cpu_ref.logical_id()) else {
+            return false;
+        };
+        if !installed {
+            return false;
+        }
+        slot.store(self.entry_context_address(), Ordering::Release);
+        true
+    }
+
+    pub(crate) fn installed_entry_context_address(logical_id: usize) -> usize {
+        FORMAL_TRAP_ENTRY_CONTEXTS
+            .get(logical_id)
+            .map(|slot| slot.load(Ordering::Acquire))
+            .unwrap_or(0)
     }
 
     #[cfg_attr(not(app_user_boot), allow(dead_code))]
@@ -916,8 +987,27 @@ impl TrapType {
             .adopt_transition(LifecycleEvent::Setup, State::Prepared, State::Ready)
     }
 
-    pub(crate) fn formal_entry_address() -> usize {
-        formal_event_entry as *const () as usize
+    pub(crate) fn formal_entry_address(cpu_ref: CpuRef) -> Option<usize> {
+        let entry = match cpu_ref.logical_id() {
+            0 => formal_event_entry,
+            1 => formal_event_entry_cpu1,
+            2 => formal_event_entry_cpu2,
+            3 => formal_event_entry_cpu3,
+            4 => formal_event_entry_cpu4,
+            5 => formal_event_entry_cpu5,
+            6 => formal_event_entry_cpu6,
+            7 => formal_event_entry_cpu7,
+            8 => formal_event_entry_cpu8,
+            9 => formal_event_entry_cpu9,
+            10 => formal_event_entry_cpu10,
+            11 => formal_event_entry_cpu11,
+            12 => formal_event_entry_cpu12,
+            13 => formal_event_entry_cpu13,
+            14 => formal_event_entry_cpu14,
+            15 => formal_event_entry_cpu15,
+            _ => return None,
+        };
+        Some(entry as *const () as usize)
     }
 
     pub fn setup(
@@ -929,11 +1019,13 @@ impl TrapType {
         kernel_stack_base: usize,
         kernel_stack_top: usize,
     ) -> EventResult {
+        let formal_entry = Self::formal_entry_address(cpu_ref).unwrap_or(0);
         if self.lifecycle.state() != State::Prepared
             || vm.state() != State::Ready
             || static_objects.state() != State::Online
-            || self.exception.state() != State::Prepared
+            || self.exception.state() != State::Base
             || self.interrupt.state() != State::Ready
+            || formal_entry == 0
             || !self.install_entry_context(
                 cpu_ref,
                 task_identity,
@@ -949,8 +1041,9 @@ impl TrapType {
             );
         }
 
-        csr::write_stvec(formal_event_entry as *const () as usize);
-        csr::write_sscratch(self.entry_context_address());
+        self.exception.preset(self.lifecycle.state())?;
+        csr::write_stvec(formal_entry);
+        csr::clear_sscratch();
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Prepared,
@@ -1066,7 +1159,9 @@ fn capture_entry_authority(frame: &TrapFrame, record: &TrapExecutionRecord) -> T
     let trap = cpu.trap();
     let task_identity = csr::read_tp();
     let task_root = ctx.task_root_trap_flow_ref_raw(task_ref);
-    if csr::read_sscratch() != trap.entry_context_address()
+    if csr::read_sscratch() != 0
+        || TrapType::installed_entry_context_address(cpu_ref.logical_id())
+            != trap.entry_context_address()
         || !trap.entry_context.entry_authority_matches(
             cpu_ref,
             task_identity,
@@ -1074,8 +1169,12 @@ fn capture_entry_authority(frame: &TrapFrame, record: &TrapExecutionRecord) -> T
             frame as *const TrapFrame as usize,
         )
     {
-        crate::arch::riscv64::sbi::putstr("trap entry context mismatch context=");
+        crate::arch::riscv64::sbi::putstr("trap entry context mismatch sscratch=");
         sbi_put_hex(csr::read_sscratch());
+        crate::arch::riscv64::sbi::putstr(" installed_context=");
+        sbi_put_hex(TrapType::installed_entry_context_address(
+            cpu_ref.logical_id(),
+        ));
         crate::arch::riscv64::sbi::putstr(" expected_context=");
         sbi_put_hex(trap.entry_context_address());
         crate::arch::riscv64::sbi::putstr(" context_task=");

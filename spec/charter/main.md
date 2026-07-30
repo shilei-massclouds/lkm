@@ -1132,13 +1132,12 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 5. `陷入资源`（`TrapType`）
 
-   `TrapType` 维护异常和中断共用的总入口 `TrapFlowType`。异常或中断发生时，执行先进入这个总入口，
-   再根据事件类别进入相应的处理路径；`TrapType` 负责总入口及分流前的公共边界，具体处理语义由对应
-   的异常或中断类型负责。
-
-   `TrapType` 通过生命周期逐步建立和开放总入口服务。当前先定义 `Preset`：它为所属 CPU 建立临时
-   保护入口，用于处理初始化过程中意外发生的异常或中断，便于测试和定位缺陷。`Setup` 和 `Enable`
-   的语义由后续校准继续补充。权威定义见 [`objects/trap-type.md`](objects/trap-type.md)。
+   `TrapType` 是所属 CPU 上异常和中断响应的稳定类型资源，`TrapFlowType` 是每次正式陷入建立的动态
+   响应流，二者的关系如同 `Task` 与 `TaskFlow`。`Preset` 建立临时保护入口；`Setup` 在驱动
+   `ExceptionType` 及其四个子类型完成 Preset 后，把该 CPU 的异常/中断响应入口重置为正式的
+   `TrapFlowType` 响应流入口并进入 Ready。该动作不开放中断，也不表示完整异常处理服务 Online；
+   尚未闭合的具体能力保留为 deferred obligation。权威定义见
+   [`objects/trap-type.md`](objects/trap-type.md)。
 
 6. `内核映像`（`KernelImage`）
 
@@ -1212,8 +1211,12 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 8. 执行 `TrapType.preset()`，为 BootCPU 建立临时保护入口，用于处理初始化过程中意外发生的异常或中断，便于测试和定位缺陷。
 9. 执行 `Vm.Preset()`，准备 `KernelAddrSpace`、`RawDtb`、`FixMap`、`TrampolineVm` 与 `EarlyVm`；该过程只建立全局布局和 controller 准备事实，不改变 BootCPU 当前的 PhysicalDirect。
 10. 执行 `Vm.Setup()`，依次调用 `TrampolineVm.ActivateOnCpu()` 与 `EarlyVm.ActivateOnCpu()`：先完成从物理地址空间到跳板映射的 Handoff，再 Handoff 到 early page table；其中 `KernelImage.Enable()` 重建当前地址环境中的 `gp-relative` 寻址能力。controller 仍保持共享 Ready，`Vm` 提交 Ready；`Vm.Enable()` 留给后续 SwapperVm 阶段。
-11. `VM.setup()` 完成后执行 `TrapType.setup()`；其具体语义由后续校准补充。
-12. 在 `VM.setup()` 完成后调用单个 `CurrentTask.RefreshTaskStack(BootTask, BootTask.stack)`，原子将 `tp` 与 `sp` 重置为虚拟地址；同目标 pair 保持两种 binding identity，不处理抢占计数，也不存在 Stack lifecycle。
+11. `Vm.Setup()` 完成后执行 `TrapType.Setup()`：它先驱动 `ExceptionType.Preset()` 及四个异常子类型的
+    `Preset()`，再把 BootCPU 的异常/中断响应入口从临时保护入口重置为正式的 `TrapFlowType` 响应流
+    入口；成功后 TrapType 为 Ready，ExceptionType 及四个子类型为 Prepared，中断仍未开放。
+12. `TrapType.Setup()` 完成后调用单个 `CurrentTask.RefreshTaskStack(BootTask, BootTask.stack)`，原子将
+    `tp` 与 `sp` 重置为虚拟地址；同目标 pair 保持两种 binding identity，不处理抢占计数，也不存在
+    Stack lifecycle。
 13. 执行 `片上系统.preset()`，完成片上系统平台相关的早期预置，并直接提交 `BootInitFlow.Prepared`。
 
 当前时序图主要表达对象过程的编排顺序，不表达逐项源码对应关系。失败时进入 `FAIL` 状态的错误传播方式，以及每一步更细的依赖检查，后续继续补充。
@@ -3033,7 +3036,7 @@ Exec 核心对象的权威职责已经拆到
 6. `ELF 对象`（`ElfObject`）：表示 main/interpreter artifact 与 load plan。详细职责见独立 charter；格式选择属于 registry，提交属于 transaction，不建立 `ElfLoader`。
 7. `用户地址空间对象`（暂名 `UserAddressSpace`）：表示每个用户态进程独立的低地址用户区映射。它是多实例对象；高地址内核映射共享或引用 `SwapperVm`。`SwapperVm` 继续表示内核共享地址空间实例，不改成普通多实例用户地址空间。首轮仅要求最小用户页表、用户页 `U` 权限、内核页 `U=0`、ELF 段映射、用户栈映射和阶段性的 heap/mmap arena；dynamic libc 首片要求同一个 `UserAddressSpace` 同时映射主程序 ELF 和 `PT_INTERP` 指向的 musl interpreter ELF，并用固定 non-overlap load bias 装载 `ET_DYN` interpreter。ELF 段的 backing/PTE 以页粒度覆盖 `align_down(p_vaddr)..align_up(p_vaddr + p_memsz)`，因此 `mprotect`/`munmap` 对动态链接器 RELRO 页保护请求的 mapped-range 判断也必须按页范围处理，而不是只按原始 `p_vaddr..p_vaddr+p_memsz` 字节范围拒绝页内前缀。heap/mmap arena 用于承接动态链接器早期 `brk`/anonymous `mmap` 需求，属于正式运行时语义，不是测试专用入口。完整 VMA 树、文件映射、COW、ASLR 和 page fault recovery 后续再展开。
 8. `用户栈对象`（`UserStack`）：表示 exec initial stack 与当前用户栈的稀疏物理 backing owner。initial VMA 覆盖参数页并向下预扩展 128 KiB，只分配实际写入页；运行期 load/store fault 可在 8 MiB rlimit、256 页 guard gap 和相邻 mapping 允许时按页向下增长，跨页跳跃不填充中间页。每次 exec 的单次 24 字节 HWRNG 读取中，16 字节只供栈内 `AT_RANDOM`，独立 8 字节只在 `0x40000000` 以下 8 MiB 窗口内选择页对齐 top。initial auxv 是当前可准确表达的 Linux RISC-V 基线：程序头/entry/interpreter、HWCAP、页大小、时钟 tick、flags、exec 前 credentials、secure=0、`AT_RANDOM`、指向独立 filename 副本的 `AT_EXECFN` 和 `AT_NULL`；没有事实支撑的 platform/HWCAP2/rseq/vDSO 条目不生成。stack mapping 只持有 RW/NX VMA 与 ownership token，不复制 backing 引用；动态 `setrlimit`、越界 signal、通用 VMA fault core、COW/多线程栈、完整 CRNG 和内核 compiler stack protector 后续再展开。
-9. `用户 trap frame 对象`（暂名 `UserTrapFrame`）：表示进入 U-mode 前的寄存器现场，至少绑定 `sepc=ElfObject.runtime_entry`、用户 `sp`、`sstatus.SPP=U` 和 `SPIE=1`。静态程序的 runtime entry 是主 ELF entry；动态程序的 runtime entry 是 interpreter entry。它是 `UserAppFlow.Enable` 执行最终 trap-return handoff 的输入，并直接关联稳定 `KernelInitTask`。当前 RISC-V `APP=user-boot` 入口还为 boot CPU 上的 PID 1 建立 16 KiB、32 KiB 对齐的 VMAP kernel trap stack 和 4 KiB、16 字节对齐的静态 overflow stack。用户态 trap 通过位于安全 kernel stack 边界的入口上下文同时取得 kernel stack 和当前 Task 的实现身份；在进入通用事件、调度或 CurrentTask 路径前必须已经恢复该身份，返回用户态前则按调度提交后的 Task 刷新入口上下文。该入口上下文只是体系结构 lowering，不是 CurrentTask 对象、槽或 snapshot state。内核态 trap 必须在保存任何通用寄存器前只借用 `sp`/`sscratch`，按 prospective frame SP 的 `((sp - 288) >> 14) & 1` 检查 VMAP guard 半区，并在正常分支恢复原 `sp`、清零 `sscratch` 后进入现有完整 frame 保存。溢出分支以 `t6`/`sscratch` 交换保持坏栈 SP 和原始 `t6`，切换到静态 overflow stack 构造包含全部整数寄存器与 `sepc/scause/stval/sstatus` 的完整 frame，只经 SBI 输出稳定诊断并 terminal panic；不得进入普通 checkpoint、分配器、printk 锁或信号路径。该首片不把不可恢复的 kernel stack overflow 转换为用户信号；per-task stack owner 泛化、per-CPU overflow stack 与 IRQ hardirq stack switch 继续 deferred。
+9. `用户 trap frame 对象`（暂名 `UserTrapFrame`）：表示进入 U-mode 前的寄存器现场，至少绑定 `sepc=ElfObject.runtime_entry`、用户 `sp`、`sstatus.SPP=U` 和 `SPIE=1`。静态程序的 runtime entry 是主 ELF entry；动态程序的 runtime entry 是 interpreter entry。它是 `UserAppFlow.Enable` 执行最终 trap-return handoff 的输入，并直接关联稳定 `KernelInitTask`。当前 RISC-V `APP=user-boot` 入口还为 boot CPU 上的 PID 1 建立 16 KiB、32 KiB 对齐的 VMAP kernel trap stack 和 4 KiB、16 字节对齐的静态 overflow stack。正式响应入口必须区分异常或中断来自用户态还是内核态：用户态来源在进入通用事件、调度或 CurrentTask 路径前恢复当前 Task 身份并切换到其内核栈，返回用户态前按调度提交后的 Task 刷新入口上下文；内核态来源保持被中断的内核栈和当前 Task 身份。该入口上下文只是体系结构 lowering，不是 CurrentTask 对象、槽或 snapshot state。两种来源都必须在保存完整响应现场前确认当前栈足以容纳完整响应记录；容量不足时切换到紧急栈，保留可定位故障的完整整数寄存器及 `sepc/scause/stval/sstatus`，并以 terminal panic 停止，不得进入普通 checkpoint、分配器、printk 锁或信号路径。该首片不把不可恢复的 kernel stack overflow 转换为用户信号；per-task stack owner 泛化、per-CPU overflow stack 与 IRQ hardirq stack switch 继续 deferred。
 10. `系统调用入口与表对象`（`SyscallException` / `SyscallTable`）：`SyscallException` 是 `ExceptionType` 下已有的 ecall/syscall 异常对象，负责用户态 syscall 入口、来源检查、参数提取和分发选择；不再单独建立 `SyscallDispatcher` 对象。`SyscallTable` 是独立分发表对象，承载当前支持的 syscall action 集合；具体 syscall 不是资源对象，而是 `SyscallTable.Action::Write`、`SyscallTable.Action::Writev`、`SyscallTable.Action::OpenAt`、`SyscallTable.Action::Read`、`SyscallTable.Action::Close`、`SyscallTable.Action::NewFstatAt`、`SyscallTable.Action::Brk`、`SyscallTable.Action::Mmap`、`SyscallTable.Action::Mprotect`、`SyscallTable.Action::Munmap`、`SyscallTable.Action::SetTidAddress`、`SyscallTable.Action::Exit`、`SyscallTable.Action::ExitGroup` 等 action。`write/writev` 不再直接按 fd 特判转发到 console，而是经 `FilesStruct -> FileDescriptorTable -> OpenFileDescription -> FileBackend` 解析到标准输出/标准错误对应的字符设备后端；只读 `openat/read/close/newfstatat` 首片则经 `FilesStruct` 分配一个普通文件 opened instance，并通过 VFS path read 读取当前 ext2 rootfs 中已存在的 regular file；`brk/mmap/mprotect/munmap` 路由到 `UserAddressSpace` 的阶段性 heap/mmap arena，用于支撑 musl dynamic loader 的早期运行；`set_tid_address` 按 Linux `current->clear_child_tid = tidptr; return task_pid_vnr(current);` 的形态落到当前 `KernelInitTask` 的 PID 1 任务属性上，不建立 persona 或 futex 完整对象。
 11. `打开文件上下文对象`（`FilesStruct` / `FileDescriptorTable` / `OpenFileDescription` / `FileBackend`）：`FilesStruct` 是任务拥有的打开文件上下文，和表示 root/pwd 的 `FsStruct` 并列，不是 `FsStruct` 的下级类型。`FileDescriptorTable` 是 `FilesStruct` 内部的 fd table，负责把 fd 映射到 `OpenFileDescription`；`OpenFileDescription` 表示一次打开后的文件实例，承载 flags、offset 和后端引用；`FileBackend` 表示具体后端类型。当前支持边界分两层：第一层预安装 fd 0/1/2 为 console-like `CharDevice` 后端；第二层只支持一个 read-only `RegularFile` opened instance，用于 `openat` 后的 `read`、`close` 和 `newfstatat` 最小元数据返回。块设备文件、完整 `/dev/console`、TTY、权限、目录 fd、symlink、poll、共享 fd table、写路径和 page cache 后续展开。
 12. `KernelInitTask 与用户应用 Flow`（`KernelInitTask` / `UserAppFlow`）：`KernelInitTask` 是 exec 前后不变且 PID 为 1 的 Task carrier；用户地址空间、files、credentials、signal 和 trap frame 直接附着于它，不建立用户态 persona wrapper。首次 exec 在执行点声明一个 fresh `UserAppFlow` 运行实例，只承载该次应用 continuation 的 lifecycle。successful exec 固定按“新 Flow Preset/Setup -> `KernelInitFlow.Disable` -> `KernelInitTask.CommitFlowHandoff` -> 新 Flow Enable -> `KernelInitFlow.Cleanup`”推进；一个 Task 任一时刻最多一个 Flow Online。后续 exec 仍保持 Task 身份，并声明另一个 fresh `UserAppFlow`。

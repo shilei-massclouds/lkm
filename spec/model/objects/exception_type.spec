@@ -13,7 +13,11 @@ type ExceptionType: ResourceObject {
 
     state State::Base {
         transitions {
+            /* 为 TrapType 的正式响应入口准备四类异常的初始兜底。 */
             on Transition::Preset -> State::Prepared {
+                depends_on {
+                    self.parent.state == State::Prepared;
+                }
                 drives {
                     self.page_fault.Transition::Preset;
                     self.syscall.Transition::Preset;
@@ -23,6 +27,7 @@ type ExceptionType: ResourceObject {
                 ensures {
                     exception_fallback_covers_all_causes(self);
                     exception_default_bindings_fatal(self);
+                    exception_initial_fallbacks_prepared(self);
                 }
             }
         }
@@ -31,6 +36,7 @@ type ExceptionType: ResourceObject {
     state State::Prepared {
         invariant {
             exception_fallback_covers_all_causes(self);
+            exception_initial_fallbacks_prepared(self);
             self.page_fault.state == State::Prepared;
             self.syscall.state == State::Prepared;
             self.breakpoint.state == State::Prepared;
@@ -76,6 +82,7 @@ type ExceptionType: ResourceObject {
 
 predicate exception_fallback_covers_all_causes<E: ExceptionType>(exception: E) -> bool;
 predicate exception_default_bindings_fatal<E: ExceptionType>(exception: E) -> bool;
+predicate exception_initial_fallbacks_prepared<E: ExceptionType>(exception: E) -> bool;
 predicate exception_classifier_ready<E: ExceptionType>(exception: E) -> bool;
 predicate exception_handler_bindings_ready<E: ExceptionType>(exception: E) -> bool;
 predicate exception_service_online<E: ExceptionType>(exception: E) -> bool;

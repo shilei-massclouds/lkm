@@ -1,7 +1,9 @@
 # TrapFlowType
 
-Each accepted entry declares a fresh, nonzero-generation `TrapFlowType` in the stack-local `TrapExecutionRecord`, then
-binds its immutable parent to the entry CPU's `TrapType`. `Preset` validates the entry and saves its return checkpoint;
+`TrapType` is the stable CPU-local carrier and each accepted entry declares a fresh, nonzero-generation
+`TrapFlowType` in the stack-local `TrapExecutionRecord`, mirroring the stable-carrier/dynamic-flow split of
+`Task` and `TaskFlow`. The entry binds the Flow's immutable parent to the entry CPU's `TrapType`. `Preset` validates
+the entry and saves its return checkpoint;
 `Setup` creates and records one child FlowRef; `Enable` creates one return token; `Disable` and `Cleanup` synchronously
 destroy child then root. Assembly consumes the token only after Cleanup.
 

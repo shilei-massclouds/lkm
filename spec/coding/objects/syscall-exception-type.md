@@ -4,6 +4,9 @@
 table is ready. Syscall occurrence Flows may schedule and migrate; scheduler commit moves the saved short-term chain
 and installs the target CPU entry context without changing the root Flow's entry-CPU parent.
 
+`Preset` installs only the not-yet-ready syscall/ecall fallback consumed by `TrapType.Setup`; it does not publish the
+`SyscallTable` or user-return service.
+
 The Linux PLIC foreign ABI may borrow `tp` only inside its assembly shim. Every normal, error and nested return restores
 the architectural task `tp` before entering Rust Context, scheduling, or selector resolution.
 

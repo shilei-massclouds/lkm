@@ -4609,24 +4609,24 @@ class SignalPipelineTests(unittest.TestCase):
                 (30, "BootInitFlow", "CpuGroup.cpus[0].trap.interrupt", "Setup", "drives", 20, "Transition", "Prepared", "Ready", "completed"),
                 (31, "BootInitFlow", "BootInitFlow", "BindTaskStack", "drives", 20, "Action", "Base", "Base", "completed"),
                 (32, "BootInitFlow", "CpuGroup.cpus[0].trap", "Preset", "drives", 20, "Transition", "Base", "Prepared", "completed"),
-                (33, "BootInitFlow", "CpuGroup.cpus[0].trap.exception", "Preset", "drives", 20, "Transition", "Base", "Prepared", "completed"),
-                (34, "CpuGroup.cpus[0].trap.exception", "CpuGroup.cpus[0].trap.exception.page_fault", "Preset", "drives", 33, "Transition", "Base", "Prepared", "completed"),
-                (35, "CpuGroup.cpus[0].trap.exception", "CpuGroup.cpus[0].trap.exception.syscall", "Preset", "drives", 33, "Transition", "Base", "Prepared", "completed"),
-                (36, "CpuGroup.cpus[0].trap.exception", "CpuGroup.cpus[0].trap.exception.breakpoint", "Preset", "drives", 33, "Transition", "Base", "Prepared", "completed"),
-                (37, "CpuGroup.cpus[0].trap.exception", "CpuGroup.cpus[0].trap.exception.unexpected", "Preset", "drives", 33, "Transition", "Base", "Prepared", "completed"),
-                (38, "BootInitFlow", "Vm", "Preset", "drives", 20, "Transition", "Base", "Prepared", "completed"),
-                (39, "Vm", "TrampolineVm", "Setup", "drives", 38, "Transition", "Base", "Ready", "completed"),
-                (40, "Vm", "EarlyVm", "Preset", "drives", 38, "Transition", "Base", "Prepared", "completed"),
-                (41, "EarlyVm", "RawDtb", "Preset", "drives", 40, "Transition", "Base", "Prepared", "completed"),
-                (42, "EarlyVm", "RawDtb", "Setup", "drives", 40, "Transition", "Prepared", "Ready", "completed"),
-                (43, "EarlyVm", "FixMap", "Preset", "drives", 40, "Transition", "Base", "Ready", "completed"),
-                (44, "Vm", "KernelAddrSpace", "Setup", "drives", 38, "Transition", "Prepared", "Ready", "completed"),
-                (45, "Vm", "EarlyVm", "Setup", "drives", 38, "Transition", "Prepared", "Ready", "completed"),
-                (46, "BootInitFlow", "Vm", "Setup", "drives", 20, "Transition", "Prepared", "Ready", "completed"),
-                (47, "Vm", "TrampolineVm", "ActivateOnCpu", "drives", 46, "Action", "Ready", "Ready", "completed"),
-                (48, "Vm", "EarlyVm", "ActivateOnCpu", "drives", 46, "Action", "Ready", "Ready", "completed"),
-                (49, "Vm", "KernelImage", "Enable", "drives", 46, "Transition", "Ready", "Online", "completed"),
-                (50, "BootInitFlow", "CpuGroup.cpus[0].trap", "Setup", "drives", 20, "Transition", "Prepared", "Ready", "completed"),
+                (33, "BootInitFlow", "Vm", "Preset", "drives", 20, "Transition", "Base", "Prepared", "completed"),
+                (34, "Vm", "TrampolineVm", "Setup", "drives", 33, "Transition", "Base", "Ready", "completed"),
+                (35, "Vm", "EarlyVm", "Preset", "drives", 33, "Transition", "Base", "Prepared", "completed"),
+                (36, "EarlyVm", "RawDtb", "Preset", "drives", 35, "Transition", "Base", "Prepared", "completed"),
+                (37, "EarlyVm", "RawDtb", "Setup", "drives", 35, "Transition", "Prepared", "Ready", "completed"),
+                (38, "EarlyVm", "FixMap", "Preset", "drives", 35, "Transition", "Base", "Ready", "completed"),
+                (39, "Vm", "KernelAddrSpace", "Setup", "drives", 33, "Transition", "Prepared", "Ready", "completed"),
+                (40, "Vm", "EarlyVm", "Setup", "drives", 33, "Transition", "Prepared", "Ready", "completed"),
+                (41, "BootInitFlow", "Vm", "Setup", "drives", 20, "Transition", "Prepared", "Ready", "completed"),
+                (42, "Vm", "TrampolineVm", "ActivateOnCpu", "drives", 41, "Action", "Ready", "Ready", "completed"),
+                (43, "Vm", "EarlyVm", "ActivateOnCpu", "drives", 41, "Action", "Ready", "Ready", "completed"),
+                (44, "Vm", "KernelImage", "Enable", "drives", 41, "Transition", "Ready", "Online", "completed"),
+                (45, "BootInitFlow", "CpuGroup.cpus[0].trap", "Setup", "drives", 20, "Transition", "Prepared", "Ready", "completed"),
+                (46, "CpuGroup.cpus[0].trap", "CpuGroup.cpus[0].trap.exception", "Preset", "drives", 45, "Transition", "Base", "Prepared", "completed"),
+                (47, "CpuGroup.cpus[0].trap.exception", "CpuGroup.cpus[0].trap.exception.page_fault", "Preset", "drives", 46, "Transition", "Base", "Prepared", "completed"),
+                (48, "CpuGroup.cpus[0].trap.exception", "CpuGroup.cpus[0].trap.exception.syscall", "Preset", "drives", 46, "Transition", "Base", "Prepared", "completed"),
+                (49, "CpuGroup.cpus[0].trap.exception", "CpuGroup.cpus[0].trap.exception.breakpoint", "Preset", "drives", 46, "Transition", "Base", "Prepared", "completed"),
+                (50, "CpuGroup.cpus[0].trap.exception", "CpuGroup.cpus[0].trap.exception.unexpected", "Preset", "drives", 46, "Transition", "Base", "Prepared", "completed"),
                 (51, "BootInitFlow", "BootInitFlow", "RefreshTaskStack", "drives", 20, "Action", "Base", "Base", "completed"),
                 (52, "BootInitFlow", "Soc", "Preset", "drives", 20, "Transition", "Base", "Prepared", "completed"),
             ]
@@ -4648,7 +4648,7 @@ class SignalPipelineTests(unittest.TestCase):
                         item["outcome"],
                     )
                 )
-                handler_member = "Action" if number in {17, 18, 19, 23, 25, 31, 47, 48, 51} else "Transition"
+                handler_member = "Action" if number in {17, 18, 19, 23, 25, 31, 42, 43, 51} else "Transition"
                 handler_state = (
                     "process"
                     if number in {18, 23, 25, 31, 51}
@@ -4660,10 +4660,10 @@ class SignalPipelineTests(unittest.TestCase):
                 )
             self.assertEqual(actual, expected)
 
-            raw_dtb_preset = derivation["signals"][40]
-            raw_dtb_setup = derivation["signals"][41]
-            self.assertEqual(raw_dtb_preset["id"], "sig-0041")
-            self.assertEqual(raw_dtb_setup["id"], "sig-0042")
+            raw_dtb_preset = derivation["signals"][35]
+            raw_dtb_setup = derivation["signals"][36]
+            self.assertEqual(raw_dtb_preset["id"], "sig-0036")
+            self.assertEqual(raw_dtb_setup["id"], "sig-0037")
             self.assertNotIn(
                 "valid_dtb_magic(RawDtb.header)",
                 raw_dtb_preset["after_snapshot"]["facts"],
@@ -4673,8 +4673,8 @@ class SignalPipelineTests(unittest.TestCase):
                 raw_dtb_setup["after_snapshot"]["facts"],
             )
 
-            vm_preset = derivation["signals"][37]
-            vm_setup = derivation["signals"][45]
+            vm_preset = derivation["signals"][32]
+            vm_setup = derivation["signals"][40]
             self.assertEqual(
                 vm_preset["handler"]["description"],
                 "准备早期布局与页表 controller，但保持当前 CPU 继续由 PhysicalDirect 承载。",
@@ -4715,6 +4715,23 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertFalse(
                 any(item["cause_id"] == "sig-0032" for item in derivation["signals"])
             )
+
+            trap_setup = derivation["signals"][44]
+            exception_preset = derivation["signals"][45]
+            self.assertEqual(trap_setup["id"], "sig-0045")
+            self.assertEqual(exception_preset["id"], "sig-0046")
+            self.assertEqual(exception_preset["cause_id"], "sig-0045")
+            self.assertEqual(
+                trap_setup["handler"]["description"],
+                "把所属 CPU 的异常/中断响应入口重置为正式的 TrapFlowType 响应流入口。",
+            )
+            for fact in (
+                "trap_response_entry_reset_to_formal_trap_flow(CpuGroup.cpus[0].trap,CpuGroup.cpus[0])",
+                "trap_formal_entry_creates_fresh_trap_flow(CpuGroup.cpus[0].trap)",
+                "exception_initial_fallbacks_prepared(CpuGroup.cpus[0].trap.exception)",
+            ):
+                self.assertNotIn(fact, trap_setup["before_snapshot"]["facts"])
+                self.assertIn(fact, trap_setup["after_snapshot"]["facts"])
             self.assertEqual(derivation["signals"][15]["reason"], "until_signal_reached")
             self.assertEqual(
                 derivation["signals"][22]["selector_resolutions"],
@@ -5010,14 +5027,14 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(snapshot.read_bytes(), BOOT_INIT_SETUP_SCENARIO.read_bytes())
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "b30ced6c215612254bacf083af872078faf6156e1bbcf3e7e2c3ab201f92e801",
+                "1f4bb50eb0ce5c2cec07603b341e9f3ba2f9e2ae9e154000370205ec73565902",
             )
             self.assertEqual(
                 {
                     derivation["model_fingerprint"], model["model_fingerprint"],
                     view["model_fingerprint"], saved["model_fingerprint"],
                 },
-                {"sha256:3860db031d3c7a2bb405ffe9c7c374080b4da96876a811aa1c22a7a67cfd24e6"},
+                {"sha256:47a29028ad6afa1522ae0cc7694388ba0301b65687bf4b278c89d135c02894f4"},
             )
             with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
                 compact_text = render_text(view)

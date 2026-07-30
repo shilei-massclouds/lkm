@@ -344,7 +344,6 @@ fn preset_until_vm_switch(ctx: &mut Context, boot_args: &BootArgs) -> EventResul
         let Context {
             cpu_group,
             kernel_image,
-            init_stack,
             ..
         } = ctx;
         let Some(trap) = cpu_group.boot_cpu_trap_mut() else {
@@ -356,8 +355,6 @@ fn preset_until_vm_switch(ctx: &mut Context, boot_args: &BootArgs) -> EventResul
             );
         };
         trap.preset(kernel_image)?;
-        let trap_state = trap.state();
-        trap.exception_mut().preset(trap_state, init_stack)?;
     }
     ctx.vm.preset(
         &ctx.config,
@@ -467,7 +464,6 @@ fn after_vm_setup(ctx: &mut Context) -> EventResult {
     let boot_task_identity = ctx.boot_task.carrier_address();
     let boot_stack_base = ctx.lds.init_stack_start();
     let boot_stack_top = ctx.lds.init_stack_end();
-    bind_boot_task_entry(ctx, TaskRef::BOOT)?;
     let Context {
         cpu_group,
         vm,
@@ -490,6 +486,7 @@ fn after_vm_setup(ctx: &mut Context) -> EventResult {
         boot_stack_base,
         boot_stack_top,
     )?;
+    bind_boot_task_entry(ctx, TaskRef::BOOT)?;
     if !ctx
         .boot_task
         .task_mut()

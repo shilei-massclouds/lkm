@@ -15,7 +15,6 @@ use super::{
     breakpoint_exception_type::BreakpointExceptionType,
     files::{CloseOnExecReport, FILE_POLLIN, FileError, TERMIOS_SIZE, is_null_path, is_tty_path},
     hwrng::HwRngError,
-    init_stack::InitStack,
     page_fault_exception_type::PageFaultExceptionType,
     process_prepare::TaskCopyUserProcessInputs,
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
@@ -3237,11 +3236,8 @@ impl ExceptionType {
         }
     }
 
-    pub fn preset(&mut self, trap_state: State, init_stack: &InitStack) -> EventResult {
-        if self.lifecycle.state() != State::Base
-            || trap_state != State::Prepared
-            || init_stack.state() != State::Prepared
-        {
+    pub fn preset(&mut self, trap_state: State) -> EventResult {
+        if self.lifecycle.state() != State::Base || trap_state != State::Prepared {
             return failed_condition(
                 LifecycleEvent::Preset,
                 self.lifecycle.state(),
