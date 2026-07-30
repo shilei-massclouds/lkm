@@ -23,8 +23,10 @@ Rust/C 介入的汇编 handoff 链完成：
 TrampolineVm 的半完成上下文返回。成功时仅目标 CPU 改为 EarlyVm，`Vm` 提交 Ready，且 `stvec`
 仍指向原保护入口。
 
-本段不 lower `Vm.Enable`，也不得在 `setup` 中建立或激活 `SwapperVm`。BootTask 的 `tp/sp` 刷新属于
-后续 `CurrentTask.RefreshTaskStack` 段，不是 Vm.Setup 的内部操作。
+本段不 lower `Vm.Enable`，也不得在 `setup` 中建立或激活 `SwapperVm`。Vm.Setup 为使地址切换
+continuation 可执行而临时调整 live `sp` 时，该调整只属于 handoff transport，不发布 CurrentStack
+binding，也不能被记作 `CurrentTask.RefreshTaskStack` 已完成。BootTask 的正式 `tp/sp` pair 刷新仍属于
+后续独立的 `CurrentTask.RefreshTaskStack` 汇编提交块；该块必须在 TrapType.Setup 后重新装载两者。
 
 后续阶段既有的跨-controller 约束继续保留：BP 完整链为
 `PhysicalDirect -> TrampolineVm -> EarlyVm -> SwapperVm`，AP 链为

@@ -79,6 +79,24 @@ BootTask 入口写边界必须由同一个 Kernel.Enable handler 按 `AcceptEnab
 PhysicalDirect InitialActivation -> BootInitFlow.Preset` 排序；Preset 接受和 Started checkpoint 都不得
 越过前三项，也不得让首个 child action 提前执行。
 
+## BootTask task/stack 地址表示刷新
+
+`CurrentTask.RefreshTaskStack(BootTask, BootTask.stack)` 是 `TaskFlow` model 上的 boot-only 上下文
+Action，不是 TaskFlow lifecycle transition。调用前必须同时观察 `Vm.Ready`、`EarlyVm.Ready`、当前
+CPU 的 `TrapType.Ready` 与尚未开始的 `Soc.Preset`，并验证 CPU-local CurrentTask/CurrentStack 已精确
+绑定到同一 BootTask、`BootTask.stack` 与 BootInitFlow。BootTask 必须仍为 `OnCpu/Live`，active Flow、
+owner/parent、CpuRef 与唯一有效 `TaskRef::BOOT` 必须一致；任何失败都在体系结构提交前终止，并保持
+原 task/stack binding 及 live 执行地址表示不变。
+
+成功路径必须在当前入口汇编路径内执行 [`riscv64.md`](../riscv64.md) 定义的连续指令序列，重载
+BootTask 与 `BootTask.stack` 的 EarlyVm 地址表示；该 Action 结束后沿同一汇编路径继续后续入口步骤，
+不建立专用 continuation 或额外 tail。Action 的语义原子性由包住整个 `BootInitFlow.Preset` 的
+`SingleTaskContext` / `SystemExclusive` 独占执行上下文保证，不要求硬件提供多寄存器原子写，也不需要
+另建事务或 rollback bridge。进入指令序列前必须完成全部 guard；序列中不得插入会解析
+CurrentTask/CurrentStack 的 Rust/C 调用、可失败分支、checkpoint 或独立 `BindStack` 操作。Action 完成
+后的第一次解析必须同时得到同一 pair，随后才允许驱动 `Soc.Preset`。该路径不创建 Task、Stack、Flow、
+slot 或 lifecycle，不改变 preempt count，也不增加或替换 binding identity。
+
 Task 收到严格 Continue 后按当前快照选择：initial Flow 为 Base 时只发送 `Preset`；否则只向 Online
 active Flow 发送 `Continue`。两个候选都可接受或都不可接受均为终止错误；不得丢弃、排队重试或降级。
 

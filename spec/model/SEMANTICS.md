@@ -712,8 +712,8 @@ BootTask 首次绑定前 CurrentCPU 仍由 `BootInitFlow.cpu_ref` 解析。Physi
 `BindTaskStack(BootTask, BootTask.stack)` 要求本 CPU 的 task/stack pair 均未绑定，并以单个 Action
 原子建立二者；EarlyVm 下的 `RefreshTaskStack(BootTask, BootTask.stack)` 要求现有 pair 精确相同，
 并以单个 Action 保持 identity、刷新地址表示。两者都要求 `stack == task.stack`，不得暴露可单独调用的
-`BindStack`，任何验证失败都保持 task binding、stack binding、`tp/sp` 不变。BootTask 的初始禁止抢占
-是静态初态属性，不由三种 Action 建立。
+`BindStack`，任何验证失败都保持 task binding、stack binding 和当前执行地址表示不变。BootTask 的
+初始禁止抢占是静态初态属性，不由三种 Action 建立。
 
 `CurrentRunQueueRef` 的正式语义是 CPU 视角私有的 current-runqueue 引用。调度路径先从 effective Flow 的 CpuRef 解析 `CurrentCPU`，再通过 `CpuGroup.cpus[id].RunQueue` 解析当前 runqueue。BP 路径落到 `BootRunQueue`，是因为 active Flow 指向 CPU0；AP 路径同样由各自 Flow 的 CpuRef 决定。
 
@@ -1004,8 +1004,9 @@ CpuGroup 不拥有或复制这些执行状态。
 `BindTask(task: Task)` action is scheduler-only and performs only `BindCurrentTask(task)` at the switch commit;
 the outer architecture commit separately restores `sp` and publishes CurrentStack from `task.stack`. BootTask is
 the entry exception: `BindTaskStack(BootTask, BootTask.stack)` atomically establishes the initial task/stack pair,
-and `RefreshTaskStack(BootTask, BootTask.stack)` preserves that pair identity while refreshing its virtual address
-representation. `CurrentTaskRef` derives from the bound Task's sole live generation-checked TaskRef. Resolution
+and `RefreshTaskStack(BootTask, BootTask.stack)` requires that exact pair to remain current, preserves its identity,
+and atomically refreshes its address representation after EarlyVm takes over. `CurrentTaskRef` derives from the
+bound Task's sole live generation-checked TaskRef. Resolution
 also validates the effective Flow's parent, owner, active status, CpuRef and `OnCpu/Live` authority. CPU-local
 task/stack bindings are isolated and retained in snapshots as contextual facts, not as system state or instances.
 Synchronous continuations preserve the selected CPU context; asynchronous receivers do not.

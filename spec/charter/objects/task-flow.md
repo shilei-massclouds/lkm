@@ -82,11 +82,13 @@ CurrentTask、effective TaskFlow、`CurrentTask.stack`、active translation cont
 `init_thread_union` / `init_stack`；不存在独立的启动栈对象、状态或引用。BootTask 是
 `BindTask` 的入口例外：BootInitFlow 必须用两个 boot-only 上下文 Action 完成执行绑定。
 `CurrentTask.Action::BindTaskStack(BootTask, BootTask.stack)` 只能在 PhysicalDirect 下首次调用，原子
-建立 task/stack pair；`CurrentTask.Action::RefreshTaskStack(BootTask, BootTask.stack)` 只能在 EarlyVm
-接管后调用，保持同一 pair 的 binding identity 并原子刷新地址表示。两者都是单个 Action/Signal，
-内部执行不可单独调用的 task/stack binding 操作；continuation 不得观察半绑定状态。任一校验或架构
-提交失败都必须保留调用前的 task binding、stack binding、`tp` 与 `sp`，且不得创建新 Task、Stack
-对象或独立 stack identity。
+建立 task/stack pair。`CurrentTask.Action::RefreshTaskStack(BootTask, BootTask.stack)` 只能在 EarlyVm
+接管后调用；调用时，当前 CPU 已绑定的 pair 必须恰好仍是 BootTask 与 `BootTask.stack`，BootTask 也
+必须仍然拥有当前执行权。该动作保持同一 pair 的 binding identity，原子刷新二者在当前地址环境中的
+表示；成功后 CurrentTask 与 CurrentStack 在 EarlyVm 下继续解析为同一个 BootTask 及其 stack。
+两种入口 Action 都是单个 Action/Signal，内部 task/stack 操作不可单独调用，continuation 不得观察
+半绑定状态。任一校验或提交失败都必须保留调用前的 task binding、stack binding 和执行现场，且不得
+创建新 Task、Stack 对象或独立 stack identity。
 
 普通调度切换在架构 restore 中从 next TaskThreadContext 恢复 next `sp`，并在同一正式 switch commit
 中调用 `BindTask(next)` 写入 next `tp`。`BindTask` 本身只提交 CurrentTask；外层架构 commit 依据已恢复

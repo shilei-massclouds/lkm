@@ -1094,15 +1094,14 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
    * `RefreshTaskStack` - 原子刷新根任务与根栈到虚拟地址
 
-     * 初始状态：`VM.setup()` 已完成并进入早期虚拟地址阶段，`tp` 寄存器指向 `init_task` 的物理地址。
-     * 执行动作：作为单个 boot-only Action，让 `tp` 与 `sp` 分别指向 `init_task` 和 `BootTask.stack` 的虚拟地址表示。
-     * 结束状态：验证 task/stack pair identity 不变，且 CPU-local bindings 与 `tp/sp` 同时刷新为有效虚拟地址表示。
+     * 初始状态：`Vm.Setup()` 已完成、EarlyVm 已接管，当前 task/stack pair 仍是拥有执行权的 BootTask 及其 `stack`。
+     * 执行动作：作为单个 boot-only Action，原子刷新该 task/stack pair 在当前地址环境中的表示。
+     * 结束状态：task/stack pair identity 不变，CPU-local bindings 在 EarlyVm 下继续解析为同一个 BootTask 及其 `stack`。
 
 3. `启动根任务栈属性`（`BootTask.stack`）
 
    描述：`启动根任务` 唯一的静态 `Stack` 值属性；它只描述 storage/range，不具有 object identity、
-   state、ref 或 lifecycle。入口的两个 boot-only Action 原子改变 CPU-local task/stack bindings 与
-   `tp/sp`。
+   state、ref 或 lifecycle。入口的两个 boot-only Action 原子建立或刷新 CPU-local task/stack bindings。
 
    * `BindTaskStack` 内部栈操作 - 建立物理地址阶段的当前栈 binding
 
@@ -1214,9 +1213,9 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 11. `Vm.Setup()` 完成后执行 `TrapType.Setup()`：它先驱动 `ExceptionType.Preset()` 及四个异常子类型的
     `Preset()`，再把 BootCPU 的异常/中断响应入口从临时保护入口重置为正式的 `TrapFlowType` 响应流
     入口；成功后 TrapType 为 Ready，ExceptionType 及四个子类型为 Prepared，中断仍未开放。
-12. `TrapType.Setup()` 完成后调用单个 `CurrentTask.RefreshTaskStack(BootTask, BootTask.stack)`，原子将
-    `tp` 与 `sp` 重置为虚拟地址；同目标 pair 保持两种 binding identity，不处理抢占计数，也不存在
-    Stack lifecycle。
+12. `TrapType.Setup()` 完成后调用单个 `CurrentTask.RefreshTaskStack(BootTask, BootTask.stack)`，保持
+    同一 task/stack pair identity，并原子刷新它们在 EarlyVm 下的地址表示；该动作完成后才执行
+    `Soc.Preset`，且不处理抢占计数，也不存在 Stack lifecycle。
 13. 执行 `片上系统.preset()`，完成片上系统平台相关的早期预置，并直接提交 `BootInitFlow.Prepared`。
 
 当前时序图主要表达对象过程的编排顺序，不表达逐项源码对应关系。失败时进入 `FAIL` 状态的错误传播方式，以及每一步更细的依赖检查，后续继续补充。

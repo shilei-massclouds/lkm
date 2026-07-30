@@ -77,6 +77,11 @@ lifecycle 方法，也不得暴露 `preset/setup/enable` 或兼容 alias。该 s
 `TrampolineVm`、owner 缺失、owner/live SATP 不一致、错误/非唯一 ref、错误 carrier/stack 或跨 CPU
 Flow 必须在修改寄存器前记录诊断并 fail-stop。OnCpu 初态只由固件/架构入口执行权事实建立，不依赖
 尚未建立的 runqueue 或 runqueue current；各阶段只能静默验证该 carrier 仍为 OnCpu/canonical。
+刷新 bridge 还必须在提交前确认 `Vm/EarlyVm/TrapType` 已到达 Model 要求的 Ready 边界、`Soc.Preset`
+尚未开始，并验证现有 CurrentTask/CurrentStack pair 精确指向 BootTask 与 `BootTask.stack`。成功提交
+在当前 `_start_kernel` 风格的汇编路径中内联完成，随后沿同一路径继续，不建立专用 continuation 或
+额外 tail；该 Action 完成后才允许驱动 `Soc.Preset`。两个寄存器更新作为一个 Action 的不可分割语义
+由外围 `SingleTaskContext` / `SystemExclusive` 保证，而不是由新的 task-stack transaction 对象保证。
 
 ## TaskRef 与 storage
 

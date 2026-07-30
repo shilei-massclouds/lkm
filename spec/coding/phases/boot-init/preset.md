@@ -30,7 +30,7 @@ Preset 横跨三个物理实现段，但仍是 BootInitFlow 的一个 model tran
 | Kernel entry acceptance | `AcceptEnable` → `AssignCpuRef` → `PhysicalDirect.ActivateOnCpu(InitialActivation)` → 接受 Preset 并记录 `BootInitFlow.Started`；任何 Preset child 尚未启动 |
 | `_start` Preset head | `InterruptType.Preset` 先以 `csrw sie, zero` 实现全部分路门控关闭，再以 `csrw sip, zero` 实现全部待决信号清空；不得由此推断 `sstatus.SIE` 总门控已关闭；随后把 `__global_pointer$` 装入 `gp/x3`，并用 `.option norelax` 保护该初始化，以建立 `gp_relative_addressing_ready(KernelImage)`；`CurrentCPU.Action::DisableFpuVectorExecution` 再以 `li t0, SR_FS_VS` 和 `csrc CSR_STATUS, t0` 同时关闭 BootCPU 的 FS/VS 执行状态；然后清 BSS，把入口 `a0` 的原值保存到持久交接位置 |
 | `preset_until_vm_switch()` | 读取 Kernel Enable 前已发布的 `CpuGroup.cpus[0]`；验证 BootInitFlow 的 CpuRef、PhysicalDirect association、BootTask/TaskRef 与 `BootTask.stack` linker range，然后调用单个 `CurrentTask.BindTaskStack(BootTask, BootTask.stack)` 汇编提交块，原子装载物理 `tp/sp` 并发布首次 task/stack pair；通过 BootInitFlow 的 CpuRef 解析 `CurrentCPU.Setup`，驱动 `KernelAddrSpace.Preset`、`TrapType.Preset` 和 `Vm.Preset`；不得在这里提前驱动 `ExceptionType.Preset` |
-| `after_vm_setup()` | `Vm.Setup` 的 Trampoline→Early continuation 返回后先驱动 `TrapType.Setup`；该动作驱动 `ExceptionType.Preset` 及四个异常子类型 Preset，把正式响应汇编函数入口写入 `stvec`，并紧接着以 `csrw sscratch, zero` 标记当前处于内核态。随后才调用单个 `CurrentTask.RefreshTaskStack(BootTask, BootTask.stack)` 汇编提交块，保持 binding identity 并原子刷新虚拟 `tp/sp`，最后驱动 `Soc.Preset` |
+| `after_vm_setup()` | `Vm.Setup` 的 Trampoline→Early continuation 返回后先驱动 `TrapType.Setup`；该动作驱动 `ExceptionType.Preset` 及四个异常子类型 Preset，把正式响应汇编函数入口写入 `stvec`，并紧接着以 `csrw sscratch, zero` 标记当前处于内核态。随后验证 Vm/EarlyVm/TrapType Ready、Soc 尚为 Base 及现有 BootTask/stack pair 精确匹配，再在同一入口汇编路径内执行 `CurrentTask.RefreshTaskStack(BootTask, BootTask.stack)` 的连续指令，保持 binding identity 并刷新虚拟 `tp/sp`；该 Action 完成后继续后续入口步骤，随后才驱动 `Soc.Preset` |
 
 `Vm.Setup` 必须按 [`Vm Coding`](../../objects/vm.md) 在同一个 Preset 内通过 per-CPU `ActivateOnCpu`
 完成 TrampolineVm 到 EarlyVm 的 Handoff，并通过
@@ -69,10 +69,12 @@ CPU controller association、live SATP 和目标 `sp` range。首次 Action 还�
 
 两个 Action 必须由汇编各自提供一个连续提交块。PhysicalDirect 块等价于 Linux 的
 `la tp, init_task`、`la sp, init_thread_union + THREAD_SIZE`、`addi sp, sp, -PT_SIZE_ON_STACK`；EarlyVm
-块以当前虚拟地址表示重复装载相同符号。所有可失败检查在提交块前完成，`tp/sp` 写入之间不得调用
-C/Rust、插入可失败分支或 checkpoint；寄存器写完后才一次性发布两种 contextual binding。不存在公开
-`CurrentStack.BindStack` action 或 Signal。BootTask 的初始禁止抢占由静态初始化器建立，两种 Action
-均不读写 preempt count。
+块以当前虚拟地址表示重复装载相同符号，完成后沿同一 `_start_kernel` 风格的汇编路径继续；两者都不
+建立专用 continuation 或额外 tail。外围 `SingleTaskContext` / `SystemExclusive` 使整个入口序列对其它
+执行主体不可观察，因此 task/stack pair 的 Action 原子性不要求硬件多寄存器原子写。所有可失败检查
+在提交块前完成，`tp/sp` 写入之间不得调用会观察 current pair 的 C/Rust、插入可失败分支或 checkpoint；
+寄存器写完后 Action 才完成。不存在公开 `CurrentStack.BindStack` action 或 Signal。BootTask 的初始
+禁止抢占由静态初始化器建立，两种 Action 均不读写 preempt count。
 
 `BootTask.OnCpu` 的 `T` 只在 `_start` 观察一次；两个 task-stack Action 都不得推进 BootTask lifecycle
 或重复该 marker。两次调用必须解析到同一 `init_task_storage`/`TaskRef::BOOT` carrier 和同一

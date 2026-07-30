@@ -199,7 +199,7 @@ cause chain 和最后稳定 snapshot。
 | `sig-0048` | `Vm -> EarlyVm.ActivateOnCpu` | drives / 0046 | Action；CPU0 TrampolineVm -> EarlyVm Handoff，trampoline 仅对该 CPU 退役 |
 | `sig-0049` | `Vm -> KernelImage.Enable` | drives / 0046 | Ready -> Online，确认当前执行环境中的相对 `gp` 寻址机制可用 |
 | `sig-0050` | `BootInitFlow -> TrapType.Setup` | drives / 0020 | Prepared -> Ready，安装正式 event entry |
-| `sig-0051` | `BootInitFlow -> CurrentTask.RefreshTaskStack(BootTask, BootTask.stack)` | drives / 0020 | 单个 boot-only 上下文 Action；EarlyVm 下保持同一 pair identity 并原子刷新虚拟 `tp/sp` |
+| `sig-0051` | `BootInitFlow -> CurrentTask.RefreshTaskStack(BootTask, BootTask.stack)` | drives / 0020 | 单个 boot-only 上下文 Action；EarlyVm 下保持同一 pair identity 并原子刷新当前地址表示 |
 | `sig-0052` | `BootInitFlow -> Soc.Preset` | drives / 0020 | Base -> Prepared；Soc 与 CpuGroup 是 Kernel 平级子对象 |
 
 `sig-0020` 的 handler 进入前必须逐项验证 Kernel acceptance、RISC-V/SBI/OpenSBI、BootCpuRegisters、
@@ -226,7 +226,7 @@ Linux 6.12 的 RISC-V `head.S` 依次关闭 BootCPU 的全部中断分路门控�
 hart、建立 `tp/sp/stvec`，再由 `setup_vm()` 建立 trampoline、early kernel mapping 和 FDT fixmap，
 `relocate_enable_mmu()` 完成 trampoline 到 early page table 的切换。现有 entry checkpoint 与实现把
 Rust 前不可延迟的动作作为同一 BootInitFlow.Preset 的 head segment adoption，并在 VM continuation
-返回、TrapType/虚拟 `tp/sp` 与 Soc 完成后提交 `BootInitFlow.Prepared`；`EntrySuccessorPhase.Started`
+返回、TrapType、task/stack 地址表示刷新与 Soc 完成后提交 `BootInitFlow.Prepared`；`EntrySuccessorPhase.Started`
 只能出现在其后，属于第 3 组 Setup。`BootInitFlow.Started` 必须观察 Preset 已在前三项 Kernel child
 完成后被接受，并位于首个 Preset child action 之前；Rust 可以稍后验证和采用 head handoff facts，但
 这种物理 adoption 时点不得重排 Signal 账本、伪造提前 child commit 或提前提交 BootInitFlow.Prepared。

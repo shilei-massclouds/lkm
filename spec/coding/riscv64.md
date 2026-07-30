@@ -91,9 +91,13 @@ BootTask 入口不调用通用 `BindTask`。`BindTaskStack(BootTask, BootTask.st
 `RefreshTaskStack(BootTask, BootTask.stack)` 必须各自 lowering 为一个连续的 RISC-V 汇编提交块：前者在
 PhysicalDirect 下使用 Linux 对应的 `la tp, init_task`、`la sp, init_thread_union + THREAD_SIZE` 与
 `addi sp, sp, -PT_SIZE_ON_STACK` 建立物理 task/stack pair；后者在 EarlyVm 接管后以相同符号重新装载
-虚拟 `tp/sp`。所有可失败校验必须在进入提交块前完成；两次寄存器写之间不得调用 C/Rust、不得插入可
-失败分支或暴露 checkpoint。提交块成功后才一次性发布 CPU-local task/stack bindings；失败保持
-bindings 与 `tp/sp` 不变。两种 Action 不初始化或修改 preempt count，也不得导出独立 `BindStack` API。
+虚拟 `tp/sp`。两个块都直接内联在 Linux `_start_kernel` 风格的入口汇编路径中，完成后顺序执行后续
+入口代码；不得为任一 Action 发明专用 continuation 或额外 tail。Linux 中最终的 `tail start_kernel`
+位于 `soc_early_init` 与 BootInitFlow Prepared 边界之后，不属于 RefreshTaskStack。外围
+`SingleTaskContext` / `SystemExclusive` 保证 Action 的语义原子性，不要求硬件多寄存器原子写。所有可
+失败校验必须在进入提交块前完成；两次寄存器写之间不得调用会观察 current pair 的 C/Rust、不得插入
+可失败分支或暴露 checkpoint。Action 成功后才发布 CPU-local task/stack bindings；失败保持 bindings
+与 `tp/sp` 不变。两种 Action 不初始化或修改 preempt count，也不得导出独立 `BindStack` API。
 
 Linux 6.12 的参考路径是：`kernel/sched/core.c::__schedule()` 调用 `switch_to(prev, next, prev)`，RISC-V 宏 `arch/riscv/include/asm/switch_to.h::switch_to` 最终调用 `arch/riscv/kernel/entry.S::__switch_to`；`__switch_to` 保存 `prev->thread`、恢复 `next->thread` 后执行 `move tp, a1`，其中 `a1` 是 next `task_struct`。`arch/riscv/include/asm/current.h` 将 `current` 绑定为 `tp` 上的 `struct task_struct *`。
 

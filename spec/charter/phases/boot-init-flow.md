@@ -34,7 +34,8 @@ PhaseObject，它从 `_start` 开始承载并编排启动执行片段，同时�
   ExceptionType 及四个子类型为 Prepared，但中断仍未开放。
 - 正式响应入口重置完成后，Preset 才调用
   `CurrentTask.RefreshTaskStack(BootTask, BootTask.stack)`，保持 task/stack binding identity 并原子刷新
-  EarlyVm 下的地址表示；TrapType.Setup 不承担这一执行绑定刷新。
+  EarlyVm 下的地址表示；TrapType.Setup 不承担这一执行绑定刷新，该动作完成前也不得开始
+  `Soc.Preset`。
 - Setup 直接顺序驱动 `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、
   `SchedInitPhase`、`IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、
   `ProcessPreparePhase` 和 `BootInitRestInitPhase`。最后一个叶子 Online 后提交
@@ -58,9 +59,10 @@ Setup/Enable 的全部 boot execution 叶子都直接以 `BootInitFlow` 为 pare
 
 `boot` 只允许作为文件组织 namespace，不表示 `Boot`、`BootPhase`、入口前导 wrapper 或任何其它
 拥有 lifecycle 的对象。`BootInitFlow.Preset` 先以单个
-`CurrentTask.BindTaskStack(BootTask, BootTask.stack)` 原子建立物理 `tp/sp` 与首次 task/stack binding，
+`CurrentTask.BindTaskStack(BootTask, BootTask.stack)` 在 PhysicalDirect 下原子建立首次 task/stack binding，
 再在 EarlyVm 接管后以单个 `CurrentTask.RefreshTaskStack(BootTask, BootTask.stack)` 保持 identity 并
-原子刷新虚拟地址表示；不存在公开 `BindStack` Signal。全部事实成立后提交 Prepared。
+原子刷新当前地址表示；该刷新严格位于 `TrapType.Setup` 之后、`Soc.Preset` 之前。不存在公开
+`BindStack` Signal。全部事实成立后提交 Prepared。
 `BootInitFlow.Setup` 再按以下顺序直接驱动四个 boot 叶阶段：
 
 1. `EntrySuccessorPhase`；

@@ -201,15 +201,16 @@ lifecycle，也不产生第二次 Kernel Enable 接受。
 ### BootInitFlow.Preset 的入口前导步骤
 
 `BootInitFlow.Preset` 依次调用两个 boot-only 上下文 Action：PhysicalDirect 下的
-`CurrentTask.Action::BindTaskStack(BootTask, BootTask.stack)` 原子建立物理 `tp/sp` 与 CPU-local
-task/stack pair，VM controller handoff 到 EarlyVm 后的
+`CurrentTask.Action::BindTaskStack(BootTask, BootTask.stack)` 原子建立 CPU-local task/stack pair，
+EarlyVm 接管后的
 `CurrentTask.Action::RefreshTaskStack(BootTask, BootTask.stack)` 保持同一 pair identity 并原子刷新为
-虚拟地址表示。每次调用都是单个 Action/Signal，continuation 不得观察半绑定状态；它们不是 Task、
-Stack、Flow、CPU 子对象、slot 或独立 lifecycle，也不改变 PID 0 identity。Stack 是 Task 类型上的值
-属性，不是对象；`BootTask` 与静态 `BootTask.stack` 在入口前已经由镜像初始化器构造。任一失败都保留
-调用前的 `tp/sp` 和 CPU-local bindings。BootTask 的初始禁止抢占不由两种 Action 初始化或改变。本步骤
-验证稳定 storage、PID 0、唯一有效 `TaskRef::BOOT`、canonical identity、active Flow、
-`BootTask.stack` identity/range、当前 CPU active translation controller 与 live SATP。
+当前地址表示。刷新只接受已经绑定的同一 BootTask/stack pair，并要求 BootTask 仍拥有当前执行权；
+它严格位于 `TrapType.Setup` 之后、`Soc.Preset` 之前。每次调用都是单个 Action/Signal，continuation 不得
+观察半绑定状态；它们不是 Task、Stack、Flow、CPU 子对象、slot 或独立 lifecycle，也不改变 PID 0
+identity。Stack 是 Task 类型上的值属性，不是对象；`BootTask` 与静态 `BootTask.stack` 在入口前已经由
+镜像初始化器构造。任一失败都保留调用前的 CPU-local bindings 和执行现场。BootTask 的初始禁止抢占
+不由两种 Action 初始化或改变。本步骤验证稳定 storage、PID 0、唯一有效 `TaskRef::BOOT`、canonical
+identity、active Flow、`BootTask.stack` identity/range 与当前 CPU 的地址环境。
 
 ### BootInitFlow 的引导叶子
 

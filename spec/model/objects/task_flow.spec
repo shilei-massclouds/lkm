@@ -88,6 +88,10 @@ type TaskFlow: PhaseObject {
             state_effect: StateEffect::None;
             depends_on {
                 boot_task_refresh_task_stack_boundary_valid(self, task, stack);
+                Vm.state == State::Ready;
+                EarlyVm.state == State::Ready;
+                CurrentCPU.trap.state == State::Ready;
+                Soc.state == State::Base;
                 boot_task_stack_argument_matches_task(task, stack);
                 task.state == State::OnCpu;
                 task_execution_authority_is(task, TaskExecutionAuthority::Live);
@@ -97,6 +101,8 @@ type TaskFlow: PhaseObject {
                 current_task_bind_task_has_unique_valid_ref(task);
                 current_task_stack_attribute_valid(task, stack);
                 current_task_bind_stack_pointer_valid_for_boundary(self, task, stack);
+                current_task_binding_committed(CurrentCPU, task, self);
+                current_stack_binding_committed(CurrentCPU, task, stack);
                 current_task_stack_binding_pair_consistent(CurrentCPU, task, stack);
                 cpu_active_translation_controller_for_ref_is(
                     self.cpu_ref,

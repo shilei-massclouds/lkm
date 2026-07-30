@@ -153,12 +153,14 @@ activation 边界由 [`objects/README.md`](../objects/README.md) 所列独立 Ch
 只规定 Kernel 的直接拥有关系和启动编排入口。
 
 `CurrentTask.Action::BindTaskStack(BootTask, BootTask.stack)` 在 PhysicalDirect activation 后调用一次，
-以单个 boot-only Action 原子建立启动 CPU 到 BootTask 及其 stack 属性的 binding，并实际写物理地址表示
-的 `tp/sp`。EarlyVm activation 后调用
+以单个 boot-only Action 原子建立启动 CPU 到 BootTask 及其 stack 属性的 binding。EarlyVm activation
+后调用
 `CurrentTask.Action::RefreshTaskStack(BootTask, BootTask.stack)`，保持同一 task/stack pair identity 并
-以单个 Action 原子刷新虚拟地址表示的 `tp/sp`。BootTask 的初始禁止抢占来自静态初始化，两种 Action
-均不初始化或改变 preempt count。错误 controller、controller association 缺失或 controller/live SATP
-不一致必须诊断并 fail-stop；任一校验或提交失败不得留下单独更新的 `tp`、`sp` 或 CPU-local binding。
+以单个 Action 原子刷新当前地址表示。刷新前必须确认现有 pair 恰好仍是 BootTask 与
+`BootTask.stack`、BootTask 仍拥有当前执行权且 EarlyVm 已接管；成功后两种 binding 在 EarlyVm 下继续
+解析到同一 pair。BootTask 的初始禁止抢占来自静态初始化，两种 Action 均不初始化或改变 preempt
+count。错误地址环境或执行归属必须诊断并 fail-stop；任一校验或提交失败不得留下部分更新的
+CPU-local binding 或执行现场。
 `BootTask.stack` 是 Task 类型上的静态属性值，不存在独立 stack object/state；两种 Action 不推进
 lifecycle，也不暴露公开 `BindStack` Signal。后续 `BootTask.EnableStackGuard` 只在该属性上建立栈边界/
 溢出保护事实。

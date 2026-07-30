@@ -85,14 +85,15 @@ logical-id 的 initial idle Flow。AP 首次 Suspend 才产生第一个可恢复
 
 BootTask 与其 stack 属性的物理/虚拟执行绑定不使用通用 `BindTask`。BootInitFlow 在
 `PhysicalDirect` 下调用 boot-only `CurrentTask.Action::BindTaskStack(BootTask, BootTask.stack)`，原子
-建立启动 CPU 到静态 task/stack pair 的首次 binding 并实际写 `tp/sp`；EarlyVm 接管后调用 boot-only
-`CurrentTask.Action::RefreshTaskStack(BootTask, BootTask.stack)`，保持两种 binding identity 并原子
-刷新同一 carrier/stack 的地址表示。两者不属于 Task lifecycle，也不建立 Stack object、独立 binding
-对象、CPU owned child 或 slot。BootTask 的初始禁止抢占是 boot-only const 初始化器给出的静态属性，
-两种 Action 都不得初始化或改变 preempt count。错误 controller、controller 与 live SATP 不一致、
-错误/非唯一 TaskRef、stack 值不等于 `BootTask.stack`、越界 `sp` 或跨 CPU 目标都必须在提交前诊断并
-fail-stop；失败保持 `tp/sp` 与两种 binding 不变。入口各阶段只能验证 `BootTask.OnCpu/Live` 与静态
-stack 属性，不能推进或重放 Stack lifecycle。
+建立启动 CPU 到静态 task/stack pair 的首次 binding；EarlyVm 接管后调用 boot-only
+`CurrentTask.Action::RefreshTaskStack(BootTask, BootTask.stack)`，只在现有 pair 恰好仍是 BootTask 与
+`BootTask.stack` 且 BootTask 仍拥有当前执行权时，保持两种 binding identity 并原子刷新同一
+carrier/stack 的地址表示。两者不属于 Task lifecycle，也不建立 Stack object、独立 binding 对象、
+CPU owned child 或 slot。BootTask 的初始禁止抢占是 boot-only const 初始化器给出的静态属性，两种
+Action 都不得初始化或改变 preempt count。错误地址环境、错误或非唯一 TaskRef、stack 值不等于
+`BootTask.stack`、stack 范围不可用或跨 CPU 目标都必须在提交前诊断并 fail-stop；失败保持两种 binding
+和执行现场不变。入口各阶段只能验证 `BootTask.OnCpu/Live` 与静态 stack 属性，不能推进或重放 Stack
+lifecycle。
 
 普通 Task 的 `Preset` 统一建立 fresh identity、`TaskRef`、typed initial Flow association、初始 Flow ownership 与 clone
 specification；`Setup` 统一消费 `TaskCreationCore` 已提交的 copy-process 事实，并建立 PID、thread
