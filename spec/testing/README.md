@@ -131,9 +131,10 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
   状态必须与 charter 账本一致，`task_flow_started(BootInitFlow)`、中断关闭、BootCPU 浮点/向量默认关闭及受控使用策略、BSS 清零完成且作为普通可写内存使用、`boot_cpu_hartid_recorded_for_later_use(BootCpuRegisters.a0)`、物理/虚拟 `tp/sp/gp`、
   early event、DTB/fixmap、VM translation 和 Soc early-platform 事实必须存在。结构化 Signal 必须把
   `selector_resolutions` 数组必须保留 `CurrentCPU` 的 source flow `BootInitFlow`、source ref `BootCPURef`
-  与 canonical target `CpuGroup.cpus[0]`，以及 `CurrentTask` 的 source flow `BootInitFlow`、source ref
-  `BootTaskRef` 与 canonical target `BootTask`。边界不得包含 `BootCurrentCPU`、`BootCpuCurrentTask` 或
-  `CurrentTaskSlot` state/instance，也不得创建、发送、接收或处理
+  与 canonical target `CpuGroup.cpus[0]`。两次 BindTask Signal 必须分别展示“首次建立”和“同目标刷新”
+  的 Model 注释；边界 snapshot 必须保存 CPU0 -> BootTask/BootTaskRef/BootInitFlow 的 contextual binding、
+  第二次地址表示与刷新序号。边界不得包含 `BootCurrentCPU`、`BootCpuCurrentTask`、CurrentStack、
+  BindStack 或 `CurrentTaskSlot` state/instance，也不得创建、发送、接收或处理
   BootInitFlow.Setup；该边界不得提前包含 `cpu_hartid_ready(CpuGroup.cpus[0], ...)`。compact text 必须显示 reached/before-send 与 0016 stopped，verbose text 必须保留
   真实 Human root、0020 identity、handler 和 reached boundary，结构化 event 必须保留 context，且两种
   text render 都不得改变 derive/view/snapshot。

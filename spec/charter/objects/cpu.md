@@ -56,8 +56,10 @@ ExceptionType.{page_fault, syscall, breakpoint, unexpected}
 ```
 
 这些 resident 资源随 CPU 建立并保持各自 lifecycle、入口容量与 handler/gate 状态，任何一个 CPU 的
-状态都不得由全局对象或其它 CPU 的缓存副本替代。CurrentTask 不属于 CPU 子对象；它由底层 effective
-TaskFlow 的 parent 解析，不存在 per-CPU current-task slot 或同义权威副本。
+状态都不得由全局对象或其它 CPU 的缓存副本替代。CurrentTask 不属于 CPU 子对象，也不存在
+`CurrentTaskSlot` lifecycle；它是 CPU 执行上下文在入口或 scheduler commit 提交的 task binding，解析
+时与 effective TaskFlow 的 parent/owner/active 关系交叉校验。每个 CPU 的 binding 独立，不能由全局
+单例或其它 CPU 的缓存副本替代。
 
 `active_translation_controller` 是 CPU-local 的 optional typed association，不是另一份页表状态。
 尚未进入内核的 stopped AP 必须保持 association absent，且没有该 CPU 的 live SATP 事实；启动协议中
@@ -76,7 +78,8 @@ TaskFlow 的 parent 解析，不存在 per-CPU current-task slot 或同义权威
 CurrentCPU := dereference(effective_task_flow.cpu_ref)
 ```
 
-它只能从具有有效 CpuRef 的当前 TaskFlow 构造。TaskFlow 及其同步 `drives` 子孙继承同一个解析结果；
+它只能从具有有效 CpuRef 的当前 TaskFlow 构造，包括 BootTask 首次 BindTask 之前的 BootInitFlow。
+CurrentCPU 不依赖 CurrentTask 已经绑定。TaskFlow 及其同步 `drives` 子孙继承同一个解析结果；
 异步 `emits` 不继承，接收方必须从自己的 effective TaskFlow 重新解析。每次 trace 必须记录 canonical
 target（如 `CpuGroup.cpus[0]`）和解析来源 Flow/CpuRef，不能只记录字符串 `CurrentCPU`。
 

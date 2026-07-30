@@ -2058,7 +2058,10 @@ class SignalPipelineTests(unittest.TestCase):
             type TaskRef { }
             enum TaskExecutionAuthority { None, Reserved, Live }
             type Task {
-                associations { mutable active_flow: TaskFlow; }
+                associations {
+                    initial_flow: TaskFlow;
+                    mutable active_flow: TaskFlow;
+                }
                 processes {
                     Action::Touch { state_effect: StateEffect::None; }
                 }
@@ -2100,18 +2103,22 @@ class SignalPipelineTests(unittest.TestCase):
                     Action::AssignCpuRef(cpu_ref: CpuRef) {
                         updates { self.cpu_ref = cpu_ref; }
                     }
+                    Action::BindTask(task: Task) {
+                        state_effect: StateEffect::None;
+                    }
                 }
             }
             external Human {
                 drives {
                     CpuGroup.Transition::Preset;
                     Flow.Action::AssignCpuRef(BootCPURef);
+                    Flow.Action::BindCurrent;
                 }
                 emits { Flow.Action::Run; }
             }
             object CpuGroup: CpuGroupObject { }
             object BootTask: Task {
-                associations { active_flow = Flow; }
+                associations { initial_flow = Flow; active_flow = Flow; }
                 initial_state: State::OnCpu;
                 state State::OnCpu {
                     invariant {
@@ -2130,6 +2137,9 @@ class SignalPipelineTests(unittest.TestCase):
                         task_flow_owner_is(Flow, BootTask);
                     }
                     actions {
+                        on Action::BindCurrent {
+                            drives { CurrentTask.Action::BindTask(BootTask); }
+                        }
                         on Action::Run {
                             drives { SyncChild.Action::UseCurrent; }
                             emits { Async.Action::UseCurrent; }
@@ -2179,6 +2189,7 @@ class SignalPipelineTests(unittest.TestCase):
                 },
                 {
                     "selector": "CurrentTask",
+                    "source_cpu": "CpuGroup.cpus[0]",
                     "source_flow": "Flow",
                     "source_task_ref": "BootTaskRef",
                     "target": "BootTask",
@@ -2215,9 +2226,19 @@ class SignalPipelineTests(unittest.TestCase):
             )
             return f"""
                 enum TaskExecutionAuthority {{ None, Reserved, Live }}
+                type CpuRef {{ }}
                 type TaskRef {{ }}
+                type CPU {{
+                    initial_state: State::Base;
+                    state State::Base {{
+                        invariant {{ cpu_ref_targets(BootCPURef, CPU0); }}
+                    }}
+                }}
                 type Task {{
-                    associations {{ mutable active_flow: TaskFlow; }}
+                    associations {{
+                        initial_flow: TaskFlow;
+                        mutable active_flow: TaskFlow;
+                    }}
                     processes {{
                         Action::Touch(task_ref: TaskRef) {{
                             state_effect: StateEffect::None;
@@ -2226,7 +2247,15 @@ class SignalPipelineTests(unittest.TestCase):
                         }}
                     }}
                 }}
-                type TaskFlow {{ parent: Task; }}
+                type TaskFlow {{
+                    parent: Task;
+                    associations {{ cpu_ref: CpuRef; }}
+                    processes {{
+                        Action::BindTask(task: Task) {{
+                            state_effect: StateEffect::None;
+                        }}
+                    }}
+                }}
                 external Human {{
                     drives {{ {flow_name}.Action::Run; }}
                     emits {{ Async.Action::Noop; }}
@@ -2237,8 +2266,9 @@ class SignalPipelineTests(unittest.TestCase):
                         actions {{ on Action::Noop {{ }} }}
                     }}
                 }}
+                object CPU0: CPU {{ }}
                 object {task_name}: Task {{
-                    associations {{ active_flow = {active_flow}; }}
+                    associations {{ initial_flow = {flow_name}; active_flow = {active_flow}; }}
                     initial_state: State::{state};
                     state State::{state} {{
                         invariant {{
@@ -2250,12 +2280,13 @@ class SignalPipelineTests(unittest.TestCase):
                     }}
                 }}
                 object OtherTask: Task {{
-                    associations {{ active_flow = OtherFlow; }}
+                    associations {{ initial_flow = OtherFlow; active_flow = OtherFlow; }}
                     initial_state: State::Online;
                     state State::Online {{ }}
                 }}
                 object {flow_name}: TaskFlow {{
                     parent: {parent};
+                    associations {{ cpu_ref = BootCPURef; }}
                     initial_state: State::Base;
                     state State::Base {{
                         invariant {{
@@ -2264,13 +2295,17 @@ class SignalPipelineTests(unittest.TestCase):
                         }}
                         actions {{
                             on Action::Run {{
-                                drives {{ CurrentTask.Action::Touch(CurrentTaskRef); }}
+                                drives {{
+                                    CurrentTask.Action::BindTask({task_name});
+                                    CurrentTask.Action::Touch(CurrentTaskRef);
+                                }}
                             }}
                         }}
                     }}
                 }}
                 object OtherFlow: TaskFlow {{
                     parent: OtherTask;
+                    associations {{ cpu_ref = BootCPURef; }}
                     initial_state: State::Base;
                     state State::Base {{
                         invariant {{
@@ -2295,6 +2330,7 @@ class SignalPipelineTests(unittest.TestCase):
             touched["selector_resolutions"],
             [{
                 "selector": "CurrentTask",
+                "source_cpu": "CPU0",
                 "source_flow": "Flow",
                 "source_task_ref": "BootTaskRef",
                 "target": "BootTask",
@@ -2302,8 +2338,8 @@ class SignalPipelineTests(unittest.TestCase):
         )
 
         cases = [
-            (source(owner="OtherTask"), "disagrees with owner"),
-            (source(active_flow="OtherFlow"), "does not match effective Flow"),
+            (source(owner="OtherTask"), "parent/owner does not uniquely match"),
+            (source(active_flow="OtherFlow"), "parent/owner does not uniquely match"),
             (source(state="Online"), "is not OnCpu"),
             (source(authority="Reserved"), "is not Live"),
             (source(ready_ref=False), "exactly one live TaskRef"),
@@ -2315,21 +2351,249 @@ class SignalPipelineTests(unittest.TestCase):
                     invalid_source, None, max_depth="all", max_breadth="all"
                 )
                 self.assertEqual(checked["verdict"], "failed")
-                failed = next(item for item in derivation["signals"] if item["outcome"] == "failed")
+                failed = next(
+                    item
+                    for item in reversed(derivation["signals"])
+                    if item["outcome"] == "failed"
+                )
                 self.assertIn(expected, failed["reason"])
 
-        ap_derivation, ap_checked, _ = self.run_source(
-            source(task_name="ApIdleTask", flow_name="ApIdleFlow"),
-            None,
-            max_depth="all",
-            max_breadth="all",
+    def test_current_task_binding_is_cpu_local_atomic_and_required_for_selection(self) -> None:
+        prebind_source = """
+            type CpuRef { }
+            type TaskRef { }
+            enum TaskExecutionAuthority { None, Reserved, Live }
+            type CPU {
+                initial_state: State::Prepared;
+                state State::Prepared {
+                    actions {
+                        on Action::Touch { state_effect: StateEffect::None; }
+                    }
+                }
+            }
+            type Task {
+                associations { initial_flow: TaskFlow; mutable active_flow: TaskFlow; }
+                processes {
+                    Action::Touch { state_effect: StateEffect::None; }
+                }
+            }
+            type TaskFlow {
+                parent: Task;
+                associations { cpu_ref: CpuRef; }
+            }
+            external Human {
+                drives {
+                    Flow.Action::ProbeCpu;
+                    Flow.Action::ProbeTask;
+                }
+                emits { Async.Action::Noop; }
+            }
+            system Async {
+                initial_state: State::Base;
+                state State::Base {
+                    actions { on Action::Noop { } }
+                }
+            }
+            object CPU0: CPU { }
+            object BootTask: Task {
+                associations { initial_flow = Flow; active_flow = Flow; }
+                initial_state: State::OnCpu;
+                state State::OnCpu {
+                    invariant {
+                        task_execution_authority_is(BootTask, TaskExecutionAuthority::Live);
+                        task_ref_targets(BootTaskRef, BootTask);
+                        task_ref_ready(BootTaskRef);
+                    }
+                }
+            }
+            object Flow: TaskFlow {
+                parent: BootTask;
+                associations { cpu_ref = BootCPURef; }
+                initial_state: State::Base;
+                state State::Base {
+                    invariant {
+                        cpu_ref_targets(BootCPURef, CPU0);
+                        task_flow_parent_is(Flow, BootTask);
+                        task_flow_owner_is(Flow, BootTask);
+                    }
+                    actions {
+                        on Action::ProbeCpu { drives { CurrentCPU.Action::Touch; } }
+                        on Action::ProbeTask { drives { CurrentTask.Action::Touch; } }
+                    }
+                }
+            }
+        """
+        derivation, checked, _ = self.run_source(
+            prebind_source, None, max_depth="all", max_breadth="all"
         )
-        self.assertEqual(ap_checked["verdict"], "complete")
-        ap_touch = next(item for item in ap_derivation["signals"] if item["name"] == "Touch")
-        self.assertEqual(ap_touch["target"], "ApIdleTask")
+        self.assertEqual(checked["verdict"], "failed")
+        cpu_touch = next((
+            item
+            for item in derivation["signals"]
+            if item["name"] == "Touch" and item["target"] == "CPU0"
+        ), None)
+        self.assertIsNotNone(
+            cpu_touch,
+            [(item["target"], item["name"], item["outcome"], item.get("reason")) for item in derivation["signals"]],
+        )
+        self.assertEqual(cpu_touch["outcome"], "completed")
         self.assertEqual(
-            ap_touch["selector_resolutions"][0]["source_task_ref"], "ApIdleTaskRef"
+            cpu_touch["selector_resolutions"][0]["source_flow"], "Flow"
         )
+        failed_probe = next(
+            item
+            for item in derivation["signals"]
+            if item["name"] == "ProbeTask"
+        )
+        self.assertIn("has no bound Task", failed_probe["reason"])
+        self.assertEqual(failed_probe["before_snapshot"], failed_probe["after_snapshot"])
+        self.assertEqual(
+            failed_probe["after_snapshot"]["contextual_bindings"], {}
+        )
+
+        def rebind_source(*, other_cpu_ref: str) -> str:
+            return f"""
+                type CpuRef {{ }}
+                type TaskRef {{ }}
+                enum TaskExecutionAuthority {{ Live }}
+                type CPU {{
+                    initial_state: State::Base;
+                    state State::Base {{ }}
+                }}
+                type Task {{
+                    associations {{ initial_flow: TaskFlow; mutable active_flow: TaskFlow; }}
+                }}
+                type TaskFlow {{
+                    parent: Task;
+                    associations {{ cpu_ref: CpuRef; }}
+                    processes {{
+                        Action::BindTask(task: Task) {{ state_effect: StateEffect::None; }}
+                    }}
+                }}
+                external Human {{
+                    drives {{
+                        Flow.Action::BindBoot;
+                        Flow.Action::BindOther;
+                    }}
+                    emits {{ Async.Action::Noop; }}
+                }}
+                system Async {{
+                    initial_state: State::Base;
+                    state State::Base {{
+                        actions {{ on Action::Noop {{ }} }}
+                    }}
+                }}
+                object CPU0: CPU {{ }}
+                object CPU1: CPU {{ }}
+                object BootTask: Task {{
+                    associations {{ initial_flow = Flow; active_flow = Flow; }}
+                    initial_state: State::OnCpu;
+                    state State::OnCpu {{
+                        invariant {{
+                            task_execution_authority_is(BootTask, TaskExecutionAuthority::Live);
+                            task_ref_targets(BootTaskRef, BootTask);
+                            task_ref_ready(BootTaskRef);
+                        }}
+                    }}
+                }}
+                object OtherTask: Task {{
+                    associations {{ initial_flow = OtherFlow; active_flow = OtherFlow; }}
+                    initial_state: State::OnCpu;
+                    state State::OnCpu {{
+                        invariant {{
+                            task_execution_authority_is(OtherTask, TaskExecutionAuthority::Live);
+                            task_ref_targets(OtherTaskRef, OtherTask);
+                            task_ref_ready(OtherTaskRef);
+                        }}
+                    }}
+                }}
+                object Flow: TaskFlow {{
+                    parent: BootTask;
+                    associations {{ cpu_ref = BootCPURef; }}
+                    initial_state: State::Base;
+                    state State::Base {{
+                        invariant {{
+                            cpu_ref_targets(BootCPURef, CPU0);
+                            cpu_ref_targets(ApCPURef, CPU1);
+                            task_flow_parent_is(Flow, BootTask);
+                            task_flow_owner_is(Flow, BootTask);
+                        }}
+                        actions {{
+                            on Action::BindBoot {{
+                                drives {{ CurrentTask.Action::BindTask(BootTask); }}
+                            }}
+                            on Action::BindOther {{
+                                drives {{ CurrentTask.Action::BindTask(OtherTask); }}
+                            }}
+                        }}
+                    }}
+                }}
+                object OtherFlow: TaskFlow {{
+                    parent: OtherTask;
+                    associations {{ cpu_ref = {other_cpu_ref}; }}
+                    initial_state: State::Base;
+                    state State::Base {{
+                        invariant {{
+                            task_flow_parent_is(OtherFlow, OtherTask);
+                            task_flow_owner_is(OtherFlow, OtherTask);
+                        }}
+                    }}
+                }}
+            """
+
+        preserved_cpu1 = {
+            "task": "OtherTask",
+            "task_ref": "OtherTaskRef",
+            "source_flow": "OtherFlow",
+            "source_cpu_ref": "ApCPURef",
+            "address_view": "CanonicalTaskAddress",
+            "revision": 7,
+        }
+        scenario = {
+            "contextual_bindings": {
+                "current_task": {"CPU1": preserved_cpu1}
+            }
+        }
+        for other_cpu_ref, expected in (
+            ("BootCPURef", "outside scheduler switch commit"),
+            ("ApCPURef", "does not belong to CPU CPU0"),
+        ):
+            with self.subTest(other_cpu_ref=other_cpu_ref):
+                derivation, checked, _ = self.run_source(
+                    rebind_source(other_cpu_ref=other_cpu_ref),
+                    None,
+                    max_depth="all",
+                    max_breadth="all",
+                    scenario=scenario,
+                )
+                self.assertEqual(checked["verdict"], "failed")
+                failed_bind = next(
+                    item
+                    for item in reversed(derivation["signals"])
+                    if item["name"] == "BindTask" and item["outcome"] == "failed"
+                )
+                self.assertIn(expected, failed_bind["reason"])
+                self.assertEqual(
+                    failed_bind["before_snapshot"], failed_bind["after_snapshot"]
+                )
+                bindings = failed_bind["after_snapshot"]["contextual_bindings"][
+                    "current_task"
+                ]
+                self.assertEqual(bindings["CPU0"]["task"], "BootTask")
+                self.assertEqual(bindings["CPU1"], preserved_cpu1)
+                states = failed_bind["after_snapshot"]["states"]
+                instances = failed_bind["after_snapshot"]["instances"]
+                self.assertFalse(
+                    any(
+                        forbidden in name
+                        for name in (*states, *instances)
+                        for forbidden in (
+                            "CurrentTaskSlot",
+                            "CurrentStack",
+                            "BindStack",
+                        )
+                    )
+                )
 
     def test_repeated_runs_have_identical_ids_order_and_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3258,7 +3522,7 @@ class SignalPipelineTests(unittest.TestCase):
                     "TrampolineVm": "Vm", "EarlyVm": "Vm", "SwapperVm": "Vm",
                 },
             )
-            bind_body = systems["BootInitFlow"]["handlers_by_name"]["BindBootTaskEntry"][0]["body"]
+            bind_body = systems["BootInitFlow"]["handlers_by_name"]["BindTask"][0]["body"]
             bind_guards = next(item["entries"] for item in bind_body if item["kind"] == "depends_on")
             bind_controller_guard = next(item for item in bind_guards if item["kind"] == "any_of")
             self.assertEqual(
@@ -4068,7 +4332,7 @@ class SignalPipelineTests(unittest.TestCase):
                 (28, "KernelAddrSpace", "UserSpaceReserve", "Preset", "drives", 26, "Transition", "Base", "Ready", "completed"),
                 (29, "BootInitFlow", "CpuGroup.cpus[0]", "Setup", "drives", 20, "Transition", "Prepared", "Ready", "completed"),
                 (30, "BootInitFlow", "CpuGroup.cpus[0].trap.interrupt", "Setup", "drives", 20, "Transition", "Prepared", "Ready", "completed"),
-                (31, "BootInitFlow", "BootInitFlow", "BindBootTaskEntry", "drives", 20, "Action", "Base", "Base", "completed"),
+                (31, "BootInitFlow", "BootInitFlow", "BindTask", "drives", 20, "Action", "Base", "Base", "completed"),
                 (32, "BootInitFlow", "BootInitStack", "Preset", "drives", 20, "Transition", "Base", "Prepared", "completed"),
                 (33, "BootInitFlow", "CpuGroup.cpus[0].trap", "Preset", "drives", 20, "Transition", "Base", "Prepared", "completed"),
                 (34, "BootInitFlow", "CpuGroup.cpus[0].trap.exception", "Preset", "drives", 20, "Transition", "Base", "Prepared", "completed"),
@@ -4089,7 +4353,7 @@ class SignalPipelineTests(unittest.TestCase):
                 (49, "Vm", "EarlyVm", "ActivateOnCpu", "drives", 47, "Action", "Ready", "Ready", "completed"),
                 (50, "Vm", "KernelImage", "Enable", "drives", 47, "Transition", "Ready", "Online", "completed"),
                 (51, "BootInitFlow", "CpuGroup.cpus[0].trap", "Setup", "drives", 20, "Transition", "Prepared", "Ready", "completed"),
-                (52, "BootInitFlow", "BootInitFlow", "BindBootTaskEntry", "drives", 20, "Action", "Base", "Base", "completed"),
+                (52, "BootInitFlow", "BootInitFlow", "BindTask", "drives", 20, "Action", "Base", "Base", "completed"),
                 (53, "BootInitFlow", "BootInitStack", "Setup", "drives", 20, "Transition", "Prepared", "Ready", "completed"),
                 (54, "BootInitFlow", "Soc", "Preset", "drives", 20, "Transition", "Base", "Prepared", "completed"),
             ]
@@ -4157,16 +4421,32 @@ class SignalPipelineTests(unittest.TestCase):
                     }
                 ],
             )
+            first_binding = derivation["signals"][30]["after_snapshot"][
+                "contextual_bindings"
+            ]["current_task"]["CpuGroup.cpus[0]"]
             self.assertEqual(
-                derivation["signals"][30]["selector_resolutions"],
-                [
-                    {
-                        "selector": "CurrentTask",
-                        "source_flow": "BootInitFlow",
-                        "source_task_ref": "BootTaskRef",
-                        "target": "BootTask",
-                    }
-                ],
+                first_binding,
+                {
+                    "address_view": "TranslationControllerKind::PhysicalDirect",
+                    "revision": 1,
+                    "source_cpu_ref": "BootCPURef",
+                    "source_flow": "BootInitFlow",
+                    "task": "BootTask",
+                    "task_ref": "BootTaskRef",
+                },
+            )
+            self.assertIn(
+                "首次建立", derivation["signals"][30]["handler"]["description"]
+            )
+            second_binding = derivation["signals"][51]["after_snapshot"][
+                "contextual_bindings"
+            ]["current_task"]["CpuGroup.cpus[0]"]
+            self.assertEqual(second_binding["task"], "BootTask")
+            self.assertEqual(second_binding["address_view"], "TranslationControllerKind::EarlyVm")
+            self.assertEqual(second_binding["revision"], 2)
+            self.assertIn(
+                "第二次绑定同一 Task",
+                derivation["signals"][51]["handler"]["description"],
             )
             self.assertTrue(
                 all("selector_resolution" not in item for item in derivation["signals"])
@@ -4289,9 +4569,13 @@ class SignalPipelineTests(unittest.TestCase):
                 "cpu_user_fpu_vector_enable_follows_task_need_and_system_policy(CpuGroup.cpus[0])",
                 "assert:BootCpuRegisters.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack)",
                 "assert:BootCpuRegisters.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode)",
-                "boot_task_entry_bound_for_active_controller(CpuGroup.cpus[0],BootTask)",
-                "boot_task_entry_preempt_count_initialized_once(BootTask)",
-                "boot_task_entry_preempt_count_preserved(BootTask)",
+                "boot_task_current_binding_established(CpuGroup.cpus[0],BootTask)",
+                "boot_task_current_binding_refreshed_for_active_controller(CpuGroup.cpus[0],BootTask)",
+                "boot_task_preemption_is_static_initial_property(BootTask)",
+                "current_task_binding_committed(CpuGroup.cpus[0],BootTask,BootInitFlow)",
+                "current_task_binding_ref_is(CpuGroup.cpus[0],BootTaskRef)",
+                "current_task_binding_address_view_is(CpuGroup.cpus[0],BootTask,TranslationControllerKind::EarlyVm)",
+                "current_task_binding_revision_is(CpuGroup.cpus[0],2)",
                 "cpu_active_translation_controller_for_ref_is(BootCPURef,TranslationControllerKind::EarlyVm)",
                 "trap_formal_entry_ready(CpuGroup.cpus[0].trap)",
                 "early_vm_translation_sync_complete(EarlyVm,BootCPURef)",
@@ -4366,14 +4650,14 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(snapshot.read_bytes(), BOOT_INIT_SETUP_SCENARIO.read_bytes())
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "457fb876ec56fabdf6a819195515cc93c753e313e897f9d8ac7ca956498be35d",
+                "19590d83fd0d75f6fef63172cd841bde9d620b7d4c5b26ad6711b000c062d5a5",
             )
             self.assertEqual(
                 {
                     derivation["model_fingerprint"], model["model_fingerprint"],
                     view["model_fingerprint"], saved["model_fingerprint"],
                 },
-                {"sha256:ce5ffd10a87a67689fabfd6d0ea42bcb309135b72cf12f485cebf11ae20cf8c0"},
+                {"sha256:20f767313cfcc9c547c8352bd372d2d4b8c4e530ea885591979ed3b4b6e4a08a"},
             )
             with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
                 compact_text = render_text(view)

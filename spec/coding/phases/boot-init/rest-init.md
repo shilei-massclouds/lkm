@@ -129,11 +129,12 @@ effective Flow, validate that Flow's `CpuRef`, and then pick next from
 `CurrentTaskRef` is `prev_ref`; it must not infer current identity from
 Scheduler counters, `BootRunQueue.curr`, or another stored copy.
 
-SwitchTo must synchronously send `prev.Suspend`, save the old context, commit
-the architecture switch with next's canonical `tp`, and perform the physical
-stack switch. On the new stack, finish first validates the raw implementation
-identity and then atomically commits next's `OnCpu/Live` state, active Flow,
-Flow CPU assignment and the resulting `CurrentTask` selection. Only the
+SwitchTo must synchronously send `prev.Suspend`, save the old context, restore
+the next context, and perform the physical stack switch. At the formal switch
+commit, assembly must execute `CurrentTask.BindTask(next)` by writing next's
+currently usable canonical address to `tp/x4`. On the new stack, finish validates
+that raw implementation identity and atomically commits next's `OnCpu/Live`
+state, active Flow, Flow CPU assignment and CPU-local CurrentTask binding. Only the
 new Task's entry/resume point may handle `next.Continue`: a Base initial Flow
 accepts strict Startup, otherwise the Online active Flow accepts strict
 Continue. Exactly one handler must accept; rejection or handler failure fails
@@ -250,19 +251,19 @@ Generated Rust must implement one `CpuGroup` with `[Option<Cpu>; MAX_CPUS]` as t
 
 `CpuRef` lowers to a compact logical ID and dereference must validate that the indexed element exists. `TaskFlow` is the sole owner of CPU assignment; `Task` has no synonymous CPU field. Only entry and scheduler commit boundaries write `TaskFlow.cpu_ref`. A Flow retains its assigned/last CPU when it is not OnCpu; migration changes the ref at commit, and handoff copies it before the successor Flow becomes active.
 
-`CurrentCpu` is a stateless capability created only after resolving `CurrentTask`, reading its validated active Flow and dereferencing that Flow's `cpu_ref` against `CpuGroup`. It is not stored as an object and has no lifecycle. Synchronous helper/drives calls may borrow it; asynchronous emits receive no inherited capability. Trace output must name both canonical target and source Flow/CpuRef. `Context` owns `CpuGroup` only; CPU-local interrupt control, registers and scheduler-local state are reached through the selected `Cpu`.
+`CurrentCpu` is a stateless capability created by dereferencing the effective Flow's `cpu_ref` against `CpuGroup`; it does not depend on CurrentTask already being bound. It is not stored as an object and has no lifecycle. Synchronous helper/drives calls may borrow it; asynchronous emits receive no inherited capability. Trace output must name both canonical target and source Flow/CpuRef. `Context` owns `CpuGroup` only; CPU-local interrupt control, registers and scheduler-local state are reached through the selected `Cpu`.
 
-AP entries may exist as possible/present before bringup, but no AP `CurrentCpu` capability exists until an AP Flow has execution authority and a valid CpuRef. AP entry must establish the idle Task's canonical `tp` before either `CurrentTask` or `CurrentCpu` is resolved. Smoke and checkpoint coverage must validate CPU0 ownership, AP identity, CpuRef dereference, no parallel identity stores, derived masks, logical-ID/hartid bijection, migration and Flow handoff.
+AP entries may exist as possible/present before bringup, but no AP `CurrentCpu` capability exists until an AP Flow has execution authority and a valid CpuRef. AP entry may resolve CurrentCpu from that Flow before BindTask, but must establish the idle Task's canonical `tp` before resolving CurrentTask or entering ordinary Rust task paths. Smoke and checkpoint coverage must validate CPU0 ownership, AP identity, CpuRef dereference, no parallel identity stores, derived masks, logical-ID/hartid bijection, migration and Flow handoff.
 
 #### Current TaskRef scope
 
-`CurrentTask` is a short-lived, read-only capability whose only payload is a
+`CurrentTask` is a short-lived capability whose resolved payload is a
 generation-checked `TaskRef`; `CurrentTaskRef` is the typed reference derived
-from that selector. Neither name is a role enum, object, lifecycle, writable
-slot, or snapshot state, and no compatibility alias or global current-task
-singleton is permitted. Resolution starts from the stable RISC-V64 `tp`
+from the bound Task. Neither name is a role enum, object, lifecycle or writable
+slot, and no compatibility alias or global current-task singleton is permitted.
+Only BindTask may change the CPU execution binding. Resolution starts from the stable RISC-V64 `tp`
 implementation identity, maps it through one centralized Task carrier
-resolver, then validates that the target is the unique `OnCpu/Live` Task, its
+resolver, then validates that the target is the unique `OnCpu/Live` Task on that CPU, its
 active Flow is the effective Flow, and the Flow parent/owner points back to the
 same Task. The resolver covers BootTask, kernel tasks, smoke/user dynamic tasks
 and AP idle tasks, rejects unknown addresses and stale generations explicitly,

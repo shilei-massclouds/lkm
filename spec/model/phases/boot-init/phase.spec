@@ -25,33 +25,6 @@ object BootInitFlow: TaskFlow {
             }
         }
 
-        Action::BindBootTaskEntry(current_task_ref: TaskRef) {
-            state_effect: StateEffect::None;
-            depends_on {
-                task_ref_ready(current_task_ref);
-                task_ref_targets(current_task_ref, BootTask);
-                cpu_active_translation_controller_for_ref_is(
-                    BootCPURef,
-                    TranslationControllerKind::PhysicalDirect
-                ) || cpu_active_translation_controller_for_ref_is(
-                    BootCPURef,
-                    TranslationControllerKind::EarlyVm
-                ) || cpu_active_translation_controller_for_ref_is(
-                    BootCPURef,
-                    TranslationControllerKind::SwapperVm
-                );
-                cpu_translation_controller_matches_live_satp_for_ref(BootCPURef);
-            }
-            ensures {
-                boot_task_entry_bound_for_active_controller(
-                    CpuGroup.cpus[0],
-                    BootTask
-                );
-                boot_task_entry_preempt_count_initialized_once(BootTask);
-                boot_task_entry_preempt_count_preserved(BootTask);
-                boot_task_entry_binding_diagnostic_clear();
-            }
-        }
     }
 
     state State::Base {
@@ -95,14 +68,14 @@ object BootInitFlow: TaskFlow {
                         KernelAddrSpace.Transition::Preset;
                         CurrentCPU.Transition::Setup(true);
                         CurrentCPU.trap.interrupt.Transition::Setup;
-                        BootInitFlow.Action::BindBootTaskEntry(CurrentTaskRef);
+                        CurrentTask.Action::BindTask(BootTask);
                         BootInitStack.Transition::Preset;
                         CurrentCPU.trap.Transition::Preset;
                         CurrentCPU.trap.exception.Transition::Preset;
                         Vm.Transition::Preset;
                         Vm.Transition::Setup;
                         CurrentCPU.trap.Transition::Setup;
-                        BootInitFlow.Action::BindBootTaskEntry(CurrentTaskRef);
+                        CurrentTask.Action::BindTask(BootTask);
                         BootInitStack.Transition::Setup;
                         Soc.Transition::Preset;
                     }
@@ -143,6 +116,10 @@ object BootInitFlow: TaskFlow {
                     Soc.state == State::Prepared;
                     task_ref_targets(BootTaskRef, BootTask);
                     task_ref_ready(BootTaskRef);
+                    boot_task_current_binding_established(CpuGroup.cpus[0], BootTask);
+                    boot_task_current_binding_refreshed_for_active_controller(CpuGroup.cpus[0], BootTask);
+                    boot_task_preemption_is_static_initial_property(BootTask);
+                    boot_task_bind_task_diagnostic_clear();
                     task_owns_flow(BootTask, self);
                     task_flow_owner_is(self, BootTask);
                     task_flow_parent_is(self, BootTask);

@@ -81,7 +81,7 @@ class ViewToolTests(unittest.TestCase):
                         ("Riscv64Platform", "Riscv64"),
                         ("OpenSBI", "BootArgs"),
                         ("Kernel", "Config"),
-                        ("Soc", "CpuGroup"),
+                        ("Kernel", "CpuGroup"),
                         ("CpuGroup.cpus[0]", "BootCpuRegisters"),
                     )
                 )

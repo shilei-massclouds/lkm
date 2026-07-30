@@ -59,12 +59,15 @@ TaskFlow slot 常量和 `USER_FLOW_SLOTS_PER_TASK` 属于本 module。通用 non
 
 `TaskFlow` transition/action 在修改状态或执行 body 前，必须通过 owner bridge 解析 parent Task 并检查
 其状态为 `OnCpu` 且 authority 为 Live。`Task.Online` 只表示可被 Scheduler 派发，不等同于执行权或普通 runnable queue
-成员。`CurrentTask := effective_task_flow.parent`，`CurrentTaskRef := ref(CurrentTask)`；解析必须证明
-Flow parent/owner、Task.active_flow、唯一 OnCpu/Live authority 与 TaskRef generation 一致。两者都不保存状态。
+成员。`CurrentTask` 先读取本 CPU 已提交的 `tp` binding，再以 effective Flow 校验 parent/owner、
+Task.active_flow、该 CPU 上的 OnCpu/Live authority 与唯一 TaskRef generation；`CurrentTaskRef` 从该
+唯一有效引用派生。它们不形成 object、slot 或 lifecycle state。BootTask 首次 BindTask 之前
+`CurrentCPU` 必须仍可从 BootInitFlow.cpu_ref 独立解析。
 
 Scheduler 切换按 `prepare -> physical save/restore -> next-stack finish` 排序。prepare 只校验双方
-authority/context/FlowRef；架构切换建立 next identity，finish 验证该身份后原子发布 prev breakpoint、
-消费 next breakpoint、激活 next Flow 并确认 CurrentTask，再处理 strict Continue。`next.Continue` 不能由旧 Task 栈提前提交 OnCpu。
+authority/context/FlowRef；架构切换恢复 next context，finish 在正式 commit 中调用
+`CurrentTask.BindTask(next)` 实际更新 `tp`，再原子发布 prev breakpoint、消费 next breakpoint、激活
+next Flow，并让后续 continuation 确认新的 CurrentTask。`next.Continue` 不能由旧 Task 栈提前提交 OnCpu。
 
 入口与 scheduler commit 是 `cpu_ref` 的仅有写边界。迁移提交在激活新 Flow 前写入目标 CpuRef；
 同一 Task 的 Flow handoff 在提交 active binding 前复制 predecessor CpuRef。执行中的 Flow 及其同步

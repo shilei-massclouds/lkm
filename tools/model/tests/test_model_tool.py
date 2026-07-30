@@ -961,17 +961,21 @@ class ModelToolTests(unittest.TestCase):
                 ],
                 [
                     "CurrentCPU.trap.interrupt.Transition::Preset",
+                    "KernelImage.Transition::Preset",
+                    "CurrentCPU.Action::DisableFpuVectorExecution",
+                    "KernelImage.Transition::Setup",
+                    "BootInitFlow.Action::RecordBootCpuHartid",
                     "KernelAddrSpace.Transition::Preset",
                     "CurrentCPU.Transition::Setup(true)",
                     "CurrentCPU.trap.interrupt.Transition::Setup",
-                    "BootInitFlow.Action::BindBootTaskEntry(CurrentTaskRef)",
+                    "CurrentTask.Action::BindTask(BootTask)",
                     "BootInitStack.Transition::Preset",
                     "CurrentCPU.trap.Transition::Preset",
                     "CurrentCPU.trap.exception.Transition::Preset",
                     "Vm.Transition::Preset",
                     "Vm.Transition::Setup",
                     "CurrentCPU.trap.Transition::Setup",
-                    "BootInitFlow.Action::BindBootTaskEntry(CurrentTaskRef)",
+                    "CurrentTask.Action::BindTask(BootTask)",
                     "BootInitStack.Transition::Setup",
                     "Soc.Transition::Preset",
                 ],
@@ -1100,10 +1104,10 @@ class ModelToolTests(unittest.TestCase):
             enable = kernel_image["states"]["Ready"]["transitions"]["Enable"]
             entry = enable["depends_on"][0]["entries"][0]
 
-            self.assertEqual(entry["text"], "EarlyVm.state == State::Ready")
+            self.assertEqual(entry["text"], "gp_relative_addressing_ready(KernelImage)")
             expanded = _read_with_includes(self.spec, seen=set(), stack=[])[0].splitlines()
             line = expanded[entry["span"]["start_line"] - 1]
-            self.assertIn("EarlyVm.state == State::Ready", line)
+            self.assertIn("gp_relative_addressing_ready(KernelImage)", line)
 
     def test_invalid_ast_schema_returns_usage_error_code(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1197,6 +1201,69 @@ class ModelToolTests(unittest.TestCase):
             data = read_json(model)
             emits = data["model"]["objects"]["A"]["states"]["Base"]["transitions"]["Preset"]["emits"]
             self.assertEqual(emits[0]["entries"][0]["text"], "B.Transition::Setup")
+
+    def test_current_task_contextual_bind_action_uses_task_flow_contract(self) -> None:
+        source = """
+            type Task {}
+
+            type TaskFlow {
+                processes {
+                    Action::BindTask(task: Task) {
+                        state_effect: StateEffect::None;
+                    }
+                }
+            }
+
+            type Driver {}
+
+            object BootTask: Task {
+                initial_state: State::OnCpu;
+                state State::OnCpu {}
+            }
+
+            object BootFlow: TaskFlow {
+                initial_state: State::Online;
+                state State::Online {}
+            }
+
+            object Computer: Driver {
+                initial_state: State::Base;
+                state State::Base {
+                    transitions {
+                        on Transition::Preset -> State::Ready {
+                            drives {
+                                CurrentTask.Action::BindTask(BootTask);
+                            }
+                        }
+                    }
+                }
+                state State::Ready {}
+            }
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            exit_code, stderr, data = self._run_model_source(Path(tmp), source)
+            self.assertEqual(exit_code, 0, stderr)
+            transition = data["model"]["objects"]["Computer"]["states"]["Base"][
+                "transitions"
+            ]["Preset"]
+            self.assertEqual(
+                transition["drives"][0]["entries"][0]["text"],
+                "CurrentTask.Action::BindTask(BootTask)",
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            exit_code, stderr, _data = self._run_model_source(
+                Path(tmp),
+                source.replace(
+                    "CurrentTask.Action::BindTask(BootTask)",
+                    "CurrentTask.Action::Missing(BootTask)",
+                ),
+            )
+            self.assertEqual(exit_code, 1)
+            self.assertIn(
+                "unsupported association action reference: CurrentTask.Action::Missing",
+                stderr,
+            )
 
     def test_emits_allows_strict_association_path_and_task_ref_dereference(self) -> None:
         source = """

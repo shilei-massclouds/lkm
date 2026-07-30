@@ -145,7 +145,7 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("Kernel.Preset", text)
         self.assertIn("BootInitFlow.Preset", text)
         self.assertIn("  -> KernelAddrSpace.Preset", text)
-        self.assertIn("  -> BootInitFlow.Action.BindBootTaskEntry [drives_action]", text)
+        self.assertIn("  -> CurrentTask.Action.BindTask [drives_action]", text)
         self.assertIn("Kernel.Setup", text)
         self.assertNotIn("\nEntryPreludePhase.", text)
         self.assertIn("EntrySuccessorPhase.Setup", text)
@@ -163,7 +163,7 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn('"Kernel.Enable" -> "BootInitFlow.Preset"', dot)
         self.assertIn('"BootInitFlow.Preset" -> "KernelAddrSpace.Preset"', dot)
         self.assertIn(
-            '"BootInitFlow.Preset" -> "BootInitFlow.Action.BindBootTaskEntry"', dot
+            '"BootInitFlow.Preset" -> "CurrentTask.Action.BindTask"', dot
         )
         self.assertIn('"Kernel.Enable" -> "BootInitFlow.Setup"', dot)
         self.assertIn('"Kernel.Enable" -> "BootInitFlow.Enable"', dot)

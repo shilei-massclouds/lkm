@@ -139,11 +139,18 @@ state 或 condition 拒绝，以及 handler body/invariant/下游 Signal 失败�
 完整浏览器 fixture 的 Signal 与 moment 数由本次成功 derive 产物重建，不把历史 274/277 数量当成
 协议常量。
 
-derive 解析 `CurrentTask` receiver 或 `CurrentTaskRef` value 时，必须从 Signal 的 effective
-`TaskFlow` 出发，同时验证 Flow parent/owner 一致、目标 Task 是唯一 `OnCpu/Live` 执行主体、
-`Task.active_flow` 指向该 Flow，且 source `TaskRef` 存在并有效。缺失 effective Flow、错误 owner、
-非活跃 Flow、非 `OnCpu/Live`、悬空或过期引用都必须拒绝。同步 `drives` 继承 effective Flow；异步
-`emits` 在接收方上下文重新解析。
+derive 必须在 snapshot 中保存按 canonical CPU key 隔离的 CurrentTask contextual binding；它不是
+system state、instance、reference assignment、全局单例或 `CurrentTaskSlot`。`CurrentTask.BindTask`
+即使在尚未绑定 CurrentTask 时也必须可接收：先从 effective TaskFlow.cpu_ref 解析 CurrentCPU，再验证
+target Task 的 parent/owner/active Flow、同 CPU `OnCpu/Live` 与唯一有效 TaskRef。boot 首次调用建立
+binding，同目标调用替换地址表示并增加可验证的刷新序号；不同目标只接受 scheduler switch commit。
+任一失败前后 snapshot 必须一致，同一 CPU 的成功换绑不得改写其它 CPU entry。
+
+derive 解析 `CurrentTask` receiver 或 `CurrentTaskRef` value 时，必须先读取该 CPU binding，再验证 Flow
+parent/owner 一致、`Task.active_flow` 指向 effective Flow、目标是该 CPU 的 `OnCpu/Live` 执行主体，且
+binding source `TaskRef` 仍唯一有效。缺失 effective Flow/CPU binding、错误 owner/CPU、非活跃 Flow、
+非 `OnCpu/Live`、悬空或过期引用都必须拒绝。同步 `drives` continuation 继承更新后的 effective Flow；
+异步 `emits` 在接收方上下文重新解析。CurrentCPU 在 BootTask 首次绑定前仍可独立解析。
 
 每次成功解析写入 `selector_resolutions` 数组，而不是单数事件字段；数组可在同一事件保留多个解析。
 每项至少包含 `selector`、`source_flow`、完整来源 reference（CurrentTask 使用

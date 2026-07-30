@@ -638,8 +638,8 @@ Completion 也说明了 transition/action factoring 的边界：`Completion.Setu
 `Task` 保存调度身份并物理拥有 `TaskThreadContext`；每个 `TaskFlow` 实例只保存自己的
 lifecycle state 和 continuation 身份。`TaskThreadContext` 的架构寄存器区固定为
 `ra/sp/s0..s11`，同时保存正交的 breakpoint validity、所绑定的带 generation
-`TaskFlowRef` 以及真实 save/restore 计数。由 effective TaskFlow 解析的 CurrentTask 与 CPU identity
-不属于可恢复寄存器现场。`TaskFlow` 是 `PhaseObject` 的传递子类型，并用
+`TaskFlowRef` 以及真实 save/restore 计数。CPU-local CurrentTask binding 与由 effective TaskFlow
+解析的 CPU identity 不属于可恢复寄存器现场。`TaskFlow` 是 `PhaseObject` 的传递子类型，并用
 `parent: Task` 类型约束要求每个实例的 parent 都是其 owner Task。Task 声明
 `initial_flow: TaskFlow` typed association：它只记录创建该 Task 时绑定的 Flow，不随
 exec 或 idle handoff 改写。静态绑定是 `BootTask -> BootInitFlow`、
@@ -692,15 +692,23 @@ Scheduler 是普通 Task Continue 与 Suspend 的唯一发送者。
 
 `Task.Action::PinToBootCpu(cpu_ref: CpuRef)` 是状态内 action，用于提交 task 的亲和性约束属性，不推进 task lifecycle，也不改变 `TaskRuntimeState`。在 `rest_init()` 中，调用点写为 `KernelInitTask.Action::PinToBootCpu(BootCPURef)`：receiver 已经确定目标 task，`BootCPURef` 是 `BootCPU` 发布的 CPU 引用。该 action 只提交两类属性事实：设置 `PF_NO_SETAFFINITY` 等价的 task flag，以及把 task cpumask 限制到 boot CPU。Linux 源码中的 `find_task_by_pid_ns(pid, &init_pid_ns)` 是用局部 pid 重新取回 task 指针的实现路径，不作为正式参数或 drives；规格层已经持有 `KernelInitTask` receiver。该源码路径由 `rcu_read_lock()/unlock()` 定界，当前保留为 deferred 上下文建模问题：它是否属于资源独占上下文，还是应建模为独立的 RCU/读侧上下文，后续讨论。
 
-正式规格必须区分对象和对象引用。对象拥有 lifecycle/runtime state、facts 和 invariants；引用是在上下文中访问对象的类型化能力。`TaskRef`、`RunQueueRef` 与 `CpuRef` 分别绑定对应目标。`CurrentTask` 是 effective TaskFlow parent 的保留选择器，`CurrentTaskRef` 是 `ref(CurrentTask)`；二者都不是对象或 snapshot state。`CurrentRunQueueRef` 仍是所选 CPU 的私有投影，而 `CurrentCPU` 是 effective `TaskFlow.cpu_ref` 的解引用结果。action 返回引用时，调用方使用 SSA 风格 `let` 绑定；后续可用 typed reference receiver 分发到目标对象。CPU 归属只保存在 TaskFlow：入口和 scheduler commit 写 `TaskFlow.Action::AssignCpuRef`，Task 不保存同义字段。
+正式规格必须区分对象和对象引用。对象拥有 lifecycle/runtime state、facts 和 invariants；引用是在上下文中访问对象的类型化能力。`TaskRef`、`RunQueueRef` 与 `CpuRef` 分别绑定对应目标。`CurrentTask` 是 CPU 执行上下文已经提交的 task binding；`CurrentTask.Action::BindTask(task: Task)` 建立或刷新该 binding，`CurrentTaskRef` 再从已绑定 Task 的唯一有效 TaskRef 派生。它们不是 object、owned child、lifecycle 或 `CurrentTaskSlot`。`CurrentRunQueueRef` 仍是所选 CPU 的私有投影，而 `CurrentCPU` 是 effective `TaskFlow.cpu_ref` 的解引用结果。action 返回引用时，调用方使用 SSA 风格 `let` 绑定；后续可用 typed reference receiver 分发到目标对象。CPU 归属只保存在 TaskFlow：入口和 scheduler commit 写 `TaskFlow.Action::AssignCpuRef`，Task 不保存同义字段。
 
 Ref receiver 的正式分发规则是：若 `R` 是 `XXXRef` 类型的引用值，且 `XXXRef` 的目标对象类型 `XXX` 声明了 `Transition::E` 或 `Action::A`，则 `R.Transition::E(...)` / `R.Action::A(...)` 表示通过引用对目标对象执行 `XXX` 类型定义的 process；process 内部的 `self` 绑定到引用当前指向的目标对象。引用类型自身的 structural process，例如 `TaskRef.Action::Bind(task)`，只用于建立普通引用，不得用于改写 CurrentTaskRef。typed association path 允许引用目标的 association 透明访问，例如 Task 的 `initial_flow` 与 `active_flow`。普通 attribute 与 owned child 的通用 `Ref.attr` / `Ref.child` 仍未开放；其它引用关系继续使用 `task_ref_targets(...)`、`runqueue_ref_targets(...)`、`runqueue_ref_cpu_is(...)` 等 fact 承载。
 
-`CurrentTask := effective_task_flow.parent`，`CurrentTaskRef := ref(CurrentTask)`。解析必须同时证明
-Flow parent/owner 一致、目标 Task 是唯一 `OnCpu/Live` 执行主体、Task.active_flow 等于 effective
-TaskFlow 且 TaskRef generation 有效。缺失上下文、非活跃 Flow、错误 owner、非 `OnCpu/Live` 或
-悬空引用一律拒绝。同步 drives 子树继承 effective Flow；异步 emits 在接收方重新解析。不存在
-可写 current-task 槽、selector action 或另一份权威 snapshot state。
+`CurrentTask` 先从 effective Flow 的 CpuRef 找到 CPU-local binding，再以 effective TaskFlow 校验绑定
+目标。Flow parent/owner 必须与绑定 Task 一致，Task.active_flow 必须等于 effective TaskFlow，目标必须
+是该 CPU 上的 `OnCpu/Live` 执行主体，并且恰好一个 live TaskRef 通过 generation 校验且指向目标；
+`CurrentTaskRef` 只返回该引用。缺失 CPU 上下文、尚未绑定、非活跃 Flow、错误 owner/CPU、非
+`OnCpu/Live`、悬空或重复引用一律拒绝。BootTask 首次绑定前 CurrentCPU 仍可从 BootInitFlow.cpu_ref
+解析。同步 drives continuation 继承 binding/effective Flow；异步 emits 在接收方重新解析。
+
+`CurrentTask.Action::BindTask(task: Task)` 的首次 boot 调用由 BootInitFlow 建立 CPU 到 BootTask 的
+binding；EarlyVm 后的第二次同目标调用保持 identity 并刷新地址表示。普通不同目标换绑只允许在
+Scheduler switch commit：next 已成为 `OnCpu/Live`、其 active Flow/parent/owner/CpuRef 和唯一 live
+TaskRef 全部成立后原子替换本 CPU 的旧目标，不影响其它 CPU。任何验证失败都不得留下部分 binding。
+BootTask 的初始禁止抢占是静态初态属性，不由 BindTask 建立。本段不定义 CurrentStack、BindStack 或
+`sp`。
 
 `CurrentRunQueueRef` 的正式语义是 CPU 视角私有的 current-runqueue 引用。调度路径先从 effective Flow 的 CpuRef 解析 `CurrentCPU`，再通过 `CpuGroup.cpus[id].RunQueue` 解析当前 runqueue。BP 路径落到 `BootRunQueue`，是因为 active Flow 指向 CPU0；AP 路径同样由各自 Flow 的 CpuRef 决定。
 
@@ -736,8 +744,8 @@ key 上前一 sibling Online 后才能推进后一 sibling，不同 key 之间�
 prev 是 `OnCpu/Live/Invalid` 且存在 active Flow，并验证 next 是
 `Online/None/Valid` 且其 FlowRef slot/generation/owner 均有效；不得预提交 lifecycle。物理 switch
 保存 prev Task 的 context 并恢复 next context。next 栈上的 finish 是普通 Signal 不可观察中间态的
-原子提交：prev 失去执行权、next 成为 `OnCpu/Live/Invalid`、next active Flow 与 CurrentTask
-解析结果同时切换，然后严格选择 initial
+原子提交：prev 失去执行权、next 成为 `OnCpu/Live/Invalid`、next active Flow 与
+`CurrentTask.BindTask(next)` 同时提交，然后 continuation 才能从新 binding 解析 CurrentTask 并严格选择 initial
 Flow Startup 或 active Flow Continue。terminal prev 走 `OnCpu --Disable--> Offline --Cleanup-->
 Destroyed`，context 保持 Invalid。`prev == next` 是严格 identity no-op，不发出 Suspend/Continue、
 不保存/恢复现场、不改变 lifecycle、authority、breakpoint 或计数。MM、FPU/vector、`last` 返回值、
@@ -983,13 +991,17 @@ CpuGroup 不拥有或复制这些执行状态。
 
 `BP视角` 和 `AP视角` 是 `CPU视角` 的两个具体分类。BP 是唯一且必须存在的启动 CPU，承担主要内核初始化职责；AP 是后续进入的 secondary CPU，复用共享类型语义和 BP 已建立的共享环境，但必须拥有自己的 effective TaskFlow、`CurrentTask`/`CurrentCPU` 解析、本地中断控制、GPR/CSR 寄存器组和 AP entry/ack 路径。
 
-多个 CPU 视角共同可见、共同依赖或共同维护的公共事实集合，命名为 `共享全局视角`。它包括共享内存对象、全局 phase 边界、`CpuGroup`/topology、全局调度设施、同步对象和跨 CPU 可见状态等。`共享全局视角` 不是新的执行主体，也不是可以同时支配所有 CPU 私有步骤的全局控制视角；它只是各个 `CPU视角` 中公共可见环境的规格化名称。本地中断状态、当前寄存器组和当前任务切换结果必须留在对应 CPU 视角内表达；CurrentTaskRef 始终由该执行上下文的 effective Flow 派生。
+多个 CPU 视角共同可见、共同依赖或共同维护的公共事实集合，命名为 `共享全局视角`。它包括共享内存对象、全局 phase 边界、`CpuGroup`/topology、全局调度设施、同步对象和跨 CPU 可见状态等。`共享全局视角` 不是新的执行主体，也不是可以同时支配所有 CPU 私有步骤的全局控制视角；它只是各个 `CPU视角` 中公共可见环境的规格化名称。本地中断状态、当前寄存器组和 CurrentTask binding 必须留在对应 CPU 视角内表达；CurrentTaskRef 始终由该 CPU 已绑定 Task 的唯一有效 TaskRef 派生，并以 effective Flow 校验。
 
-## SEM-CURRENT-TASK-MODEL-001: CurrentTask Is A Flow-Scoped Selector
+## SEM-CURRENT-TASK-MODEL-001: CurrentTask Is A CPU-Local Contextual Binding
 
-`CurrentTask` and `CurrentTaskRef` have no declaration, lifecycle, child ownership, writable action, or
-snapshot entry. A successful resolution records the canonical Task together with the effective Flow and
-generation-checked TaskRef. Synchronous descendants preserve that source; asynchronous receivers do not.
+`CurrentTask` has no object declaration, lifecycle, child ownership or `CurrentTaskSlot`. Its contextual
+`BindTask(task: Task)` action establishes the BootTask binding at boot entry, refreshes an identical target's
+current address representation on every successful call, and changes task identity only at a scheduler switch
+commit. `CurrentTaskRef` derives from the bound Task's sole live generation-checked TaskRef. Resolution also
+validates the effective Flow's parent, owner, active status, CpuRef and `OnCpu/Live` authority. CPU-local bindings
+are isolated and retained in snapshots as contextual facts, not as system state or instances. Synchronous
+continuations preserve the selected CPU context; asynchronous receivers do not.
 
 ## SEM-CURRENT-CPU-MODEL-001: CurrentCPU Is A Flow-Scoped Selector
 
@@ -999,7 +1011,7 @@ Only entry and scheduler-commit boundaries may write `TaskFlow.cpu_ref`; Task ha
 
 `CpuGroup.Preset` atomically declares CPU0 and advances both child and parent to Prepared before Kernel Enable. Kernel acceptance binds CPU0s CpuRef to BootInitFlow; BootInitFlow.Preset resolves CurrentCPU, records the first entry argument for later use, and advances CPU0 to Ready without assigning its hartid in assembly. The later `smp_setup_processor_id()` boundary consumes the saved value for CPU0. CpuGroup.Setup atomically creates AP elements and publishes topology. possible/present/active/online sets derive from CPU states and may be cached only as rebuildable bitmaps.
 
-CPU-local interrupt control, registers and scheduler-local children belong below each CPU element. CurrentTask does not. A stateless `CurrentCpu` implementation capability borrows the selected element; Context stores CpuGroup, not an independent current/boot CPU. The raw-spin-lock chain uses that borrowed CPU local state and the Flow-selected current task. AP `CurrentCPU` becomes resolvable only after an AP Flow receives execution authority and its CpuRef; possible/present membership alone is insufficient.
+CPU-local interrupt control, registers and scheduler-local children belong below each CPU element. CurrentTask is a contextual binding, not a CPU child or lifecycle object. A stateless `CurrentCpu` implementation capability borrows the selected element; Context stores CpuGroup, not an independent current/boot CPU. CurrentCPU can resolve from BootInitFlow.cpu_ref before BootTask BindTask. The raw-spin-lock chain uses that borrowed CPU local state and the bound current task after Flow consistency validation. AP `CurrentCPU` becomes resolvable only after an AP Flow receives execution authority and its CpuRef; possible/present membership alone is insufficient.
 
 ## SEM-PROCESS-RESULT-001: Transition And Action Results Are Explicit
 

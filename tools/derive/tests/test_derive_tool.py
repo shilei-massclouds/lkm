@@ -735,9 +735,9 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    record["predicate"] == "boot_task_entry_bound_for_active_controller"
-                    and record["proof_class"] == "type_process_ensures"
-                    and record["proof_provider"] == "within_context"
+                    record["predicate"] == "boot_task_current_binding_established"
+                    and record["proof_class"] == "transition_ensures"
+                    and record["proof_provider"] == "transition_commit"
                     for record in proved
                 )
             )
@@ -1221,9 +1221,9 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    record["predicate"] == "memory_zeroed"
-                    and record["proof_class"] == "memory_content"
-                    and record["proof_provider"] == "transition_ensures"
+                    record["predicate"] == "kernel_image_bss_zeroing_completed"
+                    and record["proof_class"] == "transition_ensures"
+                    and record["proof_provider"] == "transition_commit"
                     for record in proved
                 )
             )
@@ -1243,9 +1243,9 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    record["predicate"] == "gp_relative_access_ready"
-                    and record["proof_class"] == "architecture_state"
-                    and record["proof_provider"] == "transition_ensures"
+                    record["predicate"] == "gp_relative_addressing_ready"
+                    and record["proof_class"] == "transition_ensures"
+                    and record["proof_provider"] == "transition_commit"
                     for record in proved
                 )
             )

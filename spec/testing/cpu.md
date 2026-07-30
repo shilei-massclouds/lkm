@@ -29,15 +29,16 @@ This file is the testing authority for CPU ownership, references and the
 - `CurrentCPU` is tested as a selector, never an object. Every resolved Signal
   trace must record selector `CurrentCPU`, source Flow, source CpuRef and actual
   canonical target `CpuGroup.cpus[i]`. A synchronous `drives` subtree inherits
-  the effective Flow context; asynchronous `emits` does not.
+  the effective Flow context; asynchronous `emits` does not. Boot coverage must
+  prove this resolution succeeds before the first CurrentTask.BindTask.
 
 ## Runtime observations and gates
 
 - Kernel-environment smoke observes the production CpuGroup in Context and
   proves CPU0/AP roles, set membership, topology uniqueness, valid CpuRefs and
   the absence of a second boot/current CPU or current-task store. `current_cpu()`
-  must derive the effective Flow through CurrentTask, dereference that Flow's
-  CpuRef and reject any Task/Flow/CPU disagreement.
+  must dereference the effective Flow's CpuRef independently of CurrentTask and,
+  once a task binding exists, reject any Task/Flow/CPU disagreement.
 - The same smoke boundary must observe each CPU's optional active translation
   controller and complete ordered activation journal. BP records an absent
   association followed by

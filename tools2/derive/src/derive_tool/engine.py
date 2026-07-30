@@ -44,6 +44,15 @@ def _snapshot(value: dict[str, Any]) -> dict[str, Any]:
         "states": dict(sorted(value["states"].items())),
         "facts": sorted(set(value["facts"])),
         "references": dict(sorted(value["references"].items())),
+        "contextual_bindings": {
+            kind: {
+                key: deepcopy(binding)
+                for key, binding in sorted(entries.items())
+            }
+            for kind, entries in sorted(
+                value.get("contextual_bindings", {}).items()
+            )
+        },
         "instances": {
             key: deepcopy(item)
             for key, item in sorted(value.get("instances", {}).items())
@@ -145,6 +154,14 @@ def load_scenario(
     instances = value.get("instances", {}) if trusted_snapshot else {}
     if not isinstance(instances, dict):
         raise ProtocolError("snapshot instances must be an object")
+    contextual_bindings = value.get("contextual_bindings", {})
+    if not isinstance(contextual_bindings, dict) or not all(
+        isinstance(kind, str)
+        and isinstance(entries, dict)
+        and all(isinstance(key, str) and isinstance(item, dict) for key, item in entries.items())
+        for kind, entries in contextual_bindings.items()
+    ):
+        raise ProtocolError("scenario contextual_bindings must map kinds and keys to objects")
     for target, state in states.items():
         if target not in model["systems"] and target not in instances:
             raise ProtocolError(f"scenario has unknown system state target {target}")
@@ -215,6 +232,7 @@ def load_scenario(
         result["references"][reference] = target
     if trusted_snapshot:
         result["instances"] = deepcopy(instances)
+    result["contextual_bindings"] = deepcopy(contextual_bindings)
     return _snapshot(result)
 
 
@@ -661,8 +679,7 @@ class Engine:
         inherited = signal.get("_effective_flow")
         return str(inherited) if inherited in self.systems else None
 
-    def _current_cpu_target(self, signal: dict[str, Any]) -> str:
-        flow = self._effective_flow(signal)
+    def _current_cpu_context(self, flow: str | None) -> tuple[str, str]:
         if flow is None:
             raise DerivationProblem("CurrentCPU requires an effective TaskFlow")
         reference = self.current["references"].get(f"{flow}.cpu_ref")
@@ -675,13 +692,18 @@ class Engine:
             )
         if not _matches_system_type(self.model, str(target), "CPU"):
             raise DerivationProblem(f"CurrentCPU CpuRef {reference} targets non-CPU {target}")
+        return str(target), str(reference)
+
+    def _current_cpu_target(self, signal: dict[str, Any]) -> str:
+        flow = self._effective_flow(signal)
+        target, reference = self._current_cpu_context(flow)
         self._record_selector_resolution(signal, {
             "selector": "CurrentCPU",
-            "target": str(target),
+            "target": target,
             "source_flow": flow,
             "source_cpu_ref": reference,
         })
-        return str(target)
+        return target
 
     @staticmethod
     def _record_selector_resolution(
@@ -708,6 +730,17 @@ class Engine:
         if flow is None:
             raise DerivationProblem("CurrentTask requires an effective TaskFlow")
 
+        cpu, _ = self._current_cpu_context(flow)
+        binding = (
+            self.current.get("contextual_bindings", {})
+            .get("current_task", {})
+            .get(cpu)
+        )
+        if binding is None:
+            raise DerivationProblem(f"CurrentTask CPU {cpu} has no bound Task")
+        task = str(binding.get("task"))
+        reference = str(binding.get("task_ref"))
+
         parents = self._fact_targets("task_flow_parent_is", flow)
         owners = self._fact_targets("task_flow_owner_is", flow)
         if len(parents) != 1:
@@ -718,7 +751,10 @@ class Engine:
             raise DerivationProblem(
                 f"CurrentTask source Flow {flow} must have exactly one owner Task"
             )
-        task = parents[0]
+        if parents[0] != task:
+            raise DerivationProblem(
+                f"CurrentTask CPU {cpu} bound Task {task} disagrees with source Flow {flow} parent {parents[0]}"
+            )
         if owners[0] != task:
             raise DerivationProblem(
                 f"CurrentTask source Flow {flow} parent {task} disagrees with owner {owners[0]}"
@@ -740,25 +776,61 @@ class Engine:
                 f"CurrentTask target Task {task} active Flow {active_flow} does not match effective Flow {flow}"
             )
 
-        live_tasks = sorted(
-            candidate
-            for candidate in self.systems
-            if _matches_system_type(self.model, candidate, "Task")
-            and self.current["states"].get(candidate) == "OnCpu"
-            and (
+        live_tasks: list[str] = []
+        for candidate in self.systems:
+            if not _matches_system_type(self.model, candidate, "Task"):
+                continue
+            if self.current["states"].get(candidate) != "OnCpu":
+                continue
+            if (
                 f"task_execution_authority_is({candidate},TaskExecutionAuthority::Live)"
-                in self.current["facts"]
+                not in self.current["facts"]
+            ):
+                continue
+            candidate_flow = self.current["references"].get(f"{candidate}.active_flow")
+            candidate_cpu_ref = self.current["references"].get(
+                f"{candidate_flow}.cpu_ref"
             )
-        )
+            if candidate_cpu_ref is not None and self._deref(candidate_cpu_ref) == cpu:
+                live_tasks.append(candidate)
+        live_tasks.sort()
         if live_tasks != [task]:
             raise DerivationProblem(
-                f"CurrentTask requires one OnCpu/Live Task, found {live_tasks}"
+                f"CurrentTask CPU {cpu} requires one OnCpu/Live Task, found {live_tasks}"
             )
 
+        live_reference = self._unique_live_task_ref(task)
+        if reference != live_reference:
+            raise DerivationProblem(
+                f"CurrentTask CPU {cpu} bound TaskRef {reference} is not the unique live TaskRef {live_reference}"
+            )
+        self._record_selector_resolution(signal, {
+            "selector": "CurrentTask",
+            "source_cpu": cpu,
+            "source_flow": flow,
+            "source_task_ref": reference,
+            "target": task,
+        })
+        return task, reference, flow
+
+    def _unique_live_task_ref(self, task: str) -> str:
         references = []
         for reference in self._fact_sources("task_ref_targets", task):
-            if f"task_ref_ready({reference})" in self.current["facts"]:
-                references.append(reference)
+            if f"task_ref_ready({reference})" not in self.current["facts"]:
+                continue
+            metadata = self.current.get("instances", {}).get(reference)
+            if metadata is not None:
+                target_metadata = self.current.get("instances", {}).get(task, {})
+                if not metadata.get("alive", True):
+                    continue
+                if metadata.get("target") not in {None, task}:
+                    continue
+                if metadata.get("target_generation") not in {
+                    None,
+                    target_metadata.get("generation"),
+                }:
+                    continue
+            references.append(reference)
         references = sorted(set(references))
         if len(references) != 1:
             raise DerivationProblem(
@@ -769,13 +841,165 @@ class Engine:
             raise DerivationProblem(
                 f"CurrentTask TaskRef {reference} does not dereference to {task}"
             )
-        self._record_selector_resolution(signal, {
-            "selector": "CurrentTask",
-            "source_flow": flow,
-            "source_task_ref": reference,
-            "target": task,
-        })
-        return task, reference, flow
+        return reference
+
+    def _current_task_bind_boundary_valid(
+        self, signal: dict[str, Any], context_flow: str, task: str
+    ) -> bool:
+        if context_flow not in self.systems or not _matches_system_type(
+            self.model, context_flow, "TaskFlow"
+        ):
+            return False
+        cpu, _ = self._current_cpu_context(context_flow)
+        binding = (
+            self.current.get("contextual_bindings", {})
+            .get("current_task", {})
+            .get(cpu)
+        )
+        if binding is None:
+            return (
+                task == "BootTask"
+                and self.current["references"].get(f"{task}.initial_flow")
+                == context_flow
+                and self.current["references"].get(f"{task}.active_flow")
+                == context_flow
+            )
+        if binding.get("task") == task:
+            return True
+        cause_id = signal.get("cause_id")
+        cause = self.signal_index.get(cause_id) if cause_id is not None else None
+        return bool(
+            cause is not None
+            and cause.get("name") in {"SwitchTo", "SwitchTerminal"}
+            and cause.get("target") in self.systems
+            and _matches_system_type(
+                self.model, str(cause.get("target")), "SchedulerObject"
+            )
+        )
+
+    def _current_task_address_view(self, cpu: str, cpu_ref: str) -> str:
+        kinds: set[str] = set()
+        for fact in self.current["facts"]:
+            match = re.fullmatch(
+                rf"cpu_active_translation_controller_is\({re.escape(cpu)},([^,)]+)\)",
+                fact,
+            )
+            if match is not None:
+                kinds.add(match.group(1))
+            match = re.fullmatch(
+                rf"cpu_active_translation_controller_for_ref_is\({re.escape(cpu_ref)},([^,)]+)\)",
+                fact,
+            )
+            if match is not None:
+                kinds.add(match.group(1))
+        for preferred in (
+            "TranslationControllerKind::SwapperVm",
+            "TranslationControllerKind::EarlyVm",
+            "TranslationControllerKind::PhysicalDirect",
+        ):
+            if preferred in kinds:
+                return preferred
+        return "CanonicalTaskAddress"
+
+    def _apply_current_task_binding(
+        self,
+        *,
+        signal: dict[str, Any],
+        bindings: dict[str, Any],
+        candidate: dict[str, Any],
+    ) -> None:
+        context_flow = self._effective_flow(signal)
+        if context_flow is None:
+            raise DerivationProblem("CurrentTask.BindTask requires an effective TaskFlow")
+        task = str(bindings.get("task"))
+        if task not in self.systems or not _matches_system_type(
+            self.model, task, "Task"
+        ):
+            raise DerivationProblem(f"CurrentTask.BindTask target {task} is not a Task")
+        cpu, cpu_ref = self._current_cpu_context(context_flow)
+        active_flow = self.current["references"].get(f"{task}.active_flow")
+        if active_flow is None:
+            raise DerivationProblem(
+                f"CurrentTask.BindTask target Task {task} has no active Flow"
+            )
+        parents = self._fact_targets("task_flow_parent_is", str(active_flow))
+        owners = self._fact_targets("task_flow_owner_is", str(active_flow))
+        if parents != [task] or owners != [task]:
+            raise DerivationProblem(
+                f"CurrentTask.BindTask target Flow {active_flow} parent/owner does not uniquely match {task}"
+            )
+        if self.current["states"].get(task) != "OnCpu":
+            raise DerivationProblem(f"CurrentTask.BindTask target Task {task} is not OnCpu")
+        if (
+            f"task_execution_authority_is({task},TaskExecutionAuthority::Live)"
+            not in self.current["facts"]
+        ):
+            raise DerivationProblem(f"CurrentTask.BindTask target Task {task} is not Live")
+        target_cpu_ref = self.current["references"].get(f"{active_flow}.cpu_ref")
+        if target_cpu_ref is None or self._deref(target_cpu_ref) != cpu:
+            raise DerivationProblem(
+                f"CurrentTask.BindTask target Flow {active_flow} does not belong to CPU {cpu}"
+            )
+        task_ref = self._unique_live_task_ref(task)
+        if not self._current_task_bind_boundary_valid(signal, context_flow, task):
+            raise DerivationProblem(
+                f"CurrentTask.BindTask cannot replace CPU {cpu} outside scheduler switch commit"
+            )
+
+        current_task_bindings = candidate.setdefault(
+            "contextual_bindings", {}
+        ).setdefault("current_task", {})
+        previous = current_task_bindings.get(cpu)
+        revision = int(previous.get("revision", 0)) + 1 if previous else 1
+        address_view = self._current_task_address_view(cpu, cpu_ref)
+        if previous is None:
+            signal["handler"]["description"] = (
+                "首次建立当前 CPU 到 BootTask 的 CurrentTask binding，并写入当前地址表示。"
+            )
+        elif previous.get("task") == task:
+            signal["handler"]["description"] = (
+                "第二次绑定同一 Task：保持 CurrentTask binding identity，并刷新当前地址表示。"
+            )
+        else:
+            signal["handler"]["description"] = (
+                "在正式 scheduler switch commit 将 CurrentTask binding 切换到 next Task。"
+            )
+        current_task_bindings[cpu] = {
+            "task": task,
+            "task_ref": task_ref,
+            "source_flow": str(active_flow),
+            "source_cpu_ref": cpu_ref,
+            "address_view": address_view,
+            "revision": revision,
+        }
+
+        binding_fact_prefixes = (
+            f"current_task_binding_committed({cpu},",
+            f"current_task_binding_ref_is({cpu},",
+            f"current_task_binding_address_view_is({cpu},",
+            f"current_task_binding_revision_is({cpu},",
+        )
+        candidate["facts"] = [
+            fact
+            for fact in candidate["facts"]
+            if not fact.startswith(binding_fact_prefixes)
+        ]
+        candidate["facts"].extend(
+            [
+                _fact(
+                    "current_task_binding_committed",
+                    [cpu, task, active_flow],
+                ),
+                _fact("current_task_binding_ref_is", [cpu, task_ref]),
+                _fact(
+                    "current_task_binding_address_view_is",
+                    [cpu, task, address_view],
+                ),
+                _fact("current_task_binding_revision_is", [cpu, revision]),
+                _fact("current_task_binding_is_cpu_local", [cpu]),
+            ]
+        )
+        candidate["facts"] = sorted(set(candidate["facts"]))
 
     def _fact_sources(self, predicate: str, target: str) -> list[str]:
         pattern = re.compile(
@@ -1197,15 +1421,15 @@ class Engine:
             if kind == "fact":
                 values = [self.value(item, signal=signal, bindings=bindings) for item in expression["arguments"]]
                 if expression["name"].endswith(("_generation_nonzero", "_occurrence_fresh")):
-                    return self._builtin_fact(expression["name"], values)
+                    return self._builtin_fact(expression["name"], values, signal=signal)
                 if (
                     expression["name"].endswith("_ref_generation_valid")
                     and len(values) == 1
                     and self._is_dynamic_reference(values[0])
                 ):
-                    return self._builtin_fact(expression["name"], values)
+                    return self._builtin_fact(expression["name"], values, signal=signal)
                 return _fact(expression["name"], values) in self.current["facts"] or self._builtin_fact(
-                    expression["name"], values
+                    expression["name"], values, signal=signal
                 ) or self._predicate_body_value(expression["name"], values, signal=signal)
             if kind == "assertion":
                 rendered = self.substitute(expression["expression"], signal=signal, bindings=bindings)
@@ -1242,7 +1466,13 @@ class Engine:
             return None
         return left == right if operator == "==" else left != right
 
-    def _builtin_fact(self, name: str, values: list[Any]) -> bool:
+    def _builtin_fact(
+        self,
+        name: str,
+        values: list[Any],
+        *,
+        signal: dict[str, Any] | None = None,
+    ) -> bool:
         if name.endswith("_generation_nonzero") and len(values) == 1:
             metadata = self.current.get("instances", {}).get(str(values[0]), {})
             return int(metadata.get("generation", 0)) > 0 and metadata.get("alive", True)
@@ -1273,6 +1503,16 @@ class Engine:
             return reference is not None and self._deref(reference) == values[1]
         if name == "task_flow_cpu_ref_read_only_while_executing" and len(values) == 1:
             return self.current["references"].get(f"{values[0]}.cpu_ref") is not None
+        if name == "current_task_bind_boundary_valid" and len(values) == 2:
+            return signal is not None and self._current_task_bind_boundary_valid(
+                signal, str(values[0]), str(values[1])
+            )
+        if name == "current_task_bind_task_has_unique_valid_ref" and len(values) == 1:
+            try:
+                self._unique_live_task_ref(str(values[0]))
+            except DerivationProblem:
+                return False
+            return True
         if name == "cpu_ref_dereference_requires_published_element" and len(values) == 1:
             target = self._deref(values[0])
             return target in self.systems and target in self.current["states"]
@@ -1316,6 +1556,8 @@ class Engine:
             )
         if name == "task_initial_flow_is" and len(values) == 2:
             return self.current["references"].get(f"{values[0]}.initial_flow") == values[1]
+        if name == "task_active_flow_is" and len(values) == 2:
+            return self.current["references"].get(f"{values[0]}.active_flow") == values[1]
         if name in {"task_owns_flow", "task_flow_owner_is", "task_flow_parent_is"} and len(values) == 2:
             task, flow = (values[0], values[1]) if name == "task_owns_flow" else (values[1], values[0])
             return (
@@ -1441,7 +1683,9 @@ class Engine:
                         ]
                         if not (
                             _fact(fact.group(1), arguments) in self.current["facts"]
-                            or self._builtin_fact(fact.group(1), arguments)
+                            or self._builtin_fact(
+                                fact.group(1), arguments, signal=signal
+                            )
                             or self._predicate_body_value(
                                 fact.group(1), arguments, signal=signal
                             )
@@ -1766,11 +2010,9 @@ class Engine:
             )
 
         signal.pop("_selector_resolutions", None)
-        target = self.resolve_receiver(call["receiver"], signal=signal, bindings=bindings)
-        receiver_value = self.value(
-            {"kind": "path", "value": call["receiver"]},
-            signal=signal,
-            bindings=bindings,
+        contextual_bind = self._is_current_task_bind_call(call)
+        target, receiver_value = self._resolve_call_receiver(
+            call, signal=signal, bindings=bindings
         )
         raw_arguments = self.materialize_arguments(
             call["arguments"], signal=signal, bindings=bindings
@@ -1796,6 +2038,8 @@ class Engine:
         child["contexts"] = list(context_stack)
         if receiver_value != target:
             child["_receiver_value"] = receiver_value
+        if contextual_bind:
+            child["_current_task_bind_call"] = True
         self.event("drives_wait_started", signal_id=signal["id"], child_id=child["id"])
         self.deliver(child)
         # The callee does not wait for its emits.  Once its response boundary is
@@ -1813,6 +2057,11 @@ class Engine:
             return
         if child["outcome"] != "completed":
             raise DerivationProblem(f"strict child {child['id']} did not complete")
+        if contextual_bind:
+            old_flow = self._effective_flow(signal)
+            cpu, _ = self._current_cpu_context(old_flow)
+            binding = self.current["contextual_bindings"]["current_task"][cpu]
+            signal["_effective_flow"] = binding["source_flow"]
         alias = call.get("result_alias")
         if alias:
             result = child.get("result")
@@ -1925,6 +2174,38 @@ class Engine:
         ):
             metadata["alive"] = False
 
+    @staticmethod
+    def _is_current_task_bind_call(call: dict[str, Any]) -> bool:
+        return (
+            call.get("kind") == "call"
+            and call.get("receiver") == "CurrentTask"
+            and call.get("name") == "BindTask"
+        )
+
+    def _resolve_call_receiver(
+        self,
+        call: dict[str, Any],
+        *,
+        signal: dict[str, Any],
+        bindings: dict[str, Any],
+    ) -> tuple[str, Any]:
+        if self._is_current_task_bind_call(call):
+            flow = self._effective_flow(signal)
+            if flow is None:
+                raise DerivationProblem(
+                    "CurrentTask.BindTask requires an effective TaskFlow"
+                )
+            return flow, "CurrentTask"
+        target = self.resolve_receiver(
+            call["receiver"], signal=signal, bindings=bindings
+        )
+        receiver_value = self.value(
+            {"kind": "path", "value": call["receiver"]},
+            signal=signal,
+            bindings=bindings,
+        )
+        return target, receiver_value
+
     def _call_acceptable(
         self,
         call: dict[str, Any],
@@ -1933,11 +2214,8 @@ class Engine:
         bindings: dict[str, Any],
     ) -> tuple[bool, str | None]:
         try:
-            target = self.resolve_receiver(call["receiver"], signal=signal, bindings=bindings)
-            receiver_value = self.value(
-                {"kind": "path", "value": call["receiver"]},
-                signal=signal,
-                bindings=bindings,
+            target, receiver_value = self._resolve_call_receiver(
+                call, signal=signal, bindings=bindings
             )
             raw_arguments = self.materialize_arguments(
                 call["arguments"], signal=signal, bindings=bindings
@@ -2240,6 +2518,12 @@ class Engine:
                     candidate=candidate,
                     handler=handler,
                 )
+            if signal.get("_current_task_bind_call"):
+                self._apply_current_task_binding(
+                    signal=signal,
+                    bindings=bindings,
+                    candidate=candidate,
+                )
             self._apply_occurrence_metadata(
                 handler=handler,
                 signal=signal,
@@ -2439,6 +2723,7 @@ class Engine:
             signal.pop("_effective_flow", None)
             signal.pop("_selector_resolutions", None)
             signal.pop("_indexed_transaction", None)
+            signal.pop("_current_task_bind_call", None)
         return {
             "root_request": {
                 "source": self.source,
@@ -2486,6 +2771,7 @@ def initial_snapshot(model: dict[str, Any]) -> dict[str, Any]:
         "states": {},
         "facts": [],
         "references": {},
+        "contextual_bindings": {},
         "instances": {},
     }
 

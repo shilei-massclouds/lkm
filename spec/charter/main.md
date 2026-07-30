@@ -1251,12 +1251,12 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 4. 执行 `内核映像.setup()`，清零 `BSS` 段，使内核映像进入早期可运行状态。
 5. 把内核启动时的第一个参数作为BootCPU的hartid记录下来，以备后续使用。
 6. `OpenSBI.Enable` 同步驱动 `处理器管理.preset()`，原子创建 `CpuGroup.cpus[0]` 并驱动它进入 `Prepared`；只有该父子发布全部成功后才发送 `Kernel.Enable`。
-7. 由 `PhysicalDirect.ActivateOnCpu(BootCPURef)` 以 InitialActivation 从 absent 建立 CPU-local association，再调用 `BootInitFlow.BindBootTaskEntry(CurrentTaskRef)` 与根栈 setup，建立物理地址阶段的根任务指针与根栈指针；首次 action 只初始化一次 preempt count。
+7. 由 `PhysicalDirect.ActivateOnCpu(BootCPURef)` 以 InitialActivation 从 absent 建立 CPU-local association，再调用 `CurrentTask.BindTask(BootTask)` 与根栈 setup，建立物理地址阶段的 CPU-local 当前任务 binding 与根栈指针；BootTask 的初始禁止抢占来自静态初始化，BindTask 不初始化 preempt count。
 8. 执行 `TrapType.preset()`，设置受控早期处理入口，使 `VM` 建立过程中误入的中断或异常能够进入受控停机路径。
 9. 执行 `虚拟内存空间.preset()`，依次推进 `TrampolineVM.setup()` 与 `EarlyVM.setup()`，初始化 `静态对象集合.trampoline_pg_dir` 与 `静态对象集合.early_pg_dir`，为入口前导期的两次页表切换准备条件。
 10. 执行 `虚拟内存空间.setup()`，依次调用 `TrampolineVM.ActivateOnCpu()` 与 `EarlyVM.ActivateOnCpu()`：先完成从物理地址空间到跳板映射的 Handoff，再 Handoff 到 early page table；其中 `内核映像.enable()` 重置 `gp-relative` 寻址方式。controller 仍保持共享 Ready。
 11. `VM.setup()` 完成后，执行 `TrapType.setup()`，设置正式公共处理入口，使 `RISCV64.stvec` 指向 `formal_event_entry`。
-12. 在 `VM.setup()` 完成后，再次调用 `BootInitFlow.BindBootTaskEntry(CurrentTaskRef)` 并执行根栈 setup，分别将 `tp` 与 `sp` 重置为虚拟地址；抢占计数保持首次值。
+12. 在 `VM.setup()` 完成后，再次调用 `CurrentTask.BindTask(BootTask)` 并执行根栈 setup，分别将 `tp` 与 `sp` 重置为虚拟地址；同目标 BindTask 保持 binding identity 并实际刷新 `tp`，不处理抢占计数。本段的 CurrentTask 修正不定义根栈 binding 语义。
 13. 执行 `片上系统.preset()`，完成片上系统平台相关的早期预置，并直接提交 `BootInitFlow.Prepared`。
 
 当前时序图主要表达对象过程的编排顺序，不表达逐项源码对应关系。失败时进入 `FAIL` 状态的错误传播方式，以及每一步更细的依赖检查，后续继续补充。

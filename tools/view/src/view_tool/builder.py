@@ -28,6 +28,7 @@ _OBJECT_TRANSITION_EXPR_RE = re.compile(
     re.S,
 )
 _OBJECT_ACTION_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)\b")
+_CONTEXTUAL_ACTION_RECEIVERS = frozenset({"CurrentTask"})
 _LOCAL_TRANSITION_EXPR_RE = re.compile(r"\ATransition::([A-Za-z_][A-Za-z0-9_]*)\Z")
 _OBJECT_STATE_RE = re.compile(
     r"\b([A-Z][A-Za-z0-9_]*)\.state\s*==\s*State::([A-Za-z_][A-Za-z0-9_]*)\b"
@@ -225,7 +226,10 @@ def build_drives_view(model: ObjectModel) -> ViewModel:
                     edges.append(ViewEdge(source=source, target=target, kind="emits"))
 
                 for target_obj, target_action in _driven_actions(transition):
-                    if target_obj not in model.objects:
+                    if (
+                        target_obj not in model.objects
+                        and target_obj not in _CONTEXTUAL_ACTION_RECEIVERS
+                    ):
                         continue
                     target = _action_node_id(target_obj, target_action)
                     _add_action_node(nodes, target, target_obj, target_action)

@@ -29,8 +29,8 @@ Preset 横跨三个物理实现段，但仍是 BootInitFlow 的一个 model tran
 | --- | --- |
 | Kernel entry acceptance | `AcceptEnable` → `AssignCpuRef` → `PhysicalDirect.ActivateOnCpu(InitialActivation)` → 接受 Preset 并记录 `BootInitFlow.Started`；任何 Preset child 尚未启动 |
 | `_start` Preset head | `InterruptType.Preset` 先以 `csrw sie, zero` 实现全部分路门控关闭，再以 `csrw sip, zero` 实现全部待决信号清空；不得由此推断 `sstatus.SIE` 总门控已关闭；随后把 `__global_pointer$` 装入 `gp/x3`，并用 `.option norelax` 保护该初始化，以建立 `gp_relative_addressing_ready(KernelImage)`；`CurrentCPU.Action::DisableFpuVectorExecution` 再以 `li t0, SR_FS_VS` 和 `csrc CSR_STATUS, t0` 同时关闭 BootCPU 的 FS/VS 执行状态；然后清 BSS，把入口 `a0` 的原值保存到持久交接位置，再建立入口 task/stack |
-| `preset_until_vm_switch()` | 读取 Kernel Enable 前已发布的 `CpuGroup.cpus[0]`；验证 BootInitFlow 的 CpuRef 与已激活的 PhysicalDirect association，调用 `BindBootTaskEntry(TaskRef::BOOT)` 建立物理 `tp`/首次 preempt 事实；通过 BootInitFlow 的 CpuRef 解析 `CurrentCPU.Setup`，驱动 `KernelAddrSpace.Preset`、`TrapType.Preset`、`ExceptionType.Preset` 和 `Vm.Preset` |
-| `after_vm_setup()` | `Vm.Setup` 的 Trampoline→Early continuation 返回后调用同一 `BindBootTaskEntry` 建立虚拟 `tp` 且保持 preempt count，再驱动 `TrapType.Setup`、`BootInitStack.Setup` 和 `Soc.Preset` |
+| `preset_until_vm_switch()` | 读取 Kernel Enable 前已发布的 `CpuGroup.cpus[0]`；验证 BootInitFlow 的 CpuRef 与已激活的 PhysicalDirect association，调用 `CurrentTask.BindTask(BootTask)` 首次建立物理 `tp` binding；通过 BootInitFlow 的 CpuRef 解析 `CurrentCPU.Setup`，驱动 `KernelAddrSpace.Preset`、`TrapType.Preset`、`ExceptionType.Preset` 和 `Vm.Preset` |
+| `after_vm_setup()` | `Vm.Setup` 的 Trampoline→Early continuation 返回后调用同一 `CurrentTask.BindTask(BootTask)`，保持 binding identity 并实际刷新虚拟 `tp`，再驱动 `TrapType.Setup`、`BootInitStack.Setup` 和 `Soc.Preset` |
 
 `Vm.Setup` 必须在同一个 Preset 内通过 per-CPU `ActivateOnCpu` 完成 TrampolineVm 到 EarlyVm 的 Handoff，并通过
 `after_vm_setup_continuation()` 回到 BootInitFlow owner。全部 drives 成功后直接检查原入口 Phase
@@ -48,14 +48,15 @@ Setup 的第一个叶阶段，不回调 Kernel。
 adoption 必须通过 BootInitFlow 的 CpuRef 解析到 `CpuGroup.cpus[0]`，再验证该 CPU 的 FS/VS 已关闭；
 不得把 `sstatus` 检查重新解释为 Flow 状态、CPU 能力缺失或用户态永久禁用。
 
-`BindBootTaskEntry` 是本 Flow 的可重复 action，不保存 Base/Prepared/Ready 私有状态，不加入公共
-`Context`，也不发 lifecycle checkpoint。每次调用在修改 `tp` 前验证 BootTask、`TaskRef::BOOT`、当前
-CPU controller association 与 live SATP；PhysicalDirect 首次调用且仅首次初始化入口 preempt count，EarlyVm/SwapperVm
-调用保持该 count 并绑定同一 carrier 的虚拟地址。Trampoline、controller 缺失、SATP 不匹配或 carrier
-不一致必须记录稳定诊断并沿既有 shutdown 路径 fail-stop。该 action 不承担 CurrentTask lifecycle、
-accessor 或权威存储职责；BootInitFlow 生效后 `CurrentTask` 必须直接解析为 BootTask。
+`CurrentTask.BindTask(BootTask)` 是 CPU 执行上下文的可重复 action，不保存 Base/Prepared/Ready 私有
+状态，不加入公共 `Context`，也不发 lifecycle checkpoint。每次调用在修改 `tp` 前验证 BootTask、唯一
+有效 `TaskRef::BOOT`、active Flow/CpuRef、当前 CPU controller association 与 live SATP；PhysicalDirect
+首次调用建立 binding，EarlyVm/SwapperVm 同目标调用保持 binding identity。每次成功调用都必须实际将
+同一 carrier 当时可用的地址写入 `tp/x4`。Trampoline、controller 缺失、SATP 不匹配、carrier/Flow
+不一致或跨 CPU 污染必须记录稳定诊断并沿既有 shutdown 路径 fail-stop。BootTask 的初始禁止抢占由
+静态初始化器建立，BindTask 不读写 preempt count。本段不定义 CurrentStack、BindStack 或 `sp`。
 
-`BootTask.OnCpu` 的 `T` 只在 `_start` 观察一次；物理/虚拟 bind action 都不得推进 BootTask lifecycle
+`BootTask.OnCpu` 的 `T` 只在 `_start` 观察一次；物理/虚拟 BindTask 都不得推进 BootTask lifecycle
 或重复该 marker。两次调用必须解析到同一 `init_task_storage`/`TaskRef::BOOT` carrier，期间不
 建立新的 TaskFlow ownership。
 

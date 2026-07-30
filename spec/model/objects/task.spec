@@ -675,6 +675,7 @@ object BootTask: Task {
             task_owns_flow(self, BootInitFlow);
             task_flow_owner_is(BootInitFlow, self);
             task_flow_parent_is(BootInitFlow, self);
+            boot_task_preemption_is_static_initial_property(self);
         }
 
         transitions {
@@ -689,6 +690,7 @@ object BootTask: Task {
                     task_owns_flow(self, BootInitFlow);
                     task_flow_owner_is(BootInitFlow, self);
                     task_flow_parent_is(BootInitFlow, self);
+                    boot_task_preemption_is_static_initial_property(self);
                     task_online_schedulable(self);
                     task_online_does_not_imply_dispatched(self);
                     task_not_on_cpu(self);
@@ -713,6 +715,7 @@ object BootTask: Task {
             task_owns_flow(self, BootInitFlow);
             task_flow_owner_is(BootInitFlow, self);
             task_flow_parent_is(BootInitFlow, self);
+            boot_task_preemption_is_static_initial_property(self);
             task_online_schedulable(self);
             task_online_does_not_imply_dispatched(self);
             task_not_on_cpu(self);

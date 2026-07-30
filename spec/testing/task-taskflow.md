@@ -10,9 +10,11 @@ carrier and its independently-lived `TaskFlow` instances.
   reported as a second Task or own a second Task lifecycle.
 - Entry tests must observe `BootTask.OnCpu` exactly once with the `T` early
   marker, in `Kernel.Started -> BootTask.OnCpu -> BootInitFlow.Started` order.
-  Physical and virtual binding happen later,
+  Physical and virtual BindTask happen later, each must perform a real `tp` write,
   do not change BootTask lifecycle, and both must resolve to the same
-  linker-visible `init_task_storage`/`TaskRef::BOOT` carrier.
+  linker-visible `init_task_storage`/`TaskRef::BOOT` carrier. The first call
+  establishes the CPU binding, the second refreshes its address representation
+  without changing binding identity, and neither initializes preempt count.
 - The complete Kernel.Enable boundary must preserve
   `Kernel.Started < BootInitFlow.Started < Scheduler.Schedule <
   PayloadHandoffPreparePhase.Online < Kernel.Online <
@@ -29,14 +31,24 @@ carrier and its independently-lived `TaskFlow` instances.
   that scheduler call later restores BootTask.
 - Execution-boundary coverage must prove that a Flow process proceeds only
   when its parent Task is OnCpu/Live. Reserved authority, stale Flow generation or another mismatch must fail without changing Flow
-  lifecycle state. `CurrentTask := effective_task_flow.parent` must resolve only
-  when parent/owner, active Flow, unique OnCpu/Live authority and TaskRef generation all agree.
+  lifecycle state. CurrentTask must first read the CPU-local binding and resolve
+  only when parent/owner, active Flow, same-CPU OnCpu/Live authority and the
+  unique TaskRef generation all agree. CurrentCPU must still resolve from
+  BootInitFlow.cpu_ref before the first binding.
 - CopyProcess coverage must accept an OnCpu/Live source whose validated TaskRef
   is the derived `CurrentTaskRef`, and reject Online, Reserved, non-current and mismatched
   TaskRef sources without changing TaskCreationCore or destination state.
 - CurrentTask and CurrentTaskRef tests must prove that neither selector has
-  lifecycle, owned storage, writable state or snapshot entries. Synchronous
-  drives inherit the effective Flow; asynchronous emits resolve independently.
+  lifecycle, owned storage, a `CurrentTaskSlot`, system state or instance entries.
+  Snapshot coverage must retain only the CPU-keyed contextual binding facts.
+  Synchronous continuations inherit the updated binding/effective Flow;
+  asynchronous emits resolve independently.
+- BindTask focused coverage must exercise BootTask first binding and same-target
+  refresh, pre-bind CurrentTask rejection, post-bind CurrentTask/CurrentTaskRef,
+  scheduler switch to next, independent bindings for two CPUs, and rejection of
+  parent/owner, active-flow, CPU, OnCpu/Live, TaskRef and non-switch-boundary
+  mismatches. Every rejected BindTask must preserve the exact before snapshot.
+  No case may introduce CurrentStack, BindStack or CurrentTaskSlot semantics.
 - Model-tool coverage must exercise multi-level lifecycle inheritance: cumulative
   conditions/facts, base-to-derived drives, post-commit emits, duplicate-side-effect
   rejection and complete override. The legacy and tools2 pipelines must produce the
@@ -73,8 +85,8 @@ carrier and its independently-lived `TaskFlow` instances.
 - BootTask begins OnCpu/Live/Invalid; its first Suspend binds BootIdleFlow and publishes its first Valid
   breakpoint. Each AP begins OnCpu/Reserved/Invalid with Base ApIdleFlow; HSM preserves TaskRef/FlowRef,
   activates Live authority and starts the matching logical-id Flow without Task Enable/Continue.
-- RISC-V sentinel coverage must save/restore `ra/sp/s0..s11` and prove `tp` is established from next Task
-  identity rather than from `TaskSwitchContext`.
+- RISC-V sentinel coverage must save/restore `ra/sp/s0..s11` and prove formal switch commit writes `tp/x4`
+  from next Task identity rather than from `TaskSwitchContext`.
 - Linux PLIC foreign-ABI coverage must prove that ordinary completion, an error return through the Rust
   IRQ-domain bridge, and a nested foreign call each restore the exact entry `tp`; Rust Context and
   CurrentTask resolution may run only while the saved canonical Task `tp` is active.

@@ -155,13 +155,16 @@ TrampolineVm → EarlyVm → SwapperVm Handoff，AP 在各自真实入口以同�
 PhysicalDirect，再按 PhysicalDirect → TrampolineVm → SwapperVm Handoff。四个 controller 都通过
 `ActivateOnCpu(cpu_ref)` 提交；旧 controller 不 Cleanup/Destroyed，静态页表保持 Ready。
 
-`BootInitFlow.Action::BindBootTaskEntry(CurrentTaskRef)` 在 PhysicalDirect 和 EarlyVm activation 后各调用一次。
-首次调用只初始化一次入口 preempt count，第二次只把同一 carrier 的 `tp` 改为虚拟地址并保持计数；
-TrampolineVm、controller association 缺失或 controller/live SATP 不一致必须诊断并 fail-stop。
+`CurrentTask.Action::BindTask(BootTask)` 在 PhysicalDirect 和 EarlyVm activation 后各调用一次。首次调用
+建立启动 CPU 到 BootTask 的 binding，第二次保持同一 Task/binding identity 并把 `tp` 刷新为当前虚拟
+地址表示；两次都必须实际写 `tp`。BootTask 的初始禁止抢占来自静态初始化，BindTask 不初始化或改变
+preempt count。TrampolineVm、controller association 缺失或 controller/live SATP 不一致必须诊断并
+fail-stop。本段不约束 `sp`。
 
 首次调度真实切换先通过 CurrentTask 选择器确认 BootTask，随后提交 context-switch prepare 事实并
 完成物理栈切换；next 栈上的 finish 原子保存/发布 BootTask 断点、消费 KernelInitTask 断点、提交
-OnCpu/Live 与 active Flow，使 CurrentTask 解析切换到 KernelInitTask。PID 1 的真实入口直接启动
+OnCpu/Live、active Flow 与 `CurrentTask.BindTask(KernelInitTask)`，使 CurrentTask 解析切换到
+KernelInitTask。PID 1 的真实入口直接启动
 `KernelInitFlow.Preset`，不再回调 Kernel
 的 Setup 或 Enable。Preset body 必须在 `kernel_init_entry()` 验证 PID 1 vmalloc stack 后执行。
 

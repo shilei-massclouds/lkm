@@ -1,5 +1,10 @@
 # Compose 规格
 
+2026-07-30 CurrentTask 执行绑定复核：CPU-local contextual binding 只改变既有 TaskFlow/scheduler/入口
+私有边界和 tools2 snapshot/derive 投影；RISC-V64 继续由 `tp` lowering 承载，不新增 kernel crate、
+facade、feature、公开 API、CPU child 或 `CurrentTaskSlot`。`spec/compose/main.spec` 已复核，组合语义
+无需修改；本段不修改 `impl/arceos_ex`。
+
 2026-07-29 KernelAddrSpace/translation controller 复核：`KernelAddrSpace` 与 `Vm` 在既有
 `arceos_ex::objects`/`Context` 内拆为私有 module，四个 controller 的激活身份收归既有 canonical
 `Cpu`；BootTask bind action 和 AP boot-data 扩展也只在既有 boot-init/SMP/arch 私有边界内流动。

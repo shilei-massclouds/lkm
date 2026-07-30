@@ -55,7 +55,7 @@ PhaseObject 并以 `parent: Task` 约束 owner，但不拥有 guard 字段、gua
 
 `TaskRef` / `TaskFlowRef` 是分别引用 Task / TaskFlow runtime identity 的稳定句柄。引用必须同时
 携带私有 storage slot 和非零 generation；storage 可在对象完整 Cleanup 后回收，但旧 generation
-永远不能重新变为有效。current-task slot、runqueue、scheduler、wait/reap record 和 checkpoint
+永远不能重新变为有效。CPU-local current-task 执行绑定、runqueue、scheduler、wait/reap record 和 checkpoint
 诊断都传递这种引用，不能用 BootTask/KernelInitTask/UserChild 等角色枚举代替 identity。
 
 本项目采用相对简单的状态机模型，简化未来的建模、推导。
@@ -200,12 +200,13 @@ lifecycle，也不产生第二次 Kernel Enable 接受。
 
 ### BootInitFlow.Preset 的入口前导步骤
 
-`BootInitFlow.Preset` 通过可重复调用的 `Action::BindBootTaskEntry(CurrentTaskRef)` 按“PhysicalDirect
-下物理 `tp` binding → VM controller activation handoff → EarlyVm 下虚拟 `tp` binding”建立调度器运行前的
-初始抢占关闭条件。首次物理调用初始化一次 preempt count；后续虚拟调用保持该计数。该 action 不是
-Task、TaskRef、Flow 或独立 lifecycle，不改变 PID 0 identity。`BootTask` 在入口前已经由静态初始化器
-构造为 OnCpu；本步骤只验证其稳定 storage、PID 0、`TaskRef::BOOT`、canonical identity、当前 CPU
-active translation controller 与 live SATP。
+`BootInitFlow.Preset` 通过可重复调用的上下文动作 `CurrentTask.Action::BindTask(BootTask)` 按
+“PhysicalDirect 下物理 `tp` binding → VM controller activation handoff → EarlyVm 下虚拟 `tp`
+binding”建立启动 CPU 到 BootTask 的首次执行绑定并刷新同一 binding 的地址表示。该 action 不是
+Task、TaskRef、Flow、CPU 子对象或独立 lifecycle，不改变 PID 0 identity。`BootTask` 在入口前已经由
+静态初始化器构造为 `OnCpu/Live` 并具有静态初始禁止抢占属性；BindTask 不初始化或改变 preempt
+count。本步骤只验证稳定 storage、PID 0、唯一有效 `TaskRef::BOOT`、canonical identity、active Flow、
+当前 CPU active translation controller 与 live SATP。本段不定义 CurrentStack、BindStack 或 `sp`。
 
 ### BootInitFlow 的引导叶子
 

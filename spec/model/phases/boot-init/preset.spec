@@ -6,13 +6,13 @@
  */
 
 /*
- * BootTask 的定义集中在 task.spec。入口 tp binding 是 BootInitFlow 的
- * 可重复 Action，不创建独立对象、状态或 snapshot identity。
+ * BootTask 的定义集中在 task.spec。入口 tp binding 是 CurrentTask 的
+ * CPU-local 上下文 Action，不创建独立对象、状态或 CurrentTaskSlot。
  */
-predicate boot_task_entry_bound_for_active_controller<C: CPU, T: Task>(cpu: C, task: T) -> bool;
-predicate boot_task_entry_preempt_count_initialized_once<T: Task>(task: T) -> bool;
-predicate boot_task_entry_preempt_count_preserved<T: Task>(task: T) -> bool;
-predicate boot_task_entry_binding_diagnostic_clear() -> bool;
+predicate boot_task_current_binding_established<C: CPU, T: Task>(cpu: C, task: T) -> bool;
+predicate boot_task_current_binding_refreshed_for_active_controller<C: CPU, T: Task>(cpu: C, task: T) -> bool;
+predicate boot_task_preemption_is_static_initial_property<T: Task>(task: T) -> bool;
+predicate boot_task_bind_task_diagnostic_clear() -> bool;
 
 /*
  * BootInitStack 表示入口前导期根任务使用的静态根栈。它约束 sp 在物理地址阶段和早期虚拟地址阶段的取值。

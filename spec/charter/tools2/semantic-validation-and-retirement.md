@@ -178,7 +178,7 @@ cause chain 和最后稳定 snapshot。
 | `sig-0027` | `KernelAddrSpace -> UserSpaceReserve.Preset` | drives / 0025 | Base -> Ready，保留 canonical 用户地址范围 |
 | `sig-0028` | `BootInitFlow -> CpuGroup.cpus[0].Setup` | drives / 0020 | CurrentCPU 解析到 CPU0；Prepared -> Ready |
 | `sig-0029` | `BootInitFlow -> BootCpuLocalInterrupt.Setup` | drives / 0020 | Prepared -> Ready，建立 CPU0 本地中断关闭事实 |
-| `sig-0030` | `BootInitFlow -> BootInitFlow.BindBootTaskEntry` | drives / 0020 | Action；PhysicalDirect 下绑定物理 `tp` 并仅首次初始化 preempt count |
+| `sig-0030` | `BootInitFlow -> CurrentTask.BindTask(BootTask)` | drives / 0020 | 上下文 Action；PhysicalDirect 下首次建立 CPU0 到 BootTask 的 binding 并写物理 `tp`；不初始化 preempt count |
 | `sig-0031` | `BootInitFlow -> BootInitStack.Preset` | drives / 0020 | Base -> Prepared，提交物理入口 `sp` |
 | `sig-0032` | `BootInitFlow -> TrapType.Preset` | drives / 0020 | Base -> Prepared，安装物理 early event entry |
 | `sig-0033` | `BootInitFlow -> ExceptionType.Preset` | drives / 0020 | 等待 0034–0037 后 Base -> Prepared |
@@ -199,7 +199,7 @@ cause chain 和最后稳定 snapshot。
 | `sig-0048` | `Vm -> EarlyVm.ActivateOnCpu` | drives / 0046 | Action；CPU0 TrampolineVm -> EarlyVm Handoff，trampoline 仅对该 CPU 退役 |
 | `sig-0049` | `Vm -> KernelImage.Enable` | drives / 0046 | Ready -> Online，确认当前执行环境中的相对 `gp` 寻址机制可用 |
 | `sig-0050` | `BootInitFlow -> TrapType.Setup` | drives / 0020 | Prepared -> Ready，安装正式 event entry |
-| `sig-0051` | `BootInitFlow -> BootInitFlow.BindBootTaskEntry` | drives / 0020 | Action；EarlyVm 下绑定虚拟 `tp`，保持 preempt count |
+| `sig-0051` | `BootInitFlow -> CurrentTask.BindTask(BootTask)` | drives / 0020 | 上下文 Action；EarlyVm 下保持同一 binding identity 并实际刷新虚拟 `tp`；不处理 preempt count |
 | `sig-0052` | `BootInitFlow -> BootInitStack.Setup` | drives / 0020 | Prepared -> Ready，将 init stack `sp` 切到虚拟地址 |
 | `sig-0053` | `BootInitFlow -> Soc.Preset` | drives / 0020 | Base -> Prepared；Soc 与 CpuGroup 是 Kernel 平级子对象 |
 
@@ -210,7 +210,7 @@ Config/Lds、BootTask `OnCpu/Live/Invalid`、initial-flow binding、task concurr
 CPU0 的唯一 indexed declaration 已在第 1 组完成，不得用最终 `context_is(SystemExclusive)` 事实虚构
 第二个 context、Lock 或实例事件。
 
-最后一个 child 0053 完成后，0020 检查 CurrentTask 仍解析为 BootTask 及 `task_flow_started(BootInitFlow)`，再把
+最后一个 child 0053 完成后，0020 检查 CPU0 的 CurrentTask binding 仍解析为 BootTask 及 `task_flow_started(BootInitFlow)`，再把
 BootInitFlow 从 Base 提交到 Prepared。此时 Kernel.Enable 的同步 drives 列表下一项是
 `BootInitFlow.Setup`；有界推导必须在创建该 Signal 之前 reached。boundary provenance 的 source/target
 必须是 `Kernel -> BootInitFlow`、canonical signal 必须是 `BootInitFlow.Setup`、delivery 必须是 drives、

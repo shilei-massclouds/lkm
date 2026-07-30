@@ -87,6 +87,9 @@ _REF_TARGET_PROCESS_TYPES = {
     "RunQueueRef": "RunQueue",
     "TaskRef": "Task",
 }
+_CONTEXTUAL_ACTION_RECEIVER_TYPES = {
+    "CurrentTask": "TaskFlow",
+}
 _ATTR_RE = re.compile(r"\A([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.+)\Z", re.S)
 _ALLOWED_STATE_NAMES = frozenset(
     {
@@ -2743,6 +2746,9 @@ def _resolve_association_receiver_type(
     receiver: str,
     bindings: dict[str, str],
 ) -> str | None:
+    contextual_type = _CONTEXTUAL_ACTION_RECEIVER_TYPES.get(receiver)
+    if contextual_type is not None:
+        return contextual_type
     if receiver == "CurrentCPU":
         return "CPU"
     if receiver.startswith("CurrentCPU."):
@@ -2987,6 +2993,18 @@ def _check_action_references(
 ) -> None:
     allowed = _context_allowed_object_refs(context)
     for object_name, action_name in _OBJECT_ACTION_RE.findall(block.body):
+        contextual_type = _CONTEXTUAL_ACTION_RECEIVER_TYPES.get(object_name)
+        if contextual_type is not None:
+            if _type_process_decl(model, contextual_type, "Action", action_name) is None:
+                diagnostics.append(
+                    Diagnostic(
+                        Severity.ERROR,
+                        "unsupported contextual action reference: "
+                        f"{object_name}.Action::{action_name}",
+                        block.span,
+                    )
+                )
+            continue
         if object_name not in model.objects:
             diagnostics.append(
                 Diagnostic(
@@ -3352,6 +3370,7 @@ def _check_drive_action_entry(
     if association_process is not None and (
         "." in association_process.group(1)
         or association_process.group(1) == "CurrentCPU"
+        or association_process.group(1) in _CONTEXTUAL_ACTION_RECEIVER_TYPES
     ):
         receiver, process_kind, process_name, args = association_process.groups()
         if process_kind != "Action":

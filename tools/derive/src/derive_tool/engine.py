@@ -236,6 +236,10 @@ _STATIC_SOURCE_PROOFS = {
             "static_object_binding",
             "linux_static_object_binding",
         ),
+        "boot_task_preemption_is_static_initial_property(self)": (
+            "static_initial_property",
+            "linux_static_object_binding",
+        ),
         "valid_object_storage(storage)": (
             "object_storage",
             "linux_static_object_binding",

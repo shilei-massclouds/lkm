@@ -446,6 +446,16 @@ predicate printk_deferred_section_exited<T>(section: T) -> bool;
 predicate current_task_resolved_target_is<F, R, T>(flow: F, task_ref: R, task: T) -> bool;
 predicate current_task_ref_derived_from_selector<R, T>(task_ref: R, task: T) -> bool;
 predicate current_task_selector_validates_execution<F, T>(flow: F, task: T) -> bool;
+predicate current_task_bind_boundary_valid<F: TaskFlow, T: Task>(flow: F, task: T) -> bool;
+predicate current_task_bind_task_has_unique_valid_ref<T: Task>(task: T) -> bool;
+predicate current_task_binding_committed<C: CPU, T: Task, F: TaskFlow>(cpu: C, task: T, flow: F) -> bool;
+predicate current_task_binding_ref_is<C: CPU, R: TaskRef>(cpu: C, task_ref: R) -> bool;
+predicate current_task_binding_address_view_is<C: CPU, T: Task, V>(cpu: C, task: T, view: V) -> bool;
+predicate current_task_binding_revision_is<C: CPU>(cpu: C, revision: usize) -> bool;
+predicate current_task_binding_address_refreshed<C: CPU, T: Task>(cpu: C, task: T) -> bool;
+predicate current_task_binding_identity_preserved_for_same_task<C: CPU, T: Task>(cpu: C, task: T) -> bool;
+predicate current_task_binding_is_cpu_local<C: CPU>(cpu: C) -> bool;
+predicate current_task_bind_preserves_preemption_state<T: Task>(task: T) -> bool;
 predicate task_creation_flow_contract_ready<T>(core: T) -> bool;
 predicate task_clone_args_ready<T>(task: T) -> bool;
 predicate task_creation_copy_process_committed<T, U, V>(core: T, src_task: U, dst_task: V) -> bool;
@@ -1037,8 +1047,10 @@ type BufferObject {
  * records execution and calls Schedule/Yield, and the CPU returns to the
  * KernelInitTask continuation. This does not weaken the rest_init first
  * schedule facts below; it is an additional payload-phase schedule use.
- * CurrentTask and CurrentTaskRef are Flow-scoped selectors. CurrentRunQueueRef
- * remains private to the current CPU view. The model does not introduce
+ * CurrentTask reads the current CPU's committed task binding, validates it
+ * against the effective TaskFlow, and CurrentTaskRef derives the bound Task's
+ * unique live TaskRef. CurrentRunQueueRef remains private to the current CPU
+ * view. The model does not introduce
  * descriptive current-task/current-runqueue
  * objects or global current-task/current-runqueue singletons. SelectRunQueue is a pure
  * wake-up selection action: it consumes a TaskRef and returns a RunQueueRef.
@@ -1201,6 +1213,7 @@ type SchedulerObject: KernelObject {
                 next_ref.Action::RestoreCoreContext;
                 BootTask.Transition::Suspend;
                 KernelInitTask.Transition::Continue;
+                CurrentTask.Action::BindTask(KernelInitTask);
                 KernelInitFlow.Action::ConfirmCurrentTask(KernelInitTaskRef);
             }
             ensures {
@@ -1242,6 +1255,7 @@ type SchedulerObject: KernelObject {
                 next_ref.Action::RestoreCoreContext;
                 prev_ref.Transition::Disable;
                 next_ref.Transition::Continue;
+                CurrentTask.Action::BindTask(next_ref);
                 next_ref.active_flow.Action::ConfirmCurrentTask(next_ref);
                 prev_ref.Transition::Cleanup;
                 next_ref.Action::DispatchContinuation;

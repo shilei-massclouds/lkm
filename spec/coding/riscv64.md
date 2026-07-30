@@ -70,16 +70,20 @@ RISC-V64 入口前导期实现必须按地址空间阶段区分可执行代码�
 
 ## 当前任务引用
 
-模型层的 `CurrentTask` 是 effective TaskFlow parent 选择器，`CurrentTaskRef` 是其 generation-checked
-类型化引用；两者都没有槽、lifecycle 或 snapshot state。RISC-V64 lowering 参考 Linux，用本 hart 的
-`tp` 承载当前 Task 的稳定实现身份。内核入口、AP HSM entry、真实及模拟调度提交都必须在任何 Rust
+模型层的 `CurrentTask` 是 CPU 执行上下文已提交的 task binding，`CurrentTaskRef` 从该 Task 的唯一
+generation-checked 引用派生；两者都没有 object、槽或 lifecycle。RISC-V64 lowering 参考 Linux，用本
+hart 的 `tp/x4` 承载这一 binding。`CurrentTask.Action::BindTask(task)` 必须由汇编把 task 当时可用的
+canonical 地址写入 `tp`；每次成功调用都必须实际写寄存器，同目标重复调用只刷新地址表示，不创建新
+Task 或 binding identity。内核入口、AP HSM entry、真实及模拟调度提交都必须在任何 Rust
 Context、scheduler 或 CurrentTask 路径前建立正确的 `tp`；identity switch 保持原值，普通/terminal
-switch 在 next 栈 finish 前指向 next Task。集中解析器必须把该地址验证为 canonical Task/TaskRef，
+switch 在正式 switch commit 指向 next Task。入口调用位置对应 Linux `la tp, init_task`，调度路径对应
+`__switch_to` 的 `move tp, a1`。集中解析器必须把该地址验证为 canonical Task/TaskRef，
 未知地址、错误 storage class 或 stale generation 都显式失败，不回退到 BootTask、runqueue curr 或缓存。
 
 Linux 6.12 的参考路径是：`kernel/sched/core.c::__schedule()` 调用 `switch_to(prev, next, prev)`，RISC-V 宏 `arch/riscv/include/asm/switch_to.h::switch_to` 最终调用 `arch/riscv/kernel/entry.S::__switch_to`；`__switch_to` 保存 `prev->thread`、恢复 `next->thread` 后执行 `move tp, a1`，其中 `a1` 是 next `task_struct`。`arch/riscv/include/asm/current.h` 将 `current` 绑定为 `tp` 上的 `struct task_struct *`。
 
-per-cpu 存储可以作为其它 CPU-local 数据的实现承载方式，但不得把它变成 CurrentTask 定义或权威副本。
+per-cpu 存储可以作为其它 CPU-local 数据的实现承载方式，但不得把它变成 CurrentTaskSlot、生命周期
+对象或全局单例；CurrentTask 的体系结构执行 binding 仍由本 hart `tp` 承载。
 Linux PLIC shim 对 `tp` 的临时占用只属于 foreign ABI；正常、错误和嵌套返回路径都必须恢复调用前的
 真实 task `tp`，且在恢复前不得进入 Rust Context、调度或 CurrentTask 解析。
 
@@ -287,11 +291,13 @@ RISC-V64 code should realize CurrentTask's stable implementation identity by
 following the Linux-style use of the tp register as the current-task
 view. There is no object-level current-task slot; the implementation
 boundary is a centralized, generation-checking tp-to-TaskRef resolver.
-This follows Linux 6.12
+Every successful `BindTask` must write the task's current usable address to
+`tp/x4`; an identical target refreshes that address without allocating another
+task or binding identity. This follows Linux 6.12
 arch/riscv/kernel/entry.S::__switch_to, which moves next
 task_struct from a1 into tp. This is an implementation reference for
-this target; the model semantics remain Flow-scoped and contain no
-register or per-cpu storage definition.
+this target; the model semantics remain a CPU-local contextual binding and do
+not create an object-level current-task slot.
 
 For a user-origin trap, the architecture entry context at the safe kernel
 stack boundary must preserve user `tp`, establish the receiving Task pointer

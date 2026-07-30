@@ -791,7 +791,7 @@ class SignalAnimationTests(unittest.TestCase):
                 derivation["model_fingerprint"],
                 view["model_fingerprint"],
             },
-            {"sha256:ce5ffd10a87a67689fabfd6d0ea42bcb309135b72cf12f485cebf11ae20cf8c0"},
+            {"sha256:20f767313cfcc9c547c8352bd372d2d4b8c4e530ea885591979ed3b4b6e4a08a"},
         )
         animation = build_animation(model, view)
         self.assertEqual(animation["trace"]["total_signals"], 54)
@@ -810,6 +810,23 @@ class SignalAnimationTests(unittest.TestCase):
         self.assertEqual(
             [moment["id"] for moment in animation["moments"] if moment["kind"] == "terminal"],
             ["sig-0016:terminal"],
+        )
+        bind_requests = {
+            moment["signal_id"]: moment
+            for moment in animation["moments"]
+            if moment["kind"] == "request" and moment["signal"] == "BindTask"
+        }
+        self.assertEqual(
+            {
+                signal_id: moment["handler"]["description"]
+                for signal_id, moment in bind_requests.items()
+            },
+            {
+                "sig-0031":
+                    "首次建立当前 CPU 到 BootTask 的 CurrentTask binding，并写入当前地址表示。",
+                "sig-0052":
+                    "第二次绑定同一 Task：保持 CurrentTask binding identity，并刷新当前地址表示。",
+            },
         )
         terminal = next(
             moment for moment in animation["moments"] if moment["kind"] == "terminal"

@@ -22,6 +22,18 @@ def _snapshot_delta(before: dict[str, Any] | None, after: dict[str, Any] | None)
         old, new = before["references"].get(name), after["references"].get(name)
         if old != new:
             lines.append(f"reference {name}: {old} -> {new}")
+    before_bindings = before.get("contextual_bindings", {})
+    after_bindings = after.get("contextual_bindings", {})
+    for kind in sorted(set(before_bindings) | set(after_bindings)):
+        old_entries = before_bindings.get(kind, {})
+        new_entries = after_bindings.get(kind, {})
+        for key in sorted(set(old_entries) | set(new_entries)):
+            old, new = old_entries.get(key), new_entries.get(key)
+            if old != new:
+                lines.append(
+                    f"contextual binding {kind}[{key}]: "
+                    f"{json.dumps(old, sort_keys=True)} -> {json.dumps(new, sort_keys=True)}"
+                )
     return lines
 
 

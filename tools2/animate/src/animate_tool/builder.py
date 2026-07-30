@@ -34,6 +34,7 @@ def _validate_snapshot(value: Any, *, label: str) -> dict[str, Any]:
     states = value.get("states")
     facts = value.get("facts")
     references = value.get("references")
+    contextual_bindings = value.get("contextual_bindings")
     instances = value.get("instances")
     if not isinstance(states, dict) or not all(
         isinstance(name, str) and (isinstance(state, str) or state is None)
@@ -44,6 +45,8 @@ def _validate_snapshot(value: Any, *, label: str) -> dict[str, Any]:
         raise ProtocolError(f"{label}.facts must be a string list")
     if not isinstance(references, dict):
         raise ProtocolError(f"{label}.references must be an object")
+    if contextual_bindings is not None and not isinstance(contextual_bindings, dict):
+        raise ProtocolError(f"{label}.contextual_bindings must be an object")
     if instances is not None and not isinstance(instances, dict):
         raise ProtocolError(f"{label}.instances must be an object")
     return value
@@ -464,6 +467,7 @@ def _build_frames(
         "states": {},
         "facts": [],
         "references": {},
+        "contextual_bindings": {},
     }
     initial = frame(initial_snapshot, index=-1, moment_id=None)
     frames: list[dict[str, Any]] = []

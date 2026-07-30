@@ -51,32 +51,33 @@ Flow handoff 在激活新 Flow 前必须把旧 Flow 的 CpuRef 复制给新 Flow
 同步 drives 子孙继承这一解析来源，异步 emits 不继承。完整 CPU ownership、别名和解引用规则见
 [`CPU`](cpu.md) 与 [`CpuGroup`](cpu-group.md)。
 
-## CurrentTask 与 CurrentTaskRef
+## CurrentTask、BindTask 与 CurrentTaskRef
 
-`CurrentTask` 是 TaskFlow 执行上下文中的保留选择器，`CurrentTaskRef` 是同一选择结果的派生类型化
-引用：
+`CurrentTask` 表示 CPU 执行上下文已经提交的当前 Task binding，不直接等同于 effective TaskFlow 的
+parent。`CurrentTask.Action::BindTask(task: Task)` 是建立或刷新这一上下文 binding 的动作；它不声明
+CurrentTask object、owned child、lifecycle 或 `CurrentTaskSlot`。普通 Task 只能在 Scheduler 的正式
+switch commit 边界完成不同目标换绑；BootTask 是入口特例，由自己的 BootInitFlow 在首段指令路径
+完成首次绑定。同一 CPU 对同一 Task 的重复调用保持 binding identity，只刷新该 Task 的当前地址表示；
+不同 CPU 的 binding 彼此隔离。
 
-```text
-CurrentTask := effective_task_flow.parent
-CurrentTaskRef := ref(CurrentTask)
-```
+TaskFlow parent 仍只表达结构归属，不是 current-task 存储。绑定完成后，所选 Task 必须同时是
+effective TaskFlow 的 parent 和 owner，且该 Flow 必须是 Task 的 active Flow；目标必须为该 CPU 上的
+`OnCpu/Live` 执行主体，并具有恰好一个有效、指向自身的 TaskRef。`CurrentTaskRef` 只从该已绑定 Task
+的唯一有效 TaskRef 派生。缺失 CPU 执行上下文、尚未绑定、错误 parent/owner、非 active Flow、错误
+CPU、非 `OnCpu/Live` 或悬空/过期/重复 TaskRef 都必须拒绝，失败不得提交部分 binding。
 
-解析不仅检查 parent/owner binding，还必须证明目标 Task 是唯一 `OnCpu/Live` 执行主体、目标的
-`active_flow` 等于 effective TaskFlow，且 Flow 的 parent 与 owner 均指向该 Task。缺失 effective
-Flow、非活跃 Flow、错误 owner、非 `OnCpu/Live` 或悬空/过期 TaskRef 都必须拒绝。
-
-二者都不是 object、owned child、lifecycle、可写 slot 或 snapshot state，不声明 `SetCurrent` 一类
-动作，也不存在另一份 current-task 权威存储。TaskFlow 及其同步 `drives` 子树继承同一解析；异步
-`emits` 不继承，接收方从自己的 effective TaskFlow 重新解析。trace 必须记录 canonical Task、source
-Flow 和 source TaskRef。Kernel 接管并启动 BootInitFlow 后，逻辑 CurrentTask 即为 BootTask；
-`BootInitFlow.Action::BindBootTaskEntry` 只协调入口架构绑定，不承担 CurrentTask lifecycle，也不建立
-snapshot object。
+TaskFlow 及其同步 `drives` continuation 继承同一 CPU-local binding；异步 `emits` 不继承，接收方从
+自己的执行上下文重新解析。trace 必须记录 canonical CPU、Task、source Flow 和 source TaskRef。
+BootTask 首次绑定前，`CurrentCPU` 可以独立从 `BootInitFlow.cpu_ref` 解引用，不能反向依赖尚未建立的
+CurrentTask。BootTask 的静态初始禁止抢占属性不是 BindTask 的副作用。本段不定义 CurrentStack、
+BindStack 或 `sp`。
 
 ## 陷入期间的底层执行权
 
 短期 Trap/Interrupt/Exception Flow 不替换 Task 的长期 continuation。陷入期间
-`Task.active_flow` 与其 `TaskFlowRef` 保持绑定但暂停推进；effective TaskFlow 仍是 CurrentTask、
-CurrentTaskRef 与 CurrentCPU 的唯一解析来源。活动执行上下文只在其上叠加：
+`Task.active_flow` 与其 `TaskFlowRef` 保持绑定但暂停推进；effective TaskFlow 仍提供结构/CPU 解析来源，
+CurrentTask/CurrentTaskRef 则从该 CPU 已提交的 task binding 解析并与 Flow 结构相互校验。活动执行上下文
+只在其上叠加：
 
 ```text
 TaskFlow -> TrapFlow -> InterruptFlow/ExceptionFlow -> concrete exception Flow
@@ -125,7 +126,8 @@ Kernel.Enable、缺失 CpuRef/controller association 或执行权不匹配立即
 
 PID 1 的首次 dispatch 是跨栈 continuation：scheduler prepare 校验两侧 FlowRef/context，架构 switch
 保存 BootTask 并恢复 PID 1，随后在 `kernel_init_entry()` 的 finish 边界原子提交 BootTask Suspend、
-PID 1 Continue、active Flow 与断点消费，使 CurrentTask 解析切换到 PID 1，再严格发出
+PID 1 Continue、active Flow、断点消费与 `CurrentTask.BindTask(KernelInitTask)`，使 CurrentTask 解析
+切换到 PID 1，再严格发出
 KernelInitFlow Startup。不得在 BootTask 栈上
 预提交 PID 1 OnCpu，也不得预执行 `PreSmpInitPhase` 或任何后续叶子阶段。
 

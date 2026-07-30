@@ -16,6 +16,43 @@ type TaskFlow: PhaseObject {
     }
 
     processes {
+        /*
+         * 首次成功调用建立当前 CPU 到 BootTask 的 binding；同目标再次调用保持
+         * binding identity 并刷新该 Task 的当前地址表示。不同目标只允许在正式
+         * scheduler switch commit，且失败不得留下部分 binding。
+         */
+        Action::BindTask(task: Task) {
+            state_effect: StateEffect::None;
+            depends_on {
+                current_task_bind_boundary_valid(self, task);
+                task.state == State::OnCpu;
+                task_execution_authority_is(task, TaskExecutionAuthority::Live);
+                task_active_flow_is(task, task.active_flow);
+                task_flow_owner_is(task.active_flow, task);
+                task_flow_parent_is(task.active_flow, task);
+                task_flow_cpu_ref_is(task.active_flow, self.cpu_ref);
+                current_task_bind_task_has_unique_valid_ref(task);
+                cpu_active_translation_controller_for_ref_is(
+                    self.cpu_ref,
+                    TranslationControllerKind::PhysicalDirect
+                ) || cpu_active_translation_controller_for_ref_is(
+                    self.cpu_ref,
+                    TranslationControllerKind::EarlyVm
+                ) || cpu_active_translation_controller_for_ref_is(
+                    self.cpu_ref,
+                    TranslationControllerKind::SwapperVm
+                );
+                cpu_translation_controller_matches_live_satp_for_ref(self.cpu_ref);
+            }
+            ensures {
+                current_task_binding_committed(CurrentCPU, task, task.active_flow);
+                current_task_binding_address_refreshed(CurrentCPU, task);
+                current_task_binding_identity_preserved_for_same_task(CurrentCPU, task);
+                current_task_binding_is_cpu_local(CurrentCPU);
+                current_task_bind_preserves_preemption_state(task);
+            }
+        }
+
         Action::AssignCpuRef(cpu_ref: CpuRef) {
             state_effect: StateEffect::None;
             updates {
