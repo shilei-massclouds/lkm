@@ -28,7 +28,7 @@ Preset 横跨三个物理实现段，但仍是 BootInitFlow 的一个 model tran
 | 段 | model drives 与实现 |
 | --- | --- |
 | Kernel entry acceptance | `AcceptEnable` → `AssignCpuRef` → `PhysicalDirect.ActivateOnCpu(InitialActivation)` → 接受 Preset 并记录 `BootInitFlow.Started`；任何 Preset child 尚未启动 |
-| `_start` Preset head | `InterruptType.Preset` 先以 `csrw sie, zero` 实现全部分路门控关闭，再以 `csrw sip, zero` 实现全部待决信号清空；不得由此推断 `sstatus.SIE` 总门控已关闭；随后把 `__global_pointer$` 装入 `gp/x3`，并用 `.option norelax` 保护该初始化，以建立 `gp_relative_addressing_ready(KernelImage)`；`CurrentCPU.Action::DisableFpuVectorExecution` 再以 `li t0, SR_FS_VS` 和 `csrc CSR_STATUS, t0` 同时关闭 BootCPU 的 FS/VS 执行状态；然后清 BSS，把入口 `a0` 的原值保存到持久交接位置 |
+| `_start` Preset head | `InterruptType.Preset` 先以 `csrw sie, zero` 实现全部分路门控关闭，再以 `csrw sip, zero` 实现一次待决清除写完成；该瞬时边界不保证硬件驱动的 live `sip` 随后保持为零，也不得由此推断 `sstatus.SIE` 总门控已关闭；随后把 `__global_pointer$` 装入 `gp/x3`，并用 `.option norelax` 保护该初始化，以建立 `gp_relative_addressing_ready(KernelImage)`；`CurrentCPU.Action::DisableFpuVectorExecution` 再以 `li t0, SR_FS_VS` 和 `csrc CSR_STATUS, t0` 同时关闭 BootCPU 的 FS/VS 执行状态；然后清 BSS，把入口 `a0` 的原值保存到持久交接位置 |
 | `preset_until_vm_switch()` | 读取 Kernel Enable 前已发布的 `CpuGroup.cpus[0]`；验证 BootInitFlow 的 CpuRef、PhysicalDirect association、BootTask/TaskRef 与 `BootTask.stack` linker range，然后调用单个 `CurrentTask.BindTaskStack(BootTask, BootTask.stack)` 汇编提交块，原子装载物理 `tp/sp` 并发布首次 task/stack pair；通过 BootInitFlow 的 CpuRef 解析 `CurrentCPU.Setup`，驱动 `KernelAddrSpace.Preset`、`TrapType.Preset` 和 `Vm.Preset`；不得在这里提前驱动 `ExceptionType.Preset` |
 | `after_vm_setup()` | `Vm.Setup` 的 Trampoline→Early continuation 返回后先驱动 `TrapType.Setup`；该动作驱动 `ExceptionType.Preset` 及四个异常子类型 Preset，把正式响应汇编函数入口写入 `stvec`，并紧接着以 `csrw sscratch, zero` 标记当前处于内核态。随后验证 Vm/EarlyVm/TrapType Ready、Soc 尚为 Base 及现有 BootTask/stack pair 精确匹配，再在同一入口汇编路径内执行 `CurrentTask.RefreshTaskStack(BootTask, BootTask.stack)` 的连续指令，保持 binding identity 并刷新虚拟 `tp/sp`；该 Action 完成后继续后续入口步骤，随后才驱动 `Soc.Preset` |
 
@@ -37,6 +37,11 @@ Preset 横跨三个物理实现段，但仍是 BootInitFlow 的一个 model tran
 `after_vm_setup_continuation()` 回到 BootInitFlow owner。全部 drives 成功后直接检查原入口 Phase
 Online invariant 的完整对象事实并提交 `BootInitFlow.Prepared`；随后由 BootInitFlow 自身直接启动
 Setup 的第一个叶阶段，不回调 Kernel。
+
+Rust adoption 对已经完成的 `InterruptType.Preset` 只允许读取并验证 live `sie == 0`；不得读取或再次写入
+`sip`，不得从该时刻的 live `sip` 推导 head 清除写是否完成，也不得重置或安装 handler/fallback。
+`sstatus.SIE` 仍完全不属于 Preset；它只能由 `CurrentCPU.Setup` 后的 `InterruptType.Setup` CPU-local
+control 路径首次关闭。
 
 ## Prepared completion 与 Setup 入口
 
@@ -52,6 +57,10 @@ BootInitFlow.Preset commits Prepared
 `start_kernel` 是 `BootInitFlow.Setup` 的代码入口代表，并开始 Setup 的第一个直接叶阶段；它不是
 Kernel 发起的第二次 drive，也不是新的 Action 或 continuation。`tail` 表示 `_start` 不会返回，必须保留
 为 tail call，不得改写成普通 `call`，也不得引入 `refresh_task_stack_continuation` 一类额外入口。
+`start_kernel` 必须暴露稳定、未改名的 ABI symbol，并在启动首叶前精确验证 BootInitFlow 为 Prepared、
+BootTask 为 OnCpu、BootInitFlow 仍是 BootTask 的 active Flow，且其 CpuRef 仍解析到 canonical BootCPU。
+实现不得保留可绕过该 ABI 的普通 Rust `setup()` 直调入口。Preset completion stub 除一个不写 `ra` 的
+lowered tail 外不得包含 `call`、`ret` 或其它目标；全 ELF 不得存在普通 `call start_kernel`。
 
 `KernelImage.Setup` 在当前 formal 非 XIP 路径中由入口汇编为 BSS 段清零。清零完成后，BSS 按 Model
 作为普通可写内存使用。

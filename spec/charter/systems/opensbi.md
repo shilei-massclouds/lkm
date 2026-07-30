@@ -18,8 +18,8 @@ OpenSBI 初态为 Base：
 原子发布 `CpuGroup.cpus[0]` 与 CpuGroup Prepared；只有该响应完成后才异步发送 `Kernel.Enable`。
 这条边界表达控制权交接；除上述直接
 入口契约外，它不表示其它启动相关寄存器已经具有 Kernel 最终值。尤其不要求 OpenSBI 预先关闭
-BootCPU 的中断分路门控或清空其待决中断信号：Kernel 在 `BootInitFlow.Preset` 的第一个入口动作中
-自行完成该防御性处理。OpenSBI 不拥有
+BootCPU 的中断分路门控或完成待决中断清除写：Kernel 在 `BootInitFlow.Preset` 的第一个入口动作中
+自行按序完成该防御性写；硬件驱动的待决位可以在写后再次置位。OpenSBI 不拥有
 Kernel，也不拥有 Kernel 的内部 phase。
 
 装载事实描述 OpenSBI Enable 交接域必须保证的结果，不虚构 OpenSBI 固件内部执行复制。QEMU/loader

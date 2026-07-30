@@ -190,12 +190,6 @@ pub fn read_sie() -> usize {
     value
 }
 
-pub fn clear_supervisor_interrupt_pending() {
-    unsafe {
-        core::arch::asm!("csrw sip, zero", options(nostack, nomem));
-    }
-}
-
 #[allow(dead_code)]
 pub fn disable_supervisor_interrupts() {
     clear_sstatus_bits(SSTATUS_SIE);

@@ -72,8 +72,6 @@ impl InterruptType {
             );
         }
 
-        csr::clear_supervisor_interrupt_pending();
-        reset_interrupt_handlers();
         self.lifecycle
             .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
     }
@@ -125,6 +123,7 @@ impl InterruptType {
         }
 
         self.disable()?;
+        reset_interrupt_handlers();
         self.boot_cpu_local_interrupts_enabled = false;
         self.early_boot_irqs_disabled = true;
         self.lifecycle.transition(

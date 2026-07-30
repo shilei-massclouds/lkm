@@ -5,11 +5,15 @@ pending state (`sie`/`sip`), handler bindings, and nested save/disable/restore b
 own device-source gates.
 
 - For the BootCPU `Preset`, lower the model requirement to close every interrupt class gate as `csrw sie, zero`, then
-  lower the model requirement to clear every pending interrupt signal as `csrw sip, zero`. The instruction order is
-  mandatory: the `sie` write completes before the `sip` write.
+  lower the pending-clear completion fact as one `csrw sip, zero`. The instruction order is mandatory: the `sie` write
+  completes before the `sip` write. This is a write-completion boundary, not a guarantee that hardware-driven live
+  `sip` bits remain zero afterward.
+- Rust adoption of the completed head `Preset` may read and require only live `sie == 0`. It must not read or write
+  `sip`, infer any later live `sip == 0` fact, or reset/install handler or fallback policy.
 - `Preset` must not read, write, adopt, or infer `sstatus.SIE`; it does not install a handler, fallback, or formal
   dispatch framework. In particular, `sie == 0` is not evidence that the CPU-local total gate is closed.
-- `Setup` binds timer/external handlers while leaving the total gate closed.
+- `Setup` first closes `sstatus.SIE` through the CPU-local control setup path, then establishes fallback dispatch
+  readiness and the Ready boundary; timer/external class handlers remain bound by their later class-routing setup.
 - `Enable` opens the total gate only after class routing is ready.
 - `SaveAndDisable` records the prior `SIE` value by nesting depth; `Restore` consumes exactly the matching saved value.
 - `InterruptFlowType` dispatch is hardirq context: ordinary IRQ reentry and scheduling are rejected unless a named

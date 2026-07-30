@@ -2,6 +2,7 @@ schema_version = 2
 name = "kernel-smoke-native"
 purpose = "acceptance"
 timeout_seconds = 120
+post_script = "kernel-smoke-order.py"
 
 [kernel]
 app = "smoke"

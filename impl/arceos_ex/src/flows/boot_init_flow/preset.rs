@@ -80,12 +80,14 @@ _start:
      * BootInitFlow.Preset head segment.
      *
      * This code performs only the model
-     * events that must happen before Rust can run: close the interrupt gates,
-     * establish gp, disable kernel FPU/vector use, zero BSS, record the boot
-     * CPU group input, install the init task pointer, and create the initial
-     * stack.  The Rust segment below continues the same Preset event.
+     * events that must happen before Rust can run: close the interrupt class
+     * gates, complete one pending-clear write, establish gp, disable kernel
+     * FPU/vector use, zero BSS, record the boot CPU group input, install the
+     * init task pointer, and create the initial stack. The Rust segment below
+     * continues the same Preset event.
      */
-    # InterruptType.Preset: S-mode interrupt pending/enabled state is closed.
+    # InterruptType.Preset: close class gates, then complete one pending-clear write.
+    # Hardware-driven pending bits may be asserted again after this boundary.
     csrw sie, zero
     csrw sip, zero
     li a0, {trace_interrupt_preset}

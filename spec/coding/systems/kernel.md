@@ -49,7 +49,8 @@ Enable handler 必须依次完成 `AcceptEnable`、把解析到的 BootCPURef �
 
 OpenSBI 不负责保证 `sie/sip` 已清零。`BootInitFlow.Preset` 的第一个被驱动叶迁移是
 `InterruptType.Preset`；入口汇编必须先执行 `csrw sie, zero` 映射全部中断分路门控关闭，再执行
-`csrw sip, zero` 映射全部待决中断信号清空。该边界不得读写或推断 `sstatus.SIE`，也不得建立
+`csrw sip, zero` 映射一次待决清除写完成；硬件驱动的 live `sip` 可以随后再次置位，Rust adoption 不得
+读取、重写或要求它为零。该边界不得读写或推断 `sstatus.SIE`，也不得建立
 handler、fallback、正式分派框架或 `interrupt_concurrency_closed()`。这发生在 Kernel.Enable 已接受
 之后、其余入口前导动作之前。
 

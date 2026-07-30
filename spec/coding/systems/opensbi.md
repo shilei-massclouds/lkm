@@ -16,5 +16,5 @@ changed by Kernel VM setup.
 QEMU or its loader may perform the actual byte placement; the OpenSBI.Enable handoff domain guarantees the resulting
 loaded address and alignment and must not invent an internal firmware copy operation. The OpenSBI mapping must not
 synthesize or require `sie/sip == 0`; the first Kernel-owned `InterruptType.Preset` action must write `sie` to zero
-before writing `sip` to zero, without inferring any `sstatus.SIE` state. The metadata records the DTB, BootTaskRef and entry ABI facts, but adds
+before completing one `sip` clear write, without inferring any later live `sip == 0` or `sstatus.SIE` state. The metadata records the DTB, BootTaskRef and entry ABI facts, but adds
 no firmware binary, build recipe, or executable OpenSBI control flow.

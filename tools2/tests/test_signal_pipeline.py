@@ -4120,11 +4120,11 @@ class SignalPipelineTests(unittest.TestCase):
                 interrupt_facts,
             )
             self.assertIn(
-                "interrupt_pending_cleared(CpuGroup.cpus[0].trap.interrupt)",
+                "interrupt_pending_clear_write_completed(CpuGroup.cpus[0].trap.interrupt)",
                 interrupt_facts,
             )
             self.assertIn(
-                "interrupt_class_gates_closed_before_pending_cleared(CpuGroup.cpus[0].trap.interrupt)",
+                "interrupt_class_gates_closed_before_pending_clear_write_completed(CpuGroup.cpus[0].trap.interrupt)",
                 interrupt_facts,
             )
             self.assertNotIn("interrupt_concurrency_closed", interrupt_facts)
@@ -4919,8 +4919,8 @@ class SignalPipelineTests(unittest.TestCase):
                 "task_flow_started(BootInitFlow)",
                 "interrupt_concurrency_closed",
                 "interrupt_class_gates_closed(CpuGroup.cpus[0].trap.interrupt)",
-                "interrupt_pending_cleared(CpuGroup.cpus[0].trap.interrupt)",
-                "interrupt_class_gates_closed_before_pending_cleared(CpuGroup.cpus[0].trap.interrupt)",
+                "interrupt_pending_clear_write_completed(CpuGroup.cpus[0].trap.interrupt)",
+                "interrupt_class_gates_closed_before_pending_clear_write_completed(CpuGroup.cpus[0].trap.interrupt)",
                 "gp_relative_addressing_ready(KernelImage)",
                 "kernel_image_bss_zeroing_completed(KernelImage)",
                 "kernel_image_bss_ordinary_writable(KernelImage)",
@@ -5031,14 +5031,14 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(snapshot.read_bytes(), BOOT_INIT_SETUP_SCENARIO.read_bytes())
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "50e10567f1e95208b74c70c52785f1f61f6a8af14afe842a7d5fad6baad276fb",
+                "22567734782cd6d9650ae8ac19f4dba1849620b4f244bd9a0ff8b01e1c5fef8a",
             )
             self.assertEqual(
                 {
                     derivation["model_fingerprint"], model["model_fingerprint"],
                     view["model_fingerprint"], saved["model_fingerprint"],
                 },
-                {"sha256:973743f9cca64010f1b421397b4cff54d8750bf2e1997be84c3339c9b79a5549"},
+                {"sha256:8b402c1807a08a4103b833060089f4969034e94aa8ac3e650db270a541b056b0"},
             )
             with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
                 compact_text = render_text(view)

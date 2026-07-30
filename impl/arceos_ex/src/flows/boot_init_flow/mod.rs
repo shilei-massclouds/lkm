@@ -2,6 +2,8 @@ mod preset;
 mod rest_init;
 mod schedule_handoff;
 
+use core::arch::global_asm;
+
 #[cfg(app_smoke)]
 pub(crate) use preset::{
     boot_task_entry_bind_count, boot_task_entry_bind_diagnostic,
@@ -16,6 +18,25 @@ use crate::{
         task_flow::{TaskFlow, TaskFlowRef, task_flow_execution_guard_satisfied},
     },
 };
+
+global_asm!(
+    r#"
+    .section .text.boot_init_flow_preset_completion, "ax"
+    .align 2
+    .globl boot_init_flow_preset_completion
+    .type boot_init_flow_preset_completion, @function
+boot_init_flow_preset_completion:
+    .option push
+    .option norelax
+    tail start_kernel
+    .option pop
+    .size boot_init_flow_preset_completion, . - boot_init_flow_preset_completion
+"#,
+);
+
+unsafe extern "C" {
+    fn boot_init_flow_preset_completion() -> !;
+}
 
 /// BootTask's immutable initial continuation. Every execution boundary reads
 /// the owning Task's Task-only OnCpu projection.
@@ -135,21 +156,18 @@ pub(super) fn preset_after_entry_objects() -> ! {
         )
     };
     crate::phases::shutdown_on_error(result, "arceos_ex boot init preset failed\n");
-    setup()
+    unsafe { boot_init_flow_preset_completion() }
 }
 
 /// Starts BootInitFlow.Setup with its first direct leaf.
-pub fn setup() -> ! {
-    crate::phases::shutdown_on_error(
-        require_guarded_state(LifecycleEvent::Setup, State::Prepared, State::Ready),
-        "arceos_ex boot init setup start failed\n",
-    );
-    if !boot_task_on_cpu_and_canonical() {
-        crate::phases::shutdown_on_error(
-            phase_failure(LifecycleEvent::Setup, State::Prepared, State::Ready),
-            "arceos_ex boot init setup dependency failed\n",
-        );
-    }
+#[unsafe(no_mangle)]
+pub extern "C" fn start_kernel() -> ! {
+    let result = if start_kernel_entry_guard_satisfied() {
+        Ok(())
+    } else {
+        phase_failure(LifecycleEvent::Setup, State::Prepared, State::Ready)
+    };
+    crate::phases::shutdown_on_error(result, "arceos_ex start_kernel guard failed\n");
     crate::phases::boot::entry_successor::preset(crate::context::context())
 }
 
@@ -374,6 +392,26 @@ fn boot_task_on_cpu_and_canonical() -> bool {
         && ctx.boot_task.task_ref() == TaskRef::BOOT
         && ctx.boot_task.task().task_ref() == TaskRef::BOOT
         && ctx.boot_task.pid() == 0
+}
+
+fn start_kernel_entry_guard_satisfied() -> bool {
+    let ctx = crate::context::context_ref();
+    let flow = ctx.boot_init_flow.core();
+    let cpu_ref = ctx.boot_init_flow.cpu_ref();
+    ctx.boot_init_flow.state() == State::Prepared
+        && boot_task_on_cpu_and_canonical()
+        && ctx
+            .boot_task
+            .task()
+            .active_flow()
+            .same_identity(flow.flow_ref())
+        && flow.active()
+        && task_flow_execution_guard_satisfied(flow, ctx.boot_task.task())
+        && cpu_ref.is_some()
+        && cpu_ref == ctx.cpu_group.boot_cpu_ref()
+        && ctx
+            .current_cpu()
+            .is_ok_and(|current| Some(current.cpu_ref()) == cpu_ref)
 }
 
 fn require_guarded_state(event: LifecycleEvent, expected: State, target: State) -> EventResult {

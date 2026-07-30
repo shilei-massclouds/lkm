@@ -144,7 +144,7 @@ RUSTFLAGS := \
 	$(PLIC_PROVIDER_LINK_ARGS) \
 	$(EXTRA_RUSTFLAGS)
 
-.PHONY: build run legacy-run generate fmt fmt-check clippy-check test-vm-activation-order test-trap-setup-order disk legacy-disk disk-clean legacy-disk-clean rootfs-tarball rootfs-overlay rootfs-file-overlay rootfs-ltp-overlay clean
+.PHONY: build run legacy-run generate fmt fmt-check clippy-check test-vm-activation-order test-trap-setup-order test-boot-init-flow-entry disk legacy-disk disk-clean legacy-disk-clean rootfs-tarball rootfs-overlay rootfs-file-overlay rootfs-ltp-overlay clean
 
 build: generate $(KERNEL_BIN)
 
@@ -177,6 +177,9 @@ test-vm-activation-order: $(KERNEL_ELF)
 
 test-trap-setup-order: $(KERNEL_ELF)
 	$(PYTHON) tests/check_trap_setup_order.py --objdump "$(RUST_OBJDUMP)" --elf "$(KERNEL_ELF)"
+
+test-boot-init-flow-entry: $(KERNEL_ELF)
+	$(PYTHON) tests/check_boot_init_flow_entry.py --objdump "$(RUST_OBJDUMP)" --elf "$(KERNEL_ELF)" --source-root src
 
 $(LINKER): $(MODEL_SPECS) $(CODEGEN_SOURCES) Makefile
 	mkdir -p $(ROOT)/tools/out/codegen

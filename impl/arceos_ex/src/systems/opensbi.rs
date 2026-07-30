@@ -2,8 +2,9 @@
 //!
 //! Its formal handoff determines `BootCpuRegisters.a0/a1`, requires entry
 //! `satp == 0`, and records ordered-boot/DTB facts. It intentionally does not
-//! require `sie/sip == 0`; the kernel's first InterruptType action clears
-//! those registers.
+//! require `sie/sip == 0`; the kernel's first InterruptType action closes
+//! `sie` class gates and completes one `sip` clear write. Hardware may assert
+//! a pending bit again after that write.
 
 use super::{MappingStatus, SpecPath, SystemMapping};
 

@@ -17,8 +17,8 @@ PhaseObject，它从 `_start` 开始承载并编排启动执行片段，同时�
   `BootInitFlow.Started` checkpoint；全部入口事实成立后才提交 `BootInitFlow.Prepared`。任一前置失败、
   重复启动或执行权不匹配都使根执行失败，且不得启动或部分提交 BootInitFlow.Preset。
 - `BootInitFlow.Preset` 的第一个直接 child 是 BootCPU 的 `InterruptType.Preset`。它先关闭 BootCPU 的
-  全部中断分路门控，再清空这些门控上的全部待决中断信号；该 child 不改变或判定中断总门控，也不
-  提前建立 handler、fallback 或正式分派框架。
+  全部中断分路门控，再完成一次待决中断清除写；该 child 只保证写已经按序完成，不保证硬件驱动的
+  待决位随后保持为零。它不改变或判定中断总门控，也不提前建立 handler、fallback 或正式分派框架。
 - 建立相对 `gp` 寻址基准后，`BootInitFlow.Preset` 驱动 BootCPU 关闭浮点运算和向量运算能力，再为
   内核映像的BSS段清零，让落到该段的全局变量初值为零。相关执行状态属于 BootCPU；BootInitFlow
   只负责编排，不拥有这些状态。
@@ -36,6 +36,9 @@ PhaseObject，它从 `_start` 开始承载并编排启动执行片段，同时�
   `CurrentTask.RefreshTaskStack(BootTask, BootTask.stack)`，保持 task/stack binding identity 并原子刷新
   EarlyVm 下的地址表示；TrapType.Setup 不承担这一执行绑定刷新，该动作完成前也不得开始
   `Soc.Preset`。
+- `Soc.Preset` 成功且 `BootInitFlow.Prepared` 已提交后，Preset 的 completion 直接进入
+  `BootInitFlow.Setup` 的首个叶阶段起点，即 `start_kernel` / `EntrySuccessorPhase.Preset` 边界；该代码
+  入口不增加 Action、continuation、Kernel drive 或 lifecycle。
 - Setup 直接顺序驱动 `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、
   `SchedInitPhase`、`IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、
   `ProcessPreparePhase` 和 `BootInitRestInitPhase`。最后一个叶子 Online 后提交
