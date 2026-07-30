@@ -32,7 +32,8 @@ Preset 横跨三个物理实现段，但仍是 BootInitFlow 的一个 model tran
 | `preset_until_vm_switch()` | 读取 Kernel Enable 前已发布的 `CpuGroup.cpus[0]`；验证 BootInitFlow 的 CpuRef、PhysicalDirect association、BootTask/TaskRef 与 `BootTask.stack` linker range，然后调用单个 `CurrentTask.BindTaskStack(BootTask, BootTask.stack)` 汇编提交块，原子装载物理 `tp/sp` 并发布首次 task/stack pair；通过 BootInitFlow 的 CpuRef 解析 `CurrentCPU.Setup`，驱动 `KernelAddrSpace.Preset`、`TrapType.Preset`、`ExceptionType.Preset` 和 `Vm.Preset` |
 | `after_vm_setup()` | `Vm.Setup` 的 Trampoline→Early continuation 返回后验证相同 pair 与 EarlyVm/live SATP，再调用单个 `CurrentTask.RefreshTaskStack(BootTask, BootTask.stack)` 汇编提交块，保持 binding identity 并原子刷新虚拟 `tp/sp`，随后驱动 `TrapType.Setup` 和 `Soc.Preset` |
 
-`Vm.Setup` 必须在同一个 Preset 内通过 per-CPU `ActivateOnCpu` 完成 TrampolineVm 到 EarlyVm 的 Handoff，并通过
+`Vm.Setup` 必须按 [`Vm Coding`](../../objects/vm.md) 在同一个 Preset 内通过 per-CPU `ActivateOnCpu`
+完成 TrampolineVm 到 EarlyVm 的 Handoff，并通过
 `after_vm_setup_continuation()` 回到 BootInitFlow owner。全部 drives 成功后直接检查原入口 Phase
 Online invariant 的完整对象事实并提交 `BootInitFlow.Prepared`；随后由 BootInitFlow 自身直接启动
 Setup 的第一个叶阶段，不回调 Kernel。

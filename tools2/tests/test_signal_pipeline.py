@@ -4659,6 +4659,42 @@ class SignalPipelineTests(unittest.TestCase):
                     f"{item['target']}.{handler_member}::{item['name']}@{handler_state}",
                 )
             self.assertEqual(actual, expected)
+
+            raw_dtb_preset = derivation["signals"][40]
+            raw_dtb_setup = derivation["signals"][41]
+            self.assertEqual(raw_dtb_preset["id"], "sig-0041")
+            self.assertEqual(raw_dtb_setup["id"], "sig-0042")
+            self.assertNotIn(
+                "valid_dtb_magic(RawDtb.header)",
+                raw_dtb_preset["after_snapshot"]["facts"],
+            )
+            self.assertIn(
+                "valid_dtb_magic(RawDtb.header)",
+                raw_dtb_setup["after_snapshot"]["facts"],
+            )
+
+            vm_preset = derivation["signals"][37]
+            vm_setup = derivation["signals"][45]
+            self.assertEqual(
+                vm_preset["handler"]["description"],
+                "准备早期布局与页表 controller，但保持当前 CPU 继续由 PhysicalDirect 承载。",
+            )
+            self.assertEqual(
+                vm_setup["handler"]["description"],
+                "依次把 BootCPU 从 PhysicalDirect 交给 TrampolineVm 和 EarlyVm，并恢复保护入口。",
+            )
+            for fact in (
+                "cpu_active_translation_controller_for_ref_is(BootCPURef,TranslationControllerKind::PhysicalDirect)",
+                "translation_live_satp_for_ref_is(BootCPURef,0)",
+            ):
+                self.assertIn(fact, vm_preset["after_snapshot"]["facts"])
+            for fact in (
+                "cpu_active_translation_controller_for_ref_is(BootCPURef,TranslationControllerKind::EarlyVm)",
+                'translation_live_satp_for_ref_is(BootCPURef,"satp_of(EarlyVm.pg_dir, Config.satp_mode)")',
+                "vm_transition_stvec_released_to_trap(BootCpuRegisters.stvec,CpuGroup.cpus[0].trap)",
+            ):
+                self.assertIn(fact, vm_setup["after_snapshot"]["facts"])
+
             trap_preset = derivation["signals"][31]
             self.assertEqual(trap_preset["id"], "sig-0032")
             self.assertEqual(
@@ -4974,14 +5010,14 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(snapshot.read_bytes(), BOOT_INIT_SETUP_SCENARIO.read_bytes())
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "775fe415a3bf20e7add33d18045f211c5256552b7641d2e5edee8c8eef308be7",
+                "b30ced6c215612254bacf083af872078faf6156e1bbcf3e7e2c3ab201f92e801",
             )
             self.assertEqual(
                 {
                     derivation["model_fingerprint"], model["model_fingerprint"],
                     view["model_fingerprint"], saved["model_fingerprint"],
                 },
-                {"sha256:3e610ac0bf8b3fd74e65363340cb3c577318253d9acce4410d5271d1261dfbac"},
+                {"sha256:3860db031d3c7a2bb405ffe9c7c374080b4da96876a811aa1c22a7a67cfd24e6"},
             )
             with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
                 compact_text = render_text(view)

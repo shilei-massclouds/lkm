@@ -56,6 +56,7 @@ pub mod kernel_addr_space;
 pub mod kernel_cmdline;
 pub mod kernel_image;
 pub mod lds;
+pub mod linear_map;
 #[cfg(plic_provider_linux_object)]
 pub mod linux_plic_shim;
 pub mod maple_tree;
@@ -108,6 +109,7 @@ pub mod trap_type;
 pub mod unexpected_exception_flow_type;
 pub mod unexpected_exception_type;
 pub mod user_boot;
+pub mod user_space_reserve;
 pub mod user_stack;
 pub mod vfs;
 pub mod virtio;

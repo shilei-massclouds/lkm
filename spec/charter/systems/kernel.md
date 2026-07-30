@@ -146,14 +146,11 @@ Online 后由仍在执行的 Kernel.Enable 驱动 `Scheduler.Action::Schedule`�
 `phys_addr(Lds.kernel_start)` 不得再被当作映像物理装载地址。
 
 `Kernel` 直接拥有平级的 `KernelAddrSpace`、`Vm`、`Soc` 与 `CpuGroup`。`KernelAddrSpace` 是唯一
-地址空间资源，拥有 `KernelImage`、`FixMap`、`LinearMap` 与 `UserSpaceReserve` 四个区域；
-`RawDtb` 仍是固件物理 blob，通过 FixMap 临时映射。`Vm` 是控制面协调对象，拥有共享的
-`PhysicalDirect`、`TrampolineVm`、`EarlyVm` 与 `SwapperVm` controller。controller 的 Ready 是全局
-事实，当前 activation association 由每 CPU `active_translation_controller` 表达。Kernel 接受真实
-BP 入口时以 `InitialActivation` 从 absent 建立 PhysicalDirect；随后 BP 按 PhysicalDirect →
-TrampolineVm → EarlyVm → SwapperVm Handoff，AP 在各自真实入口以同样的 InitialActivation 建立
-PhysicalDirect，再按 PhysicalDirect → TrampolineVm → SwapperVm Handoff。四个 controller 都通过
-`ActivateOnCpu(cpu_ref)` 提交；旧 controller 不 Cleanup/Destroyed，静态页表保持 Ready。
+地址空间资源，`Vm` 是地址转换控制面；两者不互相替代。入口前导期由 `Vm.Preset` 准备早期布局和
+controller，再由 `Vm.Setup` 使启动 CPU 按 PhysicalDirect → TrampolineVm → EarlyVm 切换并提交
+`Vm.Ready`。`Vm.Enable` 留给后续 SwapperVm 阶段。本组每个系统的所有权、生命周期和 CPU-local
+activation 边界由 [`objects/README.md`](../objects/README.md) 所列独立 Charter 文件定义，本系统文件
+只规定 Kernel 的直接拥有关系和启动编排入口。
 
 `CurrentTask.Action::BindTaskStack(BootTask, BootTask.stack)` 在 PhysicalDirect activation 后调用一次，
 以单个 boot-only Action 原子建立启动 CPU 到 BootTask 及其 stack 属性的 binding，并实际写物理地址表示

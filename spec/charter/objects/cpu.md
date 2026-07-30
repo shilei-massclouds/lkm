@@ -67,8 +67,9 @@ ExceptionType.{page_fault, syscall, breakpoint, unexpected}
 必须恰有关联一个 controller。首次从 absent 建立关联是 `InitialActivation`，已有 controller 间切换是
 `Handoff`；二者都只能由 `PhysicalDirect`、`TrampolineVm`、`EarlyVm` 或 `SwapperVm` 的
 `Action::ActivateOnCpu(cpu_ref)` 原子提交。Handoff 提交前必须证明旧 controller 与 live SATP 一致。
-完整协议见
-[`KernelAddrSpace 与启动期 translation controller`](kernel-address-space.md)。
+地址空间归属见 [`KernelAddrSpace`](kernel-address-space.md)；控制面与各 controller 的完整协议分别见
+[`Vm`](vm.md)、[`PhysicalDirect`](physical-direct.md)、[`TrampolineVm`](trampoline-vm.md)、
+[`EarlyVm`](early-vm.md) 与 [`SwapperVm`](swapper-vm.md)。
 
 ## CurrentCPU capability
 

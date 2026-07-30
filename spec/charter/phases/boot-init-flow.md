@@ -25,6 +25,9 @@ PhaseObject，它从 `_start` 开始承载并编排启动执行片段，同时�
 - 把内核启动时的第一个参数作为BootCPU的hartid记录下来，以备后续使用。
 - 初始 task/stack binding 建立后，Preset 单独驱动 BootCPU 的 `TrapType.Preset`，为所属 CPU 建立
   临时保护入口，用于处理初始化过程中意外发生的异常或中断，便于测试和定位缺陷。
+- 随后 Preset 依次驱动 `Vm.Preset` 与 `Vm.Setup`。前者准备 `KernelAddrSpace`、`RawDtb`、`FixMap`、
+  `TrampolineVm` 和 `EarlyVm`，但不改变当前 CPU；后者使 BootCPU 按 PhysicalDirect → TrampolineVm
+  → EarlyVm 切换并提交 `Vm.Ready`。`Vm.Enable` 留给后续 SwapperVm 阶段，本入口前导期不触发。
 - Setup 直接顺序驱动 `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、
   `SchedInitPhase`、`IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、
   `ProcessPreparePhase` 和 `BootInitRestInitPhase`。最后一个叶子 Online 后提交

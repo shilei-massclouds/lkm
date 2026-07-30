@@ -1,5 +1,11 @@
 # Compose 规格
 
+2026-07-30 入口 VM Preset/Setup 复核：十个相关系统继续位于既有 `arceos_ex::objects` 与 `Context`
+内部，不新增 crate、facade、feature 或公开 API。为保持系统边界，`LinearMap` 与
+`UserSpaceReserve` 从 `KernelAddrSpace` 的裸范围字段拆为各自私有 module；`vm_setup` 仍只是
+`Vm.Setup` 的 RISC-V 汇编 lowering helper，不形成第十一个系统。`spec/compose/main.spec` 的地址空间、
+控制面分离及 per-CPU activation invariant 已覆盖本段，正式组合语义无需修改。
+
 2026-07-30 CurrentTask/CurrentStack 执行绑定复核：`Task.stack` 是既有 Task carrier 的值属性，不新增
 Stack component/object。通用 scheduler `BindTask` 与两个 boot-only 原子 task-stack Action 只改变既有
 TaskFlow/scheduler/入口私有边界和 tools2 snapshot/derive 投影；RISC-V64 继续由 `tp/sp` lowering 承载，

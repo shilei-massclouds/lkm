@@ -131,9 +131,6 @@ impl RawDtb {
         let Some(magic) = read_be_u32(dtb_pa) else {
             return self.failed_condition(LifecycleEvent::Preset, State::Base, State::Prepared);
         };
-        if magic != FDT_MAGIC {
-            return self.failed_condition(LifecycleEvent::Preset, State::Base, State::Prepared);
-        }
 
         self.header = DtbHeader::with_magic(magic);
         self.header_range = PhysRange::new(dtb_pa, header_end);
@@ -146,7 +143,7 @@ impl RawDtb {
     }
 
     pub fn setup(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Prepared {
+        if self.lifecycle.state() != State::Prepared || self.header.magic != FDT_MAGIC {
             return self.failed_condition(LifecycleEvent::Setup, State::Prepared, State::Ready);
         }
 

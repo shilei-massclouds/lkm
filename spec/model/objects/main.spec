@@ -122,6 +122,16 @@ enum TranslationActivationKind {
 include "cpu.spec";
 include "cpu_group.spec";
 include "kernel_image.spec";
+include "raw_dtb.spec";
+include "fix_map.spec";
+include "linear_map.spec";
+include "user_space_reserve.spec";
+include "kernel_addr_space.spec";
+include "physical_direct.spec";
+include "trampoline_vm.spec";
+include "early_vm.spec";
+include "swapper_vm.spec";
+include "vm.spec";
 include "trap_type.spec";
 include "interrupt_type.spec";
 include "exception_type.spec";

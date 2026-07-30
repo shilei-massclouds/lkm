@@ -101,15 +101,13 @@ Linux PLIC shim 对 `tp` 的临时占用只属于 foreign ABI；正常、错误�
 
 ## 地址空间与页表
 
-- `PhysicalDirect`、`TrampolineVm`、`EarlyVm`、`SwapperVm` 应在代码中保持可区分的共享 controller 实现边界。
-- 第一轮应真实拆分入口前导期和入口后继期页表推进过程，而不是只把现有 boot page table 代码改名为多个模型 transition。
-- `EarlyVm` 的实现必须覆盖规格要求的 `KernelImage` 和 `RawDtb` 映射前提。
-- `SwapperVm` 的实现必须在每个 `ActivateOnCpu(cpu_ref)` 成功后能按 CPU 只读检查同步事实；该事实至少应覆盖
-  写入 swapper SATP 之后执行过本地 TLB flush 或等价地址转换同步。
-- `FixMap` 槽位布局应由配置或架构常量统一定义，不应在多个对象实现中分散硬编码。
-- 第一轮 `Config.fixmap.fdt` 的 FDT 槽位容量按 2MiB 配置，用于覆盖 Linux RISC-V64 `FIX_FDT`/`FIX_FDT_SIZE` 级别的早期 FDT 映射窗口；`FixMap` 只能消费该配置并执行容量检查，不应自行定义槽位大小。
-- controller 页表准备状态保持全局 Ready；CPU 切走只更新该 CPU 的 association，不执行
-  `TrampolineVm.Cleanup`、`EarlyVm.Cleanup` 或全局 Destroyed 迁移。
+各系统的权威 lowering 分别位于 [`Vm`](objects/vm.md)、
+[`PhysicalDirect`](objects/physical-direct.md)、[`TrampolineVm`](objects/trampoline-vm.md)、
+[`EarlyVm`](objects/early-vm.md)、[`SwapperVm`](objects/swapper-vm.md)、
+[`KernelAddrSpace`](objects/kernel-address-space.md)、[`FixMap`](objects/fix-map.md)、
+[`LinearMap`](objects/linear-map.md)、[`UserSpaceReserve`](objects/user-space-reserve.md) 与
+[`RawDtb`](objects/raw-dtb.md)。本文件只保留跨系统的 RISC-V 地址访问纪律与 CSR 规则，不把这些系统
+重新合并成一个 Coding 边界。
 
 ## FDT 与物理内存
 
@@ -211,87 +209,8 @@ must not use a fixed Config.kernel_phys_addr-style constant.
 
 ### Riscv64AddressTranslationMust
 
-#### PhysicalDirect initial activation
-
-Rule ID: `riscv64_must_physical_direct_initial_activation_commit_per_cpu_fact` (MUST).
-
-`PhysicalDirect.ActivateOnCpu(cpu_ref)` is the only InitialActivation. It validates an absent association and
-entry SATP zero, writes no new SATP value, fills receipt 0 with kind InitialActivation, old raw zero, new
-PhysicalDirect, sync complete, SATP zero and sequence one, then publishes the association and release-publishes
-committed count. A stopped AP has neither association nor live SATP until its architecture entry performs this same
-Action lowering; boot-data publication may carry the expected entry SATP but must not pre-commit the receipt.
-
-#### Trampoline page table activation
-
-Rule IDs (MUST):
-
-- `riscv64_must_trampoline_vm_activation_flush_tlb_before_satp`
-- `riscv64_must_trampoline_vm_activation_commit_per_cpu_sync_fact`
-
-Code generated for TrampolineVm.ActivateOnCpu(cpu_ref) must flush or otherwise
-invalidate the local address-translation cache after building the
-trampoline page table and before writing the trampoline SATP value.
-This maps Linux/RISC-V relocate_enable_mmu()'s sfence.vma before
-loading trampoline_pg_dir into SATP.
-
-The minimum acceptable implementation order is:
-1. compute or load the trampoline SATP value,
-2. execute sfence.vma or an equivalent local TLB flush,
-3. only then write SATP to the trampoline value and enter a trampoline-mapped virtual address,
-4. verify the live SATP through that virtual execution boundary,
-5. only then fill the next activation journal Handoff receipt, publish that CPU's controller association and
-   release-publish its committed count,
-6. let Rust verify that receipt without rewriting it before committing
-   `trampoline_vm_translation_sync_complete(TrampolineVm, cpu_ref)`.
-
-#### Early page table activation
-
-Rule IDs (MUST):
-
-- `riscv64_must_early_vm_activation_flush_tlb_after_satp`
-- `riscv64_must_early_vm_activation_commit_per_cpu_sync_fact`
-
-Code generated for EarlyVm.ActivateOnCpu(cpu_ref) must flush or otherwise
-invalidate the local address-translation cache after writing the
-early SATP value. This maps Linux/RISC-V relocate_enable_mmu()'s
-sfence.vma after switching from trampoline_pg_dir to early_pg_dir.
-
-The minimum acceptable implementation order is:
-1. compute or load the early SATP value,
-2. write SATP,
-3. execute sfence.vma or an equivalent local TLB flush,
-4. verify the live SATP, then fill and release-publish the next activation journal Handoff receipt and association,
-5. let Rust verify the complete BP chain without rewriting it before committing
-   `early_vm_translation_sync_complete(EarlyVm, cpu_ref)`.
-
-#### Swapper page table activation
-
-Rule IDs (MUST):
-
-- `riscv64_must_swapper_vm_activation_flush_tlb_after_satp`
-- `riscv64_must_swapper_vm_activation_commit_per_cpu_sync_fact`
-
-Code generated for SwapperVm.ActivateOnCpu(cpu_ref) must flush or otherwise
-invalidate the local address-translation cache after writing the
-swapper SATP value, and must expose that completion as the model
-fact swapper_vm_translation_sync_complete(SwapperVm, cpu_ref). This maps
-Linux/RISC-V setup_vm_final()'s local_flush_tlb_all() boundary.
-
-The minimum acceptable implementation order is:
-1. compute or load the swapper SATP value,
-2. write SATP,
-3. execute sfence.vma or an equivalent local TLB flush,
-4. verify the live SATP, then fill and release-publish the next activation journal Handoff receipt and association,
-5. let Rust verify the complete BP or AP chain without rewriting it before committing
-   `swapper_vm_translation_sync_complete(SwapperVm, cpu_ref)`.
-
-BP and AP assembly must validate the expected old association, activation kind and committed count before any receipt
-write. BP commits one InitialActivation plus three Handoffs through
-`PhysicalDirect -> TrampolineVm -> EarlyVm -> SwapperVm`; AP commits one InitialActivation plus two Handoffs through
-`PhysicalDirect -> TrampolineVm -> SwapperVm`. Each 24-byte receipt uses raw kind offset 3 while retaining SATP at
-offset 8 and sequence at offset 16. AP Rust entry verifies the full three-receipt journal, final controller and live
-swapper SATP without appending or rewriting any receipt. A root-regression disassembly check must enforce the real
-`csrw satp` / `sfence.vma` / receipt fill / association store / release committed-count order for both entry paths.
+地址转换的稳定 RISC-V rule ID 和逐 controller 提交顺序由上述各对象 Coding 文件独立拥有；跨系统
+只要求 BP/AP activation journal 属于同一 CPU，且任一 Rust 完成接口不得重写汇编已经提交的 receipt。
 
 ### Riscv64SchedulerCodingShould
 

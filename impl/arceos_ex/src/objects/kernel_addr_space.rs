@@ -5,8 +5,10 @@ use super::{
     fix_map::FixMap,
     kernel_image::KernelImage,
     lds::Lds,
+    linear_map::LinearMap,
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     swapper_vm::SwapperVm,
+    user_space_reserve::UserSpaceReserve,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -45,8 +47,8 @@ pub struct KernelAddrSpace {
     lifecycle: Lifecycle,
     kernel_image: VirtRange,
     fix_map: VirtRange,
-    linear_map: VirtRange,
-    user_space_reserve: VirtRange,
+    linear_map: LinearMap,
+    user_space_reserve: UserSpaceReserve,
     final_swapper_mappings_published: bool,
 }
 
@@ -56,8 +58,8 @@ impl KernelAddrSpace {
             lifecycle: Lifecycle::new(State::Base),
             kernel_image: VirtRange::empty(),
             fix_map: VirtRange::empty(),
-            linear_map: VirtRange::empty(),
-            user_space_reserve: VirtRange::empty(),
+            linear_map: LinearMap::new(),
+            user_space_reserve: UserSpaceReserve::new(),
             final_swapper_mappings_published: false,
         }
     }
@@ -78,12 +80,12 @@ impl KernelAddrSpace {
 
     #[allow(dead_code)]
     pub const fn linear_map_range(&self) -> VirtRange {
-        self.linear_map
+        self.linear_map.range()
     }
 
     #[allow(dead_code)]
     pub const fn user_space_reserve_range(&self) -> VirtRange {
-        self.user_space_reserve
+        self.user_space_reserve.range()
     }
 
     pub const fn final_swapper_mappings_published(&self) -> bool {
@@ -111,10 +113,10 @@ impl KernelAddrSpace {
             return self.failed(LifecycleEvent::Preset, State::Base, State::Prepared);
         }
 
+        self.linear_map.preset(config)?;
+        self.user_space_reserve.preset(config)?;
         self.kernel_image = VirtRange::new(kernel_start, kernel_end);
         self.fix_map = VirtRange::new(fdt_slot.virt_start(), fixmap_end);
-        self.linear_map = VirtRange::new(config.linear_map_virt_start(), config.kernel_link_addr());
-        self.user_space_reserve = VirtRange::new(0, config.canonical_user_virt_end());
         if !self.declared_layout_valid(config) {
             return self.failed(LifecycleEvent::Preset, State::Base, State::Prepared);
         }
@@ -168,20 +170,22 @@ impl KernelAddrSpace {
     fn declared_layout_valid(&self, config: &Config) -> bool {
         self.kernel_image.valid()
             && self.fix_map.valid()
-            && self.linear_map.valid()
-            && self.user_space_reserve.valid()
+            && self.linear_map.state() == State::Ready
+            && self.user_space_reserve.state() == State::Ready
+            && self.linear_map.range().valid()
+            && self.user_space_reserve.range().valid()
             && self.kernel_image.start() == config.kernel_link_addr()
-            && self.linear_map.start() == config.linear_map_virt_start()
-            && self.user_space_reserve.start() == 0
-            && self.user_space_reserve.end() == config.canonical_user_virt_end()
+            && self.linear_map.range().start() == config.linear_map_virt_start()
+            && self.user_space_reserve.range().start() == 0
+            && self.user_space_reserve.range().end() == config.canonical_user_virt_end()
     }
 
     fn regions_disjoint(&self) -> bool {
         let regions = [
             self.kernel_image,
             self.fix_map,
-            self.linear_map,
-            self.user_space_reserve,
+            self.linear_map.range(),
+            self.user_space_reserve.range(),
         ];
         let mut left = 0usize;
         while left < regions.len() {

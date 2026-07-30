@@ -114,8 +114,8 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
 - 提交的 `tools2/scenarios/BootInitFlow.Setup.snapshot.json` 必须与从模型初态执行
   `tools2/bin/pyveri -u BootInitFlow.Setup --snapshot-out /tmp/boot-init-flow-setup-presend.snapshot.json`
   得到的 canonical bytes 逐字节一致，并从仓库根与其它 cwd 重建出相同结果。当前正式模型下其
-  SHA-256 固定为 `775fe415a3bf20e7add33d18045f211c5256552b7641d2e5edee8c8eef308be7`，model
-  fingerprint 固定为 `sha256:3e610ac0bf8b3fd74e65363340cb3c577318253d9acce4410d5271d1261dfbac`。
+  SHA-256 固定为 `b30ced6c215612254bacf083af872078faf6156e1bbcf3e7e2c3ab201f92e801`，model
+  fingerprint 固定为 `sha256:3860db031d3c7a2bb405ffe9c7c374080b4da96876a811aa1c22a7a67cfd24e6`。
   `tools2/bin/pyveri -t BootInitFlow.Setup` 必须自动采用该第 3 组入口 scenario；显式 `-s` 仍优先，
   其它模型必须因 stale fingerprint 拒绝，缺失 canonical scenario 必须在 derive 前返回 2。
 - `-u BootInitFlow.Setup` 的真实上游推导必须精确包含 52 个 Signal，并逐项固定
@@ -128,6 +128,11 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
 - `sig-0032 TrapType.Preset` 前必须已经存在异常/中断共用 `TrapFlowType` 总入口事实；完成后
   `TrapType` 从 Base 进入 Prepared，并新增所属 CPU 临时保护入口、意外事件处理以及测试和缺陷定位
   用途事实。该 Signal 不直接产生 child Signal，动画 request 必须展示对应 Model 注释。
+- `sig-0038 Vm.Preset` 必须只准备 Trampoline/Early 页表、RawDtb/FixMap 与 KernelAddrSpace，完成后
+  BootCPU 仍由 PhysicalDirect 承载且 live SATP 为零；`sig-0041 RawDtb.Preset` 只建立固定头部可读边界，
+  magic 事实必须到 `sig-0042 RawDtb.Setup` 才出现。`sig-0046 Vm.Setup` 才依次完成 Trampoline 与
+  Early activation，并在结束时证明 BootCPU 由 EarlyVm 承载及 `stvec` 已恢复到 TrapType 保护入口。
+  两个 Vm Signal 的动画 request 必须展示各自 Model 注释。
 - `BootInitFlow.Setup` 发送前 boundary 必须来自 `spec/model/systems/kernel.spec` 中 Kernel.Enable 的真实
   drives 位置，source/target 为 `Kernel -> BootInitFlow`、delivery 为 drives、cause 为 0016，snapshot
   精确等于 0020 after snapshot。Kernel 必须保持 Ready、BootInitFlow 必须为 Prepared；入口关键对象

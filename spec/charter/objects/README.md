@@ -9,7 +9,16 @@ Object-level charter notes live here when they need a dedicated topic file.
 | `CPU` | [`cpu.md`](cpu.md) |
 | `CpuGroup` | [`cpu-group.md`](cpu-group.md) |
 | `KernelImage` | [`kernel-image.md`](kernel-image.md) |
-| `KernelAddrSpace` / VM controllers | [`kernel-address-space.md`](kernel-address-space.md) |
+| `KernelAddrSpace` | [`kernel-address-space.md`](kernel-address-space.md) |
+| `FixMap` | [`fix-map.md`](fix-map.md) |
+| `LinearMap` | [`linear-map.md`](linear-map.md) |
+| `UserSpaceReserve` | [`user-space-reserve.md`](user-space-reserve.md) |
+| `RawDtb` | [`raw-dtb.md`](raw-dtb.md) |
+| `Vm` | [`vm.md`](vm.md) |
+| `PhysicalDirect` | [`physical-direct.md`](physical-direct.md) |
+| `TrampolineVm` | [`trampoline-vm.md`](trampoline-vm.md) |
+| `EarlyVm` | [`early-vm.md`](early-vm.md) |
+| `SwapperVm` | [`swapper-vm.md`](swapper-vm.md) |
 | `Task` | [`task.md`](task.md) |
 | `TaskFlow` | [`task-flow.md`](task-flow.md) |
 | `TrapType` | [`trap-type.md`](trap-type.md) |
