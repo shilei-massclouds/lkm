@@ -138,6 +138,9 @@ object BootInitFlow: TaskFlow {
                     task_flow_started(self);
                 }
 
+                emits {
+                    Transition::Setup;
+                }
             }
         }
     }
@@ -201,6 +204,9 @@ object BootInitFlow: TaskFlow {
                     BootTask.state == State::OnCpu;
                 }
 
+                emits {
+                    Transition::Enable;
+                }
             }
         }
     }

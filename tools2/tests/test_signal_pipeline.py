@@ -3923,8 +3923,8 @@ class SignalPipelineTests(unittest.TestCase):
             kernel_enable_index = signal_index("OpenSBI", "Kernel", "Enable")
             accept_index = signal_index("Kernel", "Kernel", "AcceptEnable")
             boot_started_index = signal_index("Kernel", "BootInitFlow", "Preset")
-            boot_ready_index = signal_index("Kernel", "BootInitFlow", "Setup")
-            boot_online_index = signal_index("Kernel", "BootInitFlow", "Enable")
+            boot_ready_index = signal_index("BootInitFlow", "BootInitFlow", "Setup")
+            boot_online_index = signal_index("BootInitFlow", "BootInitFlow", "Enable")
             first_schedule_index = signal_index("Kernel", "Scheduler", "Schedule")
             kernel_init_started_index = signal_index(
                 "KernelInitTask", "KernelInitFlow", "Preset"
@@ -4819,23 +4819,27 @@ class SignalPipelineTests(unittest.TestCase):
                 {
                     "kind": "before_signal_send",
                     "normalized_signal": "BootInitFlow.Setup",
-                    "source": "Kernel",
+                    "source": "BootInitFlow",
                     "target": "BootInitFlow",
                     "signal": "Setup",
                 },
             )
             self.assertEqual(
-                (boundary["send_position"]["delivery"], boundary["send_position"]["cause_id"]),
-                ("drives", "sig-0016"),
+                (
+                    boundary["send_position"]["delivery"],
+                    boundary["send_position"]["cause_id"],
+                    boundary["send_position"]["fifo_position"],
+                ),
+                ("emits", "sig-0020", 1),
             )
             self.assertEqual(
                 boundary["call_span"],
                 {
                     "end_column": 1,
-                    "end_line": 363,
-                    "source_file": "spec/model/systems/kernel.spec",
+                    "end_line": 142,
+                    "source_file": "spec/model/phases/boot-init/phase.spec",
                     "start_column": 1,
-                    "start_line": 362,
+                    "start_line": 141,
                 },
             )
             self.assertEqual(boundary["snapshot"], derivation["signals"][19]["after_snapshot"])
@@ -4959,7 +4963,7 @@ class SignalPipelineTests(unittest.TestCase):
                 "firmware_dtb_range_accessible_from_handoff_contract(RawDtb.range)",
                 "raw_dtb_nodes_unparsed(RawDtb)",
                 "fixmap_slot_mapping_ready(EarlyVm.pg_dir,FixMap.fdt_slot)",
-                "soc_early_platform_ready",
+                "soc_preset_semantics_deferred(Soc)",
             ):
                 self.assertIn(fact, facts)
             self.assertFalse(any(fact.startswith("cpu_hartid_ready(") for fact in facts))
@@ -5027,14 +5031,14 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(snapshot.read_bytes(), BOOT_INIT_SETUP_SCENARIO.read_bytes())
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "1f4bb50eb0ce5c2cec07603b341e9f3ba2f9e2ae9e154000370205ec73565902",
+                "50e10567f1e95208b74c70c52785f1f61f6a8af14afe842a7d5fad6baad276fb",
             )
             self.assertEqual(
                 {
                     derivation["model_fingerprint"], model["model_fingerprint"],
                     view["model_fingerprint"], saved["model_fingerprint"],
                 },
-                {"sha256:47a29028ad6afa1522ae0cc7694388ba0301b65687bf4b278c89d135c02894f4"},
+                {"sha256:973743f9cca64010f1b421397b4cff54d8750bf2e1997be84c3339c9b79a5549"},
             )
             with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
                 compact_text = render_text(view)
@@ -5043,7 +5047,7 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertTrue(
                 compact_text.startswith(
                     "verdict: reached\n"
-                    "boundary: Kernel -- Setup --> BootInitFlow (before send)\n"
+                    "boundary: BootInitFlow -- Setup --> BootInitFlow (before send)\n"
                 )
             )
             self.assertIn(
@@ -5065,7 +5069,8 @@ class SignalPipelineTests(unittest.TestCase):
             )
             self.assertIn("sig-0052 [drives] BootInitFlow -> Soc.Preset", verbose_text)
             self.assertIn(
-                "reached boundary: Kernel -> BootInitFlow.Setup [drives]", verbose_text
+                "reached boundary: BootInitFlow -> BootInitFlow.Setup [emits]",
+                verbose_text,
             )
 
             rebuilt = root / "rebuilt.snapshot.json"

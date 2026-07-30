@@ -360,8 +360,6 @@ object Kernel: KernelObject {
                     BootInitFlow.Action::AssignCpuRef(BootCPURef);
                     PhysicalDirect.Action::ActivateOnCpu(BootCPURef);
                     BootInitFlow.Transition::Preset;
-                    BootInitFlow.Transition::Setup;
-                    BootInitFlow.Transition::Enable;
                     Scheduler.Action::Schedule(BootIdleFlow);
                     KernelInitFlow.Transition::Setup;
                     KernelInitFlow.Transition::Enable;

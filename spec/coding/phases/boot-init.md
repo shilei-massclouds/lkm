@@ -12,11 +12,12 @@ bool；每个 transition 都即时检查 parent `BootTask` 为 OnCpu。
 
 | Transition | 直接 drives | completion |
 | --- | --- | --- |
-| Preset: Base -> Prepared | 直接按入口顺序驱动 `InterruptType` 至 `Soc` 的具体对象 | 完整入口事实成立后提交 `BootInitFlow.Prepared`；不建立入口 wrapper lifecycle |
-| Setup: Prepared -> Ready | 依次驱动 `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、`SchedInitPhase`、`IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、`ProcessPreparePhase`、`BootInitRestInitPhase` 的 Preset | RestInit Online 后提交 `BootInitFlow.Ready`；此时两个新 Task 已完成 Preset/Setup/Enable，initial Flow 仍为 Base |
+| Preset: Base -> Prepared | 直接按入口顺序驱动 `InterruptType` 至 `Soc` 的具体对象 | 完整入口事实成立后提交 `BootInitFlow.Prepared`，再由同对象 `emits BootInitFlow.Setup`；不建立入口 wrapper lifecycle |
+| Setup: Prepared -> Ready | 依次驱动 `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、`SchedInitPhase`、`IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、`ProcessPreparePhase`、`BootInitRestInitPhase` 的 Preset | RestInit Online 后提交 `BootInitFlow.Ready`，再由同对象 `emits BootInitFlow.Enable`；此时两个新 Task 已完成 Preset/Setup/Enable，initial Flow 仍为 Base |
 | Enable: Ready -> Online | 只驱动 `BootInitScheduleHandoffPhase.Preset` | 该阶段建立 `BootIdleFlow` owner/active binding 并完成可逆切换预检；随后提交 `BootInitFlow.Online`，再进入真实 schedule |
 
-这些 transition 是 Kernel.Enable 的下层过程细化。Preset 只能在同一 Enable handler 已依次完成
+这些 transition 是 Kernel.Enable 的下层过程细化。Kernel 只同步驱动 Preset；Setup 与 Enable 分别是
+Preset 与 Setup 成功提交后的同对象 completion event，不是 Kernel 的第二、第三次 drive。Preset 只能在同一 Enable handler 已依次完成
 acceptance、BootCPURef binding 和 PhysicalDirect InitialActivation 后接受；整个 BootInitFlow 生命周期
 执行期间 Kernel 保持 Ready。每个叶子 Online 只能返回 BootInitFlow 当前 transition 的具名 continuation；父 continuation 必须检查
 刚完成的叶子精确 Online，才能启动下一个叶子。
@@ -24,10 +25,10 @@ acceptance、BootCPURef binding 和 PhysicalDirect InitialActivation 后接受�
 ```text
 OpenSBI -> Kernel.Enable accepts -> AssignCpuRef -> PhysicalDirect InitialActivation
   -> Kernel drives BootInitFlow.Preset (BootTask.OnCpu)
-  -> entry objects -> BootInitFlow.Prepared
+  -> entry objects -> BootInitFlow.Prepared -> emits BootInitFlow.Setup
   -> EntrySuccessor -> CorePrepare -> MmCoreInit -> SchedInit
   -> IrqTimeInit -> LocalIrqEnable -> IrqOpenPrepare -> ProcessPrepare
-  -> BootInitRestInit -> BootInitFlow.Ready
+  -> BootInitRestInit -> BootInitFlow.Ready -> emits BootInitFlow.Enable
   -> BootInitScheduleHandoff -> BootInitFlow.Online
   -> Kernel drives Scheduler.Schedule -> real BootTask-to-KernelInitTask switch
   -> KernelInitFlow leaves while Kernel.Ready

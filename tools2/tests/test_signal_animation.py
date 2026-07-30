@@ -791,7 +791,7 @@ class SignalAnimationTests(unittest.TestCase):
                 derivation["model_fingerprint"],
                 view["model_fingerprint"],
             },
-            {"sha256:47a29028ad6afa1522ae0cc7694388ba0301b65687bf4b278c89d135c02894f4"},
+            {"sha256:973743f9cca64010f1b421397b4cff54d8750bf2e1997be84c3339c9b79a5549"},
         )
         animation = build_animation(model, view)
         self.assertEqual(animation["trace"]["total_signals"], 52)
@@ -869,9 +869,16 @@ class SignalAnimationTests(unittest.TestCase):
             moment_index["sig-0020:feedback"],
             max(moment_index[f"sig-{index:04d}:feedback"] for index in range(21, 53)),
         )
+        boundary = animation["trace"]["boundary"]
+        self.assertEqual(boundary["normalized_signal"], "BootInitFlow.Setup")
         self.assertEqual(
-            animation["trace"]["boundary"]["normalized_signal"],
-            "BootInitFlow.Setup",
+            (
+                boundary["source"], boundary["target"],
+                boundary["send_position"]["delivery"],
+                boundary["send_position"]["cause_id"],
+                boundary["send_position"]["fifo_position"],
+            ),
+            ("BootInitFlow", "BootInitFlow", "emits", "sig-0020", 1),
         )
         self.assertFalse(
             any(

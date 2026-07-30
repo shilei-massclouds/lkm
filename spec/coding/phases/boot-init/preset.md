@@ -38,6 +38,21 @@ Preset 横跨三个物理实现段，但仍是 BootInitFlow 的一个 model tran
 Online invariant 的完整对象事实并提交 `BootInitFlow.Prepared`；随后由 BootInitFlow 自身直接启动
 Setup 的第一个叶阶段，不回调 Kernel。
 
+## Prepared completion 与 Setup 入口
+
+RISC-V 入口汇编必须把 Preset 的 completion event 精确表示为：
+
+```text
+BootInitFlow.Preset commits Prepared
+  -> emits BootInitFlow.Setup
+  -> tail start_kernel
+```
+
+`tail start_kernel` 必须位于 `soc_early_init()` 和 `BootInitFlow.Prepared` checkpoint 之后。
+`start_kernel` 是 `BootInitFlow.Setup` 的代码入口代表，并开始 Setup 的第一个直接叶阶段；它不是
+Kernel 发起的第二次 drive，也不是新的 Action 或 continuation。`tail` 表示 `_start` 不会返回，必须保留
+为 tail call，不得改写成普通 `call`，也不得引入 `refresh_task_stack_continuation` 一类额外入口。
+
 `KernelImage.Setup` 在当前 formal 非 XIP 路径中由入口汇编为 BSS 段清零。清零完成后，BSS 按 Model
 作为普通可写内存使用。
 
@@ -69,8 +84,9 @@ CPU controller association、live SATP 和目标 `sp` range。首次 Action 还�
 
 两个 Action 必须由汇编各自提供一个连续提交块。PhysicalDirect 块等价于 Linux 的
 `la tp, init_task`、`la sp, init_thread_union + THREAD_SIZE`、`addi sp, sp, -PT_SIZE_ON_STACK`；EarlyVm
-块以当前虚拟地址表示重复装载相同符号，完成后沿同一 `_start_kernel` 风格的汇编路径继续；两者都不
-建立专用 continuation 或额外 tail。外围 `SingleTaskContext` / `SystemExclusive` 使整个入口序列对其它
+块以当前虚拟地址表示重复装载相同符号，完成后沿同一 `_start_kernel` 风格的汇编路径继续；两个
+task-stack Action 都不建立专用 continuation 或自己的 tail，Preset 完成边界只使用上文规定的
+`tail start_kernel`。外围 `SingleTaskContext` / `SystemExclusive` 使整个入口序列对其它
 执行主体不可观察，因此 task/stack pair 的 Action 原子性不要求硬件多寄存器原子写。所有可失败检查
 在提交块前完成，`tp/sp` 写入之间不得调用会观察 current pair 的 C/Rust、插入可失败分支或 checkpoint；
 寄存器写完后 Action 才完成。不存在公开 `CurrentStack.BindStack` action 或 Signal。BootTask 的初始

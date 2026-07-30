@@ -117,8 +117,8 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
 - 提交的 `tools2/scenarios/BootInitFlow.Setup.snapshot.json` 必须与从模型初态执行
   `tools2/bin/pyveri -u BootInitFlow.Setup --snapshot-out /tmp/boot-init-flow-setup-presend.snapshot.json`
   得到的 canonical bytes 逐字节一致，并从仓库根与其它 cwd 重建出相同结果。当前正式模型下其
-  SHA-256 固定为 `1f4bb50eb0ce5c2cec07603b341e9f3ba2f9e2ae9e154000370205ec73565902`，model
-  fingerprint 固定为 `sha256:47a29028ad6afa1522ae0cc7694388ba0301b65687bf4b278c89d135c02894f4`。
+  SHA-256 固定为 `50e10567f1e95208b74c70c52785f1f61f6a8af14afe842a7d5fad6baad276fb`，model
+  fingerprint 固定为 `sha256:973743f9cca64010f1b421397b4cff54d8750bf2e1997be84c3339c9b79a5549`。
   `tools2/bin/pyveri -t BootInitFlow.Setup` 必须自动采用该第 3 组入口 scenario；显式 `-s` 仍优先，
   其它模型必须因 stale fingerprint 拒绝，缺失 canonical scenario 必须在 derive 前返回 2。
 - `-u BootInitFlow.Setup` 的真实上游推导必须精确包含 52 个 Signal，并逐项固定
@@ -145,12 +145,13 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
   `ExceptionType::preset`，随后先写一次 `stvec`、再以 `csrw sscratch, zero` 清零一次 `sscratch`；`stvec`
   的 PC-relative 目标精确等于四字节对齐的汇编符号 `formal_event_entry`。该函数不得写 `satp`，也不得把
   非零寄存器值写入 `sscratch`。该检查纳入仓库根 `make test`。
-- `BootInitFlow.Setup` 发送前 boundary 必须来自 `spec/model/systems/kernel.spec` 中 Kernel.Enable 的真实
-  drives 位置，source/target 为 `Kernel -> BootInitFlow`、delivery 为 drives、cause 为 0016，snapshot
-  精确等于 0020 after snapshot。Kernel 必须保持 Ready、BootInitFlow 必须为 Prepared；入口关键对象
+- `BootInitFlow.Setup` 发送前 boundary 必须来自 `spec/model/phases/boot-init/phase.spec` 中
+  BootInitFlow.Preset 成功提交后的真实 completion event，source/target 为
+  `BootInitFlow -> BootInitFlow`、delivery 为 emits、cause 为 0020、FIFO position 为 1，snapshot
+  精确等于 0020 after snapshot。Kernel 必须只创建 BootInitFlow.Preset 并保持 Ready，BootInitFlow 必须为 Prepared；入口关键对象
   状态必须与 charter 账本一致，`task_flow_started(BootInitFlow)`、中断关闭、BootCPU 浮点/向量默认关闭及受控使用策略、BSS 清零完成且作为普通可写内存使用、`boot_cpu_hartid_recorded_for_later_use(BootCpuRegisters.a0)`、物理/虚拟 `tp/sp/gp`、
   临时保护入口、正式 TrapFlowType 入口、初始异常兜底、DTB/fixmap、VM translation 和 Soc
-  early-platform 事实必须存在。结构化 Signal 必须把
+  Preset deferred 事实必须存在。结构化 Signal 必须把
   `selector_resolutions` 数组必须保留 `CurrentCPU` 的 source flow `BootInitFlow`、source ref `BootCPURef`
   与 canonical target `CpuGroup.cpus[0]`。`BindTaskStack` 与 `RefreshTaskStack` Signal 必须分别展示
   “首次原子建立”和“同一 pair 原子刷新”的 Model 注释；边界 snapshot 必须保存 CPU0 的
@@ -162,9 +163,10 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
   BootInitFlow.Setup；该边界不得提前包含 `cpu_hartid_ready(CpuGroup.cpus[0], ...)`。compact text 必须显示 reached/before-send 与 0016 stopped，verbose text 必须保留
   真实 Human root、0020 identity、handler 和 reached boundary，结构化 event 必须保留 context，且两种
   text render 都不得改变 derive/view/snapshot。
-- 同一 `BootInitFlow.Setup` 边界的 animation v3 必须精确包含 52 request、48 feedback、3 settle、
+- 同一 `BootInitFlow.Setup` completion-event 边界的 animation v3 必须精确包含 52 request、48 feedback、3 settle、
   1 terminal，共 104 moments。0016 terminal 表示已 receive 的 stopped emits ancestor；0020 feedback
-  必须晚于 0021–0052 的全部嵌套 feedback，
+  必须晚于 0021–0052 的全部嵌套 feedback，且边界必须保留 BootInitFlow 自发 emits、cause 0020 与
+  FIFO position 1 的因果元数据；
   0011–0013 仍各自 settle，边界 Signal 不得产生 moment。
 - 第 2 组负例必须从 canonical 快照删除单个真实前提并验证首个失败边界：缺失 Kernel acceptance、
   BootTask `OnCpu/Live/Invalid` 或 initial-flow binding 时不得创建第一个入口 child；缺失入口
