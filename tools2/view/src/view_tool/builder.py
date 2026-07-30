@@ -7,6 +7,9 @@ from typing import Any
 
 
 def build_view(derivation: dict[str, Any]) -> dict[str, Any]:
+    for field in ("boundary_inventory", "boundary_occurrences", "obligations"):
+        if not isinstance(derivation.get(field), list):
+            raise ValueError(f"derivation {field} must be a list")
     signals = deepcopy(derivation.get("signals", []))
     depths: dict[str, int] = {}
     by_id = {item["id"]: item for item in signals}
@@ -25,6 +28,9 @@ def build_view(derivation: dict[str, Any]) -> dict[str, Any]:
         "root_request": deepcopy(derivation.get("root_request")),
         "until_request": deepcopy(derivation.get("until_request")),
         "boundary": deepcopy(derivation.get("boundary")),
+        "boundary_inventory": deepcopy(derivation.get("boundary_inventory", [])),
+        "boundary_occurrences": deepcopy(derivation.get("boundary_occurrences", [])),
+        "obligations": deepcopy(derivation.get("obligations", [])),
         "model_fingerprint": derivation.get("model_fingerprint"),
         "budget": deepcopy(derivation.get("budget")),
         "verdict": derivation.get("verdict"),

@@ -95,9 +95,7 @@ class SignalPipelineTests(unittest.TestCase):
         self.assertEqual(derive_main(derive_args), 0)
         check_exit = check_main([str(derivation), "-o", str(checked)])
         checked_data = read_json(checked)
-        expected_check_exit = (
-            0 if checked_data["verdict"] in {"complete", "reached"} else 1
-        )
+        expected_check_exit = 0 if checked_data["allowed"] else 1
         self.assertEqual(check_exit, expected_check_exit)
         self.assertEqual(view_main([str(derivation), "-o", str(view)]), 0)
         with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
@@ -157,6 +155,7 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(
                 stdout.getvalue(),
                 "verdict: complete\n"
+                "boundaries: deferred=0 trimmed=0 occurrences=0 obligations=0\n"
                 "Human -- Start --> Root[Base:Ready]\n"
                 "  Root -- Configure --> Child\n"
                 "  Root -- Run --> Async[Base:Ready]\n"
@@ -522,6 +521,7 @@ class SignalPipelineTests(unittest.TestCase):
         self.assertEqual(
             compact,
             "verdict: failed\n"
+            "boundaries: deferred=0 trimmed=0 occurrences=0 obligations=0\n"
             "  Human -- Startup --> Child[Base:Ready]\n"
             "Child -- Inspect --> Parent\n"
             "    Child -- Missing --> Unknown !! rejected: no_handler\n"
@@ -989,7 +989,7 @@ class SignalPipelineTests(unittest.TestCase):
             data = read_json(ast)
             self.assertEqual((data["schema"], data["version"], data["producer"]), (AST_SCHEMA, AST_VERSION, PRODUCER))
 
-            for old_version in (1, 2, 3, 4, 5, 6, 7):
+            for old_version in (1, 2, 3, 4, 5, 6, 7, 8):
                 old = root / f"old-v{old_version}.ast.json"
                 old.write_text(
                     json.dumps(
@@ -1006,7 +1006,7 @@ class SignalPipelineTests(unittest.TestCase):
                 stderr = io.StringIO()
                 with contextlib.redirect_stderr(stderr):
                     self.assertEqual(model_main([str(old), "-o", str(root / "no.json")]), 2)
-                self.assertIn("version=8", stderr.getvalue())
+                self.assertIn("version=9", stderr.getvalue())
 
                 old_snapshot = root / f"old-v{old_version}.snapshot.json"
                 old_snapshot.write_text(
@@ -1046,6 +1046,328 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("error:", result.stderr)
 
+    def test_boundary_inventory_occurrences_and_obligations_are_noncausal(self) -> None:
+        derivation, checked, text = self.run_source(
+            """
+            type ProbeType {
+                processes {
+                    Action::Inspect {
+                        ensures { probe_evidence(self); }
+                        deferred probe.001 {
+                            category: DeferredCategory::Proof;
+                            summary: "Proved evidence remains a read-only observation.";
+                            evidence { probe_evidence(self); }
+                            close_when: "The proof boundary is replaced by a permanent invariant.";
+                        }
+                        within AuditContext {
+                            deferred probe.002 {
+                                category: DeferredCategory::Proof;
+                                summary: "Missing evidence produces an obligation.";
+                                evidence { missing_probe_evidence(self); }
+                                close_when: "The missing evidence is formally established and tested.";
+                            }
+                        }
+                    }
+                }
+            }
+            context AuditContext { }
+            system Root {
+                initial_state: State::Base;
+                state State::Base {
+                    transitions {
+                        on Transition::Start -> State::Ready {
+                            drives {
+                                Probe.Action::Inspect;
+                                Probe.Action::Inspect;
+                            }
+                            ensures { root_ready(self); }
+                        }
+                    }
+                }
+                state State::Ready { invariant { root_ready(self); } }
+            }
+            object Probe: ProbeType {
+                parent: Root;
+                initial_state: State::Base;
+                state State::Base { }
+            }
+            """,
+            "Root.Start",
+            max_depth="all",
+            max_breadth="all",
+        )
+        self.assertEqual(derivation["verdict"], "complete")
+        self.assertFalse(checked["allowed"])
+        self.assertEqual(checked["exit_code"], 1)
+        self.assertEqual(derivation["summary"]["inventory_deferred"], 2)
+        self.assertEqual(derivation["summary"]["inventory_trimmed"], 0)
+        self.assertEqual(derivation["summary"]["boundary_occurrences"], 4)
+        self.assertEqual(derivation["summary"]["unresolved_obligations"], 2)
+        self.assertEqual(len(derivation["boundary_inventory"]), 2)
+        self.assertEqual(
+            {item["owner"] for item in derivation["boundary_inventory"]}, {"ProbeType"}
+        )
+        self.assertEqual(
+            {item["owner"] for item in derivation["boundary_occurrences"]}, {"Probe"}
+        )
+        self.assertEqual(
+            [(item["boundary_id"], item["occurrence_index"]) for item in derivation["boundary_occurrences"]],
+            [("probe.001", 1), ("probe.002", 1), ("probe.001", 2), ("probe.002", 2)],
+        )
+        self.assertTrue(
+            all(
+                occurrence["proofs"][0]["result"]
+                for occurrence in derivation["boundary_occurrences"]
+                if occurrence["boundary_id"] == "probe.001"
+            )
+        )
+        self.assertTrue(
+            all(
+                not occurrence["proofs"][0]["result"]
+                for occurrence in derivation["boundary_occurrences"]
+                if occurrence["boundary_id"] == "probe.002"
+            )
+        )
+        self.assertEqual([item["outcome"] for item in derivation["signals"]], ["completed"] * 3)
+        self.assertEqual(len(derivation["signals"]), 3)
+        self.assertFalse(
+            any(
+                fact.startswith("missing_probe_evidence(")
+                for fact in derivation["last_stable_snapshot"]["facts"]
+            )
+        )
+        self.assertNotIn("boundary_obligation", {item["outcome"] for item in derivation["signals"]})
+        self.assertIn("obligations=2", text)
+
+    def test_declaration_state_and_transition_boundaries_use_candidate_snapshots(self) -> None:
+        derivation, checked, _ = self.run_source(
+            """
+            system Root {
+                initial_state: State::Base;
+                facts { root_declared(self); }
+                deferred boundary_location.001 {
+                    category: DeferredCategory::Proof;
+                    summary: "Declaration evidence is checked when the instance exists.";
+                    evidence { root_declared(self); }
+                    close_when: "The declaration fact becomes a permanent model invariant.";
+                }
+                state State::Base {
+                    trimmed boundary_location.002 {
+                        category: TrimmedCategory::ReferenceInput;
+                        summary: "The initial reference input selects Base.";
+                        evidence { self.state == State::Base; }
+                        revisit_when: "The reference input selects another initial state.";
+                    }
+                    transitions {
+                        on Transition::Start -> State::Ready {
+                            ensures { root_ready(self); }
+                            deferred boundary_location.003 {
+                                category: DeferredCategory::Proof;
+                                summary: "Transition evidence sees earlier candidate effects.";
+                                evidence { root_ready(self); }
+                                close_when: "The transition proof is a permanent postcondition.";
+                            }
+                        }
+                    }
+                }
+                state State::Ready {
+                    deferred boundary_location.004 {
+                        category: DeferredCategory::Proof;
+                        summary: "State evidence is checked on entry.";
+                        evidence { root_ready(self); }
+                        close_when: "The state proof is a permanent invariant.";
+                    }
+                    invariant { root_ready(self); }
+                }
+            }
+            """,
+            "Root.Start",
+        )
+        self.assertTrue(checked["allowed"])
+        self.assertEqual(derivation["verdict"], "complete")
+        self.assertEqual(derivation["summary"]["inventory_deferred"], 3)
+        self.assertEqual(derivation["summary"]["inventory_trimmed"], 1)
+        self.assertEqual(derivation["summary"]["boundary_occurrences"], 4)
+        self.assertEqual(derivation["obligations"], [])
+        self.assertEqual(
+            [item["boundary_id"] for item in derivation["boundary_occurrences"]],
+            [
+                "boundary_location.001",
+                "boundary_location.002",
+                "boundary_location.003",
+                "boundary_location.004",
+            ],
+        )
+        self.assertEqual(
+            [item["location"] for item in derivation["boundary_occurrences"]],
+            ["declaration", "state", "transition", "state"],
+        )
+        self.assertIsNone(derivation["boundary_occurrences"][0]["signal_id"])
+        self.assertEqual(derivation["boundary_occurrences"][-1]["state"], "Ready")
+
+    def test_boundary_structure_is_strict_and_inventory_is_unique(self) -> None:
+        invalid_members = {
+            "invalid id": "deferred legacy_id",
+            "invalid category": "deferred strict.001",
+            "missing summary": "deferred strict.002",
+            "empty evidence": "deferred strict.003",
+            "wrong resolution": "trimmed strict.004",
+        }
+        blocks = {
+            "invalid id": """
+                { category: DeferredCategory::Proof; summary: "x";
+                  evidence { known(self); } close_when: "closed"; }
+            """,
+            "invalid category": """
+                { category: TrimmedCategory::BuildConfig; summary: "x";
+                  evidence { known(self); } close_when: "closed"; }
+            """,
+            "missing summary": """
+                { category: DeferredCategory::Proof;
+                  evidence { known(self); } close_when: "closed"; }
+            """,
+            "empty evidence": """
+                { category: DeferredCategory::Proof; summary: "x";
+                  evidence { } close_when: "closed"; }
+            """,
+            "wrong resolution": """
+                { category: TrimmedCategory::BuildConfig; summary: "x";
+                  evidence { known(self); } close_when: "closed"; }
+            """,
+        }
+        for label, declaration in invalid_members.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                spec = root / "invalid.spec"
+                ast = root / "ast.json"
+                model = root / "model.json"
+                spec.write_text(
+                    textwrap.dedent(
+                        f"""
+                        system Root {{
+                            initial_state: State::Base;
+                            state State::Base {{
+                                actions {{
+                                    on Action::Inspect {{
+                                        {declaration} {blocks[label]}
+                                    }}
+                                }}
+                            }}
+                        }}
+                        """
+                    ),
+                    encoding="utf-8",
+                )
+                self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+                self.assertEqual(model_main([str(ast), "-o", str(model)]), 0)
+                self.assertFalse(read_json(model)["summary"]["ok"])
+
+        duplicate_source = """
+            system Root {
+                initial_state: State::Base;
+                state State::Base {
+                    actions {
+                        on Action::Inspect {
+                            deferred duplicate.001 {
+                                category: DeferredCategory::Proof;
+                                category: DeferredCategory::Proof;
+                                summary: "x";
+                                evidence { known(self); }
+                                evidence { known(self); }
+                                close_when: "closed";
+                            }
+                            deferred duplicate.001 {
+                                category: DeferredCategory::Proof;
+                                summary: "y";
+                                evidence { known(self); }
+                                close_when: "closed";
+                            }
+                        }
+                    }
+                }
+            }
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            spec = root / "duplicate.spec"
+            ast = root / "ast.json"
+            model = root / "model.json"
+            spec.write_text(textwrap.dedent(duplicate_source), encoding="utf-8")
+            self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+            parsed = read_json(ast)
+            self.assertTrue(any("duplicate deferred" in item["message"] for item in parsed["document"]["diagnostics"]))
+            self.assertEqual(model_main([str(ast), "-o", str(model)]), 0)
+            modeled = read_json(model)
+            self.assertEqual(len(modeled["model"]["boundary_inventory"]), 1)
+            self.assertTrue(any("duplicate boundary id" in item["message"] for item in modeled["diagnostics"]))
+
+    def test_obligation_blocks_snapshot_create_or_overwrite_and_zero_allows_v9(self) -> None:
+        template = """
+            system Root {{
+                initial_state: State::Base;
+                {facts}
+                state State::Base {{
+                    actions {{
+                        on Action::Inspect {{
+                            deferred snapshot_gate.001 {{
+                                category: DeferredCategory::Proof;
+                                summary: "Snapshot export requires this evidence.";
+                                evidence {{ snapshot_gate_ready(self); }}
+                                close_when: "The evidence is a permanent checked invariant.";
+                            }}
+                        }}
+                    }}
+                }}
+            }}
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            blocked_spec = root / "blocked.spec"
+            blocked_snapshot = root / "blocked.snapshot.json"
+            blocked_snapshot.write_text("sentinel\n", encoding="utf-8")
+            blocked_spec.write_text(
+                textwrap.dedent(template.format(facts="")), encoding="utf-8"
+            )
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    driver_main(
+                        [
+                            str(blocked_spec), "--signal", "Root.Inspect",
+                            "--snapshot-out", str(blocked_snapshot),
+                            "--work-dir", str(root / "blocked-work"),
+                        ]
+                    ),
+                    1,
+                )
+            self.assertEqual(blocked_snapshot.read_text(encoding="utf-8"), "sentinel\n")
+            blocked_check = read_json(root / "blocked-work" / "check.json")
+            self.assertEqual(blocked_check["verdict"], "complete")
+            self.assertFalse(blocked_check["allowed"])
+
+            allowed_spec = root / "allowed.spec"
+            allowed_snapshot = root / "allowed.snapshot.json"
+            allowed_spec.write_text(
+                textwrap.dedent(
+                    template.format(facts="facts { snapshot_gate_ready(self); }")
+                ),
+                encoding="utf-8",
+            )
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    driver_main(
+                        [
+                            str(allowed_spec), "--signal", "Root.Inspect",
+                            "--snapshot-out", str(allowed_snapshot),
+                            "--work-dir", str(root / "allowed-work"),
+                        ]
+                    ),
+                    0,
+                )
+            saved = read_json(allowed_snapshot)
+            self.assertEqual(saved["version"], SNAPSHOT_VERSION)
+            self.assertEqual(saved["version"], 9)
+            self.assertTrue(read_json(root / "allowed-work" / "check.json")["allowed"])
+
     def test_every_tools2_consumer_rejects_wrong_producer(self) -> None:
         cases = [
             (model_main, AST_SCHEMA, AST_VERSION, []),
@@ -1068,7 +1390,7 @@ class SignalPipelineTests(unittest.TestCase):
                 self.assertEqual(exit_code, 2)
                 self.assertIn("producer='tools2'", stderr.getvalue())
 
-    def test_every_tools2_consumer_rejects_pre_v8_protocols(self) -> None:
+    def test_every_tools2_consumer_rejects_pre_v9_protocols(self) -> None:
         cases = [
             (model_main, AST_SCHEMA, []),
             (derive_main, MODEL_SCHEMA, ["--signal", "Root.Go"]),
@@ -1078,7 +1400,7 @@ class SignalPipelineTests(unittest.TestCase):
         ]
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            for old_version in (1, 2, 3, 4, 5, 6, 7):
+            for old_version in (1, 2, 3, 4, 5, 6, 7, 8):
                 for index, (entry, schema, extra) in enumerate(cases):
                     source = root / f"input-v{old_version}-{index}.json"
                     source.write_text(
@@ -1093,7 +1415,7 @@ class SignalPipelineTests(unittest.TestCase):
                             [str(source), *extra, "-o", str(root / f"out-v{old_version}-{index}")]
                         )
                     self.assertEqual(exit_code, 2)
-                    self.assertIn("version=8", stderr.getvalue())
+                    self.assertIn("version=9", stderr.getvalue())
 
     def test_include_is_resolved_and_retains_child_source_span(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1276,7 +1598,7 @@ class SignalPipelineTests(unittest.TestCase):
         self.assertEqual(checked["verdict"], "failed")
         self.assertEqual(derivation["signals"][0]["outcome"], "rejected")
         self.assertEqual(
-            text.splitlines()[1],
+            text.splitlines()[2],
             "Human -- Startup --> Root[Ready:Ready] !! rejected: "
             "state_not_accepted: expected State::Base, got State::Ready",
         )
@@ -1314,7 +1636,7 @@ class SignalPipelineTests(unittest.TestCase):
         self.assertNotIn("pending", {item["outcome"] for item in derivation["signals"]})
         self.assertIn("!! rejected: condition_not_satisfied", text)
 
-    def test_lossy_signal_syntax_is_rejected_by_v8_model(self) -> None:
+    def test_lossy_signal_syntax_is_rejected_by_v9_model(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             spec = root / "input.spec"
@@ -3011,6 +3333,7 @@ class SignalPipelineTests(unittest.TestCase):
         self.assertEqual(
             text,
             "verdict: reached\n"
+            "boundaries: deferred=0 trimmed=0 occurrences=0 obligations=0\n"
             "boundary: Human -- Startup --> Root (before send)\n",
         )
 
@@ -3292,7 +3615,7 @@ class SignalPipelineTests(unittest.TestCase):
             unreached_check = read_json(root / "work-2" / "check.json")
             self.assertIn("until_signal_not_reached", unreached_check["reasons"][0])
 
-    def test_reached_snapshot_is_v8_with_boundary_provenance_and_resumes(self) -> None:
+    def test_reached_snapshot_is_v9_with_boundary_provenance_and_resumes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             work = root / "work"
@@ -3822,11 +4145,10 @@ class SignalPipelineTests(unittest.TestCase):
                 compact_text = render_text(view_data)
             with mock.patch.dict(os.environ, {"VERBOSE": "1"}):
                 verbose_text = render_text(view_data)
-            self.assertTrue(
-                compact_text.startswith(
-                    "verdict: reached\n"
-                    "boundary: OpenSBI -- Enable --> Kernel (before send)\n"
-                )
+            self.assertTrue(compact_text.startswith("verdict: reached\nboundaries: "))
+            self.assertIn(
+                "boundary: OpenSBI -- Enable --> Kernel (before send)\n",
+                compact_text,
             )
             self.assertIn(
                 "Riscv64Platform -- Enable --> OpenSBI[Ready:Online]",
@@ -4096,6 +4418,21 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(resumed_data["verdict"], "complete")
             self.assertEqual(resumed_checked["verdict"], "complete")
             self.assertEqual(resumed_checked["exit_code"], 0)
+            self.assertTrue(resumed_checked["allowed"])
+            self.assertEqual(resumed_data["summary"]["inventory_deferred"], 138)
+            self.assertEqual(resumed_data["summary"]["inventory_trimmed"], 52)
+            self.assertEqual(resumed_data["summary"]["unresolved_obligations"], 0)
+            self.assertEqual(len(resumed_data["boundary_inventory"]), 190)
+            occurrence_by_boundary = {
+                item["boundary_id"]: item
+                for item in resumed_data["boundary_occurrences"]
+            }
+            self.assertTrue(
+                {"smp_bringup.001", "smp_bringup.002", "smp_bringup.003"}
+                <= set(occurrence_by_boundary)
+            )
+            self.assertEqual(occurrence_by_boundary["page_alloc.001"]["location"], "state")
+            self.assertEqual(occurrence_by_boundary["page_alloc.001"]["state"], "Ready")
             self.assertFalse(
                 any(
                     item["outcome"] in {"rejected", "failed"}
@@ -4573,13 +4910,17 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(
                 derivation["summary"],
                 {
+                    "boundary_occurrences": 2,
                     "completed": 51,
                     "failed": 0,
+                    "inventory_deferred": 138,
+                    "inventory_trimmed": 52,
                     "pending": 0,
                     "rejected": 0,
                     "signals": 52,
                     "stopped": 1,
                     "truncated": 0,
+                    "unresolved_obligations": 0,
                 },
             )
             self.assertEqual(
@@ -5031,24 +5372,23 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(snapshot.read_bytes(), BOOT_INIT_SETUP_SCENARIO.read_bytes())
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "34525a0131c1b94ecf848054c1c3fcaf962d91f6350f64b4bc1071bd28fbeb8d",
+                "8cd841b9904ad98f92a619e627be657b7d610a050ad2625ca68841b1c6c208e4",
             )
             self.assertEqual(
                 {
                     derivation["model_fingerprint"], model["model_fingerprint"],
                     view["model_fingerprint"], saved["model_fingerprint"],
                 },
-                {"sha256:b80e689285bb9384869ec487830913fc5d9ca85dcac7b2d1557080b08887f036"},
+                {"sha256:658f02fd9242257810f6c7d43e83235999960148febb30e0357e20aeec7828a7"},
             )
             with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
                 compact_text = render_text(view)
             with mock.patch.dict(os.environ, {"VERBOSE": "1"}):
                 verbose_text = render_text(view)
-            self.assertTrue(
-                compact_text.startswith(
-                    "verdict: reached\n"
-                    "boundary: BootInitFlow -- Setup --> BootInitFlow (before send)\n"
-                )
+            self.assertTrue(compact_text.startswith("verdict: reached\nboundaries: "))
+            self.assertIn(
+                "boundary: BootInitFlow -- Setup --> BootInitFlow (before send)\n",
+                compact_text,
             )
             self.assertIn(
                 "OpenSBI -- Enable --> Kernel[Ready:Ready] !! stopped: until_signal_reached",

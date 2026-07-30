@@ -14,10 +14,68 @@ export interface AnimationTrace {
       signal: string;
       normalized_signal: string;
     } | null;
+    summary: {
+      inventory_deferred: number;
+      inventory_trimmed: number;
+      boundary_occurrences: number;
+      unresolved_obligations: number;
+      [key: string]: unknown;
+    };
+    boundary_inventory: BoundaryInventoryItem[];
+    boundary_occurrences: BoundaryOccurrence[];
+    obligations: BoundaryObligation[];
   };
   moments: AnimationMoment[];
   initial_frame: AnimationFrame;
   frames: AnimationFrame[];
+}
+
+export interface BoundaryInventoryItem {
+  id: string;
+  status: 'deferred' | 'trimmed';
+  category: string;
+  summary: string;
+  resolution: { kind: string; text: string };
+  owner: string;
+  state: string | null;
+  handler: { kind: string; name: string } | null;
+  context: string | null;
+  location: string;
+  evidence: Array<{ text: string }>;
+}
+
+export interface BoundaryProof {
+  evidence_index: number;
+  expression: string;
+  result: boolean;
+  proof_source: string;
+  classification: string;
+}
+
+export interface BoundaryOccurrence {
+  id: string;
+  sequence: number;
+  boundary_id: string;
+  occurrence_index: number;
+  signal_id: string | null;
+  execution_sequence: number;
+  owner: string;
+  state: string | null;
+  context: string[];
+  proofs: BoundaryProof[];
+}
+
+export interface BoundaryObligation {
+  id: string;
+  boundary_id: string;
+  occurrence_id: string;
+  evidence_index: number;
+  expression: string;
+  owner: string;
+  signal_id: string | null;
+  proof_source: string;
+  classification: string;
+  unresolved: true;
 }
 
 export type HandlerKind = 'Transition' | 'Action' | null;

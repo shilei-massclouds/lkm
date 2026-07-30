@@ -275,6 +275,9 @@
       <div><dt>Source:</dt><dd>{request.source}</dd></div>
       <div><dt>Verdict:</dt><dd>{animation.trace.verdict}</dd></div>
       <div><dt>Signals:</dt><dd>{animation.trace.total_signals}</dd></div>
+      <div><dt>Boundaries:</dt><dd>{animation.trace.summary.inventory_deferred}D / {animation.trace.summary.inventory_trimmed}T</dd></div>
+      <div><dt>Occurrences:</dt><dd>{animation.trace.summary.boundary_occurrences}</dd></div>
+      <div><dt>Obligations:</dt><dd>{animation.trace.summary.unresolved_obligations}</dd></div>
       <div title={`Source file: ${animation.source}\nModel fingerprint: ${animation.inputs.model_fingerprint}`}>
         <dt>Protocol:</dt><dd>{animation.schema} v{animation.version}</dd>
       </div>
@@ -324,4 +327,52 @@
     </div>
     <button type="button" onclick={next} disabled={!canNext}>下一步</button>
   </section>
+  <details class="boundary-details">
+    <summary>Deferred / Trimmed evidence details</summary>
+    <div class="boundary-detail-grid">
+      <section>
+        <h2>Inventory</h2>
+        {#if animation.trace.boundary_inventory.length === 0}
+          <p>None.</p>
+        {:else}
+          <ul>
+            {#each animation.trace.boundary_inventory as item}
+              <li><strong>{item.id}</strong> · {item.status}/{item.category} · {item.owner} ({item.location})<br />{item.summary}</li>
+            {/each}
+          </ul>
+        {/if}
+      </section>
+      <section>
+        <h2>Occurrences and proofs</h2>
+        {#if animation.trace.boundary_occurrences.length === 0}
+          <p>None reached.</p>
+        {:else}
+          <ul>
+            {#each animation.trace.boundary_occurrences as occurrence}
+              <li>
+                <strong>{occurrence.id}</strong> · {occurrence.boundary_id} · owner {occurrence.owner} · Signal {occurrence.signal_id ?? 'initial'}
+                <ul>
+                  {#each occurrence.proofs as proof}
+                    <li>evidence[{proof.evidence_index}] {proof.result ? 'proved' : 'unresolved'} via {proof.proof_source}/{proof.classification}: {proof.expression}</li>
+                  {/each}
+                </ul>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </section>
+      <section>
+        <h2>Unresolved obligations</h2>
+        {#if animation.trace.obligations.length === 0}
+          <p>None.</p>
+        {:else}
+          <ul>
+            {#each animation.trace.obligations as obligation}
+              <li><strong>{obligation.id}</strong> · {obligation.boundary_id}/{obligation.occurrence_id} · evidence[{obligation.evidence_index}] · {obligation.owner}: {obligation.expression}</li>
+            {/each}
+          </ul>
+        {/if}
+      </section>
+    </div>
+  </details>
 </section>

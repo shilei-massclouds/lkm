@@ -121,7 +121,7 @@ def main(argv: list[str] | None = None) -> int:
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(text, encoding="utf-8")
         check_data = read_json(checked)
-        if check_data["verdict"] in {"complete", "reached"} and args.snapshot_out is not None:
+        if check_data["allowed"] is True and args.snapshot_out is not None:
             derive_data = read_json(derivation)
             snapshot = {
                 "schema": SNAPSHOT_SCHEMA,

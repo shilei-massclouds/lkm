@@ -6,6 +6,7 @@ import io
 from pathlib import Path
 import subprocess
 import tempfile
+import textwrap
 import unittest
 
 from animate_tool.__main__ import main as animate_main
@@ -189,6 +190,50 @@ class SignalAnimationTests(unittest.TestCase):
             animation["moments"][3]["transfer"], {"from": "Root", "to": "Human"}
         )
         self.assertIsNone(animation["moments"][5]["transfer"])
+
+    def test_animation_projects_boundary_proofs_without_new_causal_moments(self) -> None:
+        spec = self.root / "boundary.spec"
+        work = self.root / "boundary-work"
+        spec.write_text(
+            textwrap.dedent(
+                """
+                system Root {
+                    initial_state: State::Base;
+                    facts { known(self); }
+                    state State::Base {
+                        actions {
+                            on Action::Inspect {
+                                deferred animation_boundary.001 {
+                                    category: DeferredCategory::Proof;
+                                    summary: "Project evidence without a causal moment.";
+                                    evidence { known(self); missing(self); }
+                                    close_when: "Both evidence expressions are permanent invariants.";
+                                }
+                            }
+                        }
+                    }
+                }
+                """
+            ),
+            encoding="utf-8",
+        )
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(
+                driver_main(
+                    [str(spec), "--signal", "Root.Inspect", "--work-dir", str(work)]
+                ),
+                1,
+            )
+        animation = build_animation(read_json(work / "model.json"), read_json(work / "view.json"))
+        self.assertEqual(animation["trace"]["total_signals"], 1)
+        self.assertEqual(animation["trace"]["total_moments"], 2)
+        self.assertEqual(len(animation["trace"]["boundary_inventory"]), 1)
+        self.assertEqual(len(animation["trace"]["boundary_occurrences"]), 1)
+        self.assertEqual(len(animation["trace"]["obligations"]), 1)
+        self.assertEqual(
+            [proof["result"] for proof in animation["trace"]["boundary_occurrences"][0]["proofs"]],
+            [True, False],
+        )
 
     def test_animation_projects_optional_model_handler_description(self) -> None:
         view = deepcopy(self.view)
@@ -382,11 +427,18 @@ class SignalAnimationTests(unittest.TestCase):
     def test_cli_rejects_schema_version_and_producer_mismatch_without_output(self) -> None:
         model_path = self.root / "model.json"
         view_path = self.root / "view.json"
-        cases = (
+        cases = [
             ("schema", "model", "schema", "other.model", "model protocol mismatch"),
-            ("version", "view", "version", 3, "view protocol mismatch"),
             ("producer", "view", "producer", "tools", "view protocol mismatch"),
-        )
+            *[
+                (f"model-v{version}", "model", "version", version, "model protocol mismatch")
+                for version in range(1, 9)
+            ],
+            *[
+                (f"view-v{version}", "view", "version", version, "view protocol mismatch")
+                for version in range(1, 9)
+            ],
+        ]
         for label, owner, field, value, message in cases:
             with self.subTest(label=label):
                 model = deepcopy(self.model)
@@ -791,7 +843,7 @@ class SignalAnimationTests(unittest.TestCase):
                 derivation["model_fingerprint"],
                 view["model_fingerprint"],
             },
-            {"sha256:b80e689285bb9384869ec487830913fc5d9ca85dcac7b2d1557080b08887f036"},
+            {"sha256:658f02fd9242257810f6c7d43e83235999960148febb30e0357e20aeec7828a7"},
         )
         animation = build_animation(model, view)
         self.assertEqual(animation["trace"]["total_signals"], 52)

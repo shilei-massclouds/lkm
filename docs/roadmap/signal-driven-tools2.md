@@ -3,7 +3,7 @@
 ## 目标与边界
 
 在 `tools2/` 从头建立 Signal 驱动的 `parse -> model -> derive -> check -> view -> render/animate` Python
-纵切，并由独立 `pyveri` driver 串联。它不替换 `tools/`，不进入根 `make test`；当前 v5 工具链已经
+纵切，并由独立 `pyveri` driver 串联。它不替换 `tools/`，不进入根 `make test`；当前 v9 工具链已经
 能够消费完整主模型并生成 text 与独立离线 HTML，仍不实现或复用老静态 SVG。
 
 权威设计见 [`../../spec/charter/system-signal.md`](../../spec/charter/system-signal.md)，formal semantics
@@ -11,7 +11,7 @@
 实现协议见 [`../../spec/coding/tools2.md`](../../spec/coding/tools2.md)。本文只记录里程碑和实施证据，
 不覆盖上述规格。
 
-## P0：Deferred / Trimmed / Obligation 处理闭环
+## 已完成：Deferred / Trimmed / Obligation 处理闭环
 
 2026-07-30 对照检查确认：`tools2` 能在 AST 和 Model handler body 中保留结构化
 `deferred` / `trimmed` member，但尚未形成与 Model 语义一致的 boundary inventory、结构校验、
@@ -59,6 +59,33 @@ charter-first 校准段。实施以现有 `SEM-BOUNDARY-001` 及 tools2 Signal �
     负例被拒绝、未证明 evidence 稳定形成 obligation/check=1、已证明 inventory check=0、主模型
     obligation=0，且 snapshot 与展示门禁均符合上述规则，才完成本 P0。
 
+## Deferred / Trimmed / Obligation v9 完成证据
+
+2026-07-30 按 charter-first 完成闭环。Charter 明确 obligation 不改变 Signal 因果结果但阻止 check 与
+canonical snapshot；Model 区分全局 inventory 与动态 occurrence，并要求 evidence 在 candidate snapshot
+上只读求值；Coding 固定 v9 的 AST/Model/Derive/Check/View/Snapshot 协议及 v3 animation 投影。锁定的
+`spec/charter/systems/computer.md` 仅复核、未修改；Compose 复核后无组件边界变化。
+
+- parser/model 现在拒绝非法分类、缺失或空字段、非法/重复 ID、重复属性/evidence block、错误
+  resolution 与 legacy boundary；Type process composition 共享 inventory ID，执行实例分别产生 occurrence。
+- derive 不再按 evidence AST 形状直接判真；proof 只读消费 candidate snapshot、Model 结构、参考输入和
+  前序已证明事实。每条未证明 evidence 形成结构化 obligation，但不增加 Signal、状态、事实或 causal
+  moment。check 仅在 verdict 为 `complete` / `reached` 且 unresolved obligation 为零时 allowed，driver
+  只依据该结果创建或覆盖 snapshot。
+- 完整主模型 inventory 精确为 138 deferred、52 trimmed；完整推导为 185 个 occurrence、0 个 unresolved
+  obligation，且 `smp_bringup.001`–`.003`、state-level boundary 与 Type-process boundary 均有正式记录。
+  旧 `tools/` 的 135/52 与事件计数仅保留为 shadow comparison，没有覆盖 v9 结果。
+- `make -C tools2 test-all` 通过：Python 91/91、Svelte 0 error/0 warning、Vitest 16/16、bundle stale
+  check 和 Playwright 9/9。测试覆盖 v1–v8 全拒绝、v9 round-trip、已证明/未证明 evidence、重复
+  occurrence、非因果 obligation、check/snapshot 门禁以及 animation v3 同源投影。
+- `make verify` 通过；仓库根直接 `make test` 最终为 184/184，两侧 KUnit 各 25/25、app smoke 各
+  56/56，LTP close list native/linux-object 均通过。
+- 两个 canonical snapshot 已重建为 v9，Model fingerprint 均为
+  `sha256:658f02fd9242257810f6c7d43e83235999960148febb30e0357e20aeec7828a7`；`Kernel.Enable` snapshot
+  SHA-256 为 `da0e8208407c4d5cbbb6563ca7208ad8df4da7cea6296077928824cf80d53c99`，
+  `BootInitFlow.Setup` snapshot SHA-256 为
+  `8cd841b9904ad98f92a619e627be657b7d610a050ad2625ca68841b1c6c208e4`。
+
 ## 里程碑
 
 1. 首期最小闭环（已完成）：独立包和 producer/version 隔离；必要 DSL 子集；Transition/Action 隐式 Signal；
@@ -70,9 +97,9 @@ charter-first 校准段。实施以现有 `SEM-BOUNDARY-001` 及 tools2 Signal �
    包括歧义、重载和迁移诊断。
 4. pending 与 continuation：定义接受后等待未来 Signal、保存/恢复 continuation、队列所有权、超时、
    取消和 snapshot 可续跑语义；首期条件失败必须保持 rejected。
-5. 交互 HTML（已完成）：独立 animate 阶段共同消费 tools2 v5 `model.json` 和 `view.json`，生成内嵌
+5. 交互 HTML（已完成）：独立 animate 阶段共同消费 tools2 v9 `model.json` 和 `view.json`，生成内嵌
    `lkm.spec.signal-animation` v3 因果时刻的自包含 HTML；按 request/feedback/settle/terminal moment
-   前进/后退，不扩展 v5 view schema，也不把浏览器变成推导器。首轮 v1 计划见
+   前进/后退，不重新求值 v9 view 的 boundary/obligation 投影，也不把浏览器变成推导器。首轮 v1 计划见
    [`interactive-model-animation.md`](interactive-model-animation.md)，老 tools 静态 SVG 保持原责任。
 6. 老工具迁移/退役：只有用户另行明确决定后才能规划。不得以 tools2 覆盖率或版本号自动触发。
 

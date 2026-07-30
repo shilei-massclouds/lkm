@@ -32,7 +32,7 @@ Python 测试统一由 `tools2/bin/test-python` 装载。无参数时它从仓�
 parser/model 必须让 `spec/model/main.spec` 通过零 error、零 unsupported，并支持 include、嵌套泛型、
 enum、type/object/system 与传递继承、属性、owned、association/reference、predicate/function、context/
 lock、state、Type lifecycle/process、对象 lifecycle override、命名形参/result、`within`、结构化
-`deferred`/`trimmed` evidence、`depends_on`、`ensures`、`updates`、`external`、`drives` 和 `emits`。v7 不接受
+`deferred`/`trimmed` evidence、`depends_on`、`ensures`、`updates`、`external`、`drives` 和 `emits`。v9 不接受
 `lossy` 修饰；所有已发送 Signal 都必须被 handler 接受并处理。
 model 必须把 `drives` 的顶层 `A || B` 规范化为有序 choice 节点；derive 在发送前检查候选可接受性，未选择候选不得进入 Signal 序列或消耗预算。
 条件和 invariant 的顶层 `P || Q` 必须规范化为布尔 any-of 节点并按当前快照短路求值，不得保留为无法解释的 assertion 字符串。
@@ -62,8 +62,8 @@ external 编排；显式 `--signal` 只发送该单个根 Signal。三个 Human 
 ## 中间协议
 
 所有 JSON 顶层必须包含 `schema`、`version`、`producer: "tools2"` 和 `source`。schema 名沿用
-`lkm.spec.ast/model/derive/check/view/snapshot`，tools2 各自使用 version `7`。消费者必须在读取后立即
-验证三元组，不接受缺失 producer、老 producer、version 1/2/3/4/5/6 或其它 version。Signal/model/view JSON
+`lkm.spec.ast/model/derive/check/view/snapshot`，tools2 各自使用 version `9`。消费者必须在读取后立即
+验证三元组，不接受缺失 producer、老 producer、version 1 至 version 8 或其它 version。Signal/model/view JSON
 不包含 `lossy`/`strict` 字段，outcome 不包含 `discarded`。
 
 AST 保留 include 展开后的声明、source order 和每个声明/语句 span。model 建立 enum、system、parent、
@@ -75,19 +75,36 @@ source span 内容，不得包含 checkout 绝对路径前缀。snapshot 继续�
 boundary provenance 内的 `source_file` 同样遵循该稳定路径规则，使同一 checkout 从不同 cwd 运行以及
 不同绝对路径下的等价 checkout 产生相同 canonical bytes。
 
+parser 必须把同一 boundary 内的重复属性、重复 `evidence` 块及其它局部结构冲突报告为 error。model
+必须在 Type process composition 与实例 materialization 之前建立全局唯一 `boundary_inventory`，并拒绝
+缺失/空字段、非法 category、非法/重复 ID、错误 resolution kind/text 及 legacy boundary。inventory
+每项固定包含 `id`、`status`、`category`、`summary`、结构化 `resolution { kind, text }`、规范化
+`evidence`、词法 `owner/state/handler/context`、`location` 和 source `span`。可执行 handler 与 state/
+declaration 位置只携带 `boundary_ref`，不得复制 inventory item。
+
+derive 固定输出 `boundary_inventory`、`boundary_occurrences` 和 `obligations`。每个 occurrence 包含稳定
+序号、boundary ID、当前 Signal ID、执行序号、动态 owner instance、state/handler/context 及逐 evidence
+proof result；每个 proof 包含 evidence index、expression、result、proof source/classification 和 span。
+每条未证明 evidence 产生稳定 obligation ID，并记录 boundary/occurrence/evidence 索引、expression、
+owner、Signal、proof source/classification、span 与 `unresolved: true`。evidence 使用现有 condition/
+predicate evaluator 的只读路径在到达位置 candidate snapshot 上求值；不得按 AST kind 自动判 true，
+不得写 fact/state/reference、发送 Signal 或生成 animation causal moment。boundary 观察只生成普通 derive
+record/event，obligation 不改变 Signal outcome 或 derive causal verdict。summary 另外固定输出 inventory
+deferred/trimmed、occurrence 和 unresolved obligation 计数。
+
 ## CLI 与退出码
 
 阶段工具都接受显式 `-o/--output`。parse 接收 `.spec`；model 接收 ast.json；derive 接收 model.json
 以及可选的 `--signal Target.Name`、`-u/--until Target.Name`、`--source`、`--scenario`、`--max-depth`、`--max-breadth`；check 和 view
 接收 derive.json；render 接收 view.json 且只实现 `--format text`；animate 接收 model.json、view.json
-并原子写出 HTML。animate 必须先分别验证两个输入的 v7 schema/version/producer、source 与 model
+并原子写出 HTML。animate 必须先分别验证两个输入的 v9 schema/version/producer、source 与 model
 fingerprint 身份，协议、身份、缺失端点或 I/O 错误返回 2 且不留下部分输出。
 
 driver 接收 `.spec` 和同一组 derive 参数，另提供 `--snapshot-out`、`--work-dir`、文本 `-o` 与
 `--html-out`。默认
 source 是 `Human`，预算默认 `3/3`；`all` 解析为无限，整数必须非负。未给 work-dir 时使用
-临时目录，给出时保留 `ast.json`、`model.json`、`derive.json`、`check.json` 和 `view.json`。只有 check
-verdict 为 complete 或 reached 才原子写 snapshot-out；reached snapshot 写入 boundary provenance；
+临时目录，给出时保留 `ast.json`、`model.json`、`derive.json`、`check.json` 和 `view.json`。只有
+`check.allowed == true` 才原子写 snapshot-out；reached snapshot 写入 boundary provenance；
 failed/bounded/until_signal_not_reached 或阶段错误时目标文件不得出现。
 
 driver 必须在 model/view 成功产生后为 `--html-out` 调用 animate。HTML 与 text stdout/`-o`、scenario、
@@ -162,13 +179,15 @@ derive 对已具名的符号引用执行 `==` / `!=` 时，必须比较引用值
 另外制造 `assert:` fact。对象属性比较仍先读取 snapshot 中的 reference assignment；不能把“两个引用
 恰好指向同一对象”误作“两个引用值相等”。
 
-parse/model/derive 在成功写出合法诊断 JSON 时返回 0，I/O 或协议损坏返回 2。check 对 complete/reached 返回
-0，对 failed/bounded/until_signal_not_reached 返回 1，协议损坏返回 2。view/render 不改变 check verdict；driver 最终采用
+parse/model/derive 在成功写出合法诊断 JSON 时返回 0，I/O 或协议损坏返回 2。check 仅对
+complete/reached 且 unresolved obligation 为零返回 0；对 policy 拒绝（含 complete/reached 加
+obligation、failed/bounded/until_signal_not_reached）返回 1，协议损坏返回 2。view/render 不改变 check verdict；driver 最终采用
 check 的退出码。所有用户错误写到 stderr，不输出 Python traceback。
 
 ## 展示边界
 
-view 逐字段复制/整理 derive 的 root/until request、reached boundary、verdict、events、signals、snapshots、frontier 和 failure chain；
+view 逐字段复制/整理 derive 的 root/until request、reached boundary、verdict、events、signals、snapshots、frontier、failure chain、
+boundary inventory、occurrences 和 obligations；
 不得重新求值条件或通过名称推断 handler/outcome。`render_text(view)` 保持单参数调用接口，并在内部仅以
 `os.environ.get("VERBOSE") == "1"` 选择 detailed renderer；render CLI、driver、shortcut 及 `-o` 输出
 不得各自实现另一套选择。该环境变量只控制最终文本，不能传入或修改 parse/model/derive/check/view。
@@ -184,7 +203,8 @@ Signal before/after snapshot 中的实际值。Signal 文本名 `Preset` 显示�
 verbose renderer 保持本轮修改前的详细格式和 canonical `Preset` 名称，以 cause depth 缩进 Signal，
 明确标记 `drives wait`、`emits enqueue/dequeue`、payload、predicate proof source、effective context、
 到达时快照来源、selector resolutions、before/after state/fact/reference delta、reached boundary、stopped propagation、
-reject、truncated coordinate、source span 和完整因果链。当前 tools2 version 7 view 已包含两种
+reject、truncated coordinate、source span 和完整因果链；还必须逐项显示 inventory、occurrence、
+proof source/classification 和 obligation 来源。当前 tools2 version 9 view 已包含两种
 renderer 所需字段，因此不得为文本模式升级协议或改写 view。
 当前 tools2 render 不实现 DOT、SVG 或 HTML。交互 HTML 由独立 animate 包及 Svelte 5 + TypeScript
 frontend 生成，不属于 `lkm-render --format text` 的格式分支。老静态 trace/SVG 任务继续保留，退役
@@ -192,7 +212,7 @@ frontend 生成，不属于 `lkm-render --format text` 的格式分支。老静�
 
 ## Animation v3 与确定帧
 
-animate 必须按 v7 view `events[].sequence` 重放并投影 `lkm.spec.signal-animation` version `3` 因果时刻。
+animate 必须按 v9 view `events[].sequence` 重放并投影 `lkm.spec.signal-animation` version `3` 因果时刻。
 `signal_sent` 只验证 Signal 已发送，不生成 moment；`signal_received` 生成 `<signal-id>:request`。
 completed/rejected/failed 的 `drives` 或同步根请求生成 `<signal-id>:feedback`，`emits` 生成
 `<signal-id>:settle`；truncated/stopped/response_stopped 生成 `<signal-id>:terminal`。moment kind 只取
@@ -224,6 +244,10 @@ parent 链计算显示坐标；前后导航不得累积顺序。
 
 reached boundary 复制到 trace 并在最终说明显示，但 before-send target 不得获得 Signal ID、moment、
 可见节点或 `first_seen`；尤其 `-u Kernel.Enable` 不得创建 Kernel.Enable Signal/moment。
+
+animation trace 必须逐字段投影 view 的 boundary inventory、occurrences、obligations 和对应 summary，并在
+离线播放器显示计数与可展开详情。该投影不得重新求值 evidence，也不得为 boundary/proof/obligation
+新增 causal moment。
 
 自包含 HTML 必须安全编码内嵌 JSON，阻止 `</script>`、`<!--` 等数据提前终止 script 内容；CSS、
 播放器 JS 和 animation v3 数据均不得依赖网络。Svelte/TypeScript 源码、lockfile 与编译后的 JS/CSS

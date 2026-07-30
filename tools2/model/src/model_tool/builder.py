@@ -297,7 +297,11 @@ def _normalize_members(members: list[dict[str, Any]]) -> list[dict[str, Any]]:
             result.append({**member, "members": _normalize_members(member["members"])})
         elif kind in {"deferred", "trimmed"}:
             result.append(
-                {**member, "evidence": [_expression(entry) for entry in member.get("evidence", [])]}
+                {
+                    "kind": "boundary_ref",
+                    "boundary_id": member.get("id"),
+                    "span": deepcopy(member.get("span", {})),
+                }
             )
         elif kind == "result":
             variants = []
@@ -312,6 +316,17 @@ def _normalize_members(members: list[dict[str, Any]]) -> list[dict[str, Any]]:
         else:
             result.append(deepcopy(member))
     return result
+
+
+def _boundary_refs(boundaries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "kind": "boundary_ref",
+            "boundary_id": boundary.get("id"),
+            "span": deepcopy(boundary.get("span", {})),
+        }
+        for boundary in boundaries
+    ]
 
 
 def _handler(handler: dict[str, Any], *, owner: str) -> dict[str, Any]:
@@ -364,6 +379,242 @@ def _compose_type_lifecycle_process(
     return result
 
 
+_BOUNDARY_ID_RE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*\.[0-9]{3}$")
+_BOUNDARY_CATEGORIES = {
+    "deferred": {
+        "DeferredCategory::Feature",
+        "DeferredCategory::Protocol",
+        "DeferredCategory::ModelDetail",
+        "DeferredCategory::Proof",
+        "DeferredCategory::AlternatePath",
+    },
+    "trimmed": {
+        "TrimmedCategory::BuildConfig",
+        "TrimmedCategory::Architecture",
+        "TrimmedCategory::ReferenceInput",
+        "TrimmedCategory::CompileTimeNoOp",
+    },
+}
+_BOUNDARY_RESOLUTION = {"deferred": "close_when", "trimmed": "revisit_when"}
+
+
+def _boundary_text(
+    raw: Any,
+    *,
+    label: str,
+    span: dict[str, Any],
+    diagnostics: list[dict[str, Any]],
+) -> str:
+    if not isinstance(raw, str):
+        _diagnostic(diagnostics, "error", f"boundary {label} must be a non-empty string", span)
+        return ""
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        value = None
+    if not isinstance(value, str) or not value.strip():
+        _diagnostic(diagnostics, "error", f"boundary {label} must be a non-empty string", span)
+        return ""
+    return value.strip()
+
+
+def _build_boundary_inventory(
+    document: dict[str, Any], diagnostics: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    found: list[dict[str, Any]] = []
+
+    def add(
+        boundary: dict[str, Any],
+        *,
+        owner: str,
+        state: str | None,
+        handler: dict[str, Any] | None,
+        contexts: list[str],
+        location: str,
+    ) -> None:
+        status = boundary.get("kind")
+        span = deepcopy(boundary.get("span", {}))
+        boundary_id = boundary.get("id")
+        if not isinstance(boundary_id, str) or _BOUNDARY_ID_RE.fullmatch(boundary_id) is None:
+            _diagnostic(
+                diagnostics,
+                "error",
+                f"invalid or legacy boundary id {boundary_id!r}",
+                span,
+            )
+            boundary_id = boundary_id if isinstance(boundary_id, str) else ""
+        properties = boundary.get("properties")
+        if not isinstance(properties, dict):
+            _diagnostic(diagnostics, "error", f"boundary {boundary_id!r} properties are invalid", span)
+            properties = {}
+        resolution_kind = _BOUNDARY_RESOLUTION.get(str(status), "")
+        allowed_properties = {"category", "summary", resolution_kind}
+        for name in sorted(set(properties) - allowed_properties):
+            _diagnostic(
+                diagnostics,
+                "error",
+                f"boundary {boundary_id!r} has unknown property {name}",
+                span,
+            )
+        category = properties.get("category", "")
+        if category not in _BOUNDARY_CATEGORIES.get(str(status), set()):
+            _diagnostic(
+                diagnostics,
+                "error",
+                f"boundary {boundary_id!r} has invalid {status} category {category!r}",
+                span,
+            )
+        summary = _boundary_text(
+            properties.get("summary"),
+            label=f"{boundary_id!r} summary",
+            span=span,
+            diagnostics=diagnostics,
+        )
+        resolution_text = _boundary_text(
+            properties.get(resolution_kind),
+            label=f"{boundary_id!r} {resolution_kind}",
+            span=span,
+            diagnostics=diagnostics,
+        )
+        wrong_resolution = ({"close_when", "revisit_when"} - {resolution_kind}) & set(properties)
+        if wrong_resolution:
+            _diagnostic(
+                diagnostics,
+                "error",
+                f"boundary {boundary_id!r} uses the wrong resolution {sorted(wrong_resolution)[0]}",
+                span,
+            )
+        raw_evidence = boundary.get("evidence")
+        if not isinstance(raw_evidence, list) or not raw_evidence:
+            _diagnostic(
+                diagnostics,
+                "error",
+                f"boundary {boundary_id!r} evidence must be non-empty",
+                span,
+            )
+            raw_evidence = []
+        evidence = [_expression(entry) for entry in raw_evidence]
+        found.append(
+            {
+                "id": boundary_id,
+                "status": status,
+                "category": category,
+                "summary": summary,
+                "resolution": {"kind": resolution_kind, "text": resolution_text},
+                "evidence": evidence,
+                "owner": owner,
+                "state": state,
+                "handler": None
+                if handler is None
+                else {"kind": handler.get("kind"), "name": handler.get("name")},
+                "context": contexts[-1] if contexts else None,
+                "context_stack": list(contexts),
+                "location": location,
+                "span": span,
+            }
+        )
+
+    def visit_members(
+        members: list[dict[str, Any]],
+        *,
+        owner: str,
+        state: str | None,
+        handler: dict[str, Any],
+        contexts: list[str],
+    ) -> None:
+        for member in members:
+            kind = member.get("kind")
+            if kind in {"deferred", "trimmed"}:
+                add(
+                    member,
+                    owner=owner,
+                    state=state,
+                    handler=handler,
+                    contexts=contexts,
+                    location="within" if contexts else str(handler.get("kind", "handler")).lower(),
+                )
+            elif kind == "within":
+                visit_members(
+                    member.get("members", []),
+                    owner=owner,
+                    state=state,
+                    handler=handler,
+                    contexts=[*contexts, str(member.get("context", ""))],
+                )
+            elif kind == "result":
+                for variant in member.get("variants", []):
+                    visit_members(
+                        variant.get("members", []),
+                        owner=owner,
+                        state=state,
+                        handler=handler,
+                        contexts=contexts,
+                    )
+            elif kind in {"actions", "processes"}:
+                for nested in member.get("handlers", []):
+                    visit_handler(nested, owner=owner, state=state)
+
+    def visit_handler(handler: dict[str, Any], *, owner: str, state: str | None) -> None:
+        visit_members(
+            handler.get("members", handler.get("body", [])),
+            owner=owner,
+            state=state,
+            handler=handler,
+            contexts=[],
+        )
+
+    for declaration in [*document.get("types", []), *document.get("systems", [])]:
+        owner = declaration.get("name", "")
+        for boundary in declaration.get("boundaries", []):
+            add(
+                boundary,
+                owner=owner,
+                state=None,
+                handler=None,
+                contexts=[],
+                location="declaration",
+            )
+        for state_decl in declaration.get("states", []):
+            state = state_decl.get("name")
+            for boundary in state_decl.get("boundaries", []):
+                add(
+                    boundary,
+                    owner=owner,
+                    state=state,
+                    handler=None,
+                    contexts=[],
+                    location="state",
+                )
+            for handler in state_decl.get("handlers", []):
+                visit_handler(handler, owner=owner, state=state)
+        for handler in declaration.get("processes", []):
+            visit_handler(handler, owner=owner, state=handler.get("source_state"))
+
+    found.sort(
+        key=lambda item: (
+            item["span"].get("source_file", ""),
+            item["span"].get("start_line", 0),
+            item["span"].get("start_column", 0),
+            item["id"],
+        )
+    )
+    inventory: list[dict[str, Any]] = []
+    seen: dict[str, dict[str, Any]] = {}
+    for item in found:
+        boundary_id = item["id"]
+        if boundary_id in seen:
+            _diagnostic(
+                diagnostics,
+                "error",
+                f"duplicate boundary id {boundary_id!r}",
+                item["span"],
+            )
+            continue
+        seen[boundary_id] = item
+        inventory.append(item)
+    return inventory
+
+
 def _index_types(
     raw_types: list[dict[str, Any]], diagnostics: list[dict[str, Any]]
 ) -> dict[str, dict[str, Any]]:
@@ -375,11 +626,15 @@ def _index_types(
             continue
         normalized = deepcopy(declaration)
         normalized["processes"] = [_handler(item, owner=name) for item in declaration["processes"]]
+        normalized["declaration_boundaries"] = _boundary_refs(
+            declaration.get("boundaries", [])
+        )
         normalized["states"] = {
             state["name"]: {
                 **deepcopy(state),
                 "invariant": [_expression(item) for item in state["invariant"]],
                 "handlers": [_handler(item, owner=name) for item in state["handlers"]],
+                "boundaries": _boundary_refs(state.get("boundaries", [])),
             }
             for state in declaration["states"]
         }
@@ -681,6 +936,7 @@ def _parent_cycles(systems: dict[str, dict[str, Any]]) -> list[list[str]]:
 
 def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     diagnostics = deepcopy(document.get("diagnostics", []))
+    boundary_inventory = _build_boundary_inventory(document, diagnostics)
     enums: dict[str, list[str]] = {}
     enum_spans: dict[str, dict[str, Any]] = {}
     for declaration in document.get("enums", []):
@@ -869,7 +1125,10 @@ def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
                     for item in raw_state.get("invariant", [])
                 ],
                 "handlers": handlers,
-                "boundaries": deepcopy(raw_state.get("boundaries", [])),
+                "boundaries": _boundary_refs(raw_state.get("boundaries", []))
+                if raw_state.get("boundaries")
+                and raw_state["boundaries"][0].get("kind") in {"deferred", "trimmed"}
+                else deepcopy(raw_state.get("boundaries", [])),
                 "span": raw_state["span"],
                 "lifecycle_owner": lifecycle_owner,
             }
@@ -964,7 +1223,12 @@ def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
             "states": states,
             "processes": [*inherited_processes, *object_processes],
             "handlers_by_name": handlers_by_name,
-            "boundaries": deepcopy(declaration.get("boundaries", [])),
+            "declaration_boundaries": [
+                deepcopy(boundary)
+                for type_declaration in reversed(_type_chain(types, declared_type))
+                for boundary in type_declaration.get("declaration_boundaries", [])
+            ]
+            + _boundary_refs(declaration.get("boundaries", [])),
             "span": declaration["span"],
         }
 
@@ -1080,7 +1344,11 @@ def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
                 "states": states,
                 "processes": inherited_processes,
                 "handlers_by_name": handlers_by_name,
-                "boundaries": [],
+                "declaration_boundaries": [
+                    deepcopy(boundary)
+                    for type_declaration in reversed(_type_chain(types, child_type))
+                    for boundary in type_declaration.get("declaration_boundaries", [])
+                ],
                 "span": field["span"],
                 "owned_by": owner_name,
                 "owned_field": field_name,
@@ -1182,6 +1450,7 @@ def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
                 report_invalid_calls(handler.get("body", []))
 
     core = {
+        "boundary_inventory": boundary_inventory,
         "enums": enums,
         "enum_spans": enum_spans,
         "types": types,

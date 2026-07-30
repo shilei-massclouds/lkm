@@ -22,7 +22,12 @@ const animation: AnimationTrace = {
   trace: {
     verdict: 'complete', total_signals: 2, total_moments: 4,
     root_request: { source: 'Human', target: 'Root', signal: 'Start' },
-    boundary: { source: 'Root', target: 'Next', signal: 'Run', normalized_signal: 'Next.Run' }
+    boundary: { source: 'Root', target: 'Next', signal: 'Run', normalized_signal: 'Next.Run' },
+    summary: {
+      inventory_deferred: 0, inventory_trimmed: 0,
+      boundary_occurrences: 0, unresolved_obligations: 0
+    },
+    boundary_inventory: [], boundary_occurrences: [], obligations: []
   },
   moments: [
     {

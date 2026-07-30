@@ -59,6 +59,14 @@ def _transition_states(signal: dict[str, Any]) -> tuple[Any, Any] | None:
 
 def _render_compact(view: dict[str, Any]) -> str:
     lines = [f"verdict: {view['verdict']}"]
+    summary = view.get("summary", {})
+    lines.append(
+        "boundaries: "
+        f"deferred={summary.get('inventory_deferred', 0)} "
+        f"trimmed={summary.get('inventory_trimmed', 0)} "
+        f"occurrences={summary.get('boundary_occurrences', 0)} "
+        f"obligations={summary.get('unresolved_obligations', 0)}"
+    )
     boundary = view.get("boundary")
     if boundary is not None:
         lines.append(
@@ -170,6 +178,45 @@ def _render_verbose(view: dict[str, Any]) -> str:
         failure = view["failure"]
         lines.append("failure chain: " + " -> ".join(failure["chain"]))
         lines.append("failure reason: " + str(failure["reason"]))
+    inventory = view.get("boundary_inventory", [])
+    if inventory:
+        lines.append("boundary inventory:")
+        for item in inventory:
+            owner = item["owner"]
+            location = item["location"]
+            lines.append(
+                f"  {item['id']} [{item['status']}/{item['category']}] "
+                f"{owner} {location}: {item['summary']}"
+            )
+            lines.append(
+                f"    {item['resolution']['kind']}: {item['resolution']['text']}"
+            )
+    occurrences = view.get("boundary_occurrences", [])
+    if occurrences:
+        lines.append("boundary occurrences:")
+        for occurrence in occurrences:
+            lines.append(
+                f"  {occurrence['id']} #{occurrence['sequence']} "
+                f"{occurrence['boundary_id']} owner={occurrence['owner']} "
+                f"signal={occurrence.get('signal_id')} execution={occurrence['execution_sequence']}"
+            )
+            for proof in occurrence.get("proofs", []):
+                lines.append(
+                    f"    evidence[{proof['evidence_index']}] result={str(proof['result']).lower()} "
+                    f"source={proof['proof_source']}/{proof['classification']}: "
+                    f"{proof['expression']}"
+                )
+    obligations = view.get("obligations", [])
+    if obligations:
+        lines.append("unresolved obligations:")
+        for obligation in obligations:
+            lines.append(
+                f"  {obligation['id']} {obligation['boundary_id']} "
+                f"occurrence={obligation['occurrence_id']} evidence={obligation['evidence_index']} "
+                f"owner={obligation['owner']} signal={obligation.get('signal_id')} "
+                f"source={obligation['proof_source']}/{obligation['classification']}: "
+                f"{obligation['expression']}"
+            )
     return "\n".join(lines) + "\n"
 
 

@@ -1,5 +1,10 @@
 # Compose 规格
 
+2026-07-30 tools2 Deferred/Trimmed/Obligation v9 复核：全局 boundary inventory、动态 occurrence、只读
+evidence proof、check/snapshot 门禁及 view/animation 投影只改变独立 tools2 协议与验证产物；不新增或
+调整内核 crate、Rust module、facade、feature、公开 API 或组件依赖。`spec/compose/main.spec` 已复核，
+组合语义无需修改。
+
 2026-07-30 TrapType.Setup 正式入口复核：`TrapType`、`TrapFlowType`、`ExceptionType` 及四个异常子类型
 继续各自由既有 `arceos_ex::objects` 独立 module 承载；`BootInitFlow` 只编排既有对象，RISC-V64
 `stvec`/`sscratch` 写入仍是 `TrapType` 私有 lowering，不新增 crate、facade、feature、公开 API 或

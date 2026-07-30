@@ -255,6 +255,16 @@ class Engine:
         self.model = deepcopy(model_document["model"])
         self.systems = deepcopy(self.model["systems"])
         self.model["systems"] = self.systems
+        raw_boundary_inventory = self.model.get("boundary_inventory")
+        if not isinstance(raw_boundary_inventory, list):
+            raise DerivationProblem("model boundary_inventory must be a list")
+        self.boundary_inventory = deepcopy(raw_boundary_inventory)
+        self.boundary_by_id = {
+            item["id"]: item for item in self.boundary_inventory
+        }
+        self.boundary_occurrences: list[dict[str, Any]] = []
+        self.obligations: list[dict[str, Any]] = []
+        self.boundary_occurrence_counts: dict[str, int] = {}
         self.source = source
         self.root_target = root_target
         self.root_name = root_name
@@ -263,6 +273,9 @@ class Engine:
         self.until_name = until_name
         self.initial_snapshot = _snapshot(initial_snapshot)
         self.current = _snapshot(initial_snapshot)
+        self.next_signal = 1
+        self.next_event = 1
+        self.next_boundary_occurrence = 1
         for identity, metadata in self.current.get("instances", {}).items():
             self._install_runtime_system(identity, metadata)
         self.max_depth = max_depth
@@ -277,8 +290,6 @@ class Engine:
         self.was_bounded = False
         self.failure_signal_id: str | None = None
         self.failure_reason: str | None = None
-        self.next_signal = 1
-        self.next_event = 1
         self.next_instance = len(self.current.get("instances", {})) + 1
         self.next_generation = 1 + max(
             (
@@ -292,6 +303,9 @@ class Engine:
         self.active_predicates: set[tuple[str, tuple[str, ...]]] = set()
         for fact in self.initial_snapshot["facts"]:
             self.event("initial_fact_established", fact=fact, source="initial_state_invariant")
+        for identity in sorted(self.current["states"]):
+            if identity in self.systems:
+                self._record_instance_boundary_occurrences(identity, signal=None)
 
     def _runtime_handler(self, handler: dict[str, Any], identity: str) -> dict[str, Any]:
         result = deepcopy(handler)
@@ -382,7 +396,11 @@ class Engine:
             "states": states,
             "processes": processes,
             "handlers_by_name": handlers_by_name,
-            "boundaries": [],
+            "declaration_boundaries": [
+                deepcopy(boundary)
+                for declaration in reversed(self._type_chain(declared_type))
+                for boundary in declaration.get("declaration_boundaries", [])
+            ],
             "span": deepcopy(metadata.get("span", type_decl.get("span", {}))),
             "runtime_instance": deepcopy(metadata),
         }
@@ -442,6 +460,193 @@ class Engine:
     def event(self, kind: str, **fields: Any) -> None:
         self.events.append({"sequence": self.next_event, "kind": kind, **fields})
         self.next_event += 1
+
+    def _proof_value(
+        self,
+        expression: dict[str, Any],
+        *,
+        signal: dict[str, Any],
+        bindings: dict[str, Any],
+        snapshot: dict[str, Any],
+    ) -> tuple[bool, str, str, str | None]:
+        try:
+            result = self.expression_value(
+                expression,
+                signal=signal,
+                bindings=bindings,
+                snapshot=snapshot,
+            )
+        except DerivationProblem as exc:
+            return False, "none", "unresolved", str(exc)
+        if not result:
+            return False, "none", "unresolved", None
+        kind = expression["kind"]
+        if kind == "state_condition":
+            return True, "snapshot", "state", None
+        if kind == "reference_condition":
+            return True, "snapshot", "reference", None
+        if kind == "assertion":
+            return True, "snapshot", "fact", None
+        if kind == "any_of":
+            return True, "composite", "any_of", None
+        if kind == "fact":
+            saved = self.current
+            self.current = snapshot
+            try:
+                values = [
+                    self.value(item, signal=signal, bindings=bindings)
+                    for item in expression.get("arguments", [])
+                ]
+                if _fact(expression["name"], values) in snapshot["facts"]:
+                    return True, "snapshot", "fact", None
+                if expression["name"] == "has_slot" and len(values) == 2:
+                    return True, "model", "structure", None
+                if self._builtin_fact(expression["name"], values, signal=signal):
+                    return True, "evaluator", "reference_input", None
+                return True, "model", "predicate", None
+            finally:
+                self.current = saved
+        return True, "evaluator", kind, None
+
+    def _candidate_with_effects(
+        self,
+        effects: list[dict[str, Any]],
+        *,
+        signal: dict[str, Any],
+        handler: dict[str, Any],
+        bindings: dict[str, Any],
+    ) -> dict[str, Any]:
+        candidate = _snapshot(self.current)
+        for expression in effects:
+            self.apply_effect(
+                expression,
+                signal=signal,
+                bindings=bindings,
+                candidate=candidate,
+                handler=handler,
+            )
+        return _snapshot(candidate)
+
+    def _record_boundary_occurrence(
+        self,
+        boundary_id: str,
+        *,
+        signal: dict[str, Any] | None,
+        owner: str,
+        candidate: dict[str, Any],
+        handler: dict[str, Any] | None = None,
+        bindings: dict[str, Any] | None = None,
+        context_stack: list[str] | None = None,
+    ) -> None:
+        inventory = self.boundary_by_id.get(boundary_id)
+        if inventory is None:
+            raise DerivationProblem(f"unknown boundary inventory reference {boundary_id!r}")
+        occurrence_id = f"occ-{self.next_boundary_occurrence:04d}"
+        self.next_boundary_occurrence += 1
+        per_boundary = self.boundary_occurrence_counts.get(boundary_id, 0) + 1
+        self.boundary_occurrence_counts[boundary_id] = per_boundary
+        runtime_signal = signal or {
+            "id": None,
+            "source": None,
+            "target": owner,
+            "name": None,
+            "_self_value": owner,
+        }
+        proofs: list[dict[str, Any]] = []
+        for evidence_index, expression in enumerate(inventory["evidence"], start=1):
+            result, proof_source, classification, error = self._proof_value(
+                expression,
+                signal=runtime_signal,
+                bindings=bindings or {},
+                snapshot=candidate,
+            )
+            proof = {
+                "evidence_index": evidence_index,
+                "expression": expression["text"],
+                "result": result,
+                "proof_source": proof_source,
+                "classification": classification,
+                "span": deepcopy(expression["span"]),
+            }
+            if error is not None:
+                proof["error"] = error
+            proofs.append(proof)
+            if not result:
+                obligation_id = f"obl-{len(self.obligations) + 1:04d}"
+                self.obligations.append(
+                    {
+                        "id": obligation_id,
+                        "boundary_id": boundary_id,
+                        "occurrence_id": occurrence_id,
+                        "occurrence_index": per_boundary,
+                        "evidence_index": evidence_index,
+                        "expression": expression["text"],
+                        "owner": owner,
+                        "signal_id": None if signal is None else signal.get("id"),
+                        "signal": None
+                        if signal is None
+                        else {
+                            "source": signal.get("source"),
+                            "target": signal.get("target"),
+                            "name": signal.get("name"),
+                        },
+                        "proof_source": proof_source,
+                        "classification": classification,
+                        "span": deepcopy(expression["span"]),
+                        "unresolved": True,
+                    }
+                )
+        occurrence = {
+            "id": occurrence_id,
+            "sequence": len(self.boundary_occurrences) + 1,
+            "boundary_id": boundary_id,
+            "occurrence_index": per_boundary,
+            "signal_id": None if signal is None else signal.get("id"),
+            "execution_sequence": self.next_event,
+            "owner": owner,
+            "state": candidate.get("states", {}).get(owner),
+            "handler": None
+            if handler is None
+            else {
+                "id": handler.get("id"),
+                "kind": handler.get("kind"),
+                "name": handler.get("name"),
+            },
+            "context": list(context_stack or []),
+            "location": inventory["location"],
+            "proofs": proofs,
+        }
+        self.boundary_occurrences.append(occurrence)
+        self.event(
+            "boundary_observed",
+            occurrence_id=occurrence_id,
+            boundary_id=boundary_id,
+            signal_id=occurrence["signal_id"],
+            owner=owner,
+            proofs=deepcopy(proofs),
+            unresolved=sum(not proof["result"] for proof in proofs),
+        )
+
+    def _record_instance_boundary_occurrences(
+        self, identity: str, *, signal: dict[str, Any] | None
+    ) -> None:
+        system = self.systems[identity]
+        for boundary in system.get("declaration_boundaries", []):
+            self._record_boundary_occurrence(
+                boundary["boundary_id"],
+                signal=signal,
+                owner=identity,
+                candidate=_snapshot(self.current),
+            )
+        state = self.current["states"].get(identity)
+        state_decl = system.get("states", {}).get(state, {})
+        for boundary in state_decl.get("boundaries", []):
+            self._record_boundary_occurrence(
+                boundary["boundary_id"],
+                signal=signal,
+                owner=identity,
+                candidate=_snapshot(self.current),
+            )
 
     @staticmethod
     def self_value(signal: dict[str, Any]) -> Any:
@@ -2215,6 +2420,7 @@ class Engine:
                 span=call["span"],
                 snapshot=_snapshot(self.current),
             )
+            self._record_instance_boundary_occurrences(identity, signal=signal)
             return
         if call.get("kind") == "declare":
             signal["_dynamic_transaction"] = True
@@ -2246,6 +2452,7 @@ class Engine:
                 span=call["span"],
                 snapshot=_snapshot(self.current),
             )
+            self._record_instance_boundary_occurrences(identity, signal=signal)
             return
         if call.get("kind") != "call":
             raise DerivationProblem(
@@ -2591,23 +2798,23 @@ class Engine:
                     span=member["span"],
                 )
                 context_stack.pop()
-            elif kind in {"deferred", "trimmed"}:
-                evidence = member.get("evidence", [])
-                for expression in evidence:
-                    known = expression["kind"] in {"fact", "assertion", "state_condition", "reference_condition"}
-                    self.event(
-                        "boundary_evidence_checked",
-                        signal_id=signal["id"],
-                        boundary_id=member.get("id"),
-                        status=kind,
-                        expression=expression["text"],
-                        result=known,
-                        span=expression["span"],
-                    )
-                    if not known:
-                        raise DerivationProblem(
-                            f"boundary_evidence_unverifiable: {member.get('id')}: {expression['text']}"
-                        )
+            elif kind == "boundary_ref":
+                candidate = self._candidate_with_effects(
+                    pending_effects,
+                    signal=signal,
+                    handler=handler,
+                    bindings=bindings,
+                )
+                owner = str(self.self_value(signal))
+                self._record_boundary_occurrence(
+                    member["boundary_id"],
+                    signal=signal,
+                    owner=owner,
+                    candidate=candidate,
+                    handler=handler,
+                    bindings=bindings,
+                    context_stack=context_stack,
+                )
             elif kind == "result":
                 success = next(
                     (item for item in member.get("variants", []) if item.get("name") == "Success"),
@@ -2811,6 +3018,16 @@ class Engine:
                     )
                     if not result:
                         raise DerivationProblem(f"invariant_not_satisfied: {invariant['text']}")
+                for boundary in target_state.get("boundaries", []):
+                    self._record_boundary_occurrence(
+                        boundary["boundary_id"],
+                        signal=signal,
+                        owner=signal["target"],
+                        candidate=candidate,
+                        handler=handler,
+                        bindings=bindings,
+                        context_stack=[],
+                    )
             self.current = _snapshot(candidate)
             signal["after_snapshot"] = _snapshot(self.current)
             signal["outcome"] = "completed"
@@ -2988,6 +3205,9 @@ class Engine:
                 "normalized_signal": f"{self.until_target}.{self.until_name}",
             },
             "boundary": deepcopy(self.boundary),
+            "boundary_inventory": deepcopy(self.boundary_inventory),
+            "boundary_occurrences": deepcopy(self.boundary_occurrences),
+            "obligations": deepcopy(self.obligations),
             "model_fingerprint": self.document["model_fingerprint"],
             "budget": {"max_depth": self.max_depth, "max_breadth": self.max_breadth},
             "verdict": verdict,
@@ -3011,6 +3231,16 @@ class Engine:
                 "truncated": sum(item["outcome"] == "truncated" for item in self.signals),
                 "stopped": sum(item["outcome"] == "stopped" for item in self.signals),
                 "pending": 0,
+                "inventory_deferred": sum(
+                    item["status"] == "deferred" for item in self.boundary_inventory
+                ),
+                "inventory_trimmed": sum(
+                    item["status"] == "trimmed" for item in self.boundary_inventory
+                ),
+                "boundary_occurrences": len(self.boundary_occurrences),
+                "unresolved_obligations": sum(
+                    item.get("unresolved") is True for item in self.obligations
+                ),
             },
         }
 

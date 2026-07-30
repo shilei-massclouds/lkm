@@ -51,6 +51,27 @@ trimmed mm_core.001 {
 - 默认 check policy 允许 evidence 成立的 deferred/trimmed inventory 存在，但必须拒绝
   结构错误、legacy 记录和任何未解 verification obligation。
 
+Inventory 与动态 occurrence 是不同对象：
+
+- model 在任何 Type process 组合或实例展开前建立唯一的全局 `boundary_inventory`；每个 boundary ID
+  在其中恰好出现一次。Type process 被多个实例使用或被重复 Signal 执行时共享该 inventory ID，不能
+  因 handler composition 或实例 materialization 复制 inventory 项。
+- object/system/type declaration 上的 boundary 在实例建立时产生 occurrence；state 上的 boundary 在
+  初始 state 建立或后续进入该 state 时产生 occurrence；Transition、Action 以及 `within` 中的 boundary
+  在对应源码执行位置产生 occurrence。
+- 同一 boundary 每次动态到达都产生独立、稳定排序的 occurrence。occurrence 必须记录 inventory ID、
+  当前 Signal、执行序号、动态 owner instance、state/handler/context 和逐条 evidence proof；重复执行
+  不得按 boundary ID 去重，也不得以某次成功吞掉另一次失败。
+- evidence 在该位置的 candidate snapshot 上只读求值。proof source 只能来自 snapshot 中的 fact、state
+  或 reference、Model structure/谓词、明确的参考配置/架构/输入事实，或此前已经证明并进入 candidate
+  snapshot 的事实；求值不得新增 fact、state、reference、Signal 或 causal moment。
+- 每条未证明 evidence 都产生独立的结构化 obligation，稳定关联 boundary、occurrence 和 evidence
+  索引，并保留 expression、动态 owner、Signal、proof classification/source 和 source span。obligation
+  是 validation 结果，不得伪装为 Signal rejected/failed、runtime failure 或 lifecycle state。
+- derive summary 必须分别报告 inventory deferred/trimmed 数、occurrence 数和 unresolved obligation 数；
+  check 仅在因果 verdict 为 `complete`/`reached` 且 unresolved obligation 为零时允许结果与 canonical
+  snapshot。
+
 生命周期规则：
 
 - 新发现的未闭合责任必须在定位 owner 后新增结构化记录；责任变化语义时先重分类或迁移

@@ -48,6 +48,13 @@ def main(argv: list[str] | None = None) -> int:
                     for system in model["systems"].values()
                     for state in system["states"].values()
                 ),
+                "boundary_inventory": len(model["boundary_inventory"]),
+                "boundary_deferred": sum(
+                    item["status"] == "deferred" for item in model["boundary_inventory"]
+                ),
+                "boundary_trimmed": sum(
+                    item["status"] == "trimmed" for item in model["boundary_inventory"]
+                ),
                 "errors": sum(item["category"] == "error" for item in diagnostics),
                 "unsupported": sum(item["category"] == "unsupported" for item in diagnostics),
                 "ok": not diagnostics,

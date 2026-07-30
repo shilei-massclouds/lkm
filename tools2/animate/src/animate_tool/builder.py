@@ -1,4 +1,4 @@
-"""Validate tools2 v6 inputs and project causal animation v3 moments."""
+"""Validate tools2 v9 inputs and project causal animation v3 moments."""
 
 from __future__ import annotations
 
@@ -127,6 +127,58 @@ def _validate_identity(model: dict[str, Any], view: dict[str, Any]) -> tuple[str
     if view.get("model_fingerprint") != model_fingerprint:
         raise ProtocolError("model/view model_fingerprint mismatch")
     return source, model_fingerprint
+
+
+def _validate_boundary_projection(
+    model: dict[str, Any], view: dict[str, Any]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+    payload = model.get("model")
+    model_inventory = payload.get("boundary_inventory") if isinstance(payload, dict) else None
+    inventory = view.get("boundary_inventory")
+    occurrences = view.get("boundary_occurrences")
+    obligations = view.get("obligations")
+    summary = view.get("summary")
+    if not isinstance(model_inventory, list) or not isinstance(inventory, list):
+        raise ProtocolError("model/view boundary_inventory must be lists")
+    if inventory != model_inventory:
+        raise ProtocolError("model/view boundary_inventory mismatch")
+    if not isinstance(occurrences, list) or not isinstance(obligations, list):
+        raise ProtocolError("view boundary_occurrences/obligations must be lists")
+    if not isinstance(summary, dict):
+        raise ProtocolError("view.summary must be an object")
+    inventory_ids: set[str] = set()
+    for index, item in enumerate(inventory):
+        if not isinstance(item, dict):
+            raise ProtocolError(f"view.boundary_inventory[{index}] must be an object")
+        boundary_id = _required_string(item, "id", label=f"view.boundary_inventory[{index}]")
+        if boundary_id in inventory_ids:
+            raise ProtocolError(f"duplicate boundary inventory id {boundary_id!r}")
+        inventory_ids.add(boundary_id)
+    occurrence_ids: set[str] = set()
+    for index, item in enumerate(occurrences):
+        if not isinstance(item, dict):
+            raise ProtocolError(f"view.boundary_occurrences[{index}] must be an object")
+        occurrence_id = _required_string(item, "id", label=f"view.boundary_occurrences[{index}]")
+        if occurrence_id in occurrence_ids:
+            raise ProtocolError(f"duplicate boundary occurrence id {occurrence_id!r}")
+        occurrence_ids.add(occurrence_id)
+        if item.get("boundary_id") not in inventory_ids:
+            raise ProtocolError(f"boundary occurrence {occurrence_id!r} has unknown inventory id")
+        if not isinstance(item.get("proofs"), list):
+            raise ProtocolError(f"boundary occurrence {occurrence_id!r} proofs must be a list")
+    obligation_ids: set[str] = set()
+    for index, item in enumerate(obligations):
+        if not isinstance(item, dict):
+            raise ProtocolError(f"view.obligations[{index}] must be an object")
+        obligation_id = _required_string(item, "id", label=f"view.obligations[{index}]")
+        if obligation_id in obligation_ids:
+            raise ProtocolError(f"duplicate obligation id {obligation_id!r}")
+        obligation_ids.add(obligation_id)
+        if item.get("boundary_id") not in inventory_ids or item.get("occurrence_id") not in occurrence_ids:
+            raise ProtocolError(f"obligation {obligation_id!r} has unknown boundary occurrence")
+        if item.get("unresolved") is not True:
+            raise ProtocolError(f"obligation {obligation_id!r} must be unresolved")
+    return deepcopy(inventory), deepcopy(occurrences), deepcopy(obligations), deepcopy(summary)
 
 
 def _project_signal(
@@ -485,6 +537,7 @@ def build_animation(model: dict[str, Any], view: dict[str, Any]) -> dict[str, An
     """Build animation v3 moments without deriving any new Signal behavior."""
     systems = _validate_systems(model, view)
     source, model_fingerprint = _validate_identity(model, view)
+    inventory, occurrences, obligations, summary = _validate_boundary_projection(model, view)
     root_request = view.get("root_request")
     if not isinstance(root_request, dict):
         raise ProtocolError("view.root_request must be an object")
@@ -535,6 +588,10 @@ def build_animation(model: dict[str, Any], view: dict[str, Any]) -> dict[str, An
             "boundary": deepcopy(boundary),
             "total_signals": len(signals),
             "total_moments": len(moments),
+            "summary": summary,
+            "boundary_inventory": inventory,
+            "boundary_occurrences": occurrences,
+            "obligations": obligations,
         },
         "systems": {
             name: {

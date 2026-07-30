@@ -214,6 +214,33 @@ dd {
   gap: clamp(.4rem, .8cqi, .8rem);
   align-items: center;
 }
+
+.boundary-details {
+  border-top: 1px solid var(--line);
+  padding: 0.8rem 1rem 1rem;
+}
+
+.boundary-details > summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.boundary-detail-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  margin-top: 0.8rem;
+}
+
+.boundary-detail-grid h2 {
+  font-size: 0.95rem;
+  margin: 0 0 0.5rem;
+}
+
+.boundary-detail-grid ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
 .transport button {
   min-inline-size: clamp(4.4rem, 6cqi, 6rem);
   padding: clamp(.38rem, .55cqi, .55rem) clamp(.65rem, .9cqi, .9rem);

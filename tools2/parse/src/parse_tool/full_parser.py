@@ -367,13 +367,25 @@ def _boundary(segment: Segment, status: str, diagnostics: list[dict[str, Any]]) 
     body, body_line, header = _block_body(segment)
     evidence: list[dict[str, Any]] = []
     properties: dict[str, str] = {}
+    evidence_blocks = 0
     for member in _split_members(body, path=segment.path, start_line=body_line):
         block = _BLOCK_RE.match(member.text)
         prop = _PROP_RE.match(member.text)
         if block and block.group(1) == "evidence":
+            evidence_blocks += 1
+            if evidence_blocks > 1:
+                diagnostics.append(
+                    _diagnostic("error", f"duplicate {status} evidence block", member)
+                )
             evidence.extend(_plain_block(member)["entries"])
         elif prop:
-            properties[prop.group(1)] = prop.group(2).strip()
+            name = prop.group(1)
+            if name in properties:
+                diagnostics.append(
+                    _diagnostic("error", f"duplicate {status} property {name}", member)
+                )
+            else:
+                properties[name] = prop.group(2).strip()
         else:
             diagnostics.append(_diagnostic("unsupported", f"unsupported {status} member", member))
     return {
@@ -611,6 +623,7 @@ def _type(segment: Segment, diagnostics: list[dict[str, Any]]) -> dict[str, Any]
         "fields": {},
         "states": [],
         "processes": [],
+        "boundaries": [],
         "invariant": [],
         "span": segment.span(),
     }
@@ -626,6 +639,8 @@ def _type(segment: Segment, diagnostics: list[dict[str, Any]]) -> dict[str, Any]
             result["invariant"].extend(_plain_block(member)["entries"])
         elif block and block.group(1) in _TYPE_BLOCKS:
             result["fields"][block.group(1)] = _field_block(member, diagnostics)["fields"]
+        elif block and block.group(1) in {"deferred", "trimmed"}:
+            result["boundaries"].append(_boundary(member, block.group(1), diagnostics))
         elif prop:
             result["properties"][prop.group(1)] = prop.group(2).strip()
             if prop.group(1) == "initial_state":

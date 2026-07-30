@@ -15,7 +15,14 @@ def check_derivation(derivation: dict[str, Any]) -> dict[str, Any]:
         "bounded",
     }:
         raise ValueError(f"unknown derivation verdict {verdict!r}")
-    allowed = verdict in {"complete", "reached"}
+    obligations = derivation.get("obligations")
+    if not isinstance(obligations, list):
+        raise ValueError("derivation obligations must be a list")
+    unresolved = [item for item in obligations if item.get("unresolved") is True]
+    summary = derivation.get("summary")
+    if not isinstance(summary, dict) or summary.get("unresolved_obligations") != len(unresolved):
+        raise ValueError("derivation unresolved obligation summary is inconsistent")
+    allowed = verdict in {"complete", "reached"} and not unresolved
     reasons: list[str] = []
     if verdict == "failed":
         failure = derivation.get("failure") or {}
@@ -29,8 +36,10 @@ def check_derivation(derivation: dict[str, Any]) -> dict[str, Any]:
         reasons.append(
             f"until_signal_not_reached: {request.get('normalized_signal', '<unknown>')}"
         )
+    if unresolved:
+        reasons.append(f"unresolved_obligations: {len(unresolved)}")
     return {
-        "policy": "tools2-signal-v3",
+        "policy": "tools2-signal-v9-boundary-obligations",
         "verdict": verdict,
         "allowed": allowed,
         "exit_code": 0 if allowed else 1,
@@ -39,5 +48,6 @@ def check_derivation(derivation: dict[str, Any]) -> dict[str, Any]:
         "boundary": derivation.get("boundary"),
         "model_fingerprint": derivation.get("model_fingerprint"),
         "reasons": reasons,
-        "summary": derivation.get("summary", {}),
+        "summary": summary,
+        "unresolved_obligations": len(unresolved),
     }
