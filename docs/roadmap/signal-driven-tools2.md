@@ -11,6 +11,54 @@
 实现协议见 [`../../spec/coding/tools2.md`](../../spec/coding/tools2.md)。本文只记录里程碑和实施证据，
 不覆盖上述规格。
 
+## P0：Deferred / Trimmed / Obligation 处理闭环
+
+2026-07-30 对照检查确认：`tools2` 能在 AST 和 Model handler body 中保留结构化
+`deferred` / `trimmed` member，但尚未形成与 Model 语义一致的 boundary inventory、结构校验、
+evidence 证明、obligation、check policy 和展示闭环。最小负例中，旧 `tools` 对两个未证明 evidence
+报告 `deferred=1`、`trimmed=1`、`obligation=2` 并使 check 返回 1；`tools2` 仅因为 evidence
+表达式具有 fact 形状就将两项记为 `result=true`，最终返回 complete/0。包含非法分类、空
+summary、空 evidence、缺少 resolution 和重复 ID 的结构负例也被 `tools2` 以零诊断接受。
+
+主模型源码当前包含 138 个唯一 deferred ID 和 52 个唯一 trimmed ID。旧工具 Model 只记录
+135/52，漏掉 `smp_bringup.001`–`.003`；`tools2` Model 树能保留全部 138/52，但 derive 只有
+119/64 次 evidence event，按 ID 去重后是 106/52。差异表明全局 inventory、可达 owner 和动态
+occurrence 必须分别表示；本项不以复制旧工具计数为完成标准。
+
+本 P0 是 tools2 修正/完善计划，不把 tools2 当作 System，也不建立新的系统 lifecycle 或独立
+charter-first 校准段。实施以现有 `SEM-BOUNDARY-001` 及 tools2 Signal 语义为约束，按以下步骤推进：
+
+1. **固化基线 fixture 与验收矩阵**：增加合法已证明 evidence、合法未证明 evidence、非法分类、
+   缺字段、空 evidence、非法/重复 ID，以及 State、Transition、Action、`within`、Type process 和
+   重复 Signal occurrence 用例；记录 tools2 当前结果和旧工具 shadow comparison。
+2. **完善 parse/model inventory 与结构校验**：建立按 boundary ID 唯一索引的结构化 inventory，
+   保存 status、category、summary、resolution、evidence、词法 owner/context 和 source span；拒绝缺字段、
+   非法分类、非法/重复 ID、legacy 记录和空 evidence。
+3. **明确 inventory 与 occurrence**：inventory 中每个 ID 只出现一次；同一 owner 多次执行时分别记录
+   occurrence、Signal ID、执行序号和 proof result，不用动态执行次数冒充 inventory 计数。
+4. **完善 derive evidence 验证**：在所属 State/Transition/Action/`within` 边界到达时，使用该成功边界
+   可见的 Model 结构、参考配置/架构/输入事实、前序已证明事实以及 transition candidate snapshot
+   验证 evidence；不得按表达式语法种类直接认定成立，也不得合成缺失事实。
+5. **增加结构化 obligation**：无法证明的每个 evidence 产生可追溯到 boundary ID、owner、occurrence、
+   expression、proof source/classification 和 source span 的 verification obligation。obligation 不改写
+   Signal 因果结果，不伪装为 runtime failure，也不关闭对应 Deferred/Trimmed boundary。
+6. **完善 check 与 snapshot 门禁**：`complete` / `reached` 只是必要条件；默认 policy 允许 evidence
+   已证明的 Deferred/Trimmed inventory，但任何 unresolved obligation 都使 check 返回 1。check 未通过时
+   不得写 canonical snapshot；诊断用 derive/view 产物仍可保留。
+7. **完善 view/render/animation 投影**：view 只复制 derive 的 inventory、occurrence、proof result 和
+   obligation；compact 输出提供计数摘要，verbose 输出提供逐项来源。render/animation 不重新求值 evidence，
+   boundary 观察事件不制造额外 Signal、moment、状态或事实。
+8. **更新 tools2 协议和 Coding 映射**：为新增必需字段定义稳定 schema；若现有 v8 消费者不能在保持
+   严格协议身份的前提下解释结果，则升级协议版本。同步修正“complete/reached 无条件返回 0”等与
+   obligation policy 冲突的 Coding 描述。
+9. **建立新旧工具差异审计**：旧工具仅作 shadow evidence，不是真值 oracle。逐项审查旧工具漏掉的
+   `smp_bringup.001`–`.003`、tools2 漏掉的 state-level boundaries、Type process composition 和重复
+   occurrence；以正式 Model owner/可达语义决定结果，不以任一侧历史计数覆盖源码 inventory。
+10. **完成回归和接管判定**：运行 focused parse/model/derive/check/view/animation 正反例、完整主模型
+    推导、`make -C tools2 test-all`、`make verify`、`git diff --check` 和仓库根直接 `make test`。只有结构
+    负例被拒绝、未证明 evidence 稳定形成 obligation/check=1、已证明 inventory check=0、主模型
+    obligation=0，且 snapshot 与展示门禁均符合上述规则，才完成本 P0。
+
 ## 里程碑
 
 1. 首期最小闭环（已完成）：独立包和 producer/version 隔离；必要 DSL 子集；Transition/Action 隐式 Signal；
