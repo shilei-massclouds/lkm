@@ -180,7 +180,7 @@ cause chain 和最后稳定 snapshot。
 | `sig-0029` | `BootInitFlow -> CpuGroup.cpus[0].Setup` | drives / 0020 | CurrentCPU 解析到 CPU0；Prepared -> Ready |
 | `sig-0030` | `BootInitFlow -> BootCpuLocalInterrupt.Setup` | drives / 0020 | Prepared -> Ready，建立 CPU0 本地中断关闭事实 |
 | `sig-0031` | `BootInitFlow -> CurrentTask.BindTaskStack(BootTask, BootTask.stack)` | drives / 0020 | 单个 boot-only 上下文 Action；PhysicalDirect 下原子建立 CPU0 task/stack pair 并写物理 `tp/sp`，不初始化 preempt count |
-| `sig-0032` | `BootInitFlow -> TrapType.Preset` | drives / 0020 | Base -> Prepared，安装物理 early event entry |
+| `sig-0032` | `BootInitFlow -> TrapType.Preset` | drives / 0020 | Base -> Prepared，为所属 CPU 建立临时保护入口，用于处理意外事件并支持测试和缺陷定位 |
 | `sig-0033` | `BootInitFlow -> ExceptionType.Preset` | drives / 0020 | 等待 0034–0037 后 Base -> Prepared |
 | `sig-0034` | `ExceptionType -> PageFaultException.Preset` | drives / 0033 | Base -> Prepared |
 | `sig-0035` | `ExceptionType -> SyscallException.Preset` | drives / 0033 | Base -> Prepared |

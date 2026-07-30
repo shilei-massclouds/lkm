@@ -4659,6 +4659,26 @@ class SignalPipelineTests(unittest.TestCase):
                     f"{item['target']}.{handler_member}::{item['name']}@{handler_state}",
                 )
             self.assertEqual(actual, expected)
+            trap_preset = derivation["signals"][31]
+            self.assertEqual(trap_preset["id"], "sig-0032")
+            self.assertEqual(
+                trap_preset["handler"]["description"],
+                "为所属 CPU 建立临时保护入口，用于处理意外事件并支持测试和缺陷定位。",
+            )
+            self.assertIn(
+                "trap_flow_type_is_common_interrupt_exception_entry(CpuGroup.cpus[0].trap)",
+                trap_preset["before_snapshot"]["facts"],
+            )
+            for fact in (
+                "trap_temporary_protection_entry_ready(CpuGroup.cpus[0].trap,CpuGroup.cpus[0])",
+                "trap_temporary_protection_handles_unexpected_events(CpuGroup.cpus[0].trap)",
+                "trap_temporary_protection_supports_testing_and_defect_localization(CpuGroup.cpus[0].trap)",
+            ):
+                self.assertNotIn(fact, trap_preset["before_snapshot"]["facts"])
+                self.assertIn(fact, trap_preset["after_snapshot"]["facts"])
+            self.assertFalse(
+                any(item["cause_id"] == "sig-0032" for item in derivation["signals"])
+            )
             self.assertEqual(derivation["signals"][15]["reason"], "until_signal_reached")
             self.assertEqual(
                 derivation["signals"][22]["selector_resolutions"],
@@ -4869,6 +4889,11 @@ class SignalPipelineTests(unittest.TestCase):
                 "current_task_binding_address_view_is(CpuGroup.cpus[0],BootTask,TranslationControllerKind::EarlyVm)",
                 "current_task_binding_revision_is(CpuGroup.cpus[0],2)",
                 "cpu_active_translation_controller_for_ref_is(BootCPURef,TranslationControllerKind::EarlyVm)",
+                "trap_flow_type_is_common_interrupt_exception_entry(CpuGroup.cpus[0].trap)",
+                "trap_common_entry_routes_by_event_class(CpuGroup.cpus[0].trap,CpuGroup.cpus[0].trap.interrupt,CpuGroup.cpus[0].trap.exception)",
+                "trap_temporary_protection_entry_ready(CpuGroup.cpus[0].trap,CpuGroup.cpus[0])",
+                "trap_temporary_protection_handles_unexpected_events(CpuGroup.cpus[0].trap)",
+                "trap_temporary_protection_supports_testing_and_defect_localization(CpuGroup.cpus[0].trap)",
                 "trap_formal_entry_ready(CpuGroup.cpus[0].trap)",
                 "early_vm_translation_sync_complete(EarlyVm,BootCPURef)",
                 "translation_controller_retired_for_cpu(TrampolineVm,BootCPURef)",
@@ -4892,6 +4917,13 @@ class SignalPipelineTests(unittest.TestCase):
                 )
             )
             self.assertNotIn("memory_zeroed(segments.bss.range)", facts)
+            self.assertNotIn(
+                "trap_early_fatal_prelude_ready(CpuGroup.cpus[0].trap)", facts
+            )
+            self.assertNotIn(
+                "trap_prelude_creates_no_flow_occurrence(CpuGroup.cpus[0].trap)",
+                facts,
+            )
 
             context_events = [
                 event
@@ -4942,14 +4974,14 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(snapshot.read_bytes(), BOOT_INIT_SETUP_SCENARIO.read_bytes())
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "118160c1c179cf8571c8d85d18e96a4f71f04c5f493c88442209ace967e36646",
+                "775fe415a3bf20e7add33d18045f211c5256552b7641d2e5edee8c8eef308be7",
             )
             self.assertEqual(
                 {
                     derivation["model_fingerprint"], model["model_fingerprint"],
                     view["model_fingerprint"], saved["model_fingerprint"],
                 },
-                {"sha256:7a65211e474cf8a20b35373008ab6c6004f8052bcf1d0ff414be6ee2956b1c90"},
+                {"sha256:3e610ac0bf8b3fd74e65363340cb3c577318253d9acce4410d5271d1261dfbac"},
             )
             with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
                 compact_text = render_text(view)

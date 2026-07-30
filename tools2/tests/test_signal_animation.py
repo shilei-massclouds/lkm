@@ -791,7 +791,7 @@ class SignalAnimationTests(unittest.TestCase):
                 derivation["model_fingerprint"],
                 view["model_fingerprint"],
             },
-            {"sha256:7a65211e474cf8a20b35373008ab6c6004f8052bcf1d0ff414be6ee2956b1c90"},
+            {"sha256:3e610ac0bf8b3fd74e65363340cb3c577318253d9acce4410d5271d1261dfbac"},
         )
         animation = build_animation(model, view)
         self.assertEqual(animation["trace"]["total_signals"], 52)
@@ -828,6 +828,15 @@ class SignalAnimationTests(unittest.TestCase):
                 "sig-0051":
                     "保持同一 BootTask/BootTask.stack binding identity，并原子刷新虚拟 tp/sp。",
             },
+        )
+        trap_preset_request = next(
+            moment
+            for moment in animation["moments"]
+            if moment["id"] == "sig-0032:request"
+        )
+        self.assertEqual(
+            trap_preset_request["handler"]["description"],
+            "为所属 CPU 建立临时保护入口，用于处理意外事件并支持测试和缺陷定位。",
         )
         terminal = next(
             moment for moment in animation["moments"] if moment["kind"] == "terminal"

@@ -23,6 +23,8 @@ PhaseObject，它从 `_start` 开始承载并编排启动执行片段，同时�
   内核映像的BSS段清零，让落到该段的全局变量初值为零。相关执行状态属于 BootCPU；BootInitFlow
   只负责编排，不拥有这些状态。
 - 把内核启动时的第一个参数作为BootCPU的hartid记录下来，以备后续使用。
+- 初始 task/stack binding 建立后，Preset 单独驱动 BootCPU 的 `TrapType.Preset`，为所属 CPU 建立
+  临时保护入口，用于处理初始化过程中意外发生的异常或中断，便于测试和定位缺陷。
 - Setup 直接顺序驱动 `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、
   `SchedInitPhase`、`IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、
   `ProcessPreparePhase` 和 `BootInitRestInitPhase`。最后一个叶子 Online 后提交

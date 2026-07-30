@@ -61,6 +61,8 @@ RISC-V64 入口前导期实现必须按地址空间阶段区分可执行代码�
 
 - CSR 访问应集中封装，调用点表达具体语义，例如关闭中断、设置 `stvec`、切换 `satp`。
 - 写入 `stvec` 的入口地址必须满足 RISC-V64 `stvec` 对齐和模式编码要求。直接模式下入口 base 至少 4 字节对齐，低位不得被误用为 mode；trampoline 或 early trap 入口标签必须在汇编或链接布局中显式保证对齐，并按当前地址空间阶段写入物理地址或虚拟地址。
+- `TrapType.Preset` 写入 `stvec` 的目标必须是汇编定义的临时保护入口；该入口只以无条件分支回跳
+  自身，形成没有其它指令或副作用的空无限循环。
 - 页表切换相关代码必须显式处理 `sfence.vma` 要求。模型规格可以不逐条展开该细节，但实现规格要求保留该边界。
 - `SwapperVm.Action::ActivateOnCpu(cpu_ref)` 对应 Linux/RISC-V `setup_vm_final()` 中写入 `swapper_pg_dir`
   SATP 后的 `local_flush_tlb_all()` 边界。实现必须在写入 swapper SATP 后执行本地 TLB/地址转换同步，

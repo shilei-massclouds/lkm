@@ -3,7 +3,20 @@
 `TrapType` is embedded in each `Cpu`; `Context` must not own a second trap resource. Its RISC-V lowering owns the
 public `stvec` service, the per-CPU `TrapEntryContext`, stack-capacity admission and the emergency failure path.
 
-- `Preset` publishes only the physical early fatal prelude. That prelude records no Flow occurrence.
+- `Preset` writes `stvec` with the address of an assembly-defined temporary protection entry. The entry is an empty
+  infinite loop: after the required alignment it contains only an unconditional branch to itself, with no `wfi`,
+  Rust/C call, checkpoint, log, shutdown request or other side effect. The lowering is equivalent to:
+
+  ```asm
+  .align 2
+  trap_temporary_protection_entry:
+      j trap_temporary_protection_entry
+
+      la t0, trap_temporary_protection_entry
+      csrw stvec, t0
+  ```
+
+  The symbol loaded into `stvec` is the assembly entry itself, not a Rust wrapper or a data object.
 - `Setup` installs `formal_trap_entry` in `stvec` after the CPU's interrupt and exception children are ready.
 - `Enable` accepts entries only after both children are online.
 - `sscratch` addresses the current CPU's `TrapEntryContext`; BP entry, every AP entry and scheduler commit install or

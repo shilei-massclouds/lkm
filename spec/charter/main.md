@@ -1127,19 +1127,13 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 5. `陷入资源`（`TrapType`）
 
-   描述：当前 CPU 独立拥有的公共陷入入口资源；它拥有 `InterruptType` 与 `ExceptionType`，用于维护中断/异常公共入口及分叉前的接收边界。
+   `TrapType` 维护异常和中断共用的总入口 `TrapFlowType`。异常或中断发生时，执行先进入这个总入口，
+   再根据事件类别进入相应的处理路径；`TrapType` 负责总入口及分流前的公共边界，具体处理语义由对应
+   的异常或中断类型负责。
 
-   * `preset` - 设置受控早期处理入口
-
-     * 初始状态：空。
-     * 执行动作：设置 `RISCV64.stvec` 指向事件的临时处理入口 `early_event_entry`。在参考内核中，该入口对应 `.Lsecondary_park`，其实现是用于调试目的的无限循环。
-     * 结束状态：验证 `RISCV64.stvec` 指向 `early_event_entry`，确保误入的中断或异常能够进入受控停机路径。
-
-   * `setup` - 设置正式公共处理入口
-
-     * 初始状态：`VM.setup()` 已完成并进入早期虚拟地址阶段，`TrapType.preset()` 已完成。
-     * 执行动作：设置 `RISCV64.stvec` 指向事件的正式处理入口 `formal_event_entry`。在参考内核中，该入口对应 `handle_exception`。该动作建立起中断/异常处理的入口框架，并清零 `RISCV64.sscratch` 指示当前处于内核态。
-     * 结束状态：验证 `RISCV64.stvec` 指向 `formal_event_entry`，并验证 `RISCV64.sscratch` 指向当前 CPU 的正式入口上下文。
+   `TrapType` 通过生命周期逐步建立和开放总入口服务。当前先定义 `Preset`：它为所属 CPU 建立临时
+   保护入口，用于处理初始化过程中意外发生的异常或中断，便于测试和定位缺陷。`Setup` 和 `Enable`
+   的语义由后续校准继续补充。权威定义见 [`objects/trap-type.md`](objects/trap-type.md)。
 
 6. `内核映像`（`KernelImage`）
 
@@ -1254,10 +1248,10 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 5. 把内核启动时的第一个参数作为BootCPU的hartid记录下来，以备后续使用。
 6. `OpenSBI.Enable` 同步驱动 `处理器管理.preset()`，原子创建 `CpuGroup.cpus[0]` 并驱动它进入 `Prepared`；只有该父子发布全部成功后才发送 `Kernel.Enable`。
 7. 由 `PhysicalDirect.ActivateOnCpu(BootCPURef)` 以 InitialActivation 从 absent 建立 CPU-local association，再调用单个 `CurrentTask.BindTaskStack(BootTask, BootTask.stack)`，原子建立物理地址阶段的 CPU-local task/stack 执行 binding 并实际写入 `tp/sp`；BootTask 的初始禁止抢占来自静态初始化，该 Action 不初始化 preempt count。
-8. 执行 `TrapType.preset()`，设置受控早期处理入口，使 `VM` 建立过程中误入的中断或异常能够进入受控停机路径。
+8. 执行 `TrapType.preset()`，为 BootCPU 建立临时保护入口，用于处理初始化过程中意外发生的异常或中断，便于测试和定位缺陷。
 9. 执行 `虚拟内存空间.preset()`，依次推进 `TrampolineVM.setup()` 与 `EarlyVM.setup()`，初始化 `静态对象集合.trampoline_pg_dir` 与 `静态对象集合.early_pg_dir`，为入口前导期的两次页表切换准备条件。
 10. 执行 `虚拟内存空间.setup()`，依次调用 `TrampolineVM.ActivateOnCpu()` 与 `EarlyVM.ActivateOnCpu()`：先完成从物理地址空间到跳板映射的 Handoff，再 Handoff 到 early page table；其中 `内核映像.enable()` 重置 `gp-relative` 寻址方式。controller 仍保持共享 Ready。
-11. `VM.setup()` 完成后，执行 `TrapType.setup()`，设置正式公共处理入口，使 `RISCV64.stvec` 指向 `formal_event_entry`。
+11. `VM.setup()` 完成后执行 `TrapType.setup()`；其具体语义由后续校准补充。
 12. 在 `VM.setup()` 完成后调用单个 `CurrentTask.RefreshTaskStack(BootTask, BootTask.stack)`，原子将 `tp` 与 `sp` 重置为虚拟地址；同目标 pair 保持两种 binding identity，不处理抢占计数，也不存在 Stack lifecycle。
 13. 执行 `片上系统.preset()`，完成片上系统平台相关的早期预置，并直接提交 `BootInitFlow.Prepared`。
 

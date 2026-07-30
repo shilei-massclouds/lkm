@@ -48,6 +48,10 @@ Setup 的第一个叶阶段，不回调 Kernel。
 adoption 必须通过 BootInitFlow 的 CpuRef 解析到 `CpuGroup.cpus[0]`，再验证该 CPU 的 FS/VS 已关闭；
 不得把 `sstatus` 检查重新解释为 Flow 状态、CPU 能力缺失或用户态永久禁用。
 
+`TrapType.Preset` 必须把 `stvec` 写为一个汇编函数入口。该入口只包含回跳自身的空无限循环；不得加入
+`wfi`、Rust/C 调用、checkpoint、日志、关机请求或其它副作用。写入 `stvec` 的必须是该汇编入口本身，
+不能是 Rust wrapper 或数据对象。
+
 `BindTaskStack` 与 `RefreshTaskStack` 是 CPU 执行上下文的两个 boot-only 原子 Action，不保存
 Base/Prepared/Ready 私有状态，不加入公共 `Context`，也不发 lifecycle checkpoint。每次调用在修改
 寄存器前验证 BootTask、唯一有效 `TaskRef::BOOT`、active Flow/CpuRef、`stack == BootTask.stack`、当前
