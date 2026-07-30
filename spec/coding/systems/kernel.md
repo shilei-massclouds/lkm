@@ -47,6 +47,11 @@ Enable handler 必须依次完成 `AcceptEnable`、把解析到的 BootCPURef �
 事后 adoption 可以核对早期 handoff storage，但不得改变这条语义和 checkpoint 顺序。`KernelAddrSpace`、`Vm`、`Soc`、
 `CpuGroup` 是 Kernel 的平级直接子对象；Soc/CpuGroup 之间的启动依赖不表达所有权。
 
+这些已在 MMU-off head 完成的接受事实通过入口私有 `.head.handoff` receipt 跨越 BSS/Rust 边界；Rust
+只能在整体校验 receipt 后按 `AcceptEnable -> AssignCpuRef -> PhysicalDirect -> Preset` adoption。
+`AcceptEnable` 不得反向依赖 BootInitFlow 已有 CpuRef；receipt 缺失、重复或乱序必须在 Flow CpuRef、
+controller 或 Preset 状态发生部分提交前 fail-stop。
+
 OpenSBI 不负责保证 `sie/sip` 已清零。`BootInitFlow.Preset` 的第一个被驱动叶迁移是
 `InterruptType.Preset`；入口汇编必须先执行 `csrw sie, zero` 映射全部中断分路门控关闭，再执行
 `csrw sip, zero` 映射一次待决清除写完成；硬件驱动的 live `sip` 可以随后再次置位，Rust adoption 不得

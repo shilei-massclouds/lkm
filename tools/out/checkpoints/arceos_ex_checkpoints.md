@@ -24,7 +24,7 @@
 | 19 | TrapTypePrepared | TrapType.Prepared | V | impl/arceos_ex/src/checkpoint/mod.rs |
 | 20 | ExceptionTypePrepared | ExceptionType.Prepared | 9 | impl/arceos_ex/src/checkpoint/mod.rs |
 | 21 | TrampolineVmReady | TrampolineVm.Ready | Q | impl/arceos_ex/src/checkpoint/mod.rs |
-| 22 | PhysicalDirectActivatedOnCpu | PhysicalDirect.ActivatedOnCpu | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 22 | PhysicalDirectActivatedOnCpu | PhysicalDirect.ActivatedOnCpu | D | impl/arceos_ex/src/checkpoint/mod.rs |
 | 23 | TrampolineVmActivatedOnCpu | TrampolineVm.ActivatedOnCpu | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 24 | RawDtbPrepared | RawDtb.Prepared | Y | impl/arceos_ex/src/checkpoint/mod.rs |
 | 25 | RawDtbReady | RawDtb.Ready | W | impl/arceos_ex/src/checkpoint/mod.rs |

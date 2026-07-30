@@ -79,7 +79,7 @@ pub fn accept_enable_at_entry(boot_args: &BootArgs) -> EventResult {
         || ctx.boot_init_flow.state() != State::Base
         || ctx.cpu_group.state() != State::Prepared
         || ctx.cpu_group.boot_cpu_state() != State::Prepared
-        || ctx.boot_init_flow.cpu_ref() != ctx.cpu_group.boot_cpu_ref()
+        || ctx.boot_init_flow.cpu_ref().is_some()
         || KERNEL_ENABLE_ACCEPTED.load(Ordering::Acquire)
     {
         return failed_condition(LifecycleEvent::Enable, state, State::Ready, State::Online);

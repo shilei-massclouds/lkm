@@ -1,6 +1,6 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use crate::{arch::riscv64::csr, checkpoint::Checkpoint};
+use crate::arch::riscv64::csr;
 
 use super::{
     cpu::{
@@ -24,7 +24,7 @@ impl PhysicalDirect {
         State::Ready
     }
 
-    pub fn activate_on_cpu(&self, cpu: &Cpu) -> EventResult {
+    pub(crate) fn adopt_head_activation_on(&self, cpu: &Cpu) -> EventResult {
         if cpu.logical_id() >= MAX_CPUS
             || cpu.active_translation_controller() != Ok(None)
             || !cpu.translation_activation_preflight(
@@ -42,7 +42,6 @@ impl PhysicalDirect {
                 State::Ready,
             );
         }
-        csr::sfence_vma();
         if !cpu.commit_translation_activation(
             TranslationActivationKind::InitialActivation,
             None,
@@ -58,7 +57,6 @@ impl PhysicalDirect {
             );
         }
         self.activation_complete[cpu.logical_id()].store(true, Ordering::Release);
-        crate::checkpoint::checkpoint(Checkpoint::PhysicalDirectActivatedOnCpu);
         Ok(())
     }
 

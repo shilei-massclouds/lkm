@@ -65,10 +65,9 @@ object BootInitFlow: TaskFlow {
                         CurrentCPU.Action::DisableFpuVectorExecution;
                         KernelImage.Transition::Setup;
                         BootInitFlow.Action::RecordBootCpuHartid;
-                        KernelAddrSpace.Transition::Preset;
+                        CurrentTask.Action::BindTaskStack(BootTask, BootTask.stack);
                         CurrentCPU.Transition::Setup(true);
                         CurrentCPU.trap.interrupt.Transition::Setup;
-                        CurrentTask.Action::BindTaskStack(BootTask, BootTask.stack);
                         CurrentCPU.trap.Transition::Preset;
                         Vm.Transition::Preset;
                         Vm.Transition::Setup;

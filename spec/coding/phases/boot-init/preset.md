@@ -21,6 +21,13 @@ acceptance；随后 adoption head 已完成的入口动作。Rust 函数的物�
 寄存器已经具有 Kernel 最终值，也不得重放 Human、Computer、Platform、OpenSBI 或 Kernel 的设计期
 构造过程。
 
+MMU-off head 使用入口私有 `.head.handoff` receipt 依次保存 CpuGroup adoption、AcceptEnable、
+AssignCpuRef、PhysicalDirect InitialActivation 与 Preset acceptance，最后序号必须为 5。head 在
+PhysicalDirect receipt 后输出 `D`、在 Preset acceptance 后输出 `O`，随后第一个 child 才输出 `I`。
+Rust 必须先一次性验证全部 receipt、顺序、hartid 与 live `satp=0`，然后才按同序 adoption；缺失、重复
+或乱序必须 fail-stop，且不得提前提交 Flow CpuRef、controller 或 Started。Rust 不得重新发出
+PhysicalDirect/Started checkpoint。
+
 ## Preset: Base -> Prepared
 
 Preset 横跨三个物理实现段，但仍是 BootInitFlow 的一个 model transition：
@@ -29,7 +36,7 @@ Preset 横跨三个物理实现段，但仍是 BootInitFlow 的一个 model tran
 | --- | --- |
 | Kernel entry acceptance | `AcceptEnable` → `AssignCpuRef` → `PhysicalDirect.ActivateOnCpu(InitialActivation)` → 接受 Preset 并记录 `BootInitFlow.Started`；任何 Preset child 尚未启动 |
 | `_start` Preset head | `InterruptType.Preset` 先以 `csrw sie, zero` 实现全部分路门控关闭，再以 `csrw sip, zero` 实现一次待决清除写完成；该瞬时边界不保证硬件驱动的 live `sip` 随后保持为零，也不得由此推断 `sstatus.SIE` 总门控已关闭；随后把 `__global_pointer$` 装入 `gp/x3`，并用 `.option norelax` 保护该初始化，以建立 `gp_relative_addressing_ready(KernelImage)`；`CurrentCPU.Action::DisableFpuVectorExecution` 再以 `li t0, SR_FS_VS` 和 `csrc CSR_STATUS, t0` 同时关闭 BootCPU 的 FS/VS 执行状态；然后清 BSS，把入口 `a0` 的原值保存到持久交接位置 |
-| `preset_until_vm_switch()` | 读取 Kernel Enable 前已发布的 `CpuGroup.cpus[0]`；验证 BootInitFlow 的 CpuRef、PhysicalDirect association、BootTask/TaskRef 与 `BootTask.stack` linker range，然后调用单个 `CurrentTask.BindTaskStack(BootTask, BootTask.stack)` 汇编提交块，原子装载物理 `tp/sp` 并发布首次 task/stack pair；通过 BootInitFlow 的 CpuRef 解析 `CurrentCPU.Setup`，驱动 `KernelAddrSpace.Preset`、`TrapType.Preset` 和 `Vm.Preset`；不得在这里提前驱动 `ExceptionType.Preset` |
+| `preset_until_vm_switch()` | 读取 Kernel Enable 前已发布的 `CpuGroup.cpus[0]`；验证 BootInitFlow 的 CpuRef、PhysicalDirect association、BootTask/TaskRef 与 `BootTask.stack` linker range，然后调用单个 `CurrentTask.BindTaskStack(BootTask, BootTask.stack)` 汇编提交块，原子 adoption 物理 `tp/sp` 并发布首次 task/stack pair；随后严格按 `CurrentCPU.Setup`、`InterruptType.Setup`、`TrapType.Preset`、`Vm.Preset` 驱动；不得直接驱动 `KernelAddrSpace.Preset`，也不得在这里提前驱动 `ExceptionType.Preset` |
 | `after_vm_setup()` | `Vm.Setup` 的 Trampoline→Early continuation 返回后先驱动 `TrapType.Setup`；该动作驱动 `ExceptionType.Preset` 及四个异常子类型 Preset，把正式响应汇编函数入口写入 `stvec`，并紧接着以 `csrw sscratch, zero` 标记当前处于内核态。随后验证 Vm/EarlyVm/TrapType Ready、Soc 尚为 Base 及现有 BootTask/stack pair 精确匹配，再在同一入口汇编路径内执行 `CurrentTask.RefreshTaskStack(BootTask, BootTask.stack)` 的连续指令，保持 binding identity 并刷新虚拟 `tp/sp`；该 Action 完成后继续后续入口步骤，随后才驱动 `Soc.Preset` |
 
 `Vm.Setup` 必须按 [`Vm Coding`](../../objects/vm.md) 在同一个 Preset 内通过 per-CPU `ActivateOnCpu`

@@ -132,7 +132,9 @@ Linux 6.12 `Documentation/arch/riscv/boot.rst` 与当前 RV64 Image contract 提
 一次。`BootInitFlow` 是 `BootTask.initial_flow` 指向的 TaskFlow；Kernel.Enable 必须先完成自身
 acceptance、BootCPURef binding 与 PhysicalDirect InitialActivation，再同步驱动其
 Preset/Setup/Enable。`Startup` 只显示 canonical Preset；`BootInitFlow.Started` 只记录 Preset 已接受，
-位于第一个 child action 之前。Preset 的第一个入口动作由启动 CPU 自有的 `InterruptType.Preset` 先关闭
+位于第一个 child action 之前。这三项按 `AcceptEnable -> AssignCpuRef ->
+PhysicalDirect.ActivateOnCpu` 排序，任何后项都不得反向成为前项的接受前置；只有三项都完成后才能
+接受 Preset、记录 Started 并启动其第一个 child。Preset 的第一个入口动作由启动 CPU 自有的 `InterruptType.Preset` 先关闭
 全部中断分路门控，再完成一次待决中断清除写；该动作只保证写按序完成，不保证硬件驱动的待决位随后
 保持为零，也不改变或判定中断总门控或建立 handler、fallback、正式分派框架。随后 BootInitFlow 再
 编排其余入口对象并提交 Prepared。该动作对应
@@ -148,7 +150,10 @@ Online 后由仍在执行的 Kernel.Enable 驱动 `Scheduler.Action::Schedule`�
 
 `Kernel` 直接拥有平级的 `KernelAddrSpace`、`Vm`、`Soc` 与 `CpuGroup`。`KernelAddrSpace` 是唯一
 地址空间资源，`Vm` 是地址转换控制面；两者不互相替代。入口前导期由 `Vm.Preset` 准备早期布局和
-controller，再由 `Vm.Setup` 使启动 CPU 按 PhysicalDirect → TrampolineVm → EarlyVm 切换并提交
+controller；`KernelAddrSpace.Preset/Setup` 是 `Vm.Preset` 协调的下层 drive，不是 BootInitFlow 的
+平级直接 drive，其中 `KernelAddrSpace.Preset` 是 Vm 的第一个 child。BootInitFlow 在 head 前缀后固定按
+`BindTaskStack -> CurrentCPU.Setup -> InterruptType.Setup -> TrapType.Preset -> Vm.Preset` 驱动。
+随后 `Vm.Setup` 使启动 CPU 按 PhysicalDirect → TrampolineVm → EarlyVm 切换并提交
 `Vm.Ready`。`Vm.Enable` 留给后续 SwapperVm 阶段。本组每个系统的所有权、生命周期和 CPU-local
 activation 边界由 [`objects/README.md`](../objects/README.md) 所列独立 Charter 文件定义，本系统文件
 只规定 Kernel 的直接拥有关系和启动编排入口。

@@ -64,6 +64,7 @@ impl Vm {
         if self.lifecycle.state() != State::Base
             || self.trampoline_vm.state() != State::Base
             || self.early_vm.state() != State::Base
+            || kernel_addr_space.state() != State::Base
         {
             return failed_condition(
                 LifecycleEvent::Preset,
@@ -72,6 +73,8 @@ impl Vm {
                 State::Prepared,
             );
         }
+
+        kernel_addr_space.preset(config, lds, kernel_image)?;
 
         self.trampoline_vm
             .setup(config, static_objects, lds, kernel_image)?;
@@ -243,8 +246,8 @@ impl Vm {
         )
     }
 
-    pub fn activate_physical_on_cpu(&self, cpu: &Cpu) -> EventResult {
-        self.physical_direct.activate_on_cpu(cpu)
+    pub(crate) fn adopt_head_physical_on_cpu(&self, cpu: &Cpu) -> EventResult {
+        self.physical_direct.adopt_head_activation_on(cpu)
     }
 
     pub fn entry_prelude_ready(&self) -> bool {

@@ -13,10 +13,11 @@ object Vm: KernelObject {
                     PhysicalDirect.state == State::Ready;
                     TrampolineVm.state == State::Base;
                     EarlyVm.state == State::Base;
-                    KernelAddrSpace.state == State::Prepared;
+                    KernelAddrSpace.state == State::Base;
                 }
 
                 drives {
+                    KernelAddrSpace.Transition::Preset;
                     TrampolineVm.Transition::Setup;
                     EarlyVm.Transition::Preset;
                     KernelAddrSpace.Transition::Setup;

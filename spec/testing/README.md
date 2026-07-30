@@ -117,8 +117,8 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
 - 提交的 `tools2/scenarios/BootInitFlow.Setup.snapshot.json` 必须与从模型初态执行
   `tools2/bin/pyveri -u BootInitFlow.Setup --snapshot-out /tmp/boot-init-flow-setup-presend.snapshot.json`
   得到的 canonical bytes 逐字节一致，并从仓库根与其它 cwd 重建出相同结果。当前正式模型下其
-  SHA-256 固定为 `22567734782cd6d9650ae8ac19f4dba1849620b4f244bd9a0ff8b01e1c5fef8a`，model
-  fingerprint 固定为 `sha256:8b402c1807a08a4103b833060089f4969034e94aa8ac3e650db270a541b056b0`。
+  SHA-256 固定为 `34525a0131c1b94ecf848054c1c3fcaf962d91f6350f64b4bc1071bd28fbeb8d`，model
+  fingerprint 固定为 `sha256:b80e689285bb9384869ec487830913fc5d9ca85dcac7b2d1557080b08887f036`。
   `tools2/bin/pyveri -t BootInitFlow.Setup` 必须自动采用该第 3 组入口 scenario；显式 `-s` 仍优先，
   其它模型必须因 stale fingerprint 拒绝，缺失 canonical scenario 必须在 derive 前返回 2。
 - `-u BootInitFlow.Setup` 的真实上游推导必须精确包含 52 个 Signal，并逐项固定
@@ -128,10 +128,14 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
   0 failed/rejected/truncated/pending。0020 只允许一对 `SingleTaskContext` enter/exit，enter 位于首个
   child send 前、exit 位于最后一个 child response 后和 0020 commit 前；第 1 组只有 CPU0 的一个 indexed declaration，
   第 2 组不得出现 Lock 或其它 fresh-instance event。
-- `sig-0032 TrapType.Preset` 前必须已经存在异常/中断共用 `TrapFlowType` 总入口事实；完成后
+- `sig-0026 BindTaskStack` 必须先建立 PhysicalDirect 地址表示的 BootTask/stack pair；其后
+  `sig-0027 CurrentCPU.Setup`、`sig-0028 InterruptType.Setup` 与 `sig-0029 TrapType.Preset` 必须严格
+  按序发生。`sig-0029 TrapType.Preset` 前必须已经存在异常/中断共用 `TrapFlowType` 总入口事实；完成后
   `TrapType` 从 Base 进入 Prepared，并新增所属 CPU 临时保护入口、意外事件处理以及测试和缺陷定位
   用途事实。该 Signal 不直接产生 child Signal，动画 request 必须展示对应 Model 注释。
-- `sig-0033 Vm.Preset` 必须只准备 Trampoline/Early 页表、RawDtb/FixMap 与 KernelAddrSpace，完成后
+- `sig-0030 Vm.Preset` 必须首先以 `sig-0031 Vm -> KernelAddrSpace.Preset` 驱动地址空间 Preset，再准备
+  Trampoline/Early 页表、RawDtb/FixMap 并完成 KernelAddrSpace.Setup；BootInitFlow 不得直接发送
+  KernelAddrSpace lifecycle Signal。Vm.Preset 完成后
   BootCPU 仍由 PhysicalDirect 承载且 live SATP 为零；`sig-0036 RawDtb.Preset` 只建立固定头部可读边界，
   magic 事实必须到 `sig-0037 RawDtb.Setup` 才出现。`sig-0041 Vm.Setup` 才依次完成 Trampoline 与
   Early activation，并在结束时证明 BootCPU 由 EarlyVm 承载及 `stvec` 已恢复到 TrapType 保护入口。
@@ -145,6 +149,12 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
   `ExceptionType::preset`，随后先写一次 `stvec`、再以 `csrw sscratch, zero` 清零一次 `sscratch`；`stvec`
   的 PC-relative 目标精确等于四字节对齐的汇编符号 `formal_event_entry`。该函数不得写 `satp`，也不得把
   非零寄存器值写入 `sscratch`。该检查纳入仓库根 `make test`。
+- `make test-boot-init-flow-entry` 必须检查实际 RV64 ELF/source：MMU-off head 的 early marker 唯一包含
+  `PhysicalDirect.ActivatedOnCpu(D) -> BootInitFlow.Started(O) -> InterruptType.Prepared(I)`，入口 receipt
+  依次表示 CpuGroup、AcceptEnable、AssignCpuRef、PhysicalDirect 与 Preset acceptance；Rust 必须先整体
+  校验再 adoption，不能晚发 Started。该检查还必须固定 Bind/CurrentCPU/Interrupt/Trap/Vm 顺序、
+  Vm-owned KernelAddrSpace.Preset、`start_kernel` 的 Kernel Ready/Enable acceptance 门禁，以及既有
+  sie→sip、sie-only adoption、Setup 首次清 SIE 和非链接 tail ABI。
 - `BootInitFlow.Setup` 发送前 boundary 必须来自 `spec/model/phases/boot-init/phase.spec` 中
   BootInitFlow.Preset 成功提交后的真实 completion event，source/target 为
   `BootInitFlow -> BootInitFlow`、delivery 为 emits、cause 为 0020、FIFO position 为 1，snapshot

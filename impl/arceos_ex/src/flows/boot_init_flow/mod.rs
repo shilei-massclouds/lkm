@@ -398,7 +398,8 @@ fn start_kernel_entry_guard_satisfied() -> bool {
     let ctx = crate::context::context_ref();
     let flow = ctx.boot_init_flow.core();
     let cpu_ref = ctx.boot_init_flow.cpu_ref();
-    ctx.boot_init_flow.state() == State::Prepared
+    crate::systems::kernel::enable_in_progress()
+        && ctx.boot_init_flow.state() == State::Prepared
         && boot_task_on_cpu_and_canonical()
         && ctx
             .boot_task

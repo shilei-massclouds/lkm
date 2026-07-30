@@ -29,6 +29,10 @@ const SBI_LEGACY_CONSOLE_PUTCHAR: usize = 1;
 
 const TRACE_KERNEL_STARTED: usize = Checkpoint::KernelStarted.early_byte() as usize;
 const TRACE_BOOT_TASK_ON_CPU: usize = Checkpoint::BootTaskOnCpu.early_byte() as usize;
+const TRACE_CPU_GROUP_PREPARED: usize = Checkpoint::CpuGroupPrepared.early_byte() as usize;
+const TRACE_PHYSICAL_DIRECT_ACTIVATED: usize =
+    Checkpoint::PhysicalDirectActivatedOnCpu.early_byte() as usize;
+const TRACE_BOOT_INIT_FLOW_STARTED: usize = Checkpoint::BootInitFlowStarted.early_byte() as usize;
 const TRACE_INTERRUPT_PRESET: usize = b'I' as usize;
 const TRACE_KERNEL_IMAGE_PRESET: usize = b'K' as usize;
 const TRACE_BSS_ZEROED: usize = b'Z' as usize;
@@ -53,6 +57,42 @@ static mut head_init_stack_sp: HeadHandoffWord = HeadHandoffWord(0);
 #[unsafe(link_section = ".head.handoff")]
 static mut HEAD_BSS_CLEAR_COMPLETED: HeadHandoffWord = HeadHandoffWord(0);
 
+const HEAD_CPU_GROUP_RECEIPT: usize = 1;
+const HEAD_KERNEL_ENABLE_RECEIPT: usize = 2;
+const HEAD_BOOT_CPU_REF_RECEIPT: usize = 3;
+const HEAD_PHYSICAL_DIRECT_RECEIPT: usize = 4;
+const HEAD_BOOT_INIT_PRESET_RECEIPT: usize = 5;
+
+#[used]
+#[unsafe(no_mangle)]
+#[unsafe(link_section = ".head.handoff")]
+static mut head_cpu_group_receipt: HeadHandoffWord = HeadHandoffWord(0);
+
+#[used]
+#[unsafe(no_mangle)]
+#[unsafe(link_section = ".head.handoff")]
+static mut head_kernel_enable_receipt: HeadHandoffWord = HeadHandoffWord(0);
+
+#[used]
+#[unsafe(no_mangle)]
+#[unsafe(link_section = ".head.handoff")]
+static mut head_boot_cpu_ref_receipt: HeadHandoffWord = HeadHandoffWord(0);
+
+#[used]
+#[unsafe(no_mangle)]
+#[unsafe(link_section = ".head.handoff")]
+static mut head_physical_direct_receipt: HeadHandoffWord = HeadHandoffWord(0);
+
+#[used]
+#[unsafe(no_mangle)]
+#[unsafe(link_section = ".head.handoff")]
+static mut head_boot_init_preset_receipt: HeadHandoffWord = HeadHandoffWord(0);
+
+#[used]
+#[unsafe(no_mangle)]
+#[unsafe(link_section = ".head.handoff")]
+static mut head_entry_receipt_sequence: HeadHandoffWord = HeadHandoffWord(0);
+
 global_asm!(
     r#"
     .section .head.text.entry, "ax"
@@ -72,8 +112,52 @@ _start:
     li a0, {trace_kernel_started}
     call {head_checkpoint}
 
-    # The linker-visible PID 0 carrier already has its only state: Online.
+    # Adopt the CpuGroup/BootCPU handoff before accepting Kernel.Enable.
+    la t0, {head_boot_hartid}
+    sd s0, 0(t0)
+    la t0, {head_cpu_group_receipt}
+    li t1, {head_cpu_group_receipt_value}
+    sd t1, 0(t0)
+    la t0, {head_entry_receipt_sequence}
+    sd t1, 0(t0)
+    li a0, {trace_cpu_group_prepared}
+    call {head_checkpoint}
+
+    # Kernel.Action::AcceptEnable. It does not depend on a bound CpuRef.
+    la t0, {head_kernel_enable_receipt}
+    li t1, {head_kernel_enable_receipt_value}
+    sd t1, 0(t0)
+    la t0, {head_entry_receipt_sequence}
+    sd t1, 0(t0)
+
+    # The linker-visible PID 0 carrier already owns execution authority.
     li a0, {trace_boot_task_on_cpu}
+    call {head_checkpoint}
+
+    # BootInitFlow.Action::AssignCpuRef(BootCPURef).
+    la t0, {head_boot_cpu_ref_receipt}
+    li t1, {head_boot_cpu_ref_receipt_value}
+    sd t1, 0(t0)
+    la t0, {head_entry_receipt_sequence}
+    sd t1, 0(t0)
+
+    # PhysicalDirect initial activation completes while live SATP is still zero.
+    sfence.vma
+    la t0, {head_physical_direct_receipt}
+    li t1, {head_physical_direct_receipt_value}
+    sd t1, 0(t0)
+    la t0, {head_entry_receipt_sequence}
+    sd t1, 0(t0)
+    li a0, {trace_physical_direct_activated}
+    call {head_checkpoint}
+
+    # Accept canonical BootInitFlow.Preset and record Started before its first child.
+    la t0, {head_boot_init_preset_receipt}
+    li t1, {head_boot_init_preset_receipt_value}
+    sd t1, 0(t0)
+    la t0, {head_entry_receipt_sequence}
+    sd t1, 0(t0)
+    li a0, {trace_boot_init_flow_started}
     call {head_checkpoint}
 
     /*
@@ -120,9 +204,7 @@ _start:
     li a0, {trace_bss_zeroed}
     call {head_checkpoint}
 
-    # CpuGroup.cpus[0].Preset: publish the boot hart id for Rust-side adoption.
-    la t0, {head_boot_hartid}
-    sd s0, 0(t0)
+    # RecordBootCpuHartid observes the persistent head handoff value.
     li a0, {trace_boot_cpu_preset}
     call {head_checkpoint}
 
@@ -152,9 +234,20 @@ _start:
 
 "#,
     head_boot_hartid = sym head_boot_hartid,
+    head_boot_cpu_ref_receipt = sym head_boot_cpu_ref_receipt,
+    head_boot_cpu_ref_receipt_value = const HEAD_BOOT_CPU_REF_RECEIPT,
+    head_boot_init_preset_receipt = sym head_boot_init_preset_receipt,
+    head_boot_init_preset_receipt_value = const HEAD_BOOT_INIT_PRESET_RECEIPT,
     head_bss_clear_completed = sym HEAD_BSS_CLEAR_COMPLETED,
     head_checkpoint = sym arceos_ex_head_checkpoint,
+    head_cpu_group_receipt = sym head_cpu_group_receipt,
+    head_cpu_group_receipt_value = const HEAD_CPU_GROUP_RECEIPT,
+    head_entry_receipt_sequence = sym head_entry_receipt_sequence,
     head_init_stack_sp = sym head_init_stack_sp,
+    head_kernel_enable_receipt = sym head_kernel_enable_receipt,
+    head_kernel_enable_receipt_value = const HEAD_KERNEL_ENABLE_RECEIPT,
+    head_physical_direct_receipt = sym head_physical_direct_receipt,
+    head_physical_direct_receipt_value = const HEAD_PHYSICAL_DIRECT_RECEIPT,
     head_trap_entry = sym arceos_ex_head_trap_entry,
     head_text_align = const HEAD_TEXT_ALIGN,
     init_task_storage = sym crate::objects::boot_task::init_task_storage,
@@ -162,12 +255,15 @@ _start:
     rust_entry = sym boot_init_flow_preset_rust_entry,
     sstatus_fpu_vector_mask = const SSTATUS_FPU_VECTOR_MASK,
     trace_boot_cpu_preset = const TRACE_BOOT_CPU_PRESET,
+    trace_boot_init_flow_started = const TRACE_BOOT_INIT_FLOW_STARTED,
     trace_boot_task_on_cpu = const TRACE_BOOT_TASK_ON_CPU,
     trace_bss_zeroed = const TRACE_BSS_ZEROED,
     trace_init_stack_preset = const TRACE_INIT_STACK_PRESET,
     trace_interrupt_preset = const TRACE_INTERRUPT_PRESET,
+    trace_cpu_group_prepared = const TRACE_CPU_GROUP_PREPARED,
     trace_kernel_started = const TRACE_KERNEL_STARTED,
     trace_kernel_image_preset = const TRACE_KERNEL_IMAGE_PRESET,
+    trace_physical_direct_activated = const TRACE_PHYSICAL_DIRECT_ACTIVATED,
 );
 
 global_asm!(
@@ -248,6 +344,9 @@ fn print_hex(value: usize) {
 #[unsafe(no_mangle)]
 extern "C" fn boot_init_flow_preset_rust_entry(hartid: usize, dtb_pa: usize) -> ! {
     let boot_args = BootArgs::new(hartid, dtb_pa);
+    if !head_entry_receipts_valid(hartid) {
+        crate::arch::riscv64::sbi::system_shutdown()
+    }
     crate::phases::shutdown_on_error(
         crate::phases::prepare::adopt_head_prefix(&boot_args),
         "arceos_ex prepare event failed\n",
@@ -257,25 +356,23 @@ extern "C" fn boot_init_flow_preset_rust_entry(hartid: usize, dtb_pa: usize) -> 
         ctx.cpu_group.preset(&boot_args),
         "arceos_ex cpu group preset failed\n",
     );
-    crate::checkpoint::checkpoint(Checkpoint::CpuGroupPrepared);
     let Some(boot_cpu_ref) = ctx.cpu_group.boot_cpu_ref() else {
         crate::arch::riscv64::sbi::system_shutdown()
     };
-    if !ctx.boot_init_flow.bind_cpu_ref(boot_cpu_ref) {
-        crate::arch::riscv64::sbi::system_shutdown()
-    }
     crate::phases::shutdown_on_error(
         crate::systems::kernel::accept_enable_at_entry(&boot_args),
         "arceos_ex kernel enable failed\n",
     );
+    if !ctx.boot_init_flow.bind_cpu_ref(boot_cpu_ref) {
+        crate::arch::riscv64::sbi::system_shutdown()
+    }
     let Some(boot_cpu) = ctx.cpu_group.boot_cpu() else {
         crate::arch::riscv64::sbi::system_shutdown()
     };
     crate::phases::shutdown_on_error(
-        ctx.vm.activate_physical_on_cpu(boot_cpu),
+        ctx.vm.adopt_head_physical_on_cpu(boot_cpu),
         "arceos_ex physical translation activation failed\n",
     );
-    crate::checkpoint::checkpoint(Checkpoint::BootInitFlowStarted);
     crate::phases::shutdown_on_error(
         super::adopt_head_preset_start(),
         "arceos_ex boot init preset start failed\n",
@@ -340,8 +437,6 @@ fn preset_flow(boot_args: &BootArgs) -> ! {
 
 fn preset_until_vm_switch(ctx: &mut Context, boot_args: &BootArgs) -> EventResult {
     adopt_head_prefix(ctx, boot_args)?;
-    ctx.kernel_addr_space
-        .preset(&ctx.config, &ctx.lds, &ctx.kernel_image)?;
     {
         let Context {
             cpu_group,
@@ -391,6 +486,7 @@ fn adopt_head_prefix(ctx: &mut Context, boot_args: &BootArgs) -> EventResult {
     }
     ctx.kernel_image
         .adopt_head_setup(&ctx.lds, head_bss_clear_completed())?;
+    bind_boot_task_entry(ctx, TaskRef::BOOT)?;
     ctx.cpu_group
         .setup_boot_cpu(ctx.cpu_group.boot_hartid() == Some(boot_args.boot_hartid()))?;
     let Some(local_interrupt) = ctx.cpu_group.boot_cpu_local_interrupt_mut() else {
@@ -403,7 +499,6 @@ fn adopt_head_prefix(ctx: &mut Context, boot_args: &BootArgs) -> EventResult {
     };
     local_interrupt.setup_local_control()?;
     local_interrupt.setup()?;
-    bind_boot_task_entry(ctx, TaskRef::BOOT)?;
     let Ok(current_task) = ctx.current_task() else {
         return failed_condition(
             LifecycleEvent::Setup,
@@ -656,6 +751,37 @@ fn head_bss_clear_completed() -> bool {
             .read_volatile()
             .0
             == 1
+    }
+}
+
+fn head_entry_receipts_valid(hartid: usize) -> bool {
+    unsafe {
+        core::ptr::addr_of!(head_boot_hartid).read_volatile().0 == hartid
+            && core::ptr::addr_of!(head_cpu_group_receipt)
+                .read_volatile()
+                .0
+                == HEAD_CPU_GROUP_RECEIPT
+            && core::ptr::addr_of!(head_kernel_enable_receipt)
+                .read_volatile()
+                .0
+                == HEAD_KERNEL_ENABLE_RECEIPT
+            && core::ptr::addr_of!(head_boot_cpu_ref_receipt)
+                .read_volatile()
+                .0
+                == HEAD_BOOT_CPU_REF_RECEIPT
+            && core::ptr::addr_of!(head_physical_direct_receipt)
+                .read_volatile()
+                .0
+                == HEAD_PHYSICAL_DIRECT_RECEIPT
+            && core::ptr::addr_of!(head_boot_init_preset_receipt)
+                .read_volatile()
+                .0
+                == HEAD_BOOT_INIT_PRESET_RECEIPT
+            && core::ptr::addr_of!(head_entry_receipt_sequence)
+                .read_volatile()
+                .0
+                == HEAD_BOOT_INIT_PRESET_RECEIPT
+            && csr::read_satp() == 0
     }
 }
 

@@ -63,6 +63,7 @@ EARLY_CHECKPOINT_BYTES = {
     "T": "BootTask.OnCpu",
     "L": "Kernel.Online",
     "O": "BootInitFlow.Started",
+    "D": "PhysicalDirect.ActivatedOnCpu",
     "I": "InterruptType.Prepared",
     "K": "KernelImage.Prepared",
     "Z": "KernelImage.Ready",

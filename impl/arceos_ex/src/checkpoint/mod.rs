@@ -617,6 +617,7 @@ impl Checkpoint {
             Self::TrapTypePrepared => b'V',
             Self::ExceptionTypePrepared => b'9',
             Self::TrampolineVmReady => b'Q',
+            Self::PhysicalDirectActivatedOnCpu => b'D',
             Self::RawDtbPrepared => b'Y',
             Self::RawDtbReady => b'W',
             Self::FixMapReady => b'M',

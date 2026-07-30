@@ -3,8 +3,9 @@
 `Vm` 必须由独立控制面类型承载，并与 `KernelAddrSpace` 分开保存。它拥有四个共享 translation
 controller，但只协调准备与每 CPU handoff；虚拟区域范围仍由 `KernelAddrSpace` 及其子对象保存。
 
-`preset` 对应 Linux RISC-V `setup_vm(dtb_pa)` 的语义边界：依次准备 TrampolineVm、RawDtb/FixMap、
-KernelAddrSpace 与 EarlyVm。调用前后当前 CPU 必须仍由 PhysicalDirect 承载且 live `satp == 0`；任何
+`preset` 对应 Linux RISC-V `setup_vm(dtb_pa)` 的语义边界：先驱动 `KernelAddrSpace.Preset`，再依次
+准备 TrampolineVm、RawDtb/FixMap、完成 `KernelAddrSpace.Setup` 并准备 EarlyVm。BootInitFlow 不得
+直接驱动 KernelAddrSpace 的迁移。调用前后当前 CPU 必须仍由 PhysicalDirect 承载且 live `satp == 0`；任何
 页表 helper、Rust 状态提交或 checkpoint 都不得提前写 `satp`。
 
 `setup` 对应 Linux RISC-V `relocate_enable_mmu(early_pg_dir)` 的执行切换，必须作为一次不允许普通

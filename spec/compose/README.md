@@ -37,6 +37,12 @@ identity/cause、失败传播与 event sequence 不变，也不新增或
 仍由既有 crate、module 与 facade 承接，不新增公开 API 或组件依赖。`spec/compose/main.spec` 已复核，
 组合语义无需修改。
 
+2026-07-30 Kernel.Enable 到 BootInitFlow.Setup 入口顺序复核：MMU-off receipt、early checkpoint、
+BootInitFlow adoption、Vm-owned KernelAddrSpace drive 与 `start_kernel` guard 都留在既有
+`systems::kernel`、`flows::boot_init_flow`、`objects::vm` 及其现有 ELF section/module 边界内；不新增
+crate、facade、feature、公开 API、组件依赖或 wrapper lifecycle。`spec/compose/main.spec` 已复核，
+组合语义无需修改。
+
 2026-07-27 Linux RV64 Kernel 启动契约复核：新增的只读 `LinuxRiscv64KernelBootSpec` 仍由既有
 `systems::kernel` metadata 和入口验证承接；物理 PMD 对齐及 `satp=0` 检查使用既有 Config/Lds、CSR
 与 Kernel.Enable 接受边界，`sie/sip` 清零继续位于既有 BootInitFlow/InterruptType 入口汇编路径。

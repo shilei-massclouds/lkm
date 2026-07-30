@@ -29,6 +29,11 @@ MARKERS = [
 def main() -> int:
     log_path = Path(os.environ["LKM_TEST_QEMU_LOG"])
     text = log_path.read_text(errors="replace")
+    early = "RGTDOI"
+    if text.count(early) != 1:
+        raise SystemExit(
+            f"early Kernel.Enable markers must contain exactly one {early!r} sequence"
+        )
     positions: list[int] = []
     for marker in MARKERS:
         count = text.count(marker)
@@ -42,7 +47,7 @@ def main() -> int:
         raise SystemExit(f"BootInitFlow runtime markers are out of order:\n{observed}")
     print(
         "BootInitFlow runtime order verified: Prepared precedes EntrySuccessor, "
-        "all Setup/Enable leaves, and Kernel.Online"
+        "all Setup/Enable leaves, and Kernel.Online; early order is PhysicalDirect -> Started -> InterruptType"
     )
     return 0
 

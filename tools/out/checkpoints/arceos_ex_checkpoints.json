@@ -157,7 +157,7 @@
     "index": 22,
     "variant": "PhysicalDirectActivatedOnCpu",
     "name": "PhysicalDirect.ActivatedOnCpu",
-    "early_byte": null,
+    "early_byte": "D",
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {

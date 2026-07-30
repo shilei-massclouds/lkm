@@ -318,7 +318,7 @@ class BasicOrchestrationTests(unittest.TestCase):
 class EventAndDiffTests(unittest.TestCase):
     def test_kernel_online_follows_lower_enable_process_and_precedes_handoff(self) -> None:
         events = runner._extract_events(
-            "RTIKO\n"
+            "RGTDOI\n"
             "checkpoint: Scheduler.Schedule task=BootTask\n"
             "checkpoint: PayloadHandoffPreparePhase.Online task=KernelInitTask\n"
             "checkpoint: Kernel.Online task=KernelInitTask\n"
@@ -328,6 +328,7 @@ class EventAndDiffTests(unittest.TestCase):
         names = [event["name"] for event in events]
         ordered = [
             "Kernel.Started",
+            "PhysicalDirect.ActivatedOnCpu",
             "BootInitFlow.Started",
             "Scheduler.Schedule",
             "PayloadHandoffPreparePhase.Online",

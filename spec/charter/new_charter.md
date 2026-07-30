@@ -200,6 +200,17 @@ lifecycle，也不产生第二次 Kernel Enable 接受。
 
 ### BootInitFlow.Preset 的入口前导步骤
 
+Kernel.Enable 接受真实入口后，必须先依次完成 `Kernel.Action::AcceptEnable`、把
+`BootCPURef` 绑定到 `BootInitFlow.cpu_ref` 和
+`PhysicalDirect.Action::ActivateOnCpu(BootCPURef)`。三项全部成功后才能接受
+`BootInitFlow.Preset`、记录 `BootInitFlow.Started`，随后才启动第一个
+`InterruptType.Preset` child；后项不得反向成为前项的接受前置。
+
+在入口 head 已完成的 InterruptType/KernelImage/CPU 私有动作被 adoption 后，Preset 的下一个固定顺序是
+`CurrentTask.Action::BindTaskStack(BootTask, BootTask.stack)`、`CurrentCPU.Setup`、
+`InterruptType.Setup`、`TrapType.Preset`、`Vm.Preset`。`KernelAddrSpace.Preset/Setup` 不属于
+BootInitFlow 的平级直接 drive，而由 `Vm.Preset` 依序协调；其中 Preset 是 Vm 的第一个 child drive。
+
 `BootInitFlow.Preset` 依次调用两个 boot-only 上下文 Action：PhysicalDirect 下的
 `CurrentTask.Action::BindTaskStack(BootTask, BootTask.stack)` 原子建立 CPU-local task/stack pair，
 EarlyVm 接管后的

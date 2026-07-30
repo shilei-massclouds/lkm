@@ -791,7 +791,7 @@ class SignalAnimationTests(unittest.TestCase):
                 derivation["model_fingerprint"],
                 view["model_fingerprint"],
             },
-            {"sha256:8b402c1807a08a4103b833060089f4969034e94aa8ac3e650db270a541b056b0"},
+            {"sha256:b80e689285bb9384869ec487830913fc5d9ca85dcac7b2d1557080b08887f036"},
         )
         animation = build_animation(model, view)
         self.assertEqual(animation["trace"]["total_signals"], 52)
@@ -823,7 +823,7 @@ class SignalAnimationTests(unittest.TestCase):
                 for signal_id, moment in bind_requests.items()
             },
             {
-                "sig-0031":
+                "sig-0026":
                     "首次原子建立当前 CPU 到 BootTask/BootTask.stack 的 task-stack binding，并写入物理 tp/sp。",
                 "sig-0051":
                     "保持同一 BootTask/BootTask.stack binding identity，并原子刷新虚拟 tp/sp。",
@@ -832,7 +832,7 @@ class SignalAnimationTests(unittest.TestCase):
         trap_preset_request = next(
             moment
             for moment in animation["moments"]
-            if moment["id"] == "sig-0032:request"
+            if moment["id"] == "sig-0029:request"
         )
         self.assertEqual(
             trap_preset_request["handler"]["description"],

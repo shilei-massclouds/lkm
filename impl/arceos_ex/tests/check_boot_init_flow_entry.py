@@ -11,6 +11,9 @@ from pathlib import Path
 
 SSTATUS_SIE = 1 << 1
 SSTATUS_FS_VS = (0b11 << 9) | (0b11 << 13)
+EARLY_PHYSICAL_DIRECT = ord("D")
+EARLY_BOOT_INIT_STARTED = ord("O")
+EARLY_INTERRUPT_PRESET = ord("I")
 
 
 def run_objdump(objdump: str, *args: str) -> str:
@@ -106,6 +109,29 @@ def check_head(objdump: str, elf: Path, table: dict[str, tuple[int, int]]) -> No
     if len(sie) != 1 or len(sip) != 1 or sip[0] != sie[0] + 1:
         raise AssertionError("_start must contain adjacent ordered csrw sie, zero -> csrw sip, zero")
 
+    checkpoint_calls = [
+        index
+        for index, instruction in enumerate(instructions)
+        if instruction.endswith("<arceos_ex_head_checkpoint>")
+    ]
+    early_values = [loaded_immediate_before(body, index, "a0") for index in checkpoint_calls]
+    expected = [
+        EARLY_PHYSICAL_DIRECT,
+        EARLY_BOOT_INIT_STARTED,
+        EARLY_INTERRUPT_PRESET,
+    ]
+    positions = []
+    for value in expected:
+        if early_values.count(value) != 1:
+            raise AssertionError(
+                f"early marker 0x{value:x} occurs {early_values.count(value)} times: {early_values}"
+            )
+        positions.append(early_values.index(value))
+    if positions != sorted(positions) or positions[2] != early_values.index(EARLY_INTERRUPT_PRESET):
+        raise AssertionError(
+            "early markers must order PhysicalDirect -> BootInitFlow.Started -> InterruptType"
+        )
+
     sstatus = [
         (index, match.group(1))
         for index, instruction in enumerate(instructions)
@@ -156,14 +182,55 @@ def check_adoption_sources(source_root: Path) -> None:
         raise AssertionError("InterruptType.Setup must close local control before fallback readiness")
 
     preset_source = (source_root / "flows/boot_init_flow/preset.rs").read_text()
+    rust_entry = rust_function(
+        preset_source,
+        'extern "C" fn boot_init_flow_preset_rust_entry',
+    )
+    receipt_check = rust_entry.find("head_entry_receipts_valid")
+    accept_enable = rust_entry.find("accept_enable_at_entry")
+    assign_cpu_ref = rust_entry.find("bind_cpu_ref")
+    physical_direct = rust_entry.find("adopt_head_physical_on_cpu")
+    preset_accept = rust_entry.find("adopt_head_preset_start")
+    if not 0 <= receipt_check < accept_enable < assign_cpu_ref < physical_direct < preset_accept:
+        raise AssertionError(
+            "Rust entry must validate receipts then adopt AcceptEnable -> AssignCpuRef -> PhysicalDirect -> Preset"
+        )
+    if "Checkpoint::BootInitFlowStarted" in rust_entry:
+        raise AssertionError("Rust entry must not re-emit BootInitFlow.Started")
+
     prefix = rust_function(preset_source, "fn adopt_head_prefix")
+    bind_task_stack = prefix.find("bind_boot_task_entry")
     current_cpu_setup = prefix.find("setup_boot_cpu")
     local_control_setup = prefix.find("setup_local_control")
     interrupt_setup = prefix.find("local_interrupt.setup()")
-    if not 0 <= current_cpu_setup < local_control_setup < interrupt_setup:
+    if not 0 <= bind_task_stack < current_cpu_setup < local_control_setup < interrupt_setup:
         raise AssertionError(
-            "BootInitFlow adoption must perform CurrentCPU.Setup before local sstatus.SIE closure and InterruptType.Setup"
+            "BootInitFlow adoption must order BindTaskStack -> CurrentCPU.Setup -> local SIE closure -> InterruptType.Setup"
         )
+
+    until_vm = rust_function(preset_source, "fn preset_until_vm_switch")
+    prefix_adoption = until_vm.find("adopt_head_prefix")
+    trap_preset = until_vm.find("trap.preset")
+    vm_preset = until_vm.find("ctx.vm.preset")
+    if (
+        "ctx.kernel_addr_space\n        .preset" in until_vm
+        or not 0 <= prefix_adoption < trap_preset < vm_preset
+    ):
+        raise AssertionError(
+            "BootInitFlow must order its prefix before TrapType.Preset and Vm.Preset without directly driving KernelAddrSpace"
+        )
+
+    vm_source = (source_root / "objects/vm.rs").read_text()
+    vm_preset_body = rust_function(vm_source, "pub fn preset")
+    kernel_addr_preset = vm_preset_body.find("kernel_addr_space.preset")
+    trampoline_setup = vm_preset_body.find("self.trampoline_vm\n            .setup")
+    if not 0 <= kernel_addr_preset < trampoline_setup:
+        raise AssertionError("Vm.Preset must first drive KernelAddrSpace.Preset")
+
+    kernel_source = (source_root / "systems/kernel.rs").read_text()
+    accept_body = rust_function(kernel_source, "pub fn accept_enable_at_entry")
+    if "cpu_ref() != ctx.cpu_group.boot_cpu_ref()" in accept_body:
+        raise AssertionError("AcceptEnable still depends on an already-bound BootInitFlow CpuRef")
 
     flow_source = (source_root / "flows/boot_init_flow/mod.rs").read_text()
     if "pub fn setup() -> !" in flow_source:
@@ -175,6 +242,9 @@ def check_adoption_sources(source_root: Path) -> None:
         raise AssertionError("start_kernel does not enforce the exact entry guard")
     if "entry_successor::preset" not in start_kernel:
         raise AssertionError("start_kernel does not start EntrySuccessorPhase.Preset")
+    start_guard = rust_function(flow_source, "fn start_kernel_entry_guard_satisfied")
+    if "crate::systems::kernel::enable_in_progress()" not in start_guard:
+        raise AssertionError("start_kernel guard does not require accepted Kernel.Enable in progress")
 
 
 def check_local_control_setup(
@@ -247,7 +317,8 @@ def main() -> int:
     check_completion_tail(args.objdump, args.elf, table)
     print(
         "BootInitFlow entry verified: ordered sie/sip write, Preset excludes SIE, "
-        "sie-only adoption, Setup SIE closure, and non-linking tail start_kernel"
+        "PhysicalDirect/Started/Interrupt early order, receipt adoption, Bind/CPU/Trap/Vm order, "
+        "Setup SIE closure, Kernel.Enable guard, and non-linking tail start_kernel"
     )
     return 0
 

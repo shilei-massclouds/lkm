@@ -6,7 +6,9 @@
 controller 是否正在承载执行则是所属 CPU 的局部事实。
 
 `Vm.Preset` 准备入口前导期所需的地址转换环境。它协调 `KernelAddrSpace`、`RawDtb`、`FixMap`、
-`TrampolineVm` 与 `EarlyVm` 完成各自的准备工作，但不改变当前 CPU 正在使用的 controller；成功后
+`TrampolineVm` 与 `EarlyVm` 完成各自的准备工作：先驱动 `KernelAddrSpace.Preset`，再继续准备
+TrampolineVm、RawDtb/FixMap、完成 `KernelAddrSpace.Setup` 并准备 EarlyVm。KernelAddrSpace 的两项
+迁移都不是 BootInitFlow 的平级 drive。Preset 不改变当前 CPU 正在使用的 controller；成功后
 `Vm` 进入 Prepared。
 
 `Vm.Setup` 只在 `Preset` 已完成且当前 CPU 仍由 `PhysicalDirect` 承载时执行。它先让

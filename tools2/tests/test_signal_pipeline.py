@@ -4602,21 +4602,21 @@ class SignalPipelineTests(unittest.TestCase):
                 (23, "BootInitFlow", "CpuGroup.cpus[0]", "DisableFpuVectorExecution", "drives", 20, "Action", "Prepared", "Prepared", "completed"),
                 (24, "BootInitFlow", "KernelImage", "Setup", "drives", 20, "Transition", "Prepared", "Ready", "completed"),
                 (25, "BootInitFlow", "BootInitFlow", "RecordBootCpuHartid", "drives", 20, "Action", "Base", "Base", "completed"),
-                (26, "BootInitFlow", "KernelAddrSpace", "Preset", "drives", 20, "Transition", "Base", "Prepared", "completed"),
-                (27, "KernelAddrSpace", "LinearMap", "Preset", "drives", 26, "Transition", "Base", "Ready", "completed"),
-                (28, "KernelAddrSpace", "UserSpaceReserve", "Preset", "drives", 26, "Transition", "Base", "Ready", "completed"),
-                (29, "BootInitFlow", "CpuGroup.cpus[0]", "Setup", "drives", 20, "Transition", "Prepared", "Ready", "completed"),
-                (30, "BootInitFlow", "CpuGroup.cpus[0].trap.interrupt", "Setup", "drives", 20, "Transition", "Prepared", "Ready", "completed"),
-                (31, "BootInitFlow", "BootInitFlow", "BindTaskStack", "drives", 20, "Action", "Base", "Base", "completed"),
-                (32, "BootInitFlow", "CpuGroup.cpus[0].trap", "Preset", "drives", 20, "Transition", "Base", "Prepared", "completed"),
-                (33, "BootInitFlow", "Vm", "Preset", "drives", 20, "Transition", "Base", "Prepared", "completed"),
-                (34, "Vm", "TrampolineVm", "Setup", "drives", 33, "Transition", "Base", "Ready", "completed"),
-                (35, "Vm", "EarlyVm", "Preset", "drives", 33, "Transition", "Base", "Prepared", "completed"),
+                (26, "BootInitFlow", "BootInitFlow", "BindTaskStack", "drives", 20, "Action", "Base", "Base", "completed"),
+                (27, "BootInitFlow", "CpuGroup.cpus[0]", "Setup", "drives", 20, "Transition", "Prepared", "Ready", "completed"),
+                (28, "BootInitFlow", "CpuGroup.cpus[0].trap.interrupt", "Setup", "drives", 20, "Transition", "Prepared", "Ready", "completed"),
+                (29, "BootInitFlow", "CpuGroup.cpus[0].trap", "Preset", "drives", 20, "Transition", "Base", "Prepared", "completed"),
+                (30, "BootInitFlow", "Vm", "Preset", "drives", 20, "Transition", "Base", "Prepared", "completed"),
+                (31, "Vm", "KernelAddrSpace", "Preset", "drives", 30, "Transition", "Base", "Prepared", "completed"),
+                (32, "KernelAddrSpace", "LinearMap", "Preset", "drives", 31, "Transition", "Base", "Ready", "completed"),
+                (33, "KernelAddrSpace", "UserSpaceReserve", "Preset", "drives", 31, "Transition", "Base", "Ready", "completed"),
+                (34, "Vm", "TrampolineVm", "Setup", "drives", 30, "Transition", "Base", "Ready", "completed"),
+                (35, "Vm", "EarlyVm", "Preset", "drives", 30, "Transition", "Base", "Prepared", "completed"),
                 (36, "EarlyVm", "RawDtb", "Preset", "drives", 35, "Transition", "Base", "Prepared", "completed"),
                 (37, "EarlyVm", "RawDtb", "Setup", "drives", 35, "Transition", "Prepared", "Ready", "completed"),
                 (38, "EarlyVm", "FixMap", "Preset", "drives", 35, "Transition", "Base", "Ready", "completed"),
-                (39, "Vm", "KernelAddrSpace", "Setup", "drives", 33, "Transition", "Prepared", "Ready", "completed"),
-                (40, "Vm", "EarlyVm", "Setup", "drives", 33, "Transition", "Prepared", "Ready", "completed"),
+                (39, "Vm", "KernelAddrSpace", "Setup", "drives", 30, "Transition", "Prepared", "Ready", "completed"),
+                (40, "Vm", "EarlyVm", "Setup", "drives", 30, "Transition", "Prepared", "Ready", "completed"),
                 (41, "BootInitFlow", "Vm", "Setup", "drives", 20, "Transition", "Prepared", "Ready", "completed"),
                 (42, "Vm", "TrampolineVm", "ActivateOnCpu", "drives", 41, "Action", "Ready", "Ready", "completed"),
                 (43, "Vm", "EarlyVm", "ActivateOnCpu", "drives", 41, "Action", "Ready", "Ready", "completed"),
@@ -4648,10 +4648,10 @@ class SignalPipelineTests(unittest.TestCase):
                         item["outcome"],
                     )
                 )
-                handler_member = "Action" if number in {17, 18, 19, 23, 25, 31, 42, 43, 51} else "Transition"
+                handler_member = "Action" if number in {17, 18, 19, 23, 25, 26, 42, 43, 51} else "Transition"
                 handler_state = (
                     "process"
-                    if number in {18, 23, 25, 31, 51}
+                    if number in {18, 23, 25, 26, 51}
                     else item["before_snapshot"]["states"][item["target"]]
                 )
                 self.assertEqual(
@@ -4673,7 +4673,7 @@ class SignalPipelineTests(unittest.TestCase):
                 raw_dtb_setup["after_snapshot"]["facts"],
             )
 
-            vm_preset = derivation["signals"][32]
+            vm_preset = derivation["signals"][29]
             vm_setup = derivation["signals"][40]
             self.assertEqual(
                 vm_preset["handler"]["description"],
@@ -4695,8 +4695,8 @@ class SignalPipelineTests(unittest.TestCase):
             ):
                 self.assertIn(fact, vm_setup["after_snapshot"]["facts"])
 
-            trap_preset = derivation["signals"][31]
-            self.assertEqual(trap_preset["id"], "sig-0032")
+            trap_preset = derivation["signals"][28]
+            self.assertEqual(trap_preset["id"], "sig-0029")
             self.assertEqual(
                 trap_preset["handler"]["description"],
                 "为所属 CPU 建立临时保护入口，用于处理意外事件并支持测试和缺陷定位。",
@@ -4713,7 +4713,7 @@ class SignalPipelineTests(unittest.TestCase):
                 self.assertNotIn(fact, trap_preset["before_snapshot"]["facts"])
                 self.assertIn(fact, trap_preset["after_snapshot"]["facts"])
             self.assertFalse(
-                any(item["cause_id"] == "sig-0032" for item in derivation["signals"])
+                any(item["cause_id"] == "sig-0029" for item in derivation["signals"])
             )
 
             trap_setup = derivation["signals"][44]
@@ -4757,7 +4757,7 @@ class SignalPipelineTests(unittest.TestCase):
                 "把内核启动时的第一个参数作为BootCPU的hartid记录下来，以备后续使用。",
             )
             self.assertEqual(
-                derivation["signals"][28]["selector_resolutions"],
+                derivation["signals"][26]["selector_resolutions"],
                 [
                     {
                         "selector": "CurrentCPU",
@@ -4767,7 +4767,7 @@ class SignalPipelineTests(unittest.TestCase):
                     }
                 ],
             )
-            first_binding = derivation["signals"][30]["after_snapshot"][
+            first_binding = derivation["signals"][25]["after_snapshot"][
                 "contextual_bindings"
             ]["current_task"]["CpuGroup.cpus[0]"]
             self.assertEqual(
@@ -4782,9 +4782,9 @@ class SignalPipelineTests(unittest.TestCase):
                 },
             )
             self.assertIn(
-                "首次原子建立", derivation["signals"][30]["handler"]["description"]
+                "首次原子建立", derivation["signals"][25]["handler"]["description"]
             )
-            first_stack_binding = derivation["signals"][30]["after_snapshot"][
+            first_stack_binding = derivation["signals"][25]["after_snapshot"][
                 "contextual_bindings"
             ]["current_stack"]["CpuGroup.cpus[0]"]
             self.assertEqual(first_stack_binding["stack"], "BootTask.stack")
@@ -4836,10 +4836,10 @@ class SignalPipelineTests(unittest.TestCase):
                 boundary["call_span"],
                 {
                     "end_column": 1,
-                    "end_line": 142,
+                    "end_line": 141,
                     "source_file": "spec/model/phases/boot-init/phase.spec",
                     "start_column": 1,
-                    "start_line": 141,
+                    "start_line": 140,
                 },
             )
             self.assertEqual(boundary["snapshot"], derivation["signals"][19]["after_snapshot"])
@@ -5031,14 +5031,14 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(snapshot.read_bytes(), BOOT_INIT_SETUP_SCENARIO.read_bytes())
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "22567734782cd6d9650ae8ac19f4dba1849620b4f244bd9a0ff8b01e1c5fef8a",
+                "34525a0131c1b94ecf848054c1c3fcaf962d91f6350f64b4bc1071bd28fbeb8d",
             )
             self.assertEqual(
                 {
                     derivation["model_fingerprint"], model["model_fingerprint"],
                     view["model_fingerprint"], saved["model_fingerprint"],
                 },
-                {"sha256:8b402c1807a08a4103b833060089f4969034e94aa8ac3e650db270a541b056b0"},
+                {"sha256:b80e689285bb9384869ec487830913fc5d9ca85dcac7b2d1557080b08887f036"},
             )
             with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
                 compact_text = render_text(view)

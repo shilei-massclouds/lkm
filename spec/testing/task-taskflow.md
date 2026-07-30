@@ -9,14 +9,16 @@ carrier and its independently-lived `TaskFlow` instances.
   `BootIdleSetup` scheduling record is an internal projection and must not be
   reported as a second Task or own a second Task lifecycle.
 - Entry tests must observe `BootTask.OnCpu` exactly once with the `T` early
-  marker, in `Kernel.Started -> BootTask.OnCpu -> BootInitFlow.Started` order.
+  marker, in `Kernel.Started -> BootTask.OnCpu -> PhysicalDirect.ActivatedOnCpu ->
+  BootInitFlow.Started -> InterruptType.Prepared` order. PhysicalDirect, Started and
+  InterruptType use the stable early bytes `D -> O -> I`, each exactly once.
   Physical and virtual BindTask happen later, each must perform a real `tp` write,
   do not change BootTask lifecycle, and both must resolve to the same
   linker-visible `init_task_storage`/`TaskRef::BOOT` carrier. The first call
   establishes the CPU binding, the second refreshes its address representation
   without changing binding identity, and neither initializes preempt count.
 - The complete Kernel.Enable boundary must preserve
-  `Kernel.Started < BootInitFlow.Started < Scheduler.Schedule <
+  `Kernel.Started < PhysicalDirect.ActivatedOnCpu < BootInitFlow.Started < Scheduler.Schedule <
   PayloadHandoffPreparePhase.Online < Kernel.Online <
   KernelInitFlow.PayloadHandoffCommitted < application entry`. Kernel must
   remain Ready through the handoff-prepare checkpoint, and Hello, Smoke and
