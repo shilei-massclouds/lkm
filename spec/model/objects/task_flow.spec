@@ -20,25 +20,20 @@ type TaskFlow: PhaseObject {
          * 通用任务切换动作只执行 BindCurrentTask(task)。架构 switch 在同一个
          * scheduler commit 中另行恢复 next sp；BindTask 本身不绑定 stack。
          */
-        Action::BindTask(task: Task) {
+        Action::BindTask(task_ref: TaskRef) {
             state_effect: StateEffect::None;
             depends_on {
-                current_task_bind_scheduler_commit_boundary_valid(self, task);
-                task.state == State::OnCpu;
-                task_execution_authority_is(task, TaskExecutionAuthority::Live);
-                task_active_flow_is(task, task.active_flow);
-                task_flow_owner_is(task.active_flow, task);
-                task_flow_parent_is(task.active_flow, task);
-                task_flow_cpu_ref_is(task.active_flow, self.cpu_ref);
-                current_task_bind_task_has_unique_valid_ref(task);
+                current_task_bind_scheduler_commit_boundary_valid(self, task_ref);
+                task_ref_ready(task_ref);
+                task_ref_targets_online_task(task_ref);
                 cpu_translation_controller_matches_live_satp_for_ref(self.cpu_ref);
             }
             ensures {
-                current_task_binding_committed(CurrentCPU, task, task.active_flow);
-                current_task_binding_address_refreshed(CurrentCPU, task);
+                current_task_binding_committed(CurrentCPU, task_ref, task_ref.active_flow);
+                current_task_binding_address_refreshed(CurrentCPU, task_ref);
                 current_task_binding_is_cpu_local(CurrentCPU);
-                current_task_binding_replaced_at_scheduler_commit(CurrentCPU, task);
-                current_task_bind_preserves_preemption_state(task);
+                current_task_binding_replaced_at_scheduler_commit(CurrentCPU, task_ref);
+                current_task_bind_preserves_preemption_state(task_ref);
             }
         }
 
@@ -820,14 +815,14 @@ object KthreaddFlow: KthreaddFlowType {
                 task_owns_flow(KthreaddTask, KthreaddFlow);
                 task_state_running(KthreaddTask);
                 kthreadd_provider_ready(KthreaddTask);
-                Scheduler.state == State::Online;
+                Cpu0Scheduler.state == State::Online;
                 self.parent.state == State::OnCpu;
                 task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
             }
             ensures {
-                kthreadd_entry_reaches_schedule_loop(KthreaddTask, Scheduler);
-                kthreadd_schedule_loop_ready(KthreaddTask, Scheduler);
-                kthreadd_schedule_loop_active(KthreaddTask, Scheduler);
+                kthreadd_entry_reaches_schedule_loop(KthreaddTask, Cpu0Scheduler);
+                kthreadd_schedule_loop_ready(KthreaddTask, Cpu0Scheduler);
+                kthreadd_schedule_loop_active(KthreaddTask, Cpu0Scheduler);
             }
         }
     }
@@ -926,11 +921,39 @@ object ApIdleFlow: ApIdleFlowType {
  */
 type BootIdleFlowType: TaskFlow {
     processes {
+        Action::RequestSchedule {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                self.parent.state == State::OnCpu;
+                task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
+                task_active_flow_is(self.parent, self);
+                task_flow_cpu_ref_targets(self, CpuGroup.cpus[0]);
+                BootInitFlow.state == State::Online;
+                Cpu0Scheduler.state == State::Online;
+            }
+            ensures {
+                scheduler_schedule_sender_is_current_active_flow(Cpu0Scheduler);
+                scheduler_schedule_sender_cpu_ref_matches_owner(Cpu0Scheduler);
+                scheduler_schedule_prev_derived_from_sender_and_current_binding(
+                    Cpu0Scheduler,
+                    CurrentTaskRef
+                );
+                scheduler_schedule_request_preserves_task_lifecycle(
+                    Cpu0Scheduler,
+                    CurrentTaskRef
+                );
+            }
+            emits {
+                Cpu0Scheduler.Action::Schedule;
+            }
+        }
+
         Action::PrepareIdleEntry {
             state_effect: StateEffect::None;
             depends_on {
                 self.state == State::Ready;
-                scheduler_first_schedule_committed(Scheduler);
+                scheduler_first_schedule_committed(Cpu0Scheduler);
                 self.parent.state == State::OnCpu;
                 task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
             }
@@ -1047,12 +1070,14 @@ type BootIdleFlowType: TaskFlow {
             }
             drives {
                 self.Action::ConfirmCurrentTask(CurrentTaskRef);
-                Scheduler.Action::ScheduleIdle;
+            }
+            emits {
+                Cpu0Scheduler.Action::Schedule;
             }
             ensures {
-                boot_idle_schedule_requested(self, Scheduler);
-                boot_idle_schedule_returned(self, Scheduler);
-                scheduler_idle_schedule_returned_to_idle(Scheduler, BootTaskRef);
+                boot_idle_schedule_requested(self, Cpu0Scheduler);
+                boot_idle_schedule_returned(self, Cpu0Scheduler);
+                scheduler_idle_schedule_returned_to_idle(Cpu0Scheduler, BootTaskRef);
                 boot_idle_need_resched_drained_after_schedule(BootTask);
                 boot_idle_loop_continues(self);
                 boot_idle_livepatch_state_update_deferred(self);
@@ -1078,7 +1103,7 @@ object BootIdleFlow: BootIdleFlowType {
              */
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    Scheduler.state == State::Online;
+                    Cpu0Scheduler.state == State::Online;
                     BootIdleSetup.state == State::Ready;
                     KernelInitTask.state == State::Online;
                     KthreaddTask.state == State::Online;

@@ -1,22 +1,22 @@
 # Linux Checkpoint Mapping Coverage
 
-- total checkpoints: 476
+- total checkpoints: 479
 
 ## Mapping Kind Counts
 
 | mapping_kind | count |
 | --- | ---: |
 | exact | 103 |
-| range | 14 |
-| unmapped | 359 |
+| range | 21 |
+| unmapped | 355 |
 
 ## Confidence Counts
 
 | confidence | count |
 | --- | ---: |
-| none | 359 |
+| none | 355 |
+| high | 62 |
 | medium | 62 |
-| high | 55 |
 
 ## Mapped Linux File Counts
 
@@ -24,6 +24,7 @@
 | --- | ---: |
 | init/main.c | 53 |
 | arch/riscv/kernel/head.S | 14 |
+| kernel/sched/core.c | 8 |
 | arch/riscv/mm/init.c | 7 |
 | arch/riscv/kernel/smpboot.c | 6 |
 | fs/binfmt_elf.c | 6 |
@@ -38,7 +39,6 @@
 | kernel/fork.c | 2 |
 | arch/riscv/kernel/process.c | 1 |
 | fs/stat.c | 1 |
-| kernel/sched/core.c | 1 |
 | kernel/sched/idle.c | 1 |
 | mm/mm_init.c | 1 |
 
@@ -46,7 +46,6 @@
 
 | family | count |
 | --- | ---: |
-| Scheduler | 8 |
 | CpuHotplugSync | 7 |
 | PageAllocator | 5 |
 | BootIdleEntryPhase | 4 |
@@ -58,6 +57,7 @@
 | KthreaddTask | 4 |
 | MemBlock | 4 |
 | PayloadHandoffPreparePhase | 4 |
+| Scheduler | 4 |
 | SyscallTable | 4 |
 | VirtioBlk | 4 |
 | BootCPU | 3 |

@@ -54,11 +54,11 @@ fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
     {
         let Context {
             rcu_core,
-            scheduler,
             cpu_group,
             ..
         } = ctx;
-        let Some(local_interrupt) = cpu_group.boot_cpu_local_interrupt_mut() else {
+        let Some((scheduler, local_interrupt)) = cpu_group.boot_scheduler_and_local_interrupt_mut()
+        else {
             return failed_condition(
                 LifecycleEvent::Setup,
                 State::Base,
@@ -107,10 +107,10 @@ fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
         kthreadd_task,
         kthreadd_ready_gate_wait_lock,
         cpu_group,
-        scheduler,
         ..
     } = ctx;
-    let Some(local_interrupt) = cpu_group.boot_cpu_local_interrupt_mut() else {
+    let Some((scheduler, local_interrupt)) = cpu_group.boot_scheduler_and_local_interrupt_mut()
+    else {
         return failed_condition(
             LifecycleEvent::Setup,
             State::Base,
@@ -131,10 +131,10 @@ fn kernel_init_pi_lock_irqsave(ctx: &mut Context) -> EventResult {
     let Context {
         kernel_init_task_pi_lock,
         cpu_group,
-        scheduler,
         ..
     } = ctx;
-    let Some(local_interrupt) = cpu_group.boot_cpu_local_interrupt_mut() else {
+    let Some((scheduler, local_interrupt)) = cpu_group.boot_scheduler_and_local_interrupt_mut()
+    else {
         return failed_condition(
             LifecycleEvent::Enable,
             State::Base,
@@ -149,10 +149,10 @@ fn kernel_init_pi_unlock_irqrestore(ctx: &mut Context) -> EventResult {
     let Context {
         kernel_init_task_pi_lock,
         cpu_group,
-        scheduler,
         ..
     } = ctx;
-    let Some(local_interrupt) = cpu_group.boot_cpu_local_interrupt_mut() else {
+    let Some((scheduler, local_interrupt)) = cpu_group.boot_scheduler_and_local_interrupt_mut()
+    else {
         return failed_condition(
             LifecycleEvent::Enable,
             State::Base,
@@ -168,10 +168,10 @@ fn kthreadd_pi_lock_irqsave(ctx: &mut Context) -> EventResult {
     let Context {
         kthreadd_task_pi_lock,
         cpu_group,
-        scheduler,
         ..
     } = ctx;
-    let Some(local_interrupt) = cpu_group.boot_cpu_local_interrupt_mut() else {
+    let Some((scheduler, local_interrupt)) = cpu_group.boot_scheduler_and_local_interrupt_mut()
+    else {
         return failed_condition(
             LifecycleEvent::Enable,
             State::Base,
@@ -186,10 +186,10 @@ fn kthreadd_pi_unlock_irqrestore(ctx: &mut Context) -> EventResult {
     let Context {
         kthreadd_task_pi_lock,
         cpu_group,
-        scheduler,
         ..
     } = ctx;
-    let Some(local_interrupt) = cpu_group.boot_cpu_local_interrupt_mut() else {
+    let Some((scheduler, local_interrupt)) = cpu_group.boot_scheduler_and_local_interrupt_mut()
+    else {
         return failed_condition(
             LifecycleEvent::Enable,
             State::Base,
@@ -229,9 +229,9 @@ fn copy_kernel_init_task(ctx: &mut Context) -> EventResult {
     if ctx.kernel_init_task.state() != State::Prepared
         || ctx.task_creation_core.state() != State::Ready
         || ctx.root_pid_namespace.state() != State::Ready
-        || ctx.scheduler.state() != State::Online
+        || ctx.scheduler().state() != State::Online
         || ctx
-            .scheduler
+            .scheduler()
             .boot_cpu_owned_scheduler_view(&ctx.cpu_group)
             .is_none()
     {
@@ -251,34 +251,54 @@ fn copy_kernel_init_task(ctx: &mut Context) -> EventResult {
             State::Ready,
         );
     };
-    let copy_result = ctx
-        .task_creation_core
-        .copy_process(
+    let copy_result = {
+        let Context {
+            task_creation_core,
+            cpu_group,
+            boot_task,
+            root_pid_namespace,
+            credential_core,
+            signal_core,
+            task_file_context,
+            security_core,
+            kernel_init_task,
+            ..
+        } = ctx;
+        let Some(scheduler) = cpu_group.boot_scheduler() else {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                kernel_init_task.state(),
+                State::Prepared,
+                State::Ready,
+            );
+        };
+        task_creation_core.copy_process(
             TaskCopyProcessInputs {
-                src_task: ctx.boot_task.task(),
-                src_task_ref: ctx.boot_task.task_ref(),
+                src_task: boot_task.task(),
+                src_task_ref: boot_task.task_ref(),
                 current_task,
-                root_pid_namespace: &ctx.root_pid_namespace,
-                credential_core: &ctx.credential_core,
-                signal_core: &ctx.signal_core,
-                task_file_context: &ctx.task_file_context,
-                security_core: &ctx.security_core,
-                scheduler: &ctx.scheduler,
-                cpu_group: &ctx.cpu_group,
+                root_pid_namespace,
+                credential_core,
+                signal_core,
+                task_file_context,
+                security_core,
+                scheduler,
+                cpu_group,
                 entry: TaskEntry::KernelInit,
             },
-            ctx.kernel_init_task.state(),
-            ctx.kernel_init_task.entry(),
+            kernel_init_task.state(),
+            kernel_init_task.entry(),
         )
-        .map_err(|error| {
-            error.with_diagnostic_if_absent(FailureDiagnostic::new(
-                "BootInitRestInitPhase",
-                "copy_kernel_init_task",
-                "KernelInitTask",
-                "copy_process",
-                "TaskCreationCore.copy_process",
-            ))
-        })?;
+    }
+    .map_err(|error| {
+        error.with_diagnostic_if_absent(FailureDiagnostic::new(
+            "BootInitRestInitPhase",
+            "copy_kernel_init_task",
+            "KernelInitTask",
+            "copy_process",
+            "TaskCreationCore.copy_process",
+        ))
+    })?;
     if copy_result.entry() != TaskEntry::KernelInit
         || !copy_result.task_struct_allocated()
         || !copy_result.thread_context_ready()
@@ -343,9 +363,9 @@ fn setup_kernel_init_task(ctx: &mut Context) -> EventResult {
 
 fn wake_and_enable_kernel_init_task(ctx: &mut Context) -> EventResult {
     if ctx.kernel_init_task.state() != State::Ready
-        || ctx.scheduler.state() != State::Online
+        || ctx.scheduler().state() != State::Online
         || ctx
-            .scheduler
+            .scheduler()
             .boot_cpu_owned_scheduler_view(&ctx.cpu_group)
             .is_none()
         || ctx.cpu_group.state() != State::Ready
@@ -355,7 +375,7 @@ fn wake_and_enable_kernel_init_task(ctx: &mut Context) -> EventResult {
             .current_task_ref()
             .is_ok_and(|task_ref| task_ref.same_identity(ctx.boot_task.task_ref()))
         || ctx.kernel_init_task_pi_lock.state() != State::Ready
-        || ctx.scheduler.boot_idle_preemption().state() != State::Ready
+        || ctx.scheduler().boot_idle_preemption().state() != State::Ready
         || ctx.kernel_init_task.pid() != KERNEL_INIT_PID
         || !ctx.kernel_init_task.sched_entity_ready()
     {
@@ -370,10 +390,9 @@ fn wake_and_enable_kernel_init_task(ctx: &mut Context) -> EventResult {
     kernel_init_pi_lock_irqsave(ctx)?;
     let guarded_result: EventResult = (|| {
         ctx.kernel_init_task.task_mut().set_runtime_running()?;
-        let selected_rq = ctx
-            .scheduler
-            .select_runqueue_for_task(ctx.kernel_init_task.pid(), &ctx.cpu_group)?;
-        let Some(selected_cpu_ref) = ctx.cpu_group.cpu_ref_at(selected_rq.cpu_id()) else {
+        let task_pid = ctx.kernel_init_task.pid();
+        let selected_rq = ctx.scheduler_mut().select_scheduler_for_task(task_pid)?;
+        let Some(selected_cpu_ref) = ctx.cpu_group.cpu_ref_at(selected_rq.logical_id()) else {
             return failed_condition(
                 LifecycleEvent::Enable,
                 ctx.kernel_init_task.state(),
@@ -389,11 +408,9 @@ fn wake_and_enable_kernel_init_task(ctx: &mut Context) -> EventResult {
                 State::Online,
             );
         }
-        ctx.scheduler.enqueue_task_on_runqueue(
-            ctx.kernel_init_task.pid(),
-            ctx.kernel_init_task.task_ref(),
-            selected_rq,
-        )?;
+        let task_ref = ctx.kernel_init_task.task_ref();
+        ctx.scheduler_mut()
+            .enqueue_task_on_scheduler(task_pid, task_ref, selected_rq)?;
         ctx.kernel_init_task.task_mut().publish_runqueue_binding()?;
         ctx.kernel_init_task
             .task_mut()
@@ -408,7 +425,7 @@ fn pin_kernel_init_to_boot_cpu(ctx: &mut Context, cpu_id: usize) -> EventResult 
         || ctx.kernel_init_task.pid() != KERNEL_INIT_PID
         || ctx.kernel_init_flow.cpu_id() != cpu_id
         || ctx.root_pid_namespace.state() != State::Ready
-        || ctx.scheduler.boot_idle_rcu_read_side().state() != State::Prepared
+        || ctx.scheduler().boot_idle_rcu_read_side().state() != State::Prepared
     {
         return failed_condition(
             LifecycleEvent::Enable,
@@ -418,10 +435,12 @@ fn pin_kernel_init_to_boot_cpu(ctx: &mut Context, cpu_id: usize) -> EventResult 
         );
     }
 
-    let locks_before = ctx.scheduler.boot_idle_rcu_read_side().read_lock_count();
-    ctx.scheduler.boot_idle_rcu_read_side_mut().read_lock()?;
+    let locks_before = ctx.scheduler().boot_idle_rcu_read_side().read_lock_count();
+    ctx.scheduler_mut()
+        .boot_idle_rcu_read_side_mut()
+        .read_lock()?;
     let entered =
-        ctx.scheduler.boot_idle_rcu_read_side().read_lock_count() == locks_before.wrapping_add(1);
+        ctx.scheduler().boot_idle_rcu_read_side().read_lock_count() == locks_before.wrapping_add(1);
     let guarded_result = ctx
         .kernel_init_task
         .task_mut()
@@ -430,9 +449,12 @@ fn pin_kernel_init_to_boot_cpu(ctx: &mut Context, cpu_id: usize) -> EventResult 
             ctx.kernel_init_task
                 .commit_boot_cpu_pin_observation(entered)
         });
-    let unlock_result = ctx.scheduler.boot_idle_rcu_read_side_mut().read_unlock();
+    let unlock_result = ctx
+        .scheduler_mut()
+        .boot_idle_rcu_read_side_mut()
+        .read_unlock();
     guarded_result.and(unlock_result)?;
-    let balanced = ctx.scheduler.boot_idle_rcu_read_side().balanced();
+    let balanced = ctx.scheduler().boot_idle_rcu_read_side().balanced();
     ctx.kernel_init_task
         .commit_pid_lookup_guard_balanced(balanced)
 }
@@ -464,9 +486,9 @@ fn copy_kthreadd_task(ctx: &mut Context) -> EventResult {
     if ctx.kthreadd_task.state() != State::Prepared
         || ctx.task_creation_core.state() != State::Ready
         || ctx.root_pid_namespace.state() != State::Ready
-        || ctx.scheduler.state() != State::Online
+        || ctx.scheduler().state() != State::Online
         || ctx
-            .scheduler
+            .scheduler()
             .boot_cpu_owned_scheduler_view(&ctx.cpu_group)
             .is_none()
     {
@@ -486,23 +508,45 @@ fn copy_kthreadd_task(ctx: &mut Context) -> EventResult {
             State::Ready,
         );
     };
-    let copy_result = ctx.task_creation_core.copy_process(
-        TaskCopyProcessInputs {
-            src_task: ctx.boot_task.task(),
-            src_task_ref: ctx.boot_task.task_ref(),
-            current_task,
-            root_pid_namespace: &ctx.root_pid_namespace,
-            credential_core: &ctx.credential_core,
-            signal_core: &ctx.signal_core,
-            task_file_context: &ctx.task_file_context,
-            security_core: &ctx.security_core,
-            scheduler: &ctx.scheduler,
-            cpu_group: &ctx.cpu_group,
-            entry: TaskEntry::Kthreadd,
-        },
-        ctx.kthreadd_task.state(),
-        ctx.kthreadd_task.entry(),
-    )?;
+    let copy_result = {
+        let Context {
+            task_creation_core,
+            cpu_group,
+            boot_task,
+            root_pid_namespace,
+            credential_core,
+            signal_core,
+            task_file_context,
+            security_core,
+            kthreadd_task,
+            ..
+        } = ctx;
+        let Some(scheduler) = cpu_group.boot_scheduler() else {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                kthreadd_task.state(),
+                State::Prepared,
+                State::Ready,
+            );
+        };
+        task_creation_core.copy_process(
+            TaskCopyProcessInputs {
+                src_task: boot_task.task(),
+                src_task_ref: boot_task.task_ref(),
+                current_task,
+                root_pid_namespace,
+                credential_core,
+                signal_core,
+                task_file_context,
+                security_core,
+                scheduler,
+                cpu_group,
+                entry: TaskEntry::Kthreadd,
+            },
+            kthreadd_task.state(),
+            kthreadd_task.entry(),
+        )?
+    };
     if copy_result.entry() != TaskEntry::Kthreadd
         || !copy_result.task_struct_allocated()
         || !copy_result.thread_context_ready()
@@ -558,9 +602,9 @@ fn setup_kthreadd_task(ctx: &mut Context) -> EventResult {
 
 fn wake_and_enable_kthreadd_task(ctx: &mut Context) -> EventResult {
     if ctx.kthreadd_task.state() != State::Ready
-        || ctx.scheduler.state() != State::Online
+        || ctx.scheduler().state() != State::Online
         || ctx
-            .scheduler
+            .scheduler()
             .boot_cpu_owned_scheduler_view(&ctx.cpu_group)
             .is_none()
         || ctx.cpu_group.state() != State::Ready
@@ -570,7 +614,7 @@ fn wake_and_enable_kthreadd_task(ctx: &mut Context) -> EventResult {
             .current_task_ref()
             .is_ok_and(|task_ref| task_ref.same_identity(ctx.boot_task.task_ref()))
         || ctx.kthreadd_task_pi_lock.state() != State::Ready
-        || ctx.scheduler.boot_idle_preemption().state() != State::Ready
+        || ctx.scheduler().boot_idle_preemption().state() != State::Ready
         || ctx.kthreadd_task.pid() != KTHREADD_PID
         || !ctx.kthreadd_task.sched_entity_ready()
     {
@@ -585,10 +629,9 @@ fn wake_and_enable_kthreadd_task(ctx: &mut Context) -> EventResult {
     kthreadd_pi_lock_irqsave(ctx)?;
     let guarded_result: EventResult = (|| {
         ctx.kthreadd_task.task_mut().set_runtime_running()?;
-        let selected_rq = ctx
-            .scheduler
-            .select_runqueue_for_task(ctx.kthreadd_task.pid(), &ctx.cpu_group)?;
-        let Some(selected_cpu_ref) = ctx.cpu_group.cpu_ref_at(selected_rq.cpu_id()) else {
+        let task_pid = ctx.kthreadd_task.pid();
+        let selected_rq = ctx.scheduler_mut().select_scheduler_for_task(task_pid)?;
+        let Some(selected_cpu_ref) = ctx.cpu_group.cpu_ref_at(selected_rq.logical_id()) else {
             return failed_condition(
                 LifecycleEvent::Enable,
                 ctx.kthreadd_task.state(),
@@ -604,11 +647,9 @@ fn wake_and_enable_kthreadd_task(ctx: &mut Context) -> EventResult {
                 State::Online,
             );
         }
-        ctx.scheduler.enqueue_task_on_runqueue(
-            ctx.kthreadd_task.pid(),
-            ctx.kthreadd_task.task_ref(),
-            selected_rq,
-        )?;
+        let task_ref = ctx.kthreadd_task.task_ref();
+        ctx.scheduler_mut()
+            .enqueue_task_on_scheduler(task_pid, task_ref, selected_rq)?;
         ctx.kthreadd_task.task_mut().publish_runqueue_binding()?;
         ctx.kthreadd_task
             .task_mut()
@@ -624,7 +665,7 @@ fn publish_kthreadd_global_ref(ctx: &mut Context) -> EventResult {
         || !ctx.kthreadd_task.running()
         || !ctx.kthreadd_task.enqueued()
         || ctx.root_pid_namespace.state() != State::Ready
-        || ctx.scheduler.boot_idle_rcu_read_side().state() != State::Prepared
+        || ctx.scheduler().boot_idle_rcu_read_side().state() != State::Prepared
     {
         return failed_condition(
             LifecycleEvent::Enable,
@@ -634,17 +675,22 @@ fn publish_kthreadd_global_ref(ctx: &mut Context) -> EventResult {
         );
     }
 
-    let locks_before = ctx.scheduler.boot_idle_rcu_read_side().read_lock_count();
-    ctx.scheduler.boot_idle_rcu_read_side_mut().read_lock()?;
+    let locks_before = ctx.scheduler().boot_idle_rcu_read_side().read_lock_count();
+    ctx.scheduler_mut()
+        .boot_idle_rcu_read_side_mut()
+        .read_lock()?;
     let entered =
-        ctx.scheduler.boot_idle_rcu_read_side().read_lock_count() == locks_before.wrapping_add(1);
+        ctx.scheduler().boot_idle_rcu_read_side().read_lock_count() == locks_before.wrapping_add(1);
     let guarded_result = ctx.kthreadd_task.commit_global_ref_metadata(entered);
     if guarded_result.is_ok() {
         crate::checkpoint::checkpoint(Checkpoint::KthreaddTaskGlobalRefBound);
     }
-    let unlock_result = ctx.scheduler.boot_idle_rcu_read_side_mut().read_unlock();
+    let unlock_result = ctx
+        .scheduler_mut()
+        .boot_idle_rcu_read_side_mut()
+        .read_unlock();
     guarded_result.and(unlock_result)?;
-    let balanced = ctx.scheduler.boot_idle_rcu_read_side().balanced();
+    let balanced = ctx.scheduler().boot_idle_rcu_read_side().balanced();
     ctx.kthreadd_task.commit_pid_lookup_guard_balanced(balanced)
 }
 
@@ -727,7 +773,9 @@ fn boot_init_rest_init_phase_ready(ctx: &Context) -> bool {
     let Some(boot_cpu) = ctx.cpu_group.boot_cpu() else {
         return false;
     };
-    let Some(boot_scheduler_view) = ctx.scheduler.boot_cpu_owned_scheduler_view(&ctx.cpu_group)
+    let Some(boot_scheduler_view) = ctx
+        .scheduler()
+        .boot_cpu_owned_scheduler_view(&ctx.cpu_group)
     else {
         return false;
     };
@@ -778,7 +826,7 @@ fn boot_init_rest_init_phase_ready(ctx: &Context) -> bool {
         && ctx.kthreadd_task.sched_entity_ready()
         && ctx.kthreadd_task.running()
         && ctx.kthreadd_flow.cpu_id() == boot_cpu.logical_id()
-        && ctx.scheduler.selected_runqueue_task_id() == ctx.kthreadd_task.pid()
+        && ctx.scheduler().selected_runqueue_task_id() == ctx.kthreadd_task.pid()
         && boot_scheduler_view.runqueue_contains_task_id(ctx.kthreadd_task.pid())
         && ctx.kthreadd_task_pi_lock.state() == State::Ready
         && !ctx.kthreadd_task_pi_lock.locked()
@@ -796,7 +844,7 @@ fn boot_init_rest_init_phase_ready(ctx: &Context) -> bool {
         && ctx.kthreadd_ready_gate.state() == State::Online
         && ctx.kthreadd_ready_gate.completion().complete_committed()
         && ctx.kthreadd_ready_gate.completion().token_available()
-        && ctx.scheduler.schedule_passes() == 0
+        && ctx.scheduler().schedule_passes() == 0
         && runtime_services_still_deferred(&ctx.workqueue, &ctx.rcu_core, &ctx.cpu_group)
 }
 
@@ -804,7 +852,9 @@ pub(super) fn facts_stable(ctx: &Context) -> bool {
     let Some(boot_cpu) = ctx.cpu_group.boot_cpu() else {
         return false;
     };
-    let Some(boot_scheduler_view) = ctx.scheduler.boot_cpu_owned_scheduler_view(&ctx.cpu_group)
+    let Some(boot_scheduler_view) = ctx
+        .scheduler()
+        .boot_cpu_owned_scheduler_view(&ctx.cpu_group)
     else {
         return false;
     };

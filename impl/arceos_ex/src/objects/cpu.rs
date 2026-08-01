@@ -2,6 +2,7 @@ use super::{
     boot_args::BootArgs,
     exception_type::ExceptionType,
     interrupt_type::InterruptType,
+    scheduler::Scheduler,
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     trap_type::TrapType,
 };
@@ -547,6 +548,7 @@ pub struct Cpu {
     active: bool,
     online: bool,
     translation_state: TranslationState,
+    scheduler: Scheduler,
     trap: TrapType,
 }
 
@@ -562,6 +564,7 @@ impl Cpu {
             active: false,
             online: false,
             translation_state: TranslationState::new(),
+            scheduler: Scheduler::new(),
             trap: TrapType::new(),
         }
     }
@@ -577,6 +580,7 @@ impl Cpu {
             active: false,
             online: false,
             translation_state: TranslationState::new(),
+            scheduler: Scheduler::new(),
             trap: TrapType::new(),
         }
     }
@@ -783,6 +787,18 @@ impl Cpu {
 
     pub const fn trap(&self) -> &TrapType {
         &self.trap
+    }
+
+    pub const fn scheduler(&self) -> &Scheduler {
+        &self.scheduler
+    }
+
+    pub fn scheduler_mut(&mut self) -> &mut Scheduler {
+        &mut self.scheduler
+    }
+
+    pub fn scheduler_and_local_interrupt_mut(&mut self) -> (&mut Scheduler, &mut InterruptType) {
+        (&mut self.scheduler, self.trap.interrupt_mut())
     }
 
     pub fn trap_mut(&mut self) -> &mut TrapType {

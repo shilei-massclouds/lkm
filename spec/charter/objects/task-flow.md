@@ -60,11 +60,14 @@ switch commit 边界把 CPU-local CurrentTask 换绑到即将运行的普通 Tas
 commit 中独立恢复 next Task 的 `sp`，因此 finish continuation 开始前，CurrentTask 与从 live `sp`
 校验得到的 `CurrentStack == task.stack` 必须同时可解析。不同 CPU 的 binding 彼此隔离。
 
-TaskFlow parent 仍只表达结构归属，不是 current-task 存储。绑定完成后，所选 Task 必须同时是
+TaskFlow parent 仍只表达结构归属，不是 current-task 存储。普通执行期解析时，所选 Task 必须同时是
 effective TaskFlow 的 parent 和 owner，且该 Flow 必须是 Task 的 active Flow；目标必须为该 CPU 上的
-`OnCpu/Live` 执行主体，并具有恰好一个有效、指向自身的 TaskRef。`CurrentTaskRef` 只从该已绑定 Task
-的唯一有效 TaskRef 派生。缺失 CPU 执行上下文、尚未绑定、错误 parent/owner、非 active Flow、错误
-CPU、非 `OnCpu/Live` 或悬空/过期/重复 TaskRef 都必须拒绝，失败不得提交部分 binding。
+`OnCpu/Live` 执行主体，并具有恰好一个有效、指向自身的 TaskRef。Scheduler RestoreCoreContext 的正式
+switch commit 是唯一短暂例外：它可以把已完整预检的 `Online/None/Valid` next Task 绑定为 CurrentTask，
+但在 next Task 接受 Continue 前不得把该 binding 当成可执行 Flow context。`CurrentTaskRef` 只从已绑定
+Task 的唯一有效 TaskRef 派生。缺失 CPU 执行上下文、尚未绑定、错误 parent/owner、错误 CPU、非执行期
+`OnCpu/Live` 或非 switch-commit `Online/None/Valid`、悬空/过期/重复 TaskRef 都必须拒绝，失败不得提交
+部分 binding。
 
 TaskFlow 及其同步 `drives` continuation 继承同一 CPU-local binding；异步 `emits` 不继承，接收方从
 自己的执行上下文重新解析。trace 必须记录 canonical CPU、Task、source Flow 和 source TaskRef。
@@ -148,11 +151,16 @@ BootInitFlow.Preset。这不是 Kernel 提交后的异步事件。`Startup` 只�
 Preset 接受 checkpoint。接收方必须仍为 Base 且 parent BootTask 必须为 OnCpu；重复启动、绕过
 Kernel.Enable、缺失 CpuRef/controller association 或执行权不匹配立即失败。
 
+只有当前 Task 的 active TaskFlow 可以根据自己的 CpuRef 向该 CPU owned Scheduler `emits Schedule()`；
+Schedule 无 payload，Scheduler 必须从 sender Flow、CpuRef 和 CPU-local CurrentTask binding 推导 prev。
+identity 选择由 Scheduler 向原 active Flow `emits Continue`，表达 schedule 返回；非 identity 选择由
+Scheduler 在完成 switch 后向 next Task `emits Continue`，Task 再向 initial/active Flow emits
+Startup/Continue。
+
 PID 1 的首次 dispatch 是跨栈 continuation：scheduler prepare 校验两侧 FlowRef/context，架构 switch
-保存 BootTask 并恢复 PID 1，随后在 `kernel_init_entry()` 的 finish 边界原子提交 BootTask Suspend、
-PID 1 Continue、active Flow、断点消费与 `CurrentTask.BindTask(KernelInitTask)`，使 CurrentTask 解析
-切换到 PID 1，再严格发出
-KernelInitFlow Startup。不得在 BootTask 栈上
+依次保存并 Suspend BootTask、恢复 PID 1 并提交 `CurrentTask.BindTask(KernelInitTask)` 与 CurrentStack，
+随后在 `kernel_init_entry()` 的 finish 边界完成清理并向 PID 1 emits Continue。PID 1 接受后提交 OnCpu、
+active Flow 与断点消费，再严格发出 KernelInitFlow Startup。不得在 BootTask 栈上
 预提交 PID 1 OnCpu，也不得预执行 `PreSmpInitPhase` 或任何后续叶子阶段。
 
 每个 `ApIdleFlow[logical_id]` 与 `ApIdleTask[logical_id]` pointwise 绑定。BP 发出的 HSM Startup 是异步、
@@ -164,8 +172,8 @@ KernelInitFlow Startup。不得在 BootTask 栈上
 
 boot idle successor binding 保持 `BootTask` 身份。`BootIdleFlow.Setup` 在首次真实调度切换前直接提交
 owner 和 active binding，并到达 Ready；`BootTask.initial_flow` 仍指向 `BootInitFlow`。
-`BootInitFlow.Online` 随后在真实 BootTask→KernelInitTask
-switch commit 的紧邻边界发布。只有调度器未来恢复 `BootTask` 时，`BootIdleFlow` continuation 才
+`BootInitFlow.Online` 随后在发出首次 Schedule 之前发布；发布和 Schedule 请求都不改变 BootTask 的
+OnCpu lifecycle。只有调度器实际选择 `next != prev` 并 Suspend BootTask 后，它才变为 Online。只有调度器未来恢复 `BootTask` 时，`BootIdleFlow` continuation 才
 在 Task.Continue 提交 OnCpu 后收到 Continue，驱动 `BootIdleEntryPhase` 并进入 idle loop。实现可以
 保留 scheduler-owned 的 idle metadata、锁或
 runqueue 投影视图，但不得把它们暴露成第二个 Task carrier。

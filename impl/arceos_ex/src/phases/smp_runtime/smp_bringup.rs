@@ -44,7 +44,6 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
     ctx.secondary_idle_tasks.preset(
         &ctx.pre_smp_boundary,
         &mut ctx.cpu_group,
-        &ctx.scheduler,
         &ctx.per_cpu_storage,
     )?;
     ctx.smpboot_threads_lock.preset_static()?;
@@ -90,7 +89,6 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
         &mut ctx.cpu_group,
         &mut ctx.cpu_hotplug_sync,
         &mut ctx.cpu_running_wait_lock,
-        &mut ctx.scheduler,
     )?;
     ctx.secondary_cpu_online_ack.setup(
         &ctx.secondary_cpu_startup_ack,
@@ -98,7 +96,6 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
         &mut ctx.cpu_group,
         &ctx.sbi_ipi,
         &mut ctx.done_up_wait_lock,
-        &mut ctx.scheduler,
     )?;
     ctx.smp_bringup_boundary
         .setup(&ctx.secondary_cpu_online_ack, &ctx.cpu_group)

@@ -10,11 +10,15 @@
   state copy. Raw byte `0` means unbound/absent only; `1..=4` encode PhysicalDirect, TrampolineVm, EarlyVm and
   SwapperVm. `TranslationController` itself has only those four real values. Any other nonzero byte is invalid and
   must produce `InvalidTranslationControllerEncoding` or fail-stop on a critical entry path.
-- Keep CPU-local `InterruptType` and related local state inside `Cpu`; do not create a current-task child or slot.
+- Keep the CPU-local `Scheduler`, `InterruptType` and related local state inside `Cpu`; do not create a current-task
+  child or slot. Exactly one Scheduler field exists for every published possible-CPU slot. A global `Scheduler`
+  singleton, a parallel `RunQueue` body, or a context-level array mirroring per-CPU queue state is forbidden.
   The architectural `tp` register is the CPU execution context binding required by `CurrentTask.BindTask`, not a
   second Rust lifecycle object or global singleton.
 - Do not expose `CpuView` or copy CPU facts into an identity-bearing projection.
 - Lower `CpuRef` to a compact logical ID. Every dereference goes through `CpuGroup` and rejects an absent slot.
+- Resolve `SchedulerRef` through the owning `CpuRef` and the same `CpuGroup` slot. CPU0's Scheduler becomes Online
+  with the boot CPU scheduling handoff; an AP Scheduler remains Ready until that CPU's online handoff.
 - Lower `CurrentCPU` as a stateless `CurrentCpu` borrow created from an effective `TaskFlow` plus `CpuGroup`.
   Dereference that Flow's CpuRef directly, including before BootTask's first BindTask; after a task binding exists,
   CurrentTask resolution must prove the Task/Flow/CPU triple agrees. CurrentCPU cannot be constructed from a raw

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import re
 from typing import Any
 
 from tools2_common import ANIMATION_SCHEMA, ANIMATION_VERSION, PRODUCER, ProtocolError
@@ -11,6 +12,7 @@ from tools2_common import ANIMATION_SCHEMA, ANIMATION_VERSION, PRODUCER, Protoco
 _HANDLER_KINDS = {"Transition", "Action"}
 _OUTCOMES = {"completed", "rejected", "failed", "truncated", "stopped"}
 _DELIVERIES = {"root", "drives", "emits"}
+_INDEXED_CHILD = re.compile(r"^(?P<field>[A-Za-z_][A-Za-z0-9_]*)\[[^]]+\]$")
 _TERMINAL_EVENTS = {
     "response_completed": "completed",
     "signal_rejected": "rejected",
@@ -96,6 +98,58 @@ def _validate_systems(
             "states": deepcopy(lifecycle.get("states", {})),
             "initial_state": lifecycle.get("initial_state"),
             "declared_type": declared_type,
+        }
+    # An explicitly named object may materialize an owned child of an indexed
+    # runtime object before that parent occurs in the selected trace.  Preserve
+    # the declared hierarchy for animation without inventing a runtime
+    # occurrence or snapshot state.
+    missing_parents = {
+        system.get("parent")
+        for system in systems.values()
+        if isinstance(system, dict)
+        and isinstance(system.get("parent"), str)
+        and system["parent"] not in systems
+    }
+    while missing_parents:
+        identity = min(missing_parents)
+        owner, separator, child = identity.rpartition(".")
+        match = _INDEXED_CHILD.fullmatch(child) if separator else None
+        owner_system = systems.get(owner)
+        owned_fields = (
+            owner_system.get("fields", {}).get("owned", [])
+            if isinstance(owner_system, dict)
+            else []
+        )
+        field = next(
+            (
+                item
+                for item in owned_fields
+                if isinstance(item, dict)
+                and match is not None
+                and item.get("name") == match.group("field")
+                and item.get("indexed") is True
+            ),
+            None,
+        )
+        if field is None:
+            break
+        declared_type = field.get("type")
+        declaration = types.get(declared_type, {})
+        lifecycle = types.get(
+            declaration.get("effective_lifecycle_type", declared_type), {}
+        )
+        systems[identity] = {
+            "parent": owner,
+            "states": deepcopy(lifecycle.get("states", {})),
+            "initial_state": lifecycle.get("initial_state"),
+            "declared_type": declared_type,
+        }
+        missing_parents = {
+            system.get("parent")
+            for system in systems.values()
+            if isinstance(system, dict)
+            and isinstance(system.get("parent"), str)
+            and system["parent"] not in systems
         }
     for name, system in systems.items():
         if not isinstance(name, str) or not name or not isinstance(system, dict):

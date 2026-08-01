@@ -126,7 +126,7 @@ object PreSmpInitcallTable: KernelObject {
                 depends_on {
                     RcuCore.state == State::Ready;
                     Softirq.state == State::Ready;
-                    Scheduler.state == State::Online;
+                    Cpu0Scheduler.state == State::Online;
                     CpuGroup.state == State::Ready;
                 }
 
@@ -134,7 +134,7 @@ object PreSmpInitcallTable: KernelObject {
                     pre_smp_initcalls_early_level_ran(PreSmpInitcallTable);
                     rcu_gp_kthread_ready(RcuCore);
                     softirq_ksoftirqd_ready(Softirq);
-                    scheduler_migration_ready(Scheduler, CpuGroup.cpus[0]);
+                    scheduler_migration_ready(Cpu0Scheduler, CpuGroup.cpus[0]);
                     cpu_stopper_prepared();
                     memory_zero_page_bound();
                     address_space_id_ready();
@@ -148,7 +148,7 @@ object PreSmpInitcallTable: KernelObject {
             pre_smp_initcalls_early_level_ran(PreSmpInitcallTable);
             rcu_gp_kthread_ready(RcuCore);
             softirq_ksoftirqd_ready(Softirq);
-            scheduler_migration_ready(Scheduler, CpuGroup.cpus[0]);
+            scheduler_migration_ready(Cpu0Scheduler, CpuGroup.cpus[0]);
         }
     }
 }
@@ -197,7 +197,7 @@ object PreSmpInitBoundary: KernelObject {
  * SMP 启动前初始化段。它是 KernelInitFlow.Preset 的首个直接叶阶段，先由
  * KernelInitTask 在 kernel_init() 入口通过 wait_for_completion(&kthreadd_done)
  * 观察 KthreaddReadyGate 已被 BootTask complete，然后进入
- * kernel_init_freeable() 的 gfp_allowed_mask 起点。Scheduler.Action::Schedule
+ * kernel_init_freeable() 的 gfp_allowed_mask 起点。Cpu0Scheduler.Action::Schedule
  * 已提交，同时要求 KernelInitTask 的创建入口已由 TaskCreationCore
  * 绑定为 KernelInitFlow 并指向 KernelInitFlow 入口。该真实任务入口
  * 只在 BootInitFlow.Online 后由 KernelInitTask 的真实入口直接启动。
@@ -228,7 +228,7 @@ object PreSmpInitPhase: PhaseObject {
                     Workqueue.state == State::Prepared;
                     RcuCore.state == State::Ready;
                     Softirq.state == State::Ready;
-                    Scheduler.state == State::Online;
+                    Cpu0Scheduler.state == State::Online;
                     KthreaddTask.state == State::Online;
                 }
 

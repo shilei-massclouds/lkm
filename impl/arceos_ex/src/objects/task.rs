@@ -277,6 +277,9 @@ pub struct Task {
     kind: TaskKind,
     running: bool,
     runqueue_published: bool,
+    scheduler_sleep_declared: bool,
+    pending_wake_signal: bool,
+    core_save_pending_suspend: bool,
     affinity_cpu_id: usize,
     no_setaffinity: bool,
     thread_context: TaskThreadContext,
@@ -301,6 +304,9 @@ impl Task {
             kind: TaskKind::None,
             running: false,
             runqueue_published: false,
+            scheduler_sleep_declared: false,
+            pending_wake_signal: false,
+            core_save_pending_suspend: false,
             affinity_cpu_id: usize::MAX,
             no_setaffinity: false,
             thread_context: TaskThreadContext::new(),
@@ -326,6 +332,9 @@ impl Task {
             kind: TaskKind::None,
             running: true,
             runqueue_published: false,
+            scheduler_sleep_declared: false,
+            pending_wake_signal: false,
+            core_save_pending_suspend: false,
             affinity_cpu_id: usize::MAX,
             no_setaffinity: false,
             thread_context: TaskThreadContext::new(),
@@ -357,6 +366,9 @@ impl Task {
             kind: TaskKind::Idle,
             running: true,
             runqueue_published: false,
+            scheduler_sleep_declared: false,
+            pending_wake_signal: false,
+            core_save_pending_suspend: false,
             affinity_cpu_id: usize::MAX,
             no_setaffinity: false,
             thread_context: TaskThreadContext::new(),
@@ -455,6 +467,89 @@ impl Task {
 
     pub const fn runqueue_published(&self) -> bool {
         self.runqueue_published
+    }
+
+    pub const fn scheduler_sleep_declared(&self) -> bool {
+        self.scheduler_sleep_declared
+    }
+
+    pub const fn pending_wake_signal(&self) -> bool {
+        self.pending_wake_signal
+    }
+
+    /// Publish the task state consumed by the next non-preemptive
+    /// `PreparePrev`.  Lifecycle and execution authority remain unchanged.
+    pub(crate) fn declare_scheduler_sleep(&mut self) -> EventResult {
+        if self.state() != State::OnCpu || !self.running {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.state(),
+                State::OnCpu,
+                State::OnCpu,
+            );
+        }
+        self.scheduler_sleep_declared = true;
+        self.running = false;
+        Ok(())
+    }
+
+    /// Record a matching wake signal. `PreparePrev` consumes it exactly once.
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
+    pub(crate) fn post_pending_wake_signal(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Online || self.pending_wake_signal {
+            return failed_condition(
+                LifecycleEvent::Continue,
+                self.state(),
+                State::Online,
+                State::Online,
+            );
+        }
+        self.pending_wake_signal = true;
+        Ok(())
+    }
+
+    /// Returns true when `prev` must retain runnable eligibility.
+    pub(crate) fn prepare_prev_runnable(&mut self) -> bool {
+        if !self.scheduler_sleep_declared {
+            return self.running;
+        }
+        if self.pending_wake_signal {
+            self.pending_wake_signal = false;
+            self.scheduler_sleep_declared = false;
+            self.running = true;
+            return true;
+        }
+        false
+    }
+
+    pub(crate) fn deactivate_from_scheduler(&mut self) -> EventResult {
+        if self.state() != State::OnCpu || !self.scheduler_sleep_declared || self.running {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.state(),
+                State::OnCpu,
+                State::OnCpu,
+            );
+        }
+        self.runqueue_published = false;
+        Ok(())
+    }
+
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
+    pub(crate) fn wake_for_scheduler_enqueue(&mut self) -> EventResult {
+        if self.state() != State::Online || self.on_cpu || !self.scheduler_sleep_declared {
+            return failed_condition(
+                LifecycleEvent::Continue,
+                self.state(),
+                State::Online,
+                State::Online,
+            );
+        }
+        self.scheduler_sleep_declared = false;
+        self.pending_wake_signal = false;
+        self.running = true;
+        self.runqueue_published = true;
+        Ok(())
     }
 
     pub const fn affinity_pinned(&self) -> bool {
@@ -657,6 +752,8 @@ impl Task {
             Some("not_already_on_cpu")
         } else if self.execution_authority != TaskExecutionAuthority::None {
             Some("authority_none")
+        } else if self.core_save_pending_suspend {
+            Some("core_save_not_pending")
         } else if self.thread_context.breakpoint_state() != TaskBreakpointState::Valid {
             Some("breakpoint_valid")
         } else if !expected_flow.is_valid() {
@@ -694,10 +791,34 @@ impl Task {
     /// Scheduler-only acceptance of `Task.Suspend`, committed on the selected
     /// task's stack after the old task's core registers have been saved.
     pub(crate) fn suspend_from_cpu(&mut self) -> EventResult {
+        self.save_core_context_for_suspend()?;
+        self.suspend_after_core_context_save()
+    }
+
+    /// First half of the Scheduler SaveCoreContext -> Suspend protocol. The
+    /// architecture switch completes the callee-register store immediately
+    /// after this semantic save reservation and lifecycle handoff.
+    pub(crate) fn save_core_context_for_suspend(&mut self) -> EventResult {
+        if !self.switch_out_ready() {
+            return failed_condition(
+                LifecycleEvent::Suspend,
+                self.state(),
+                State::OnCpu,
+                State::Online,
+            );
+        }
+        self.thread_context.record_save();
+        self.core_save_pending_suspend = true;
+        Ok(())
+    }
+
+    /// Second half of the Scheduler SaveCoreContext -> Suspend protocol.
+    pub(crate) fn suspend_after_core_context_save(&mut self) -> EventResult {
         let flow_ref = self.active_flow;
         if self.lifecycle.state() != State::Online
             || !self.on_cpu
             || self.execution_authority != TaskExecutionAuthority::Live
+            || !self.core_save_pending_suspend
             || self.thread_context.breakpoint_state() != TaskBreakpointState::Invalid
             || !flow_ref.is_valid()
             || !self.owns_flow(flow_ref)
@@ -711,7 +832,7 @@ impl Task {
         }
         self.on_cpu = false;
         self.execution_authority = TaskExecutionAuthority::None;
-        self.thread_context.record_save();
+        self.core_save_pending_suspend = false;
         self.thread_context.publish(flow_ref);
         Ok(())
     }
@@ -720,6 +841,7 @@ impl Task {
         if self.active_flow.is_valid()
             || !self.on_cpu
             || self.execution_authority != TaskExecutionAuthority::Live
+            || self.core_save_pending_suspend
             || self.thread_context.breakpoint_state() != TaskBreakpointState::Invalid
         {
             return failed_condition(
@@ -741,6 +863,7 @@ impl Task {
     pub fn cleanup(&mut self) -> EventResult {
         if self.on_cpu
             || self.execution_authority != TaskExecutionAuthority::None
+            || self.core_save_pending_suspend
             || self.thread_context.breakpoint_state() != TaskBreakpointState::Invalid
         {
             return failed_condition(
@@ -889,6 +1012,7 @@ impl Task {
         self.lifecycle.state() == State::Online
             && self.on_cpu
             && self.execution_authority == TaskExecutionAuthority::Live
+            && !self.core_save_pending_suspend
             && self.thread_context.breakpoint_state() == TaskBreakpointState::Invalid
             && self.active_flow.is_valid()
             && self.owns_flow(self.active_flow)
@@ -898,6 +1022,7 @@ impl Task {
         self.lifecycle.state() == State::Online
             && self.on_cpu
             && self.execution_authority == TaskExecutionAuthority::Live
+            && !self.core_save_pending_suspend
             && self.thread_context.breakpoint_state() == TaskBreakpointState::Invalid
             && !self.active_flow.is_valid()
     }

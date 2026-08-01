@@ -33,7 +33,9 @@ pub fn run() -> SmokeResult {
         printk::write_str("boot CPU facts missing\n");
         return SmokeResult::Failed;
     };
-    let Some(boot_scheduler_view) = ctx.scheduler.boot_cpu_owned_scheduler_view(&ctx.cpu_group)
+    let Some(boot_scheduler_view) = ctx
+        .scheduler()
+        .boot_cpu_owned_scheduler_view(&ctx.cpu_group)
     else {
         printk::write_str("boot CPU scheduler view missing\n");
         return SmokeResult::Failed;
@@ -132,7 +134,7 @@ pub fn run() -> SmokeResult {
         || !ctx.kthreadd_task.running()
         || !ctx.kthreadd_task.enqueued()
         || ctx.kthreadd_flow.cpu_id() != boot_cpu.logical_id()
-        || ctx.scheduler.selected_runqueue_task_id() != ctx.kthreadd_task.pid()
+        || ctx.scheduler().selected_runqueue_task_id() != ctx.kthreadd_task.pid()
         || !boot_scheduler_view.runqueue_contains_task_id(ctx.kthreadd_task.pid())
         || !ctx.kthreadd_task.global_ref_bound()
         || !ctx.kthreadd_task.provider_ready()
@@ -205,26 +207,34 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
-    if ctx.scheduler.schedule_passes() == 0
-        || ctx.scheduler.current_runqueue_resolve_passes() == 0
-        || ctx.scheduler.pick_next_task_passes() == 0
-        || ctx.scheduler.switch_to_passes() == 0
-        || ctx.scheduler.schedule_preemption_disable_count() == 0
-        || ctx.scheduler.schedule_preemption_enable_no_resched_count() == 0
-        || ctx.scheduler.scheduler_rcu_context_switch_count() == 0
-        || ctx.scheduler.scheduler_rq_lock_mb_after_spinlock_count() == 0
-        || ctx.scheduler.scheduler_rq_clock_update_count() == 0
-        || ctx.scheduler.scheduler_need_resched_clear_count() == 0
-        || ctx.scheduler.scheduler_rq_curr_publish_rcu_count() == 0
-        || ctx.scheduler.scheduler_trace_sched_switch_count() == 0
-        || ctx.scheduler.scheduler_prepare_task_switch_count() == 0
-        || ctx.scheduler.scheduler_finish_task_switch_count() == 0
-        || ctx.scheduler.scheduler_finish_released_rq_lock_count() == 0
-        || ctx.scheduler.scheduler_finish_preempt_count_restore_count() == 0
-        || !ctx.scheduler.scheduler_switch_mm_or_lazy_tlb_deferred()
-        || !ctx.scheduler.scheduler_membarrier_switch_barrier_deferred()
-        || ctx.scheduler.identity_switch_passes() == 0
-        || ctx.scheduler.boot_idle_preemption().state() != State::Ready
+    if ctx.scheduler().schedule_passes() == 0
+        || ctx.scheduler().current_runqueue_resolve_passes() == 0
+        || ctx.scheduler().pick_next_task_passes() == 0
+        || ctx.scheduler().switch_to_passes() == 0
+        || ctx.scheduler().schedule_preemption_disable_count() == 0
+        || ctx
+            .scheduler()
+            .schedule_preemption_enable_no_resched_count()
+            == 0
+        || ctx.scheduler().scheduler_rcu_context_switch_count() == 0
+        || ctx.scheduler().scheduler_rq_lock_mb_after_spinlock_count() == 0
+        || ctx.scheduler().scheduler_rq_clock_update_count() == 0
+        || ctx.scheduler().scheduler_need_resched_clear_count() == 0
+        || ctx.scheduler().scheduler_rq_curr_publish_rcu_count() == 0
+        || ctx.scheduler().scheduler_trace_sched_switch_count() == 0
+        || ctx.scheduler().scheduler_prepare_task_switch_count() == 0
+        || ctx.scheduler().scheduler_finish_task_switch_count() == 0
+        || ctx.scheduler().scheduler_finish_released_rq_lock_count() == 0
+        || ctx
+            .scheduler()
+            .scheduler_finish_preempt_count_restore_count()
+            == 0
+        || !ctx.scheduler().scheduler_switch_mm_or_lazy_tlb_deferred()
+        || !ctx
+            .scheduler()
+            .scheduler_membarrier_switch_barrier_deferred()
+        || ctx.scheduler().identity_switch_passes() == 0
+        || ctx.scheduler().boot_idle_preemption().state() != State::Ready
         || !ctx
             .current_task_ref()
             .is_ok_and(|task_ref| task_ref == TaskRef::KERNEL_INIT)
@@ -243,11 +253,11 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
-    let idle_schedule_passes = ctx.scheduler.idle_schedule_passes();
+    let idle_schedule_passes = ctx.scheduler().idle_schedule_passes();
     if idle_schedule_passes != 0
-        || ctx.scheduler.idle_schedule_returned_passes() != 0
-        || ctx.scheduler.idle_schedule_identity_passes() != 0
-        || ctx.scheduler.identity_switch_passes() == 0
+        || ctx.scheduler().idle_schedule_returned_passes() != 0
+        || ctx.scheduler().idle_schedule_identity_passes() != 0
+        || ctx.scheduler().identity_switch_passes() == 0
     {
         printk::write_str("idle schedule relation facts invalid\n");
         return SmokeResult::Failed;
@@ -289,8 +299,8 @@ pub fn run() -> SmokeResult {
         || ctx.boot_idle_flow.boot_init_handoff_complete()
         || !ctx.boot_idle_flow.secondary_cpus_not_started()
         || !ctx.boot_idle_flow.kernel_init_task_switch_handoff_ready()
-        || ctx.scheduler.kernel_init_stack_switch_started_count() != 1
-        || ctx.scheduler.kernel_init_stack_switch_returned_count() != 0
+        || ctx.scheduler().kernel_init_stack_switch_started_count() != 1
+        || ctx.scheduler().kernel_init_stack_switch_returned_count() != 0
         || ctx.kernel_init_task.entry_started_count() != 1
         || !ctx.kernel_init_task.entry_stack_verified()
         || !ctx
@@ -311,8 +321,8 @@ pub fn run() -> SmokeResult {
         ctx.kernel_init_task.pid(),
         ctx.kthreadd_task.pid(),
         ctx.kernel_init_task.entry_stack_pointer(),
-        ctx.scheduler.schedule_passes(),
-        ctx.scheduler.switch_to_passes(),
+        ctx.scheduler().schedule_passes(),
+        ctx.scheduler().switch_to_passes(),
         crate::flows::boot_idle_flow::entry_is_online()
     ));
     SmokeResult::Passed

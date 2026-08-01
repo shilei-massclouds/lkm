@@ -118,36 +118,37 @@ KernelInitTask's wait side.
 schedule_preempt_disabled() must be split across the owner boundary:
 BootInitScheduleHandoffPhase performs BootIdlePreemption
 enable_no_resched() and BootIdleFlow successor binding, BootInitFlow commits Online,
-and Kernel.Enable then calls Scheduler.schedule(); a later restored BootTask
+and the active BootIdleFlow then emits Schedule to Cpu0Scheduler; a later restored BootTask
 enters BootIdleEntryPhase's post-schedule BootIdleStartupContext. It must not be
 implemented as a single Scheduler action and must not introduce a
 KernelInitDispatchGate lifecycle object; the branch point is the
 combination of Scheduler first-schedule and KernelInitTask dispatch
 facts. Scheduler.schedule() must resolve the `CurrentTask` capability from the
-effective Flow, validate that Flow's `CpuRef`, and then pick next from
-`CurrentRunQueueRef`. The prepare boundary confirms that the resolved
+effective Flow, validate that Flow's `CpuRef`, resolve the Scheduler uniquely owned by
+that CPU, and derive prev from the matching CPU-local CurrentTask binding. The prepare boundary confirms that the resolved
 `CurrentTaskRef` is `prev_ref`; it must not infer current identity from
-Scheduler counters, `BootRunQueue.curr`, or another stored copy.
+Scheduler counters, a global singleton, or another stored copy.
 
-SwitchTo must synchronously send `prev.Suspend`, save the old context, restore
-the next context, and perform the physical stack switch. At the formal switch
+Schedule must drive PreparePrev before PickNextTask. PutPrevTask/SetNextTask are
+part of PickNextTask's class protocol, not a pre-pick re-enqueue step; blocked/on-rq=false
+prev must never be reinserted. Nonidentity SwitchTo must save the old context, synchronously
+drive `prev.Suspend`, restore the next context, and perform the physical stack switch. At the formal switch
 commit, assembly must execute `CurrentTask.BindTask(next)` by writing next's
 currently usable canonical address to `tp/x4`; this Action does not bind stack.
 The surrounding architecture commit separately restores `sp` from next's context,
 validates it against `next.stack`, and publishes CurrentStack. On the new stack,
-finish validates that raw implementation identity and atomically commits next's
-`OnCpu/Live` state, active Flow, Flow CPU assignment and the matching CPU-local
-CurrentTask/CurrentStack pair. Only the
-new Task's entry/resume point may handle `next.Continue`: a Base initial Flow
-accepts strict Startup, otherwise the Online active Flow accepts strict
-Continue. Exactly one handler must accept; rejection or handler failure fails
+finish validates the restored identity and performs finish-task-switch cleanup. Only then
+may Scheduler emit `next Task.Continue`; the next Task accepts it and commits
+`Online/None/Valid -> OnCpu/Live/Invalid`. That Task then emits strict Startup to a Base
+initial Flow, or strict Continue to its Online active Flow. Exactly one handler must accept; rejection or handler failure fails
 the root execution. Resolving `CurrentTask` after finish must yield next; the
 previous Task cannot be reclaimed before that result is established. Identity
-switches preserve the same selector result.
+selection performs no SwitchTo, Task lifecycle or context/binding update and emits Continue
+only to the original sender Flow.
 
 Scheduler lifecycle belongs to SchedInitPhase. RestInit must consume
-Scheduler.Online; the real Scheduler.Action::Schedule is driven by Kernel.Enable only after
-BootInitFlow.Online. It must
+Cpu0Scheduler.Online; the Schedule Signal is emitted by the current Task's active BootIdleFlow only after
+BootInitFlow.Online. Kernel.Enable is not the sender and must not drive Scheduler internals. RestInit must
 not create a new Scheduler lifecycle boundary for dispatch. The
 schedule action must remain covered by the nested within sequence
 SchedulePreemptionContext -> ScheduleLocalInterruptContext ->
@@ -272,72 +273,22 @@ same Task. The resolver covers BootTask, kernel tasks, smoke/user dynamic tasks
 and AP idle tasks, rejects unknown addresses and stale generations explicitly,
 and exposes neither raw addresses nor mutable Task borrows to ordinary callers.
 For BootTask the physical and virtual `tp` resolve to linker-visible
-`init_task_storage`. No fallback to BootTask, runqueue state, or Scheduler
+`init_task_storage`. No fallback to BootTask, scheduler queue state, or Scheduler
 caches is allowed.
 
-#### CurrentRunQueueRef scope
+#### SchedulerRef topology and access
 
-CurrentRunQueueRef must be realized as a private reference in the
-current CPU view. It must not be implemented as a descriptive
-current-runqueue object or as a global current-runqueue singleton. Code
-should follow the Linux-style path: resolve the current `TaskRef`, read
-the validated Task's recorded CPU id, then resolve that
-CPU's runqueue through CPUGroup/runqueue topology. The current BP
-implementation may collapse this to the boot runqueue while marking
-that binding as a temporary UP specialization.
+`SchedulerRef` is the only scheduling-object capability. It lowers to the target `CpuRef`
+and must resolve through `CpuGroup.cpus[logical_id].scheduler`, validating CPU identity,
+owner and generation. There is no `RunQueueRef`, `CurrentRunQueueRef`, global Scheduler
+singleton, boot-only runqueue carrier or `[CpuRunQueueMetadata; MAX_CPUS]` mirror.
 
-#### CurrentRunQueueRef topology lowering
-
-Current Rust lowering must carry the resolved CPU id inside
-CurrentRunQueueRef even while the only concrete target is
-BootRunQueue. Scheduler.schedule() lowering must derive that CPU id
-from the TaskRef target Task's recorded CPU id, then validate
-it against CpuGroup.Cpu[id], Scheduler.cpu_runqueue(id) metadata and
-DefaultSchedRootDomain coverage. CpuGroup.boot_cpu() may be used only
-as a boot CPU consistency check after the current task CPU id is
-known; it must not be the primary source for resolving the current
-runqueue. Scheduler.Action::SelectRunQueue lowering is a wake-up
-selection path: it may currently select the boot runqueue, but
-RestInit task enable paths must consume the selected_rq result by
-setting task CPU from selected_rq.cpu_id() and passing selected_rq
-into the enqueue boundary. BootRunQueue may remain the UP selected
-target, but BootRunQueue enqueue/pick/dequeue APIs must reject a
-CurrentRunQueueRef with a mismatched CPU id.
-
-#### RunQueueRef / CurrentRunQueueRef type split
-
-Generated Rust must keep selected runqueue references separate from
-current-CPU runqueue references. Scheduler.Action::SelectRunQueue
-lowering must return a RunQueueRef value, not CurrentRunQueueRef.
-RestInit enqueue paths and smoke task enqueue/dequeue helpers must
-pass RunQueueRef into BootRunQueue enqueue/dequeue APIs. Only the
-schedule()/pick-next path may use CurrentRunQueueRef, after deriving
-it from TaskRef -> validated Task -> CPU id -> CpuGroup.Cpu[id].RunQueue.
-Both reference types may currently carry the same boot CPU id in the
-UP path, but sharing the enum/type is not allowed because the object
-capabilities differ.
-
-#### BootRunQueueRef transitional lowering
-
-The model may still name BootRunQueueRef as the current UP
-SelectRunQueue result, but Rust reference checks must present the
-capability as a CPU-owned runqueue match: the ref's CPU id must match
-the target CpuGroup.Cpu[id].RunQueue / BootRunQueue metadata. Public
-implementation constructors and predicates should not expose
-`targets_boot_runqueue` or `boot(...)` as the formal semantic API
-for selected or current runqueue refs; use neutral CPU-owned
-constructors and matching helpers instead. The boot-backed enum
-variant may remain as a storage/lowering detail until SMP runqueue
-variants exist.
-
-#### CurrentRunQueueRef API smoke
-
-CurrentRunQueueRef/RunQueue ObjectApiBehavior smoke must exercise
-formal runqueue enqueue and pick-next boundaries. The implementation
-must not expose test_* scheduler wrappers for these checks; if the
-boundary is needed by tests, expose it as a formal RunQueue API and
-route production enqueue/pick behavior through the same API. This
-smoke case remains app-smoke-only by default, not checkpoint KUnit.
+Schedule resolution starts with the effective sender Flow and its CpuRef, then obtains that
+CPU's owned Scheduler and validates the CPU-local CurrentTask binding. Wake-up selection uses
+`Scheduler.Action::SelectScheduler(task_ref) -> SchedulerRef`; the target recoverable Flow
+receives the selected CpuRef before the selected Scheduler enqueues the stable TaskRef. Task
+does not store a duplicate CPU assignment. Public enqueue/pick/deactivate APIs and app-smoke
+tests must all exercise the same per-CPU Scheduler boundary without `test_*` subject wrappers.
 
 #### Scheduler.schedule() payload smoke
 
@@ -358,12 +309,10 @@ any needed boundary must be a formal scheduler/task API.
 #### Wake-up task CPU action
 
 KernelInitTask and KthreaddTask wake-up paths must follow the
-Linux ordering: select the target runqueue, update the task's
-recorded CPU through a Task-level set_task_cpu boundary, then
-enqueue the task on that runqueue. The current BP implementation may
-bind the selected runqueue CPU to BootCPU/BootCPURef, but this is a
-temporary specialization; future SMP code must resolve cpu_of from
-the selected RunQueueRef.
+Linux ordering: select the target CPU Scheduler, assign its CpuRef to the target recoverable
+TaskFlow, then enqueue the stable TaskRef on that Scheduler. The current BP path selects
+Cpu0Scheduler/BootCPURef; SMP paths must resolve both from SchedulerRef without adding a
+Task-local duplicate CPU field.
 
 #### KernelInitTask affinity action
 

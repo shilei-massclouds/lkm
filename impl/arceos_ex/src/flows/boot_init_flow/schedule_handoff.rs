@@ -42,7 +42,7 @@ fn require_preset() -> EventResult {
 }
 
 fn setup(ctx: &mut Context) -> EventResult {
-    if ctx.scheduler.state() != State::Online
+    if ctx.scheduler().state() != State::Online
         || !super::rest_init::is_online()
         || !super::rest_init::facts_stable(ctx)
         || ctx.kernel_init_task.state() != State::Online
@@ -57,7 +57,7 @@ fn setup(ctx: &mut Context) -> EventResult {
     }
 
     if ctx
-        .scheduler
+        .scheduler_mut()
         .boot_idle_preemption_mut()
         .enable_no_resched()
         .is_err()
@@ -65,14 +65,27 @@ fn setup(ctx: &mut Context) -> EventResult {
         return failed_preset();
     }
 
-    ctx.boot_idle_flow.setup(
-        &mut ctx.boot_task,
-        ctx.boot_init_flow.core_mut(),
-        &ctx.scheduler,
-        &ctx.kernel_init_task,
-        &ctx.kthreadd_task,
-        &ctx.kthreadd_ready_gate,
-        &ctx.cpu_group,
+    let Context {
+        boot_idle_flow,
+        boot_task,
+        boot_init_flow,
+        kernel_init_task,
+        kthreadd_task,
+        kthreadd_ready_gate,
+        cpu_group,
+        ..
+    } = ctx;
+    let Some(scheduler) = cpu_group.boot_scheduler() else {
+        return failed_preset();
+    };
+    boot_idle_flow.setup(
+        boot_task,
+        boot_init_flow.core_mut(),
+        scheduler,
+        kernel_init_task,
+        kthreadd_task,
+        kthreadd_ready_gate,
+        cpu_group,
     )
 }
 
@@ -143,11 +156,11 @@ fn phase_failure(event: LifecycleEvent, expected: State, target: State) -> Event
 
 fn phase_ready(ctx: &Context) -> bool {
     super::rest_init::facts_stable(ctx)
-        && ctx.scheduler.schedule_passes() == 0
-        && ctx.scheduler.current_runqueue_resolve_passes() == 0
-        && ctx.scheduler.pick_next_task_passes() == 0
-        && ctx.scheduler.switch_to_passes() == 0
-        && ctx.scheduler.scheduler_finish_task_switch_count() == 0
+        && ctx.scheduler().schedule_passes() == 0
+        && ctx.scheduler().current_runqueue_resolve_passes() == 0
+        && ctx.scheduler().pick_next_task_passes() == 0
+        && ctx.scheduler().switch_to_passes() == 0
+        && ctx.scheduler().scheduler_finish_task_switch_count() == 0
         && ctx
             .current_task_ref()
             .is_ok_and(|task_ref| task_ref.same_identity(ctx.boot_task.task_ref()))

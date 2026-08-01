@@ -7,6 +7,7 @@ use crate::{
     context::Context,
     objects::{
         rest_init::runtime_services_still_deferred,
+        scheduler_task_access::SchedulerTaskAccess,
         state::{EventResult, LifecycleEvent, State, failed_condition},
     },
 };
@@ -47,19 +48,27 @@ fn require_preset() -> EventResult {
 fn enter_startup_context(ctx: &mut Context) -> EventResult {
     if !crate::flows::boot_init_flow::schedule_handoff_is_online()
         || !restore_ready(ctx)
-        || ctx.scheduler.boot_idle_preemption().state() != State::Ready
+        || ctx.scheduler().boot_idle_preemption().state() != State::Ready
     {
         return failed_preset();
     }
 
     // schedule_preempt_disabled() disables preemption again before entering
     // cpu_startup_entry(). BootIdleStartupContext exits by Never.
-    ctx.scheduler.boot_idle_preemption_mut().disable()
+    ctx.scheduler_mut().boot_idle_preemption_mut().disable()
 }
 
 fn prepare_entry(ctx: &mut Context) -> EventResult {
-    ctx.boot_idle_flow
-        .prepare_idle_entry(&ctx.boot_task, &ctx.scheduler, &ctx.cpu_group)
+    let Context {
+        boot_idle_flow,
+        boot_task,
+        cpu_group,
+        ..
+    } = ctx;
+    let Some(scheduler) = cpu_group.boot_scheduler() else {
+        return failed_preset();
+    };
+    boot_idle_flow.prepare_idle_entry(boot_task, scheduler, cpu_group)
 }
 
 fn run_idle_loop(ctx: &mut Context) -> EventResult {
@@ -71,8 +80,8 @@ fn run_idle_loop(ctx: &mut Context) -> EventResult {
     };
     let Context {
         boot_idle_flow,
-        scheduler,
         cpu_group,
+        scheduler_test_tasks,
         kernel_init_task,
         kernel_init_flow,
         user_app_flow,
@@ -82,11 +91,13 @@ fn run_idle_loop(ctx: &mut Context) -> EventResult {
         boot_task,
         ..
     } = ctx;
-    let Some(local_interrupt) = cpu_group.boot_cpu_local_interrupt_mut() else {
+    let Some((scheduler, local_interrupt)) = cpu_group.boot_scheduler_and_local_interrupt_mut()
+    else {
         return failed_preset();
     };
     boot_idle_flow.run_idle_loop(
         scheduler,
+        scheduler_test_tasks,
         current_task,
         current_cpu,
         kernel_init_task,
@@ -108,9 +119,12 @@ fn idle_continuation(ctx: &mut Context) -> ! {
         let Ok(current_cpu) = ctx.current_cpu() else {
             crate::arch::riscv64::sbi::system_shutdown()
         };
+        let Ok(sender_flow_ref) = ctx.current_task_flow_ref() else {
+            crate::arch::riscv64::sbi::system_shutdown()
+        };
         let Context {
-            scheduler,
             cpu_group,
+            scheduler_test_tasks,
             kernel_init_task,
             kernel_init_flow,
             user_app_flow,
@@ -120,12 +134,11 @@ fn idle_continuation(ctx: &mut Context) -> ! {
             user_task_set,
             ..
         } = ctx;
-        let Some(local_interrupt) = cpu_group.boot_cpu_local_interrupt_mut() else {
+        let Some((scheduler, local_interrupt)) = cpu_group.boot_scheduler_and_local_interrupt_mut()
+        else {
             crate::arch::riscv64::sbi::system_shutdown()
         };
-        let result = scheduler.schedule_idle(
-            current_task,
-            current_cpu,
+        let mut task_access = SchedulerTaskAccess::new(
             kernel_init_task,
             kernel_init_flow,
             user_app_flow,
@@ -133,6 +146,13 @@ fn idle_continuation(ctx: &mut Context) -> ! {
             kthreadd_flow,
             boot_idle_flow,
             user_task_set,
+            scheduler_test_tasks,
+        );
+        let result = scheduler.schedule_idle(
+            sender_flow_ref,
+            current_task.task_ref(),
+            current_cpu.cpu_ref(),
+            &mut task_access,
             local_interrupt,
         );
         crate::phases::shutdown_on_error(result, "boot idle schedule loop failed\n");
@@ -203,8 +223,8 @@ fn phase_failure(event: LifecycleEvent, expected: State, target: State) -> Event
 
 fn phase_ready(ctx: &Context) -> bool {
     restore_ready(ctx)
-        && ctx.scheduler.boot_idle_preemption().state() == State::Ready
-        && ctx.scheduler.boot_idle_preemption().disabled()
+        && ctx.scheduler().boot_idle_preemption().state() == State::Ready
+        && ctx.scheduler().boot_idle_preemption().disabled()
         && ctx.boot_idle_flow.state() == State::Ready
         && ctx.boot_idle_flow.first_schedule_committed()
         && ctx.boot_idle_flow.idle_entry_prepared()
@@ -219,8 +239,8 @@ fn phase_ready(ctx: &Context) -> bool {
         && ctx.boot_idle_flow.arch_cpu_idle_enter_done()
         && ctx.boot_idle_flow.arch_cpu_idle_exit_done()
         && ctx.boot_idle_flow.smp_call_function_queue_flushed()
-        && ctx.scheduler.idle_schedule_passes() != 0
-        && ctx.scheduler.idle_schedule_returned_passes() != 0
+        && ctx.scheduler().idle_schedule_passes() != 0
+        && ctx.scheduler().idle_schedule_returned_passes() != 0
         && ctx.boot_idle_flow.boot_init_handoff_complete()
         && ctx.boot_idle_flow.boot_cpu_hotplug_online()
         && ctx.boot_idle_flow.secondary_cpus_not_started()
@@ -231,13 +251,13 @@ fn phase_ready(ctx: &Context) -> bool {
 fn restore_ready(ctx: &Context) -> bool {
     crate::flows::boot_init_flow::rest_init_facts_stable(ctx)
         && crate::flows::boot_init_flow::is_online()
-        && ctx.scheduler.schedule_passes() != 0
-        && ctx.scheduler.current_runqueue_resolve_passes() != 0
-        && ctx.scheduler.pick_next_task_passes() != 0
-        && ctx.scheduler.switch_to_passes() != 0
-        && ctx.scheduler.identity_switch_passes() == 0
-        && ctx.scheduler.kernel_init_stack_switch_started_count() == 1
-        && ctx.scheduler.kernel_init_stack_switch_returned_count() == 1
+        && ctx.scheduler().schedule_passes() != 0
+        && ctx.scheduler().current_runqueue_resolve_passes() != 0
+        && ctx.scheduler().pick_next_task_passes() != 0
+        && ctx.scheduler().switch_to_passes() != 0
+        && ctx.scheduler().identity_switch_passes() == 0
+        && ctx.scheduler().kernel_init_stack_switch_started_count() == 1
+        && ctx.scheduler().kernel_init_stack_switch_returned_count() == 1
         && ctx
             .current_task_ref()
             .is_ok_and(|task_ref| task_ref.same_identity(ctx.boot_task.task_ref()))

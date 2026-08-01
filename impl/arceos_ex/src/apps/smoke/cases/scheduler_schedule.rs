@@ -34,7 +34,7 @@ impl SmokeScenario for CooperativeSwitchScenario {
 
     fn setup(&mut self, assertions: &mut SmokeAssertions) {
         let ctx = context();
-        assertions.assert("scheduler online", ctx.scheduler.state() == State::Online);
+        assertions.assert("scheduler online", ctx.scheduler().state() == State::Online);
         assertions.assert(
             "current kernel init",
             ctx.current_task_ref()
@@ -63,7 +63,7 @@ impl SmokeScenario for CooperativeSwitchScenario {
         while attempts < SCHEDULE_ATTEMPTS {
             {
                 let ctx = context();
-                if ctx.scheduler.smoke_scheduler_task().yielded_back()
+                if ctx.smoke_scheduler_task().yielded_back()
                     && ctx
                         .current_task_ref()
                         .is_ok_and(|task_ref| task_ref == TaskRef::KERNEL_INIT)
@@ -72,43 +72,49 @@ impl SmokeScenario for CooperativeSwitchScenario {
                 }
             }
 
-            assertions.assert_ok("schedule current", context().schedule_current());
+            let result = context().schedule_current();
+            if let Err(error) = result {
+                print_schedule_error("schedule current", error);
+            }
+            assertions.assert_ok("schedule current", result);
             attempts += 1;
         }
 
         let ctx = context();
         assertions.assert("bounded return", attempts < SCHEDULE_ATTEMPTS);
-        assertions.assert(
-            "smoke task ran",
-            ctx.scheduler.smoke_scheduler_task().entry_ran(),
-        );
+        assertions.assert("smoke task ran", ctx.smoke_scheduler_task().entry_ran());
         assertions.assert(
             "smoke task cpu",
-            ctx.scheduler.smoke_scheduler_task().cpu_id()
+            ctx.smoke_scheduler_task().cpu_id()
                 == ctx
-                    .scheduler
+                    .scheduler()
                     .boot_cpu_owned_scheduler_view(&ctx.cpu_group)
                     .map(|view| view.runqueue().cpu_id())
                     .unwrap_or(usize::MAX),
         );
         assertions.assert(
-            "smoke task enqueued",
-            ctx.scheduler
+            "sleeping smoke task deactivated before pick",
+            ctx.scheduler()
                 .boot_cpu_owned_scheduler_view(&ctx.cpu_group)
-                .map(|view| {
-                    view.runqueue_contains_task_id(ctx.scheduler.smoke_scheduler_task().task_id())
-                })
-                .unwrap_or(false),
+                .map(|view| !view.runqueue_contains_task_id(ctx.smoke_scheduler_task().task_id()))
+                .unwrap_or(false)
+                && ctx.smoke_scheduler_task().state() == State::Online
+                && ctx.smoke_scheduler_task().scheduler_sleep_declared()
+                && !ctx.smoke_scheduler_task().pending_wake_signal()
+                && ctx.scheduler().last_prev_disposition()
+                    == crate::objects::scheduler::PrevDisposition::Blocked
+                && ctx.scheduler().prepare_prev_passes() != 0
+                && ctx.scheduler().prepare_prev_blocked_passes() != 0,
         );
         assertions.assert(
             "smoke task yielded back",
-            ctx.scheduler.smoke_scheduler_task().yielded_back(),
+            ctx.smoke_scheduler_task().yielded_back(),
         );
         assertions.assert(
             "smoke task uses unified task and flow carriers",
-            ctx.scheduler.smoke_scheduler_task().unified_carrier_ready()
-                && ctx.scheduler.smoke_scheduler_task().task_ref() == TaskRef::SMOKE_SCHEDULER
-                && ctx.scheduler.smoke_scheduler_task().flow_ref().is_valid(),
+            ctx.smoke_scheduler_task().unified_carrier_ready()
+                && ctx.smoke_scheduler_task().task_ref() == TaskRef::SMOKE_SCHEDULER
+                && ctx.smoke_scheduler_task().flow_ref().is_valid(),
         );
         assertions.assert(
             "current returned kernel init",
@@ -117,23 +123,21 @@ impl SmokeScenario for CooperativeSwitchScenario {
         );
         assertions.assert(
             "smoke switch saved",
-            ctx.scheduler
-                .smoke_scheduler_task()
+            ctx.smoke_scheduler_task()
                 .thread_context()
                 .core_saved_count()
                 != 0,
         );
         assertions.assert(
             "smoke switch restored",
-            ctx.scheduler
-                .smoke_scheduler_task()
+            ctx.smoke_scheduler_task()
                 .thread_context()
                 .core_restored_count()
                 != 0,
         );
         assertions.assert(
             "assembly switch preserves ra/sp/s0-s11 sentinels",
-            ctx.scheduler.task_switch_register_sentinel_passes() != 0
+            ctx.scheduler().task_switch_register_sentinel_passes() != 0
                 && ctx.kernel_init_task.switch_context().sp() != 0
                 && ctx
                     .kernel_init_task
@@ -148,7 +152,42 @@ impl SmokeScenario for CooperativeSwitchScenario {
         );
         assertions.assert(
             "tp follows selected Task identity outside switch context",
-            ctx.scheduler.task_switch_tp_identity_passes() != 0,
+            ctx.scheduler().task_switch_tp_identity_passes() != 0,
+        );
+        assertions.assert(
+            "class callback and fallback protocols observed in Linux order",
+            ctx.scheduler().combined_pick_passes() != 0
+                && ctx.scheduler().fallback_pick_passes() != 0
+                && ctx.scheduler().pick_task_passes() != 0
+                && ctx.scheduler().put_prev_task_passes() != 0
+                && ctx.scheduler().set_next_task_passes() != 0
+                && ctx.scheduler().prepare_prev_sequence() < ctx.scheduler().pick_task_sequence()
+                && ctx.scheduler().pick_task_sequence() < ctx.scheduler().put_prev_task_sequence()
+                && ctx.scheduler().put_prev_task_sequence()
+                    < ctx.scheduler().set_next_task_sequence()
+                && ctx.scheduler().last_picked_class()
+                    == Some(crate::objects::scheduler::SchedClassRef::Fair)
+                && ctx.scheduler().task_continue_signal_passes() != 0,
+        );
+        assertions.assert(
+            "nonidentity switch preflights then saves suspends restores finishes and emits continuations",
+            ctx.scheduler().switch_preflight_passes() == ctx.scheduler().switch_to_passes()
+                && ctx.scheduler().save_core_context_sequence() != 0
+                && ctx.scheduler().save_core_context_sequence()
+                    < ctx.scheduler().suspend_task_sequence()
+                && ctx.scheduler().suspend_task_sequence()
+                    < ctx.scheduler().restore_core_context_sequence()
+                && ctx.scheduler().restore_core_context_sequence()
+                    < ctx.scheduler().finish_task_switch_sequence()
+                && ctx.scheduler().finish_task_switch_sequence()
+                    < ctx.scheduler().task_continue_sequence()
+                && ctx.scheduler().task_continue_sequence()
+                    < ctx.scheduler().flow_signal_sequence()
+                && ctx.scheduler().flow_startup_signal_passes() != 0
+                && ctx.scheduler().flow_continue_signal_passes() != 0
+                && ctx.scheduler().task_continue_signal_passes()
+                    == ctx.scheduler().flow_startup_signal_passes()
+                        + ctx.scheduler().flow_continue_signal_passes(),
         );
 
         let before_state = ctx.kernel_init_task.state();
@@ -164,13 +203,21 @@ impl SmokeScenario for CooperativeSwitchScenario {
             .task()
             .thread_context()
             .core_restored_count();
-        let before_prepare = ctx.scheduler.scheduler_prepare_task_switch_count();
-        let before_finish = ctx.scheduler.scheduler_finish_task_switch_count();
-        let before_identity = ctx.scheduler.identity_switch_passes();
-        assertions.assert_ok("identity switch accepted", ctx.smoke_identity_switch());
+        let before_prepare = ctx.scheduler().scheduler_prepare_task_switch_count();
+        let before_finish = ctx.scheduler().scheduler_finish_task_switch_count();
+        let before_identity = ctx.scheduler().identity_switch_passes();
+        let before_identity_flow = ctx.scheduler().identity_flow_continue_passes();
+        let before_task_continue = ctx.scheduler().task_continue_signal_passes();
+        let identity_result = ctx.schedule_current();
+        if let Err(error) = identity_result {
+            print_schedule_error("identity schedule accepted", error);
+        }
+        assertions.assert_ok("identity schedule accepted", identity_result);
         assertions.assert(
-            "identity switch has no lifecycle breakpoint or context event",
-            ctx.scheduler.identity_switch_passes() == before_identity + 1
+            "identity schedule returns only to original active flow",
+            ctx.scheduler().identity_switch_passes() == before_identity + 1
+                && ctx.scheduler().identity_flow_continue_passes() == before_identity_flow + 1
+                && ctx.scheduler().task_continue_signal_passes() == before_task_continue
                 && ctx.kernel_init_task.state() == before_state
                 && ctx.kernel_init_task.task().execution_authority() == before_authority
                 && ctx.kernel_init_task.task().breakpoint_state() == before_breakpoint
@@ -186,8 +233,34 @@ impl SmokeScenario for CooperativeSwitchScenario {
                     .thread_context()
                     .core_restored_count()
                     == before_restored
-                && ctx.scheduler.scheduler_prepare_task_switch_count() == before_prepare
-                && ctx.scheduler.scheduler_finish_task_switch_count() == before_finish
+                && ctx.scheduler().scheduler_prepare_task_switch_count() == before_prepare
+                && ctx.scheduler().scheduler_finish_task_switch_count() == before_finish
+                && ctx
+                    .current_task_ref()
+                    .is_ok_and(|task_ref| task_ref == TaskRef::KERNEL_INIT),
+        );
+        let before_identity = ctx.scheduler().identity_switch_passes();
+        assertions.assert_ok("identity switch accepted", ctx.smoke_identity_switch());
+        assertions.assert(
+            "identity switch has no lifecycle breakpoint or context event",
+            ctx.scheduler().identity_switch_passes() == before_identity + 1
+                && ctx.kernel_init_task.state() == before_state
+                && ctx.kernel_init_task.task().execution_authority() == before_authority
+                && ctx.kernel_init_task.task().breakpoint_state() == before_breakpoint
+                && ctx
+                    .kernel_init_task
+                    .task()
+                    .thread_context()
+                    .core_saved_count()
+                    == before_saved
+                && ctx
+                    .kernel_init_task
+                    .task()
+                    .thread_context()
+                    .core_restored_count()
+                    == before_restored
+                && ctx.scheduler().scheduler_prepare_task_switch_count() == before_prepare
+                && ctx.scheduler().scheduler_finish_task_switch_count() == before_finish
                 && ctx
                     .current_task_ref()
                     .is_ok_and(|task_ref| task_ref == TaskRef::KERNEL_INIT),
@@ -196,9 +269,120 @@ impl SmokeScenario for CooperativeSwitchScenario {
             "prepared enable continue handoff suspend and terminal contract",
             task_breakpoint_contract_smoke(),
         );
+        assertions.assert(
+            "stale cross-cpu inactive and wrong-binding Schedule senders leave scheduler unchanged",
+            schedule_sender_rejection_smoke(),
+        );
     }
 
     fn teardown(&mut self, _assertions: &mut SmokeAssertions) {}
+}
+
+fn print_schedule_error(label: &'static str, error: crate::objects::state::EventError) {
+    use crate::objects::printk;
+
+    printk::write_str("scheduler smoke error label=");
+    printk::write_str(label);
+    if let Some(diagnostic) = error.diagnostic() {
+        printk::write_str(" phase=");
+        printk::write_str(diagnostic.phase);
+        printk::write_str(" step=");
+        printk::write_str(diagnostic.step);
+        printk::write_str(" first_failed=");
+        printk::write_str(diagnostic.first_failed);
+    }
+    printk::write_fmt(format_args!(
+        " error={} event={} actual={} expected={} target={}\n",
+        error.error_code() as char,
+        error.event_code() as char,
+        error.actual_state_code() as char,
+        error.expected_state_code() as char,
+        error.target_state_code() as char,
+    ));
+}
+
+fn schedule_sender_rejection_smoke() -> bool {
+    let (
+        sender_flow_ref,
+        current_task_ref,
+        current_cpu_ref,
+        schedule_passes,
+        preemption_disables,
+        prepare_prev_passes,
+        pick_next_passes,
+        switch_entries,
+        identity_continues,
+        task_continues,
+        task_state,
+        task_authority,
+        task_breakpoint,
+    ) = {
+        let ctx = context();
+        let Ok(sender_flow_ref) = ctx.current_task_flow_ref() else {
+            return false;
+        };
+        let Ok(current_task_ref) = ctx.current_task_ref() else {
+            return false;
+        };
+        let Ok(current_cpu) = ctx.current_cpu() else {
+            return false;
+        };
+        (
+            sender_flow_ref,
+            current_task_ref,
+            current_cpu.cpu_ref(),
+            ctx.scheduler().schedule_passes(),
+            ctx.scheduler().schedule_preemption_disable_count(),
+            ctx.scheduler().prepare_prev_passes(),
+            ctx.scheduler().pick_next_task_passes(),
+            ctx.scheduler().switch_to_entry_count(),
+            ctx.scheduler().identity_flow_continue_passes(),
+            ctx.scheduler().task_continue_signal_passes(),
+            ctx.kernel_init_task.state(),
+            ctx.kernel_init_task.task().execution_authority(),
+            ctx.kernel_init_task.task().breakpoint_state(),
+        )
+    };
+    if current_task_ref != TaskRef::KERNEL_INIT {
+        return false;
+    }
+
+    let stale_sender =
+        sender_flow_ref.with_generation_for_test(sender_flow_ref.generation().wrapping_add(1));
+    if context()
+        .schedule_from_refs_for_test(stale_sender, current_task_ref, current_cpu_ref)
+        .is_ok()
+        || context()
+            .schedule_from_refs_for_test(TaskFlowRef::BOOT_IDLE, current_task_ref, current_cpu_ref)
+            .is_ok()
+        || context()
+            .schedule_from_refs_for_test(
+                sender_flow_ref,
+                current_task_ref,
+                crate::objects::cpu::CpuRef::new(current_cpu_ref.logical_id() + 1),
+            )
+            .is_ok()
+        || context()
+            .schedule_from_refs_for_test(sender_flow_ref, TaskRef::BOOT, current_cpu_ref)
+            .is_ok()
+    {
+        return false;
+    }
+
+    let ctx = context();
+    ctx.scheduler().schedule_passes() == schedule_passes
+        && ctx.scheduler().schedule_preemption_disable_count() == preemption_disables
+        && ctx.scheduler().prepare_prev_passes() == prepare_prev_passes
+        && ctx.scheduler().pick_next_task_passes() == pick_next_passes
+        && ctx.scheduler().switch_to_entry_count() == switch_entries
+        && ctx.scheduler().identity_flow_continue_passes() == identity_continues
+        && ctx.scheduler().task_continue_signal_passes() == task_continues
+        && ctx.kernel_init_task.state() == task_state
+        && ctx.kernel_init_task.task().execution_authority() == task_authority
+        && ctx.kernel_init_task.task().breakpoint_state() == task_breakpoint
+        && ctx
+            .current_task_ref()
+            .is_ok_and(|task_ref| task_ref == current_task_ref)
 }
 
 fn task_breakpoint_contract_smoke() -> bool {
@@ -236,6 +420,13 @@ fn task_breakpoint_contract_smoke() -> bool {
         || task.continue_on_cpu().is_err()
         || task.switch_in_ready()
         || initial.start_initial(&mut task, None, None).is_err()
+        || task.declare_scheduler_sleep().is_err()
+        || task.post_pending_wake_signal().is_err()
+        || !task.scheduler_sleep_declared()
+        || !task.pending_wake_signal()
+        || !task.prepare_prev_runnable()
+        || task.scheduler_sleep_declared()
+        || task.pending_wake_signal()
     {
         return false;
     }
@@ -255,11 +446,15 @@ fn task_breakpoint_contract_smoke() -> bool {
     }
     let successor_ref = successor.flow_ref();
     if task.breakpoint_state() != TaskBreakpointState::Invalid
+        || task.declare_scheduler_sleep().is_err()
+        || task.prepare_prev_runnable()
+        || task.deactivate_from_scheduler().is_err()
         || task.suspend_from_cpu().is_err()
         || task.breakpoint_state() != TaskBreakpointState::Valid
         || task.breakpoint_flow() != successor_ref
         || !task.breakpoint_matches(successor_ref)
         || task.breakpoint_matches(initial_ref)
+        || task.wake_for_scheduler_enqueue().is_err()
         || task.continue_on_cpu().is_err()
         || successor.cleanup_active_for_exit(&mut task).is_err()
         || task.disable().is_err()
@@ -280,7 +475,11 @@ extern "C" fn smoke_scheduler_task_entry() -> ! {
     if ctx.mark_smoke_scheduler_yielded_back().is_err() {
         crate::arch::riscv64::sbi::system_shutdown();
     }
-    if ctx.schedule_current().is_err() {
+    if ctx.declare_current_scheduler_sleep().is_err() {
+        crate::arch::riscv64::sbi::system_shutdown();
+    }
+    if let Err(error) = ctx.schedule_current() {
+        print_schedule_error("smoke task schedule back", error);
         crate::arch::riscv64::sbi::system_shutdown();
     }
 

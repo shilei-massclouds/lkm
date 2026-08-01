@@ -48,15 +48,77 @@ fn preset_dependencies_ready(ctx: &Context) -> bool {
 
 fn preset_objects(ctx: &mut Context) -> EventResult {
     ctx.sched_init_prelude_trimmed_paths.setup()?;
-    ctx.scheduler
-        .preset(&ctx.cpu_group, &ctx.per_cpu_storage, &ctx.static_branch)?;
-    ctx.scheduler.setup(
-        &mut ctx.cpu_group,
-        &ctx.per_cpu_storage,
-        &mut ctx.boot_task,
-        &ctx.init_mm,
-    )?;
-    ctx.scheduler.enable()?;
+    let Some(inventory) = ctx.cpu_group.possible_cpu_inventory() else {
+        return failed_condition(
+            LifecycleEvent::Preset,
+            State::Base,
+            State::Base,
+            State::Prepared,
+        );
+    };
+    ctx.scheduler_shared.preset(inventory)?;
+    {
+        let Context {
+            cpu_group,
+            scheduler_shared,
+            per_cpu_storage,
+            static_branch,
+            boot_task,
+            init_mm,
+            ..
+        } = ctx;
+        let root_domain = scheduler_shared.default_root_domain();
+        let Some((scheduler, local_interrupt)) = cpu_group.boot_scheduler_and_local_interrupt_mut()
+        else {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                State::Base,
+                State::Base,
+                State::Prepared,
+            );
+        };
+        scheduler.preset(per_cpu_storage, static_branch)?;
+        scheduler.setup(
+            inventory,
+            per_cpu_storage,
+            root_domain,
+            boot_task,
+            init_mm,
+            local_interrupt,
+        )?;
+        scheduler.enable()?;
+
+        let mut logical_id = 1usize;
+        while logical_id < inventory.count() {
+            let Some(cpu_ref) = inventory.cpu_ref(logical_id) else {
+                return failed_condition(
+                    LifecycleEvent::Preset,
+                    State::Base,
+                    State::Base,
+                    State::Prepared,
+                );
+            };
+            let Some(cpu_hartid) = inventory.hartid(logical_id) else {
+                return failed_condition(
+                    LifecycleEvent::Preset,
+                    State::Base,
+                    State::Base,
+                    State::Prepared,
+                );
+            };
+            let Some(cpu) = cpu_group.cpu_mut(logical_id) else {
+                return failed_condition(
+                    LifecycleEvent::Preset,
+                    State::Base,
+                    State::Base,
+                    State::Prepared,
+                );
+            };
+            cpu.scheduler_mut()
+                .setup_secondary(cpu_ref, cpu_hartid, root_domain)?;
+            logical_id += 1;
+        }
+    }
     checkpoint_irqs_disabled()?;
     ctx.radix_tree
         .setup(&mut ctx.slub_subsystem, &ctx.cpu_hotplug_state)?;
@@ -69,13 +131,25 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
         &ctx.boot_task,
     )?;
     ctx.softirq.preset(&ctx.per_cpu_storage)?;
-    ctx.rcu_core.setup(
-        &ctx.scheduler,
-        &ctx.workqueue,
-        &mut ctx.softirq,
-        &ctx.cpu_group,
-        &ctx.per_cpu_storage,
-    )?;
+    {
+        let Context {
+            rcu_core,
+            workqueue,
+            softirq,
+            cpu_group,
+            per_cpu_storage,
+            ..
+        } = ctx;
+        let Some(scheduler) = cpu_group.boot_scheduler() else {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                State::Base,
+                State::Base,
+                State::Prepared,
+            );
+        };
+        rcu_core.setup(scheduler, workqueue, softirq, cpu_group, per_cpu_storage)?;
+    }
     ctx.sched_init_trace_context_boundaries
         .setup(&ctx.sched_init_prelude_trimmed_paths, &ctx.rcu_core)
 }
@@ -144,40 +218,65 @@ pub fn is_online() -> bool {
 
 fn sched_init_phase_ready(ctx: &Context) -> bool {
     let boot_cpu = ctx.cpu_group.boot_cpu();
-    let Some(boot_scheduler_view) = ctx.scheduler.boot_cpu_owned_scheduler_view(&ctx.cpu_group)
+    let Some(boot_scheduler_view) = ctx
+        .scheduler()
+        .boot_cpu_owned_scheduler_view(&ctx.cpu_group)
     else {
         return false;
     };
-    let boot_runqueue = ctx.scheduler.boot_runqueue();
+    let boot_runqueue = ctx.scheduler();
     let boot_idle_setup_state = boot_scheduler_view.idle_task();
 
     crate::phases::boot::mm_core_init::is_online()
-        && ctx.scheduler.state() == State::Online
-        && ctx.scheduler.scheduler_running()
-        && ctx.scheduler.default_root_domain().state() == State::Ready
-        && ctx.scheduler.default_root_domain().possible_cpu_count()
-            == ctx.cpu_group.possible_cpu_count()
-        && ctx.scheduler.default_root_domain().covered_cpu_count()
-            == ctx.cpu_group.possible_cpu_count()
-        && ctx.scheduler.default_root_domain().covered_cpu_ref(0) == ctx.cpu_group.boot_cpu_ref()
+        && ctx.scheduler().state() == State::Online
+        && ctx.scheduler().scheduler_running()
+        && ctx.scheduler_shared.state() == State::Ready
+        && ctx.scheduler_shared.default_root_domain().state() == State::Ready
         && ctx
-            .scheduler
+            .scheduler_shared
+            .default_root_domain()
+            .possible_cpu_count()
+            == ctx.cpu_group.possible_cpu_count()
+        && ctx
+            .scheduler_shared
+            .default_root_domain()
+            .covered_cpu_count()
+            == ctx.cpu_group.possible_cpu_count()
+        && ctx
+            .scheduler_shared
+            .default_root_domain()
+            .covered_cpu_ref(0)
+            == ctx.cpu_group.boot_cpu_ref()
+        && ctx
+            .scheduler_shared
             .default_root_domain()
             .covers_cpu_group_possible(&ctx.cpu_group)
-        && ctx.scheduler.default_root_domain().smp_topology_deferred()
-        && ctx.scheduler.bit_wait_queue_table().state() == State::Prepared
-        && ctx.scheduler.bit_wait_queue_table().bucket_count() != 0
         && ctx
-            .scheduler
+            .scheduler_shared
+            .default_root_domain()
+            .smp_topology_deferred()
+        && ctx.scheduler_shared.bit_wait_queue_table().state() == State::Prepared
+        && ctx.scheduler_shared.bit_wait_queue_table().bucket_count() != 0
+        && ctx
+            .scheduler_shared
             .bit_wait_queue_table()
             .bucket_count_matches_wait_table_size()
         && ctx
-            .scheduler
+            .scheduler_shared
             .bit_wait_queue_table()
             .bucket_waitqueues_ready()
-        && ctx.scheduler.bit_wait_queue_table().bucket_locks_ready()
-        && ctx.scheduler.bit_wait_queue_table().bucket_lists_empty()
-        && boot_runqueue.state() == State::Ready
+        && ctx
+            .scheduler_shared
+            .bit_wait_queue_table()
+            .bucket_locks_ready()
+        && ctx
+            .scheduler_shared
+            .bit_wait_queue_table()
+            .bucket_lists_empty()
+        && ctx
+            .cpu_group
+            .possible_schedulers_ready(ctx.scheduler_shared.default_root_domain())
+        && boot_runqueue.runqueue_state() == State::Ready
         && boot_runqueue.cpu_ref().is_boot_cpu()
         && boot_cpu
             .map(|cpu| boot_runqueue.cpu_ref() == cpu.cpu_ref())
@@ -185,45 +284,57 @@ fn sched_init_phase_ready(ctx: &Context) -> bool {
         && boot_runqueue.class_queues_ready()
         && boot_runqueue.attached_to_root_domain()
         && boot_runqueue.root_attach_held_runqueue_lock()
-        && ctx.scheduler.boot_runqueue_lock().state() == State::Ready
-        && !ctx.scheduler.boot_runqueue_lock().locked()
-        && ctx.scheduler.boot_runqueue_lock().acquired_count() != 0
-        && ctx.scheduler.boot_runqueue_lock().released_count() != 0
-        && ctx.scheduler.boot_runqueue_lock().irqsave_entered_count() != 0
-        && ctx.scheduler.boot_runqueue_lock().irqrestore_exited_count() != 0
-        && ctx.scheduler.boot_init_preemption().state() == State::Ready
-        && ctx.scheduler.boot_init_preemption().disabled()
+        && ctx.scheduler().boot_runqueue_lock().state() == State::Ready
+        && !ctx.scheduler().boot_runqueue_lock().locked()
+        && ctx.scheduler().boot_runqueue_lock().acquired_count() != 0
+        && ctx.scheduler().boot_runqueue_lock().released_count() != 0
+        && ctx.scheduler().boot_runqueue_lock().irqsave_entered_count() != 0
         && ctx
-            .scheduler
+            .scheduler()
+            .boot_runqueue_lock()
+            .irqrestore_exited_count()
+            != 0
+        && ctx.scheduler().boot_init_preemption().state() == State::Ready
+        && ctx.scheduler().boot_init_preemption().disabled()
+        && ctx
+            .scheduler_shared
             .default_root_domain()
             .covers_cpu_ref(boot_runqueue.cpu_ref())
         && !boot_runqueue.balance_push_enabled()
         && ctx
-            .scheduler
+            .scheduler()
             .boot_cpu_owned_scheduler_view_ready(&ctx.cpu_group)
         && boot_idle_setup_state.state() == State::Ready
         && boot_scheduler_view.runqueue_idle_task_matches()
         && boot_idle_setup_state.uses_current_init_task()
         && boot_idle_setup_state.lazy_tlb_mm_ready()
         && boot_idle_setup_state.no_set_affinity()
-        && ctx.scheduler.boot_idle_pi_lock().state() == State::Ready
-        && !ctx.scheduler.boot_idle_pi_lock().locked()
-        && ctx.scheduler.boot_idle_pi_lock().irqsave_entered_count() != 0
-        && ctx.scheduler.boot_idle_pi_lock().irqrestore_exited_count() != 0
-        && ctx.scheduler.boot_idle_rcu_read_side().state() == State::Prepared
+        && ctx.scheduler().boot_idle_pi_lock().state() == State::Ready
+        && !ctx.scheduler().boot_idle_pi_lock().locked()
+        && ctx.scheduler().boot_idle_pi_lock().irqsave_entered_count() != 0
         && ctx
-            .scheduler
+            .scheduler()
+            .boot_idle_pi_lock()
+            .irqrestore_exited_count()
+            != 0
+        && ctx.scheduler().boot_idle_rcu_read_side().state() == State::Prepared
+        && ctx
+            .scheduler()
             .boot_idle_rcu_read_side()
             .incomplete_first_slice()
         && ctx
-            .scheduler
+            .scheduler()
             .boot_idle_rcu_read_side()
             .full_semantics_deferred()
-        && ctx.scheduler.boot_idle_rcu_read_side().read_lock_count() != 0
-        && ctx.scheduler.boot_idle_rcu_read_side().read_unlock_count() != 0
-        && ctx.scheduler.boot_idle_rcu_read_side().balanced()
-        && ctx.scheduler.boot_idle_preemption().state() == State::Ready
-        && ctx.scheduler.boot_idle_preemption().disabled()
+        && ctx.scheduler().boot_idle_rcu_read_side().read_lock_count() != 0
+        && ctx
+            .scheduler()
+            .boot_idle_rcu_read_side()
+            .read_unlock_count()
+            != 0
+        && ctx.scheduler().boot_idle_rcu_read_side().balanced()
+        && ctx.scheduler().boot_idle_preemption().state() == State::Ready
+        && ctx.scheduler().boot_idle_preemption().disabled()
         && ctx
             .current_task_ref()
             .is_ok_and(|task_ref| task_ref.same_identity(ctx.boot_task.task_ref()))

@@ -53,6 +53,7 @@ Classification meanings:
 | [`page_fault_exception_type.spec`](../../model/objects/page_fault_exception_type.spec) | `dedicated` | [`page-fault-exception-type.md`](page-fault-exception-type.md) |
 | [`physical_direct.spec`](../../model/objects/physical_direct.spec) | `dedicated` | [`physical-direct.md`](physical-direct.md) |
 | [`raw_dtb.spec`](../../model/objects/raw_dtb.spec) | `dedicated` | [`raw-dtb.md`](raw-dtb.md) |
+| [`scheduler.spec`](../../model/objects/scheduler.spec) | `dedicated` | [`scheduler.md`](scheduler.md) |
 | [`swapper_vm.spec`](../../model/objects/swapper_vm.spec) | `dedicated` | [`swapper-vm.md`](swapper-vm.md) |
 | [`syscall_exception_flow_type.spec`](../../model/objects/syscall_exception_flow_type.spec) | `dedicated` | [`syscall-exception-flow-type.md`](syscall-exception-flow-type.md) |
 | [`syscall_exception_type.spec`](../../model/objects/syscall_exception_type.spec) | `dedicated` | [`syscall-exception-type.md`](syscall-exception-type.md) |

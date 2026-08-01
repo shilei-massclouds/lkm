@@ -2,7 +2,7 @@ use super::{
     cpu_group::CpuGroup,
     cpu_hotplug::CpuHotplugState,
     mm_core::PageAllocator,
-    scheduler::Scheduler,
+    scheduler_shared::SchedulerShared,
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     workqueue::Workqueue,
 };
@@ -175,18 +175,18 @@ impl RuntimeCoreBoundary {
 
     pub fn setup(
         &mut self,
-        scheduler: &Scheduler,
+        scheduler_shared: &SchedulerShared,
         workqueue: &Workqueue,
         async_core: &AsyncCoreDeferred,
         padata_core: &PadataCoreDeferred,
         page_allocator: &PageAllocator,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
-            || scheduler.state() != State::Online
-            || !scheduler.smp_initialized()
-            || !scheduler.sched_domains_mutex().ready()
-            || !scheduler.sched_domains_mutex_guard_used()
-            || !scheduler.smp_cpu_masks_stable()
+            || scheduler_shared.state() != State::Ready
+            || !scheduler_shared.smp_initialized()
+            || !scheduler_shared.sched_domains_mutex().ready()
+            || !scheduler_shared.sched_domains_mutex_guard_used()
+            || !scheduler_shared.smp_cpu_masks_stable()
             || workqueue.state() != State::Ready
             || !workqueue.topology_ready()
             || !workqueue.topology_pool_mutex_guard_used()
@@ -215,22 +215,22 @@ impl RuntimeCoreBoundary {
 }
 
 pub fn runtime_core_ready(
-    scheduler: &Scheduler,
+    scheduler_shared: &SchedulerShared,
     workqueue: &Workqueue,
     async_core: &AsyncCoreDeferred,
     padata_core: &PadataCoreDeferred,
     page_allocator: &PageAllocator,
     boundary: &RuntimeCoreBoundary,
 ) -> bool {
-    scheduler.state() == State::Online
-        && scheduler.smp_initialized()
-        && scheduler.sched_domains_ready()
-        && scheduler.sched_domains_mutex().ready()
-        && scheduler.sched_domains_mutex_guard_used()
-        && scheduler.smp_cpu_masks_stable()
-        && scheduler.kernel_init_affinity_released()
-        && scheduler.rt_dl_smp_ready()
-        && scheduler.granularity_refreshed()
+    scheduler_shared.state() == State::Ready
+        && scheduler_shared.smp_initialized()
+        && scheduler_shared.sched_domains_ready()
+        && scheduler_shared.sched_domains_mutex().ready()
+        && scheduler_shared.sched_domains_mutex_guard_used()
+        && scheduler_shared.smp_cpu_masks_stable()
+        && scheduler_shared.kernel_init_affinity_released()
+        && scheduler_shared.rt_dl_smp_ready()
+        && scheduler_shared.granularity_refreshed()
         && workqueue.state() == State::Ready
         && workqueue.topology_ready()
         && workqueue.pod_types_ready()

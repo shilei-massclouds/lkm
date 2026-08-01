@@ -1,6 +1,6 @@
 use super::{
     cpu::{CpuRef, MAX_CPUS},
-    cpu_group::CpuGroup,
+    cpu_group::{CpuGroup, PossibleCpuInventory},
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
 };
 use crate::checkpoint::Checkpoint;
@@ -83,20 +83,16 @@ impl DefaultSchedRootDomain {
         self.smp_topology_deferred
     }
 
-    pub(crate) fn setup(&mut self, cpu_group: &CpuGroup) -> EventResult {
-        if self.lifecycle.state() != State::Base
-            || cpu_group.state() != State::Ready
-            || !cpu_group.possible_cpu_boundary_ready()
-        {
+    pub(crate) fn setup_inventory(&mut self, inventory: PossibleCpuInventory) -> EventResult {
+        if self.lifecycle.state() != State::Base || inventory.count() == 0 {
             return self.failed_setup();
         }
 
         self.covered_cpu_refs = [CpuRef::invalid(); MAX_CPUS];
         self.covered_cpu_count = 0;
-
         let mut logical_id = 0usize;
-        while logical_id < cpu_group.possible_cpu_count() {
-            let Some(cpu_ref) = cpu_group.possible_cpu_ref_at(logical_id) else {
+        while logical_id < inventory.count() {
+            let Some(cpu_ref) = inventory.cpu_ref(logical_id) else {
                 return self.failed_setup();
             };
             if self.covers_duplicate_before(cpu_ref, logical_id) {
@@ -106,12 +102,7 @@ impl DefaultSchedRootDomain {
             self.covered_cpu_count += 1;
             logical_id += 1;
         }
-
         self.smp_topology_deferred = true;
-        if !self.covers_cpu_group_possible_before_ready(cpu_group) {
-            return self.failed_setup();
-        }
-
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Base,
@@ -129,27 +120,6 @@ impl DefaultSchedRootDomain {
             index += 1;
         }
         false
-    }
-
-    fn covers_cpu_group_possible_before_ready(&self, cpu_group: &CpuGroup) -> bool {
-        if cpu_group.state() != State::Ready
-            || !cpu_group.possible_cpu_boundary_ready()
-            || self.covered_cpu_count != cpu_group.possible_cpu_count()
-        {
-            return false;
-        }
-
-        let mut logical_id = 0usize;
-        while logical_id < cpu_group.possible_cpu_count() {
-            let Some(cpu_ref) = cpu_group.possible_cpu_ref_at(logical_id) else {
-                return false;
-            };
-            if self.covered_cpu_refs[logical_id] != cpu_ref {
-                return false;
-            }
-            logical_id += 1;
-        }
-        true
     }
 
     fn failed_setup(&self) -> EventResult {

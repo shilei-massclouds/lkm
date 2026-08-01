@@ -692,7 +692,6 @@ impl SecondaryIdleTaskSet {
         &mut self,
         boundary: &PreSmpInitBoundary,
         cpu_group: &mut CpuGroup,
-        scheduler: &Scheduler,
         per_cpu_storage: &PerCpuStorage,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
@@ -701,7 +700,9 @@ impl SecondaryIdleTaskSet {
             || !boundary.secondary_cpus_present_not_online()
             || cpu_group.state() != State::Ready
             || !cpu_group.secondary_cpus_present_not_online()
-            || scheduler.state() != State::Online
+            || cpu_group
+                .boot_scheduler()
+                .is_none_or(|scheduler| scheduler.state() != State::Online)
             || per_cpu_storage.state() != State::Ready
         {
             return self.failed_preset();
@@ -1301,7 +1302,6 @@ impl SecondaryCpuStartupAck {
         cpu_group: &mut CpuGroup,
         sync: &mut CpuHotplugSyncSet,
         cpu_running_wait_lock: &mut RawSpinLock,
-        scheduler: &mut Scheduler,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || start_provider.state() != State::Ready
@@ -1316,7 +1316,8 @@ impl SecondaryCpuStartupAck {
             return self.failed_setup();
         }
 
-        let Some(local_interrupt) = cpu_group.boot_cpu_local_interrupt_mut() else {
+        let Some((scheduler, local_interrupt)) = cpu_group.boot_scheduler_and_local_interrupt_mut()
+        else {
             return self.failed_setup();
         };
         sync.observe_cpu_running(cpu_running_wait_lock, local_interrupt, scheduler)?;
@@ -1406,7 +1407,6 @@ impl SecondaryCpuOnlineAck {
         cpu_group: &mut CpuGroup,
         sbi_ipi: &SbiIpi,
         done_up_wait_lock: &mut RawSpinLock,
-        scheduler: &mut Scheduler,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || startup_ack.state() != State::Ready
@@ -1422,7 +1422,9 @@ impl SecondaryCpuOnlineAck {
         }
 
         {
-            let Some(local_interrupt) = cpu_group.boot_cpu_local_interrupt_mut() else {
+            let Some((scheduler, local_interrupt)) =
+                cpu_group.boot_scheduler_and_local_interrupt_mut()
+            else {
                 return self.failed_setup();
             };
             sync.observe_done_up(done_up_wait_lock, local_interrupt, scheduler)?;

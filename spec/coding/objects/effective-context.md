@@ -77,7 +77,7 @@ must not be silently dropped merely because an outer context already
 disables local interrupts or preemption. It also must not be
 rewritten into a second irqsave/irqrestore pair; irq/preemption
 effects must come only from the explicit outer guard that models
-them. init_idle() uses this shape for BootRunQueueLock inside the
+them. init_idle() uses this shape for Cpu0SchedulerLock inside the
 outer BootIdlePiLock irqsave context.
 
 #### Effective Context is not a license to erase protocol guards

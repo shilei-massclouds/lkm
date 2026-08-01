@@ -19,7 +19,7 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
-    if ctx.scheduler.schedule_passes() == 0
+    if ctx.scheduler().schedule_passes() == 0
         || ctx.kernel_init_task.waiting_for_kthreadd_done()
         || !ctx.kernel_init_task.observed_kthreadd_done_release()
         || !ctx.kernel_init_task.released_for_pre_smp_init()

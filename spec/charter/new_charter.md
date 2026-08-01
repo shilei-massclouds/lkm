@@ -111,7 +111,9 @@ Base 尚未完成规格采纳，Prepared 已建立规格，Ready 已构造且可
 Human 在模型外部依次同步 drives Computer.Preset、Computer.Setup，二者成功后异步 emits
 Computer.Enable；Computer 的三个 handler 不相互触发。子 System 规格和构造使用同步 `drives`。运行交接按
 `Computer.Enable -> Riscv64Platform.Enable -> OpenSBI.Enable -> Kernel.Enable` 异步推进；
-`BootInitFlow`、首次 Scheduler 调度与 `KernelInitFlow` 是 Kernel.Enable 的同步逻辑下层过程。
+Kernel.Enable 同步驱动 `BootInitFlow` 的三段 lifecycle。BootInitFlow 提交 Online 后，当前
+BootTask 的 active `BootIdleFlow` 才向 CPU0 拥有的 Scheduler 异步 `emits Schedule()`；首次非
+identity switch 的 Task/TaskFlow continuation 再承载 KernelInitFlow 的后续执行。
 
 > MUST[model]：Computer 模型
 >
@@ -194,8 +196,8 @@ Computer.Enable；Computer 的三个 handler 不相互触发。子 System 规格
 `Base -> Prepared -> Ready -> Online` 生命周期。Preset 直接执行入口前导对象编排；Setup 直接顺序驱动
 `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、`SchedInitPhase`、`IrqTimeInitPhase`、
 `LocalIrqEnablePhase`、`IrqOpenPreparePhase`、`ProcessPreparePhase`、`BootInitRestInitPhase`；Enable 只驱动
-`BootInitScheduleHandoffPhase`。三段 lifecycle 由 Kernel.Enable 依次驱动，Enable 提交 Online 后由
-Kernel.Enable 继续驱动 `Scheduler.Action::Schedule`。不存在 `BootPhase` 或 `InterruptPhase` 包装
+`BootInitScheduleHandoffPhase`。三段 lifecycle 由 Kernel.Enable 依次驱动；Enable 提交 Online 后，
+当前 BootTask 的 active `BootIdleFlow` 向 CPU0 Scheduler `emits Schedule()`。不存在 `BootPhase` 或 `InterruptPhase` 包装
 lifecycle，也不产生第二次 Kernel Enable 接受。
 
 ### BootInitFlow.Preset 的入口前导步骤

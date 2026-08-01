@@ -25,6 +25,38 @@ Linux checkpoint mapping 只是只读 cross-reference。它消费已导出的 `a
 mapping pass 不得修改 Linux 树、添加 probe、修改 `arceos_ex` 行为或 checkpoint handler，也不得把静态锚点
 当作已完成插桩或语义等价的证明。已由本项目生成的 marker/recorder 行在解析锚点时必须从内存视图忽略，但这不替代独立的 stale/mismatch 检查。
 
+## Scheduler 差分 checkpoint
+
+Scheduler 差分只增加只读观测，不改变 Linux 调度行为。成对运行至少采集并比较：
+
+- Schedule entry：CPU、schedule mode、prev identity、prev state、prev on-rq；
+- PreparePrev exit：pending signal 是否恢复 running、是否 block/deactivate、最终 on-rq；
+- PickNext exit：prev、next 与所选 sched class；
+- 仅 `next != prev` 时出现的 SwitchTo entry；
+- next stack 上的 finish-task-switch 与 schedule return。
+
+每个 marker 必须位于能稳定读取对应事实的 Linux `__schedule()`/context-switch 边界，并以源码顺序证明
+PreparePrev 先于 pick、pick 先于 class handoff、非 identity switch 先于 next-stack finish。identity case
+不得合成 SwitchTo marker。Boot 首次 `schedule_preempt_disabled()` 必须单独纳入 case-local scope，用于证明
+BootTask 在 pick 前未被错误 deactivate。具体函数、符号和 anchor 只记录于 mapping/instrumentation plan；
+不得写入 Coding 核心规格。
+
+当前 sibling Linux 的差分记录使用独立于生命周期 checkpoint ID 的定长只读缓冲区，并在既有
+`lkm_checkpoints_dump()` 前导区输出 `scheduler_diff:` 记录；关闭 `CONFIG_LKM_CHECKPOINTS` 时 recorder
+必须编译为空操作。字段与 anchor 固定如下：
+
+| stage | Linux anchor | 必须采集的字段 |
+| --- | --- | --- |
+| `entry` | `kernel/sched/core.c::__schedule()` 取得 `cpu_rq(cpu)->curr` 后、`schedule_debug()` 前 | cpu、mode、prev pid、`prev->__state`、`prev->on_rq`、入口 preempt flag |
+| `prepare_prev` | signal recovery 或 `block_task()` 完成后、`pick_next_task()` 前；SM_IDLE identity fast path 同样单独记录 | prev 最终 state/on-rq、signal-recovered、blocked、SM_PREEMPT disposition |
+| `pick_next` | `pick_next_task()` 返回后；SM_IDLE identity fast path 在 `goto picked` 前 | prev/next pid、prev state/on-rq、blocked、next class |
+| `switch_entry` | `likely(prev != next)` 分支入口、更新 `rq->curr` 前 | prev/next pid、blocked、next class；identity 严禁出现 |
+| `finish_return` | next stack 的 `finish_task_switch()` 完成 mm/dead-task cleanup 后、return 前 | cpu、已预捕获的 prev pid/state/on-rq、current pid/class |
+
+class 编码只用于差分输出，顺序为 stop、deadline、realtime、fair、idle；参考配置未启用的 ext/SCX
+仍可被诊断为 `ext`，但不进入核心规格。缓冲记录必须先写 payload、以 release-order 最后发布 stage；
+dead-task 路径必须在引用释放前捕获所有 prev 字段，finish recorder 不得解引用已释放的 prev。
+
 ## Coverage 与 paired difftest
 
 coverage 审阅只从已提交 mapping JSON 聚合数量、confidence、Linux 文件和 unmapped family；不读写 Linux 树、

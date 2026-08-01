@@ -1226,10 +1226,7 @@ fn run_syscall_table_clone(
     let child_a0 = child.child_trap_frame_reg(10).unwrap_or(usize::MAX);
     let child_tp = child.child_trap_frame_reg(4).unwrap_or(0);
     let child_sepc = child.child_trap_frame_sepc().unwrap_or(0);
-    let runqueue_contains_child = ctx
-        .scheduler
-        .boot_runqueue()
-        .contains_task_ref(child.active_task_ref());
+    let runqueue_contains_child = ctx.scheduler().contains_task_ref(child.active_task_ref());
 
     let valid = table.state() == State::Ready
         && table.clone_supported()
@@ -1260,7 +1257,7 @@ fn run_syscall_table_clone(
         && child_a0 == 0
         && child.tls_inherited()
         && child.enqueued()
-        && ctx.scheduler.selected_runqueue_task_id() == internal_child_task
+        && ctx.scheduler().selected_runqueue_task_id() == internal_child_task
         && runqueue_contains_child
         && ctx.kernel_init_user_state.child_process_group_visible();
 
@@ -1277,7 +1274,7 @@ fn run_syscall_table_clone(
     );
     sink.diag_usize(
         "clone_scheduler_selected_task",
-        ctx.scheduler.selected_runqueue_task_id(),
+        ctx.scheduler().selected_runqueue_task_id(),
     );
     sink.diag_usize(
         "clone_runqueue_contains_child",
@@ -1336,10 +1333,7 @@ fn run_syscall_table_clone_vfork_pidfd(
     let child_a0 = child.child_trap_frame_reg(10).unwrap_or(usize::MAX);
     let child_sp = child.child_trap_frame_reg(2).unwrap_or(0);
     let child_sepc = child.child_trap_frame_sepc().unwrap_or(0);
-    let runqueue_contains_child = ctx
-        .scheduler
-        .boot_runqueue()
-        .contains_task_ref(child.active_task_ref());
+    let runqueue_contains_child = ctx.scheduler().contains_task_ref(child.active_task_ref());
 
     let valid = table.state() == State::Ready
         && table.clone_supported()
@@ -1414,10 +1408,7 @@ fn run_syscall_table_clone_vfork_vm(
     let child_a0 = child.child_trap_frame_reg(10).unwrap_or(usize::MAX);
     let child_sp = child.child_trap_frame_reg(2).unwrap_or(0);
     let child_sepc = child.child_trap_frame_sepc().unwrap_or(0);
-    let runqueue_contains_child = ctx
-        .scheduler
-        .boot_runqueue()
-        .contains_task_ref(child.active_task_ref());
+    let runqueue_contains_child = ctx.scheduler().contains_task_ref(child.active_task_ref());
 
     let valid = table.state() == State::Ready
         && table.clone_supported()
@@ -2212,8 +2203,7 @@ fn run_user_child_parent_wait_resumed(
     let child = &ctx.user_task_set;
     let obs = wait4_checkpoint_observation();
     let runqueue_contains_internal_child = ctx
-        .scheduler
-        .boot_runqueue()
+        .scheduler()
         .contains_task_ref(child.last_exited_task_ref());
     let valid = child.child_exit_status_observed()
         && child.wait4_status_copied()
@@ -2465,8 +2455,7 @@ fn run_user_task_record_released(
 
     let child = &ctx.user_task_set;
     let runqueue_contains_internal_child = ctx
-        .scheduler
-        .boot_runqueue()
+        .scheduler()
         .contains_task_ref(child.last_exited_task_ref());
     let valid = child.state() == State::Ready
         && child.active_task_state() == State::Prepared

@@ -1121,2211 +1121,2232 @@
   },
   {
     "index": 160,
+    "variant": "SchedulerPreparePrevEntry",
+    "name": "Scheduler.PreparePrev.Entry",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 161,
+    "variant": "SchedulerPreparePrevExit",
+    "name": "Scheduler.PreparePrev.Exit",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 162,
+    "variant": "SchedulerDeactivateTask",
+    "name": "Scheduler.DeactivateTask",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 163,
     "variant": "SchedulerPickNextTaskExit",
     "name": "Scheduler.PickNextTask.Exit",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 161,
+    "index": 164,
     "variant": "SchedulerSwitchToEntry",
     "name": "Scheduler.SwitchTo.Entry",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 162,
+    "index": 165,
     "variant": "SchedulerSwitchToExit",
     "name": "Scheduler.SwitchTo.Exit",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 163,
+    "index": 166,
     "variant": "SchedulerSchedule",
     "name": "Scheduler.Schedule",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 164,
+    "index": 167,
     "variant": "SchedulerScheduleExit",
     "name": "Scheduler.Schedule.Exit",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 165,
+    "index": 168,
     "variant": "IrqTimeInitPhaseStarted",
     "name": "IrqTimeInitPhase.Started",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 166,
+    "index": 169,
     "variant": "IrqTimeInitPhaseReady",
     "name": "IrqTimeInitPhase.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 167,
+    "index": 170,
     "variant": "IrqTimeInitPhaseOnline",
     "name": "IrqTimeInitPhase.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 168,
+    "index": 171,
     "variant": "IrqControllerReady",
     "name": "IrqController.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 169,
+    "index": 172,
     "variant": "RiscvIntcReady",
     "name": "RiscvIntc.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 170,
+    "index": 173,
     "variant": "RiscvIrqStackSetReady",
     "name": "RiscvIrqStackSet.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 171,
+    "index": 174,
     "variant": "IrqChipInitTablePrepared",
     "name": "IrqChipInitTable.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 172,
+    "index": 175,
     "variant": "PlicDriverPrepared",
     "name": "PlicDriver.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 173,
+    "index": 176,
     "variant": "IrqChipInitTableReady",
     "name": "IrqChipInitTable.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 174,
+    "index": 177,
     "variant": "IrqDispatchTreeReady",
     "name": "IrqDispatchTree.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 175,
+    "index": 178,
     "variant": "PlicReady",
     "name": "Plic.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 176,
+    "index": 179,
     "variant": "PlicIrqDomainPrepared",
     "name": "PlicIrqDomain.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 177,
+    "index": 180,
     "variant": "PlicIrqDomainReady",
     "name": "PlicIrqDomain.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 178,
+    "index": 181,
     "variant": "IrqHandlerRegistryReady",
     "name": "IrqHandlerRegistry.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 179,
+    "index": 182,
     "variant": "TickBroadcastPrepared",
     "name": "TickBroadcast.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 180,
+    "index": 183,
     "variant": "TickPrepared",
     "name": "Tick.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 181,
+    "index": 184,
     "variant": "RcuInitNohzTrimmedNoop",
     "name": "RcuInitNohz.TrimmedNoop",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 182,
+    "index": 185,
     "variant": "IrqTimeTrimmedPathsPrepared",
     "name": "IrqTimeTrimmedPaths.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 183,
+    "index": 186,
     "variant": "TimerWheelReady",
     "name": "TimerWheel.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 184,
+    "index": 187,
     "variant": "SrcuCoreReady",
     "name": "SrcuCore.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 185,
+    "index": 188,
     "variant": "HrtimerCoreReady",
     "name": "HrtimerCore.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 186,
+    "index": 189,
     "variant": "ClocksourceCorePrepared",
     "name": "ClocksourceCore.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 187,
+    "index": 190,
     "variant": "JiffiesClocksourcePrepared",
     "name": "JiffiesClocksource.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 188,
+    "index": 191,
     "variant": "TimekeeperReady",
     "name": "Timekeeper.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 189,
+    "index": 192,
     "variant": "RiscvTimerProviderReady",
     "name": "RiscvTimerProvider.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 190,
+    "index": 193,
     "variant": "TickBroadcastReady",
     "name": "TickBroadcast.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 191,
+    "index": 194,
     "variant": "TickReady",
     "name": "Tick.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 192,
+    "index": 195,
     "variant": "SoftirqReady",
     "name": "Softirq.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 193,
+    "index": 196,
     "variant": "RandomnessReady",
     "name": "Randomness.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 194,
+    "index": 197,
     "variant": "KfenceInitTrimmedNoop",
     "name": "KfenceInit.TrimmedNoop",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 195,
+    "index": 198,
     "variant": "IrqTimeTrimmedPathsReady",
     "name": "IrqTimeTrimmedPaths.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 196,
+    "index": 199,
     "variant": "BootStackCanaryReady",
     "name": "BootStackCanary.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 197,
+    "index": 200,
     "variant": "PerfEventCoreReady",
     "name": "PerfEventCore.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 198,
+    "index": 201,
     "variant": "ProfileCoreReady",
     "name": "ProfileCore.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 199,
+    "index": 202,
     "variant": "IpiMuxReady",
     "name": "IpiMux.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 200,
+    "index": 203,
     "variant": "SbiIpiReady",
     "name": "SbiIpi.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 201,
+    "index": 204,
     "variant": "SmpCallFunctionReady",
     "name": "SmpCallFunction.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 202,
+    "index": 205,
     "variant": "LocalIrqEnablePhaseStarted",
     "name": "LocalIrqEnablePhase.Started",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 203,
+    "index": 206,
     "variant": "LocalIrqEnablePhaseReady",
     "name": "LocalIrqEnablePhase.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 204,
+    "index": 207,
     "variant": "InterruptTypeOnline",
     "name": "InterruptType.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 205,
+    "index": 208,
     "variant": "IrqOpenPreparePhaseStarted",
     "name": "IrqOpenPreparePhase.Started",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 206,
+    "index": 209,
     "variant": "IrqOpenPreparePhaseReady",
     "name": "IrqOpenPreparePhase.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 207,
+    "index": 210,
     "variant": "SlubFlushWorkqueueReady",
     "name": "SlubSubsystem.FlushWorkqueueReady",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 208,
+    "index": 211,
     "variant": "TtyLineDisciplineRegistryPrepared",
     "name": "TtyLineDisciplineRegistry.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 209,
+    "index": 212,
     "variant": "ConsoleDriverSetPrepared",
     "name": "ConsoleDriverSet.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 210,
+    "index": 213,
     "variant": "ConsolePrepared",
     "name": "Console.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 211,
+    "index": 214,
     "variant": "IrqOpenPrepareTrimmedPathsPrepared",
     "name": "IrqOpenPrepareTrimmedPaths.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 212,
+    "index": 215,
     "variant": "IrqOpenPrepareTrimmedPathsReady",
     "name": "IrqOpenPrepareTrimmedPaths.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 213,
+    "index": 216,
     "variant": "PanicLaterClearCheckpoint",
     "name": "PanicLater.Clear",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 214,
+    "index": 217,
     "variant": "LockdepInitNoop",
     "name": "LockdepInit.Noop",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 215,
+    "index": 218,
     "variant": "LockingSelftestNoop",
     "name": "LockingSelftest.Noop",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 216,
+    "index": 219,
     "variant": "InitrdBoundsTrimmed",
     "name": "InitrdBounds.Trimmed",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 217,
+    "index": 220,
     "variant": "PageAllocatorPerCpuPagesetsDeferred",
     "name": "PageAllocator.PerCpuPagesetsDeferred",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 218,
+    "index": 221,
     "variant": "NumaPolicyNoop",
     "name": "NumaPolicy.Noop",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 219,
+    "index": 222,
     "variant": "AcpiEarlyNoop",
     "name": "AcpiEarly.Noop",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 220,
+    "index": 223,
     "variant": "LateTimeInitNoop",
     "name": "LateTimeInit.Noop",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 221,
+    "index": 224,
     "variant": "SchedClockReady",
     "name": "SchedClock.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 222,
+    "index": 225,
     "variant": "DelayLoopReady",
     "name": "DelayLoop.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 223,
+    "index": 226,
     "variant": "ArchCpuFinalizeNoop",
     "name": "ArchCpuFinalize.Noop",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 224,
+    "index": 227,
     "variant": "ProcessPreparePhaseStarted",
     "name": "ProcessPreparePhase.Started",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 225,
+    "index": 228,
     "variant": "ProcessPreparePhaseReady",
     "name": "ProcessPreparePhase.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 226,
+    "index": 229,
     "variant": "RootPidNamespaceReady",
     "name": "RootPidNamespace.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 227,
+    "index": 230,
     "variant": "AnonVmaCoreReady",
     "name": "AnonVmaCore.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 228,
+    "index": 231,
     "variant": "X86EfiRuntimeSwitchTrimmed",
     "name": "X86EfiRuntimeSwitch.Trimmed",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 229,
+    "index": 232,
     "variant": "TaskCreationCorePrepared",
     "name": "TaskCreationCore.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 230,
+    "index": 233,
     "variant": "CredentialCorePrepared",
     "name": "CredentialCore.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 231,
+    "index": 234,
     "variant": "VectorContextPrepared",
     "name": "VectorContext.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 232,
+    "index": 235,
     "variant": "UprobeCoreReady",
     "name": "UprobeCore.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 233,
+    "index": 236,
     "variant": "TaskCreationCoreReady",
     "name": "TaskCreationCore.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 234,
+    "index": 237,
     "variant": "ShadowCallStackInitNoop",
     "name": "ShadowCallStackInit.Noop",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 235,
+    "index": 238,
     "variant": "LockdepInitTaskNoop",
     "name": "LockdepInitTask.Noop",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 236,
+    "index": 239,
     "variant": "SignalCorePrepared",
     "name": "SignalCore.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 237,
+    "index": 240,
     "variant": "TaskFileContextPrepared",
     "name": "TaskFileContext.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 238,
+    "index": 241,
     "variant": "VmaCorePrepared",
     "name": "VmaCore.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 239,
+    "index": 242,
     "variant": "NsProxyPrepared",
     "name": "NsProxy.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 240,
+    "index": 243,
     "variant": "UtsNamespacePrepared",
     "name": "UtsNamespace.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 241,
+    "index": 244,
     "variant": "KeyringCoreReady",
     "name": "KeyringCore.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 242,
+    "index": 245,
     "variant": "SecurityCoreReady",
     "name": "SecurityCore.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 243,
+    "index": 246,
     "variant": "ProcessPrepareTrimmedPathsPrepared",
     "name": "ProcessPrepareTrimmedPaths.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 244,
+    "index": 247,
     "variant": "DbgLateInitNoop",
     "name": "DbgLateInit.Noop",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 245,
+    "index": 248,
     "variant": "NetNamespaceDeferred",
     "name": "NetNamespace.Deferred",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 246,
+    "index": 249,
     "variant": "PageCacheDeferred",
     "name": "PageCache.Deferred",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 247,
+    "index": 250,
     "variant": "SignalCoreSetupDeferred",
     "name": "SignalCore.SetupDeferred",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 248,
+    "index": 251,
     "variant": "SeqFileCoreDeferred",
     "name": "SeqFileCore.Deferred",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 249,
+    "index": 252,
     "variant": "ProcfsDeferred",
     "name": "Procfs.Deferred",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 250,
+    "index": 253,
     "variant": "NsfsDeferred",
     "name": "Nsfs.Deferred",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 251,
+    "index": 254,
     "variant": "PidfsDeferred",
     "name": "Pidfs.Deferred",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 252,
+    "index": 255,
     "variant": "CpusetNoop",
     "name": "Cpuset.Noop",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 253,
+    "index": 256,
     "variant": "CgroupNoop",
     "name": "Cgroup.Noop",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 254,
+    "index": 257,
     "variant": "TaskstatsNoop",
     "name": "Taskstats.Noop",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 255,
+    "index": 258,
     "variant": "DelayAccountingNoop",
     "name": "DelayAccounting.Noop",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 256,
+    "index": 259,
     "variant": "AcpiSubsystemNoop",
     "name": "AcpiSubsystem.Noop",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 257,
+    "index": 260,
     "variant": "ArchPostAcpiNoop",
     "name": "ArchPostAcpi.Noop",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 258,
+    "index": 261,
     "variant": "KcsanNoop",
     "name": "Kcsan.Noop",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 259,
+    "index": 262,
     "variant": "BootInitFlowPrepared",
     "name": "BootInitFlow.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 260,
+    "index": 263,
     "variant": "BootInitFlowReady",
     "name": "BootInitFlow.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 261,
+    "index": 264,
     "variant": "BootInitRestInitPhaseReady",
     "name": "BootInitRestInitPhase.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 262,
+    "index": 265,
     "variant": "BootInitScheduleHandoffPhaseReady",
     "name": "BootInitScheduleHandoffPhase.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 263,
+    "index": 266,
     "variant": "BootIdleEntryPhaseReady",
     "name": "BootIdleEntryPhase.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 264,
+    "index": 267,
     "variant": "RcuSchedulerStartingReady",
     "name": "RcuCore.SchedulerStartingReady",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 265,
+    "index": 268,
     "variant": "KernelInitTaskPiLockReady",
     "name": "KernelInitTaskPiLock.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 266,
+    "index": 269,
     "variant": "KthreaddTaskPiLockReady",
     "name": "KthreaddTaskPiLock.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 267,
+    "index": 270,
     "variant": "KthreaddReadyGateWaitLockReady",
     "name": "KthreaddReadyGateWaitLock.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 268,
+    "index": 271,
     "variant": "KernelInitTaskPrepared",
     "name": "KernelInitTask.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 269,
+    "index": 272,
     "variant": "KernelInitTaskReady",
     "name": "KernelInitTask.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 270,
+    "index": 273,
     "variant": "KernelInitTaskOnline",
     "name": "KernelInitTask.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 271,
+    "index": 274,
     "variant": "NumaDefaultPolicyNoop",
     "name": "NumaDefaultPolicy.Noop",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 272,
+    "index": 275,
     "variant": "KthreaddTaskPrepared",
     "name": "KthreaddTask.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 273,
+    "index": 276,
     "variant": "KthreaddTaskReady",
     "name": "KthreaddTask.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 274,
+    "index": 277,
     "variant": "KthreaddTaskOnline",
     "name": "KthreaddTask.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 275,
+    "index": 278,
     "variant": "KthreaddTaskGlobalRefBound",
     "name": "KthreaddTask.GlobalRefBound",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 276,
+    "index": 279,
     "variant": "SimpleWaitQueueReady",
     "name": "SimpleWaitQueue.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 277,
+    "index": 280,
     "variant": "CompletionPrepared",
     "name": "Completion.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 278,
+    "index": 281,
     "variant": "CompletionReady",
     "name": "Completion.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 279,
+    "index": 282,
     "variant": "CompletionOnline",
     "name": "Completion.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 280,
+    "index": 283,
     "variant": "SystemStatePrepared",
     "name": "SystemState.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 281,
+    "index": 284,
     "variant": "SystemStateReady",
     "name": "SystemState.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 282,
+    "index": 285,
     "variant": "KthreaddReadyGateReady",
     "name": "KthreaddReadyGate.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 283,
+    "index": 286,
     "variant": "KthreaddReadyGateOnline",
     "name": "KthreaddReadyGate.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 284,
+    "index": 287,
     "variant": "BootIdleFlowReady",
     "name": "BootIdleFlow.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 285,
+    "index": 288,
     "variant": "PreSmpInitPhaseStarted",
     "name": "PreSmpInitPhase.Started",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 286,
+    "index": 289,
     "variant": "PreSmpInitPhaseReady",
     "name": "PreSmpInitPhase.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 287,
+    "index": 290,
     "variant": "PageAllocatorFullGfpMaskOpen",
     "name": "PageAllocator.FullGfpMaskOpen",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 288,
+    "index": 291,
     "variant": "CpuGroupPreSmpReady",
     "name": "CpuGroup.PreSmpReady",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 289,
+    "index": 292,
     "variant": "WorkqueueReady",
     "name": "Workqueue.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 290,
+    "index": 293,
     "variant": "VmstatCorePrepared",
     "name": "VmstatCore.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 291,
+    "index": 294,
     "variant": "TasksRcuReady",
     "name": "TasksRcu.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 292,
+    "index": 295,
     "variant": "PreSmpInitcallsReady",
     "name": "PreSmpInitcalls.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 293,
+    "index": 296,
     "variant": "PreSmpBoundaryReady",
     "name": "PreSmpBoundary.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 294,
+    "index": 297,
     "variant": "SmpBringupPhaseStarted",
     "name": "SmpBringupPhase.Started",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 295,
+    "index": 298,
     "variant": "SmpBringupPhaseReady",
     "name": "SmpBringupPhase.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 296,
+    "index": 299,
     "variant": "SecondaryIdleTasksPrepared",
     "name": "SecondaryIdleTasks.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 297,
+    "index": 300,
     "variant": "SmpbootThreadsLockReady",
     "name": "SmpbootThreadsLock.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 298,
+    "index": 301,
     "variant": "CpuHotplugSyncPrepared",
     "name": "CpuHotplugSync.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 299,
+    "index": 302,
     "variant": "CpuHotplugReadGuardUsed",
     "name": "CpuHotplugSync.CpuHotplugReadGuardUsed",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 300,
+    "index": 303,
     "variant": "SmpbootThreadsMutexGuardUsed",
     "name": "CpuHotplugSync.SmpbootThreadsMutexGuardUsed",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 301,
+    "index": 304,
     "variant": "CpuAddRemoveLockReady",
     "name": "CpuAddRemoveLock.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 302,
+    "index": 305,
     "variant": "CpuHotplugWriteGuardUsed",
     "name": "CpuStartProvider.CpuHotplugWriteGuardUsed",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 303,
+    "index": 306,
     "variant": "CpuRunningWaitLockReady",
     "name": "CpuRunningWaitLock.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 304,
+    "index": 307,
     "variant": "CpuDoneUpWaitLockReady",
     "name": "CpuDoneUpWaitLock.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 305,
+    "index": 308,
     "variant": "CpuStartProviderReady",
     "name": "CpuStartProvider.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 306,
+    "index": 309,
     "variant": "CpuStartProviderBootDataSelected",
     "name": "CpuStartProvider.BootDataSelected",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 307,
+    "index": 310,
     "variant": "CpuStartProviderBootDataPublished",
     "name": "CpuStartProvider.BootDataPublished",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 308,
+    "index": 311,
     "variant": "CpuStartProviderHsmStartIssued",
     "name": "CpuStartProvider.HsmStartIssued",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 309,
+    "index": 312,
     "variant": "CpuStartProviderHsmStartReturned",
     "name": "CpuStartProvider.HsmStartReturned",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 310,
+    "index": 313,
     "variant": "ApEntryPreludePhaseStarted",
     "name": "ApEntryPreludePhase.Started",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 311,
+    "index": 314,
     "variant": "ApEntryPreludeBootDataConsumed",
     "name": "ApEntryPreludePhase.BootDataConsumed",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 312,
+    "index": 315,
     "variant": "ApEntryPreludeCurrentStackEstablished",
     "name": "ApEntryPreludePhase.CurrentStackEstablished",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 313,
+    "index": 316,
     "variant": "ApEntryPreludePhaseReady",
     "name": "ApEntryPreludePhase.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 314,
+    "index": 317,
     "variant": "ApSmpCallinPhaseStarted",
     "name": "ApSmpCallinPhase.Started",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 315,
+    "index": 318,
     "variant": "ApSmpCallinCpuRunningProduced",
     "name": "ApSmpCallinPhase.CpuRunningProduced",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 316,
+    "index": 319,
     "variant": "ApSmpCallinPhaseReady",
     "name": "ApSmpCallinPhase.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 317,
+    "index": 320,
     "variant": "ApOnlineIdlePhaseStarted",
     "name": "ApOnlineIdlePhase.Started",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 318,
+    "index": 321,
     "variant": "ApOnlineIdleDoneUpProduced",
     "name": "ApOnlineIdlePhase.DoneUpProduced",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 319,
+    "index": 322,
     "variant": "ApOnlineIdlePhaseReady",
     "name": "ApOnlineIdlePhase.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 320,
+    "index": 323,
     "variant": "CpuRunningObserved",
     "name": "CpuHotplugSync.CpuRunningObserved",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 321,
+    "index": 324,
     "variant": "CpuRunningWaitLockGuardUsed",
     "name": "CpuHotplugSync.CpuRunningWaitLockGuardUsed",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 322,
+    "index": 325,
     "variant": "SecondaryCpuStartupAckReady",
     "name": "SecondaryCpuStartupAck.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 323,
+    "index": 326,
     "variant": "CpuDoneUpObserved",
     "name": "CpuHotplugSync.DoneUpObserved",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 324,
+    "index": 327,
     "variant": "CpuDoneUpWaitLockGuardUsed",
     "name": "CpuHotplugSync.DoneUpWaitLockGuardUsed",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 325,
+    "index": 328,
     "variant": "SecondaryCpusOnline",
     "name": "CpuGroup.SecondaryCpusOnline",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 326,
+    "index": 329,
     "variant": "SecondaryCpuApLocalSyncSummary",
     "name": "SecondaryCpuOnlineAck.ApLocalSyncSummary",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 327,
+    "index": 330,
     "variant": "SecondaryCpuOnlineAckReady",
     "name": "SecondaryCpuOnlineAck.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 328,
+    "index": 331,
     "variant": "SmpBringupBoundaryReady",
     "name": "SmpBringupBoundary.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 329,
+    "index": 332,
     "variant": "RuntimeCorePhaseStarted",
     "name": "RuntimeCorePhase.Started",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 330,
+    "index": 333,
     "variant": "RuntimeCorePhaseReady",
     "name": "RuntimeCorePhase.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 331,
+    "index": 334,
     "variant": "SchedulerSmpReady",
     "name": "Scheduler.SmpReady",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 332,
+    "index": 335,
     "variant": "WorkqueueTopologyReady",
     "name": "Workqueue.TopologyReady",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 333,
+    "index": 336,
     "variant": "AsyncCoreDeferredReady",
     "name": "AsyncCore.DeferredReady",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 334,
+    "index": 337,
     "variant": "PadataCoreDeferredReady",
     "name": "PadataCore.DeferredReady",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 335,
+    "index": 338,
     "variant": "PageAllocatorLateReady",
     "name": "PageAllocator.LateReady",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 336,
+    "index": 339,
     "variant": "RuntimeCoreBoundaryReady",
     "name": "RuntimeCoreBoundary.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 337,
+    "index": 340,
     "variant": "InitcallPhaseStarted",
     "name": "InitcallPhase.Started",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 338,
+    "index": 341,
     "variant": "InitcallPhaseReady",
     "name": "InitcallPhase.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 339,
+    "index": 342,
     "variant": "CpusetSmpTrimmedReady",
     "name": "CpusetSmp.TrimmedReady",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 340,
+    "index": 343,
     "variant": "DriverCoreDeferredReady",
     "name": "DriverCore.DeferredReady",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 341,
+    "index": 344,
     "variant": "IrqProcViewDeferredReady",
     "name": "IrqProcView.DeferredReady",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 342,
+    "index": 345,
     "variant": "CtorTableReady",
     "name": "CtorTable.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 343,
+    "index": 346,
     "variant": "OfPlatformDefaultPopulateScanComplete",
     "name": "OfPlatformDefaultPopulate.ScanComplete",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 344,
+    "index": 347,
     "variant": "VirtioBusReady",
     "name": "VirtioBus.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 345,
+    "index": 348,
     "variant": "VirtioBusDeviceAdded",
     "name": "VirtioBus.DeviceAdded",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 346,
+    "index": 349,
     "variant": "VirtioBlkReady",
     "name": "VirtioBlk.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 347,
+    "index": 350,
     "variant": "VirtioBlkReadReady",
     "name": "VirtioBlk.ReadReady",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 348,
+    "index": 351,
     "variant": "VirtioBlkLiveReadSubmitted",
     "name": "VirtioBlk.LiveReadSubmitted",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 349,
+    "index": 352,
     "variant": "VirtioBlkLiveReadCompleted",
     "name": "VirtioBlk.LiveReadCompleted",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 350,
+    "index": 353,
     "variant": "VirtioRngEntropyReady",
     "name": "VirtioRng.EntropyReady",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 351,
+    "index": 354,
     "variant": "InitcallTableReady",
     "name": "InitcallTable.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 352,
+    "index": 355,
     "variant": "Serial8250ConsoleBurstIrqTxReady",
     "name": "Serial8250ConsoleBurstIrqTx.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 353,
+    "index": 356,
     "variant": "Serial8250ConsoleLongIrqTxReady",
     "name": "Serial8250ConsoleLongIrqTx.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 354,
+    "index": 357,
     "variant": "TtyXmitFifoProbeReady",
     "name": "TtyXmitFifoProbe.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 355,
+    "index": 358,
     "variant": "TtyWriteRuntimeTxReady",
     "name": "TtyWriteRuntimeTx.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 356,
+    "index": 359,
     "variant": "TtyWriteBatchRuntimeTxReady",
     "name": "TtyWriteBatchRuntimeTx.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 357,
+    "index": 360,
     "variant": "InitcallBoundaryReady",
     "name": "InitcallBoundary.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 358,
+    "index": 361,
     "variant": "RootfsPhaseStarted",
     "name": "RootfsPhase.Started",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 359,
+    "index": 362,
     "variant": "RootfsPhaseReady",
     "name": "RootfsPhase.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 360,
+    "index": 363,
     "variant": "KUnitRuntimeTrimmedReady",
     "name": "KUnitRuntime.TrimmedReady",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 361,
+    "index": 364,
     "variant": "InitramfsSyncDeferredReady",
     "name": "InitramfsSync.DeferredReady",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 362,
+    "index": 365,
     "variant": "RootfsConsoleDeferredReady",
     "name": "RootfsConsole.DeferredReady",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 363,
+    "index": 366,
     "variant": "RootfsPrepareNamespacePathsReady",
     "name": "RootfsPrepareNamespacePaths.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 364,
+    "index": 367,
     "variant": "RamdiskExecuteCommandEaccessCheckpoint",
     "name": "RamdiskExecuteCommand.EaccessCheckpoint",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 365,
+    "index": 368,
     "variant": "RootFSOnline",
     "name": "RootFS.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 366,
+    "index": 369,
     "variant": "IntegrityKeysDeferredReady",
     "name": "IntegrityKeys.DeferredReady",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 367,
+    "index": 370,
     "variant": "RootfsBoundaryReady",
     "name": "RootfsBoundary.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 368,
+    "index": 371,
     "variant": "FinalizePhaseStarted",
     "name": "FinalizePhase.Started",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 369,
+    "index": 372,
     "variant": "FinalizePhaseReady",
     "name": "FinalizePhase.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 370,
+    "index": 373,
     "variant": "AsyncFullSyncDeferredReady",
     "name": "AsyncFullSync.DeferredReady",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 371,
+    "index": 374,
     "variant": "SystemStateFreeingInitmemCheckpoint",
     "name": "SystemState.FreeingInitmemCheckpoint",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 372,
+    "index": 375,
     "variant": "InitMemoryCleanupDeferredReady",
     "name": "InitMemoryCleanup.DeferredReady",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 373,
+    "index": 376,
     "variant": "KernelMappingProtectionDeferredReady",
     "name": "KernelMappingProtection.DeferredReady",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 374,
+    "index": 377,
     "variant": "PtiFinalizeTrimmedReady",
     "name": "PtiFinalize.TrimmedReady",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 375,
+    "index": 378,
     "variant": "SystemStateOnline",
     "name": "SystemState.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 376,
+    "index": 379,
     "variant": "RcuInkernelBootEnded",
     "name": "RcuCore.InkernelBootEnded",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 377,
+    "index": 380,
     "variant": "RcuBootEndReady",
     "name": "RcuBootEnd.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 378,
+    "index": 381,
     "variant": "SysctlArgsDeferredReady",
     "name": "SysctlArgs.DeferredReady",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 379,
+    "index": 382,
     "variant": "FinalizeBoundaryReady",
     "name": "FinalizeBoundary.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 380,
+    "index": 383,
     "variant": "BreakpointExceptionHandled",
     "name": "BreakpointException.Handled",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 381,
+    "index": 384,
     "variant": "UserBootMainElfReady",
     "name": "UserBoot.MainElfReady",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 382,
+    "index": 385,
     "variant": "UserBootInterpreterReady",
     "name": "UserBoot.InterpreterReady",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 383,
+    "index": 386,
     "variant": "UserBootInitAttemptFailed",
     "name": "UserBoot.InitAttemptFailed",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 384,
+    "index": 387,
     "variant": "UserBootAddressSpaceSetupStart",
     "name": "UserBoot.AddressSpaceSetupStart",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 385,
+    "index": 388,
     "variant": "UserAppFlowEnterUserMode",
     "name": "UserAppFlow.EnterUserMode",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 386,
+    "index": 389,
     "variant": "UserAddressSpaceReady",
     "name": "UserAddressSpace.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 387,
+    "index": 390,
     "variant": "SyscallTableExecveArgsReady",
     "name": "SyscallTable.ExecveArgsReady",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 388,
+    "index": 391,
     "variant": "UserExecMainElfReady",
     "name": "UserExec.MainElfReady",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 389,
+    "index": 392,
     "variant": "UserExecInterpreterReady",
     "name": "UserExec.InterpreterReady",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 390,
+    "index": 393,
     "variant": "UserExecAddressSpaceReady",
     "name": "UserExec.AddressSpaceReady",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 391,
+    "index": 394,
     "variant": "UserExecTrapFrameReady",
     "name": "UserExec.TrapFrameReady",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 392,
+    "index": 395,
     "variant": "UserExecSatpReady",
     "name": "UserExec.SatpReady",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 393,
+    "index": 396,
     "variant": "UserExecContextReplaced",
     "name": "UserExec.ContextReplaced",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 394,
+    "index": 397,
     "variant": "UserExecSatpSwitched",
     "name": "UserExec.SatpSwitched",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 395,
+    "index": 398,
     "variant": "UserExecReturnFrameReady",
     "name": "UserExec.ReturnFrameReady",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 396,
+    "index": 399,
     "variant": "SyscallTableOpenAt",
     "name": "SyscallTable.OpenAt",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 397,
+    "index": 400,
     "variant": "SyscallTableRead",
     "name": "SyscallTable.Read",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 398,
+    "index": 401,
     "variant": "SyscallTableWrite",
     "name": "SyscallTable.Write",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 399,
+    "index": 402,
     "variant": "SyscallTableWritev",
     "name": "SyscallTable.Writev",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 400,
+    "index": 403,
     "variant": "SyscallTableClose",
     "name": "SyscallTable.Close",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 401,
+    "index": 404,
     "variant": "SyscallTableNewFstatAt",
     "name": "SyscallTable.NewFstatAt",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 402,
+    "index": 405,
     "variant": "SyscallTableSetTidAddress",
     "name": "SyscallTable.SetTidAddress",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 403,
+    "index": 406,
     "variant": "SyscallTableClone",
     "name": "SyscallTable.Clone",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 404,
+    "index": 407,
     "variant": "SyscallTableCloneVforkVm",
     "name": "SyscallTable.CloneVforkVm",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 405,
+    "index": 408,
     "variant": "SyscallTableCloneVforkPidfd",
     "name": "SyscallTable.CloneVforkPidfd",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 406,
+    "index": 409,
     "variant": "FilesStructPidfdInstall",
     "name": "FilesStruct.PidfdInstall",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 407,
+    "index": 410,
     "variant": "UserCloneVforkChildHandoff",
     "name": "UserClone.VforkChildHandoff",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 408,
+    "index": 411,
     "variant": "UserCloneVforkNextChildAccepted",
     "name": "UserClone.VforkNextChildAccepted",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 409,
+    "index": 412,
     "variant": "SyscallTableRtSigtimedwait",
     "name": "SyscallTable.RtSigtimedwait",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 410,
+    "index": 413,
     "variant": "UserSignalWaitSleep",
     "name": "UserSignalWait.Sleep",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 411,
+    "index": 414,
     "variant": "UserSignalWaitWakeSigchld",
     "name": "UserSignalWait.WakeSigchld",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 412,
+    "index": 415,
     "variant": "UserPidfdReady",
     "name": "UserPidfd.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 413,
+    "index": 416,
     "variant": "SyscallTableRtSigtimedwaitReturnSignal",
     "name": "SyscallTable.RtSigtimedwaitReturnSignal",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 414,
+    "index": 417,
     "variant": "SyscallTableWait4",
     "name": "SyscallTable.Wait4",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 415,
+    "index": 418,
     "variant": "UserChildParentWaitResumed",
     "name": "UserChild.ParentWaitResumed",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 416,
+    "index": 419,
     "variant": "UserCloneVforkParentResumed",
     "name": "UserClone.VforkParentResumed",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 417,
+    "index": 420,
     "variant": "UserChildRecordArchived",
     "name": "UserChildRecord.Archived",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 418,
+    "index": 421,
     "variant": "UserTaskRecordReleased",
     "name": "UserTaskRecord.Released",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 419,
+    "index": 422,
     "variant": "UserChildRecordReaped",
     "name": "UserChildRecord.Reaped",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 420,
+    "index": 423,
     "variant": "SyscallTableExit",
     "name": "SyscallTable.Exit",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 421,
+    "index": 424,
     "variant": "EntrySuccessorPhasePrepared",
     "name": "EntrySuccessorPhase.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 422,
+    "index": 425,
     "variant": "CorePreparePhasePrepared",
     "name": "CorePreparePhase.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 423,
+    "index": 426,
     "variant": "MmCoreInitPhasePrepared",
     "name": "MmCoreInitPhase.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 424,
+    "index": 427,
     "variant": "SchedInitPhasePrepared",
     "name": "SchedInitPhase.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 425,
+    "index": 428,
     "variant": "IrqTimeInitPhasePrepared",
     "name": "IrqTimeInitPhase.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 426,
+    "index": 429,
     "variant": "LocalIrqEnablePhasePrepared",
     "name": "LocalIrqEnablePhase.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 427,
+    "index": 430,
     "variant": "LocalIrqEnablePhaseOnline",
     "name": "LocalIrqEnablePhase.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 428,
+    "index": 431,
     "variant": "IrqOpenPreparePhasePrepared",
     "name": "IrqOpenPreparePhase.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 429,
+    "index": 432,
     "variant": "IrqOpenPreparePhaseOnline",
     "name": "IrqOpenPreparePhase.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 430,
+    "index": 433,
     "variant": "ProcessPreparePhasePrepared",
     "name": "ProcessPreparePhase.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 431,
+    "index": 434,
     "variant": "ProcessPreparePhaseOnline",
     "name": "ProcessPreparePhase.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 432,
+    "index": 435,
     "variant": "BootInitFlowOnline",
     "name": "BootInitFlow.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 433,
+    "index": 436,
     "variant": "BootInitRestInitPhaseStarted",
     "name": "BootInitRestInitPhase.Started",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 434,
+    "index": 437,
     "variant": "BootInitRestInitPhasePrepared",
     "name": "BootInitRestInitPhase.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 435,
+    "index": 438,
     "variant": "BootInitRestInitPhaseOnline",
     "name": "BootInitRestInitPhase.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 436,
+    "index": 439,
     "variant": "BootInitScheduleHandoffPhaseStarted",
     "name": "BootInitScheduleHandoffPhase.Started",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 437,
+    "index": 440,
     "variant": "BootInitScheduleHandoffPhasePrepared",
     "name": "BootInitScheduleHandoffPhase.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 438,
+    "index": 441,
     "variant": "BootInitScheduleHandoffPhaseOnline",
     "name": "BootInitScheduleHandoffPhase.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 439,
+    "index": 442,
     "variant": "BootIdleEntryPhaseStarted",
     "name": "BootIdleEntryPhase.Started",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 440,
+    "index": 443,
     "variant": "BootIdleEntryPhasePrepared",
     "name": "BootIdleEntryPhase.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 441,
+    "index": 444,
     "variant": "BootIdleEntryPhaseOnline",
     "name": "BootIdleEntryPhase.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 442,
+    "index": 445,
     "variant": "PreSmpInitPhasePrepared",
     "name": "PreSmpInitPhase.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 443,
+    "index": 446,
     "variant": "PreSmpInitPhaseOnline",
     "name": "PreSmpInitPhase.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 444,
+    "index": 447,
     "variant": "SmpBringupPhasePrepared",
     "name": "SmpBringupPhase.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 445,
+    "index": 448,
     "variant": "SmpBringupPhaseOnline",
     "name": "SmpBringupPhase.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 446,
+    "index": 449,
     "variant": "RuntimeCorePhasePrepared",
     "name": "RuntimeCorePhase.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 447,
+    "index": 450,
     "variant": "RuntimeCorePhaseOnline",
     "name": "RuntimeCorePhase.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 448,
+    "index": 451,
     "variant": "InitcallPhasePrepared",
     "name": "InitcallPhase.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 449,
+    "index": 452,
     "variant": "InitcallPhaseOnline",
     "name": "InitcallPhase.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 450,
+    "index": 453,
     "variant": "RootfsPhasePrepared",
     "name": "RootfsPhase.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 451,
+    "index": 454,
     "variant": "RootfsPhaseOnline",
     "name": "RootfsPhase.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 452,
+    "index": 455,
     "variant": "FinalizePhasePrepared",
     "name": "FinalizePhase.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 453,
+    "index": 456,
     "variant": "FinalizePhaseOnline",
     "name": "FinalizePhase.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 454,
+    "index": 457,
     "variant": "ApEntryPreludePhasePrepared",
     "name": "ApEntryPreludePhase.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 455,
+    "index": 458,
     "variant": "ApEntryPreludePhaseOnline",
     "name": "ApEntryPreludePhase.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 456,
+    "index": 459,
     "variant": "ApSmpCallinPhasePrepared",
     "name": "ApSmpCallinPhase.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 457,
+    "index": 460,
     "variant": "ApSmpCallinPhaseOnline",
     "name": "ApSmpCallinPhase.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 458,
+    "index": 461,
     "variant": "ApOnlineIdlePhasePrepared",
     "name": "ApOnlineIdlePhase.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 459,
+    "index": 462,
     "variant": "ApOnlineIdlePhaseOnline",
     "name": "ApOnlineIdlePhase.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 460,
+    "index": 463,
     "variant": "PayloadPreparePhaseStarted",
     "name": "PayloadPreparePhase.Started",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 461,
+    "index": 464,
     "variant": "PayloadPreparePhasePrepared",
     "name": "PayloadPreparePhase.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 462,
+    "index": 465,
     "variant": "PayloadPreparePhaseReady",
     "name": "PayloadPreparePhase.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 463,
+    "index": 466,
     "variant": "PayloadPreparePhaseOnline",
     "name": "PayloadPreparePhase.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 464,
+    "index": 467,
     "variant": "PayloadHandoffPreparePhaseStarted",
     "name": "PayloadHandoffPreparePhase.Started",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 465,
+    "index": 468,
     "variant": "PayloadHandoffPreparePhasePrepared",
     "name": "PayloadHandoffPreparePhase.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 466,
+    "index": 469,
     "variant": "PayloadHandoffPreparePhaseReady",
     "name": "PayloadHandoffPreparePhase.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 467,
+    "index": 470,
     "variant": "PayloadHandoffPreparePhaseOnline",
     "name": "PayloadHandoffPreparePhase.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 468,
+    "index": 471,
     "variant": "KernelInitFlowPayloadHandoffCommitted",
     "name": "KernelInitFlow.PayloadHandoffCommitted",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 469,
+    "index": 472,
     "variant": "UserStackGrowComplete",
     "name": "UserStack.GrowComplete",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 470,
+    "index": 473,
     "variant": "UserStackGrowRejected",
     "name": "UserStack.GrowRejected",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 471,
+    "index": 474,
     "variant": "KernelInitFlowOffline",
     "name": "KernelInitFlow.Offline",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 472,
+    "index": 475,
     "variant": "KernelInitFlowDestroyed",
     "name": "KernelInitFlow.Destroyed",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 473,
+    "index": 476,
     "variant": "UserAppFlowPrepared",
     "name": "UserAppFlow.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 474,
+    "index": 477,
     "variant": "UserAppFlowReady",
     "name": "UserAppFlow.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
-    "index": 475,
+    "index": 478,
     "variant": "UserAppFlowOnline",
     "name": "UserAppFlow.Online",
     "early_byte": null,

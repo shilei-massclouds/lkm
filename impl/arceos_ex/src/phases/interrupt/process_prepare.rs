@@ -47,8 +47,8 @@ fn preset_dependencies_ready(ctx: &Context) -> bool {
         && ctx.console.state() == State::Prepared
         && ctx.sched_clock.state() == State::Ready
         && ctx.delay_loop.state() == State::Ready
-        && ctx.scheduler.state() == State::Online
-        && ctx.scheduler.scheduler_running()
+        && ctx.scheduler().state() == State::Online
+        && ctx.scheduler().scheduler_running()
         && ctx.workqueue.state() == State::Prepared
         && !ctx.workqueue.workers_running()
         && ctx.softirq.state() == State::Ready
@@ -220,8 +220,8 @@ fn process_prepare_phase_ready(ctx: &Context) -> bool {
         && ctx.console.state() == State::Prepared
         && ctx.sched_clock.state() == State::Ready
         && ctx.delay_loop.state() == State::Ready
-        && ctx.scheduler.state() == State::Online
-        && ctx.scheduler.scheduler_running()
+        && ctx.scheduler().state() == State::Online
+        && ctx.scheduler().scheduler_running()
         && ctx.workqueue.state() == State::Prepared
         && !ctx.workqueue.workers_running()
         && ctx.softirq.state() == State::Ready

@@ -15,6 +15,7 @@ type CPU: CPUObject {
     }
 
     owned {
+        scheduler: Scheduler;
         trap: TrapType;
     }
 
@@ -85,6 +86,7 @@ type CPU: CPUObject {
                 ensures {
                     cpu_logical_id_derived_from_owned_index(self);
                     cpu_ref_for_owned_index_ready(self);
+                    cpu_owns_scheduler(self, self.scheduler);
                     cpu_owns_trap_resource(self, self.trap);
                     cpu_active_translation_controller_absent(self);
                     cpu_translation_controller_association_is_optional_before_kernel_entry(self);
@@ -97,6 +99,7 @@ type CPU: CPUObject {
         invariant {
             cpu_logical_id_derived_from_owned_index(self);
             cpu_ref_for_owned_index_ready(self);
+            cpu_owns_scheduler(self, self.scheduler);
             cpu_owns_trap_resource(self, self.trap);
             cpu_translation_controller_association_is_optional_before_kernel_entry(self);
         }
@@ -117,6 +120,7 @@ type CPU: CPUObject {
         invariant {
             cpu_logical_id_derived_from_owned_index(self);
             cpu_ref_for_owned_index_ready(self);
+            cpu_owns_scheduler(self, self.scheduler);
             cpu_owns_trap_resource(self, self.trap);
             cpu_possible(self);
             cpu_present(self);
@@ -136,6 +140,7 @@ type CPU: CPUObject {
         invariant {
             cpu_logical_id_derived_from_owned_index(self);
             cpu_ref_for_owned_index_ready(self);
+            cpu_owns_scheduler(self, self.scheduler);
             cpu_owns_trap_resource(self, self.trap);
             cpu_possible(self);
             cpu_present(self);

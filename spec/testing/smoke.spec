@@ -51,6 +51,11 @@ predicate testing_cpu_group_smoke_must_cover_cpu_ref_targets() -> bool;
 predicate testing_cpu_group_smoke_must_cover_possible_present_online_sets() -> bool;
 predicate testing_cpu_group_smoke_must_cover_secondary_not_online_before_bringup() -> bool;
 predicate testing_cpu_group_smoke_must_cover_unique_logical_ids_and_hartids() -> bool;
+predicate testing_scheduler_smoke_must_cover_per_cpu_inventory_and_lifecycle() -> bool;
+predicate testing_scheduler_smoke_must_cover_prev_disposition() -> bool;
+predicate testing_scheduler_smoke_must_cover_class_handoff_order() -> bool;
+predicate testing_scheduler_smoke_must_cover_identity_and_nonidentity_causality() -> bool;
+predicate testing_scheduler_smoke_must_reject_invalid_sender_binding() -> bool;
 
 type TestImplementationPrinciples {
     invariant {
@@ -159,8 +164,8 @@ type SmokeTestCategories {
          *
          * A formal object API or action boundary whose contract can be tested
          * with a local subject object and read-only live prerequisites.
-         * TaskCreationCore.copy_process() and CurrentRunQueueRef/RunQueue
-         * enqueue/pick actions are current examples.
+         * TaskCreationCore.copy_process() and Scheduler enqueue/pick actions
+         * are current examples.
          */
         testing_smoke_category_object_api_behavior_defined();
 
@@ -404,6 +409,21 @@ type SmokeTestGenerationMust {
          * unique hartids for entries discovered from topology.
          */
         testing_cpu_group_smoke_must_cover_unique_logical_ids_and_hartids();
+
+        /*
+         * Per-CPU Scheduler and schedule semantics:
+         *
+         * Scheduler coverage must observe one owned Scheduler per possible CPU,
+         * CPU0/AP Ready-to-Online timing, PreparePrev Runnable/Blocked outcomes,
+         * pick-before-put/set class handoff, and the distinct identity/nonidentity
+         * continuation chains. Cross-CPU, stale-flow and wrong CurrentTask
+         * bindings must fail before any scheduler or Task mutation.
+         */
+        testing_scheduler_smoke_must_cover_per_cpu_inventory_and_lifecycle();
+        testing_scheduler_smoke_must_cover_prev_disposition();
+        testing_scheduler_smoke_must_cover_class_handoff_order();
+        testing_scheduler_smoke_must_cover_identity_and_nonidentity_causality();
+        testing_scheduler_smoke_must_reject_invalid_sender_binding();
 
         /*
          * Per-CPU translation activation:

@@ -20,6 +20,9 @@ predicate compose_arceos_ex_normal_tests_must_progress_from_simple_to_complex() 
 predicate compose_context_owns_only_cpu_group_for_cpu_identity() -> bool;
 predicate compose_cpu_group_owns_single_indexed_cpu_store() -> bool;
 predicate compose_cpu_embeds_cpu_local_state() -> bool;
+predicate compose_cpu_owns_exactly_one_scheduler() -> bool;
+predicate compose_context_has_no_global_scheduler_singleton() -> bool;
+predicate compose_scheduler_shared_resources_remain_separate() -> bool;
 predicate compose_task_flow_sole_cpu_ref_owner() -> bool;
 predicate compose_current_cpu_is_borrowed_capability() -> bool;
 predicate compose_kernel_addr_space_and_vm_are_separate_private_modules() -> bool;
@@ -72,6 +75,9 @@ type ArceosExCompositionMust {
         compose_context_owns_only_cpu_group_for_cpu_identity();
         compose_cpu_group_owns_single_indexed_cpu_store();
         compose_cpu_embeds_cpu_local_state();
+        compose_cpu_owns_exactly_one_scheduler();
+        compose_context_has_no_global_scheduler_singleton();
+        compose_scheduler_shared_resources_remain_separate();
         compose_task_flow_sole_cpu_ref_owner();
         compose_current_cpu_is_borrowed_capability();
         compose_kernel_addr_space_and_vm_are_separate_private_modules();

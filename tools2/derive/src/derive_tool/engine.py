@@ -409,7 +409,22 @@ class Engine:
             if field.get("indexed") or not field.get("type"):
                 continue
             field_name = field["name"]
-            child_identity = f"{identity}.{field_name}"
+            explicit_children = [
+                name
+                for name, candidate in self.systems.items()
+                if candidate.get("parent") == identity
+                and candidate.get("declared_type") == field["type"]
+            ]
+            if len(explicit_children) > 1:
+                raise DerivationProblem(
+                    f"multiple explicit materializations for owned field "
+                    f"{identity}.{field_name}: {', '.join(sorted(explicit_children))}"
+                )
+            child_identity = (
+                explicit_children[0]
+                if explicit_children
+                else f"{identity}.{field_name}"
+            )
             child_metadata = {
                 "declared_type": field["type"],
                 "parent": identity,
@@ -418,11 +433,15 @@ class Engine:
                 "resident": True,
                 "span": deepcopy(field.get("span", metadata.get("span", {}))),
             }
-            self.current["instances"].setdefault(child_identity, child_metadata)
             self.current["references"][f"{identity}.{field_name}"] = child_identity
             system["references"][field_name] = child_identity
             system["reference_types"][field_name] = field["type"]
-            self._install_runtime_system(child_identity, child_metadata)
+            if explicit_children:
+                self.systems[child_identity]["owned_by"] = identity
+                self.systems[child_identity]["owned_field"] = field_name
+            else:
+                self.current["instances"].setdefault(child_identity, child_metadata)
+                self._install_runtime_system(child_identity, child_metadata)
         return system
 
     def _activate_static_system(self, name: str, *, signal: dict[str, Any]) -> None:
@@ -883,6 +902,12 @@ class Engine:
             if _matches_system_type(self.model, str(current), "TaskFlow"):
                 return str(current)
             current = self.systems[str(current)].get("parent")
+        if signal.get("_sender_flow_context") is True:
+            source = signal.get("source")
+            if source in self.systems and _matches_system_type(
+                self.model, str(source), "TaskFlow"
+            ):
+                return str(source)
         inherited = signal.get("_effective_flow")
         return str(inherited) if inherited in self.systems else None
 
@@ -1053,6 +1078,9 @@ class Engine:
     def _current_task_bind_boundary_valid(
         self, signal: dict[str, Any], context_flow: str, task: str
     ) -> bool:
+        reference_type = self._reference_type(task)
+        if reference_type == "TaskRef":
+            task = str(self._deref(task))
         if context_flow not in self.systems or not _matches_system_type(
             self.model, context_flow, "TaskFlow"
         ):
@@ -1063,8 +1091,13 @@ class Engine:
             cause is not None
             and cause.get("name") in {"SwitchTo", "SwitchTerminal"}
             and cause.get("target") in self.systems
-            and _matches_system_type(
-                self.model, str(cause.get("target")), "SchedulerObject"
+            and (
+                _matches_system_type(
+                    self.model, str(cause.get("target")), "SchedulerObject"
+                )
+                or _matches_system_type(
+                    self.model, str(cause.get("target")), "Scheduler"
+                )
             )
         )
 
@@ -1136,7 +1169,10 @@ class Engine:
         context_flow = self._effective_flow(signal)
         if context_flow is None:
             raise DerivationProblem(f"CurrentTask.{action} requires an effective TaskFlow")
-        task = str(bindings.get("task"))
+        task_argument = bindings.get("task_ref", bindings.get("task"))
+        task = str(task_argument)
+        if self._reference_type(task) == "TaskRef":
+            task = str(self._deref(task))
         if task not in self.systems or not _matches_system_type(
             self.model, task, "Task"
         ):
@@ -1153,13 +1189,33 @@ class Engine:
             raise DerivationProblem(
                 f"CurrentTask.{action} target Flow {active_flow} parent/owner does not uniquely match {task}"
             )
-        if self.current["states"].get(task) != "OnCpu":
-            raise DerivationProblem(f"CurrentTask.{action} target Task {task} is not OnCpu")
-        if (
-            f"task_execution_authority_is({task},TaskExecutionAuthority::Live)"
-            not in self.current["facts"]
-        ):
-            raise DerivationProblem(f"CurrentTask.{action} target Task {task} is not Live")
+        if action == "BindTask":
+            if self.current["states"].get(task) != "Online":
+                raise DerivationProblem(
+                    f"CurrentTask.BindTask target Task {task} is not Online"
+                )
+            if (
+                f"task_execution_authority_is({task},TaskExecutionAuthority::None)"
+                not in self.current["facts"]
+            ):
+                raise DerivationProblem(
+                    f"CurrentTask.BindTask target Task {task} does not have reserved switch authority"
+                )
+            if (
+                f"task_breakpoint_state_is({task},TaskBreakpointState::Valid)"
+                not in self.current["facts"]
+            ):
+                raise DerivationProblem(
+                    f"CurrentTask.BindTask target Task {task} has no valid continuation"
+                )
+        else:
+            if self.current["states"].get(task) != "OnCpu":
+                raise DerivationProblem(f"CurrentTask.{action} target Task {task} is not OnCpu")
+            if (
+                f"task_execution_authority_is({task},TaskExecutionAuthority::Live)"
+                not in self.current["facts"]
+            ):
+                raise DerivationProblem(f"CurrentTask.{action} target Task {task} is not Live")
         target_cpu_ref = self.current["references"].get(f"{active_flow}.cpu_ref")
         if target_cpu_ref is None or self._deref(target_cpu_ref) != cpu:
             raise DerivationProblem(
@@ -1370,22 +1426,29 @@ class Engine:
         if handler.get("name") not in {"SwitchTo", "SwitchTerminal"}:
             return
         target = str(signal.get("target"))
-        if target not in self.systems or not _matches_system_type(
-            self.model, target, "SchedulerObject"
+        if target not in self.systems or not (
+            _matches_system_type(self.model, target, "SchedulerObject")
+            or _matches_system_type(self.model, target, "Scheduler")
         ):
             return
-        flow = self._effective_flow(signal)
-        if flow is None:
+        context_flow = self._effective_flow(signal)
+        if context_flow is None:
             raise DerivationProblem("scheduler stack commit requires next effective TaskFlow")
-        cpu, cpu_ref = self._current_cpu_context(flow)
+        cpu, _ = self._current_cpu_context(context_flow)
         task_binding = (
             candidate.get("contextual_bindings", {})
             .get("current_task", {})
             .get(cpu)
         )
-        if task_binding is None or task_binding.get("source_flow") != flow:
+        if task_binding is None:
             raise DerivationProblem(
                 "scheduler stack commit requires the already committed next CurrentTask"
+            )
+        flow = str(task_binding.get("source_flow"))
+        cpu_ref = self.current["references"].get(f"{flow}.cpu_ref")
+        if cpu_ref is None or self._deref(cpu_ref) != cpu:
+            raise DerivationProblem(
+                "scheduler stack commit next Flow does not target the switching CPU"
             )
         task = str(task_binding.get("task"))
         stack = f"{task}.stack"
@@ -2898,6 +2961,9 @@ class Engine:
             self.active_requests.discard(request_key)
             return
         handler = candidates[0]
+        signal["_sender_flow_context"] = (
+            self._handler_property(handler, "sender_flow_context") == "true"
+        )
         signal["handler"] = {
             "id": handler["id"],
             "kind": handler["kind"],

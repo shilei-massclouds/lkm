@@ -10,7 +10,7 @@ pub(super) fn mainline_ready(ctx: &Context) -> bool {
         && ctx
             .current_task_ref()
             .is_ok_and(|task_ref| task_ref.same_identity(ctx.kernel_init_task.task_ref()))
-        && ctx.scheduler.kernel_init_stack_switch_started_count() == 1
+        && ctx.scheduler().kernel_init_stack_switch_started_count() == 1
         && ctx.kernel_init_task.entry_started_count() == 1
         && ctx.kernel_init_task.entry_stack_verified()
         && ctx.kernel_init_task.current_stack_pointer_in_range()

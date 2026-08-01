@@ -83,8 +83,24 @@ impl BootTask {
         unsafe { &mut *Self::task_ptr() }.suspend_from_cpu()
     }
 
+    pub(crate) fn save_core_context_canonical() -> EventResult {
+        unsafe { &mut *Self::task_ptr() }.save_core_context_for_suspend()
+    }
+
+    pub(crate) fn suspend_after_core_context_save_canonical() -> EventResult {
+        unsafe { &mut *Self::task_ptr() }.suspend_after_core_context_save()
+    }
+
     pub(crate) fn continue_canonical() -> EventResult {
         unsafe { &mut *Self::task_ptr() }.continue_on_cpu()
+    }
+
+    pub(crate) fn canonical_prepare_prev_runnable() -> bool {
+        unsafe { &mut *Self::task_ptr() }.prepare_prev_runnable()
+    }
+
+    pub(crate) fn canonical_deactivate_from_scheduler() -> EventResult {
+        unsafe { &mut *Self::task_ptr() }.deactivate_from_scheduler()
     }
 
     pub(crate) fn canonical_task() -> &'static Task {

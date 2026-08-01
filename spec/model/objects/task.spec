@@ -76,9 +76,10 @@ predicate task_initial_flow_is<T: Task, F: TaskFlow>(task: T, flow: F) -> bool;
 predicate task_initial_flow_binding_complete<T: Task>(task: T) -> bool;
 predicate task_initial_flow_binding_consistent<T: Task>(task: T) -> bool;
 predicate task_clone_spec_ready<T: Task>(task: T) -> bool;
-predicate task_runqueue_publication_committed<T: Task>(task: T) -> bool;
+predicate task_scheduler_publication_committed<T: Task>(task: T) -> bool;
 predicate task_has_unique_active_flow<T: Task>(task: T) -> bool;
-predicate task_online_schedulable<T: Task>(task: T) -> bool;
+predicate task_online_has_recoverable_context<T: Task>(task: T) -> bool;
+predicate task_online_eligibility_is_scheduler_owned<T: Task>(task: T) -> bool;
 predicate task_online_does_not_imply_dispatched<T: Task>(task: T) -> bool;
 predicate task_ref_targets_online_task<R: TaskRef>(task_ref: R) -> bool;
 predicate task_on_cpu<T: Task>(task: T) -> bool;
@@ -295,7 +296,7 @@ type Task: ResourceObject {
             on Transition::Enable -> State::Online {
                 depends_on {
                     task_state_running(self);
-                    task_runqueue_publication_committed(self);
+                    task_scheduler_publication_committed(self);
                     task_initial_flow_binding_complete(self);
                     task_initial_flow_binding_consistent(self);
                     task_owns_flow(self, self.initial_flow);
@@ -314,12 +315,13 @@ type Task: ResourceObject {
                     task_thread_context_owned(self, self.thread_context);
                     task_thread_context_core_register_set(self.thread_context);
                     task_state_running(self);
-                    task_runqueue_publication_committed(self);
+                    task_scheduler_publication_committed(self);
                     task_owns_flow(self, self.initial_flow);
                     task_flow_owner_is(self.initial_flow, self);
                     task_flow_parent_is(self.initial_flow, self);
                     task_at_most_one_flow_online(self);
-                    task_online_schedulable(self);
+                    task_online_has_recoverable_context(self);
+                    task_online_eligibility_is_scheduler_owned(self);
                     task_online_does_not_imply_dispatched(self);
                     task_execution_authority_is(self, TaskExecutionAuthority::None);
                     task_breakpoint_state_is(self, TaskBreakpointState::Valid);
@@ -344,9 +346,10 @@ type Task: ResourceObject {
             task_thread_context_owned(self, self.thread_context);
             task_thread_context_core_register_set(self.thread_context);
             task_state_running(self);
-            task_runqueue_publication_committed(self);
+            task_scheduler_publication_committed(self);
             task_at_most_one_flow_online(self);
-            task_online_schedulable(self);
+            task_online_has_recoverable_context(self);
+            task_online_eligibility_is_scheduler_owned(self);
             task_online_does_not_imply_dispatched(self);
             task_execution_authority_is(self, TaskExecutionAuthority::None);
             task_breakpoint_state_is(self, TaskBreakpointState::Valid);
@@ -373,6 +376,10 @@ type Task: ResourceObject {
                     task_breakpoint_consumed_on_continue(self);
                 }
 
+                emits {
+                    self.Action::DispatchContinuation;
+                }
+
             }
 
         }
@@ -390,7 +397,7 @@ type Task: ResourceObject {
             task_thread_context_owned(self, self.thread_context);
             task_thread_context_core_register_set(self.thread_context);
             task_state_running(self);
-            task_runqueue_publication_committed(self);
+            task_scheduler_publication_committed(self);
             task_at_most_one_flow_online(self);
             task_execution_authority_is(self, TaskExecutionAuthority::Live);
             task_breakpoint_state_is(self, TaskBreakpointState::Invalid);
@@ -476,10 +483,33 @@ type Task: ResourceObject {
                 task_dispatch_continuation_pending(self);
             }
             drives {
-                self.initial_flow.Transition::Preset || self.active_flow.Action::Continue;
+                self.Action::DispatchInitialContinuation ||
+                    self.Action::DispatchActiveContinuation;
             }
             ensures {
                 task_dispatch_continuation_consumed(self);
+            }
+        }
+
+        Action::DispatchInitialContinuation {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::OnCpu;
+                self.initial_flow.state == State::Base;
+            }
+            emits {
+                self.initial_flow.Transition::Preset;
+            }
+        }
+
+        Action::DispatchActiveContinuation {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::OnCpu;
+                self.active_flow.state != State::Base;
+            }
+            emits {
+                self.active_flow.Action::Continue;
             }
         }
 
@@ -670,7 +700,7 @@ object UserTaskSet: TaskSet {
 /*
  * Static init_task carrier. Firmware/architecture entry has already granted
  * the boot CPU to this Task before the model begins. Its initial execution is
- * therefore OnCpu and does not pass through Scheduler.Continue.
+ * therefore OnCpu and does not pass through Cpu0Scheduler.Continue.
  */
 object BootTask: Task {
     lifecycle_override: true;
@@ -725,7 +755,8 @@ object BootTask: Task {
                     task_flow_owner_is(BootInitFlow, self);
                     task_flow_parent_is(BootInitFlow, self);
                     boot_task_preemption_is_static_initial_property(self);
-                    task_online_schedulable(self);
+                    task_online_has_recoverable_context(self);
+                    task_online_eligibility_is_scheduler_owned(self);
                     task_online_does_not_imply_dispatched(self);
                     task_not_on_cpu(self);
                     task_suspend_sent_only_by_scheduler(self);
@@ -750,7 +781,8 @@ object BootTask: Task {
             task_flow_owner_is(BootInitFlow, self);
             task_flow_parent_is(BootInitFlow, self);
             boot_task_preemption_is_static_initial_property(self);
-            task_online_schedulable(self);
+            task_online_has_recoverable_context(self);
+            task_online_eligibility_is_scheduler_owned(self);
             task_online_does_not_imply_dispatched(self);
             task_not_on_cpu(self);
             task_execution_authority_is(self, TaskExecutionAuthority::None);

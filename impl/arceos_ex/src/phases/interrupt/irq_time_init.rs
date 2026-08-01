@@ -35,7 +35,7 @@ fn preset_start(ctx: &Context) -> EventResult {
 
 fn preset_dependencies_ready(ctx: &Context) -> bool {
     crate::phases::boot::sched_init::is_online()
-        && ctx.scheduler.state() == State::Online
+        && ctx.scheduler().state() == State::Online
         && ctx.rcu_core.state() == State::Ready
         && ctx.workqueue.state() == State::Prepared
         && ctx.softirq.state() == State::Prepared

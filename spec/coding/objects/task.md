@@ -46,13 +46,14 @@ CPU assignment 不属于 Task carrier。`Task` 不得保存 `cpu_id`、`CpuRef` 
 `Task::preset` 负责 identity/TaskRef/initial-flow association/初始 Flow ownership/clone specification；
 `Task::setup` 必须在 Phase 或 runtime fork 路径已调用 `TaskCreationCore::copy_process` 后消费其
 copy-process 结果，建立 PID、stack/thread context 的初始寄存器字节、Prepared breakpoint、scheduler
-entity 和 New/not-enqueued 状态；`Task::enable` 只在调用者已完成 running、runqueue publication 与
+entity 和 New/not-enqueued 状态；`Task::enable` 只在调用者已完成 running、Scheduler publication 与
 初始 Flow structural binding 后把 context 绑定 initial FlowRef 并原子提交 Online/None/Valid；它不启动
-Flow。Scheduler prepare 必须验证 prev OnCpu/Live/Invalid/active-flow 和 next Online/None/Valid/FlowRef；
-next 栈上的 finish 先验证架构已建立的 next 原始身份，再调用 context save/restore observation，并原子提交 prev
-Online/None/Valid、next OnCpu/Live/Invalid、next active Flow 与 CPU-local CurrentTask binding；外层
-switch commit 同时以已恢复的 live `sp` 和 `next.stack` 发布 CurrentStack，然后严格选择 Base initial Flow 的 `Preset` 或 Online active Flow
-的 `Continue`。stale generation、无效 context、Reserved authority 或候选歧义必须无状态变化失败。
+Flow。Task 进入 Online 只证明存在可恢复上下文，不证明 runnable/on-rq；后者只由所属 CPU
+Scheduler 的类队列成员关系和 prev disposition 决定。Scheduler switch 预检必须验证 prev
+OnCpu/Live/Invalid/active-flow 和 next Online/None/Valid/FlowRef。switch 按 SaveCoreContext(prev)、Suspend(prev)、
+RestoreCoreContext(next)、next-stack finish 和 Task.Continue 排序；Task 接收 Continue 时才原子提交 next
+OnCpu/Live/Invalid，随后严格选择 Base initial Flow 的 `Preset` 或 Online active Flow 的 `Continue`。
+stale generation、无效 context、Reserved authority 或候选歧义必须无状态变化失败。
 terminal task 使用 OnCpu 直接 Disable，context 保持 Invalid；identity switch 完全不调用上述方法。
 `disable/cleanup` 必须继续检查 owned Flow 的 inactive/Destroyed 顺序。角色专用 flag、入口、
 provider、CPU pin 或 global reference publication 不得写入这些通用方法。
@@ -76,7 +77,7 @@ lifecycle 方法，也不得暴露 `preset/setup/enable` 或兼容 alias。该 s
 初始 preempt count 由 boot-only const initializer 静态构造，两种 Action 均不初始化或改变它。
 `TrampolineVm`、owner 缺失、owner/live SATP 不一致、错误/非唯一 ref、错误 carrier/stack 或跨 CPU
 Flow 必须在修改寄存器前记录诊断并 fail-stop。OnCpu 初态只由固件/架构入口执行权事实建立，不依赖
-尚未建立的 runqueue 或 runqueue current；各阶段只能静默验证该 carrier 仍为 OnCpu/canonical。
+尚未建立的 Scheduler 或 Scheduler `curr`；各阶段只能静默验证该 carrier 仍为 OnCpu/canonical。
 刷新 bridge 还必须在提交前确认 `Vm/EarlyVm/TrapType` 已到达 Model 要求的 Ready 边界、`Soc.Preset`
 尚未开始，并验证现有 CurrentTask/CurrentStack pair 精确指向 BootTask 与 `BootTask.stack`。成功提交
 在当前 `_start_kernel` 风格的汇编路径中内联完成，随后沿同一路径继续，不建立专用 continuation 或

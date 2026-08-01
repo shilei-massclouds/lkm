@@ -253,7 +253,7 @@ impl SmokeScenario for CooperativeContentionScenario {
         assertions.assert_ok("setup shared mutex", shared.lock.setup());
 
         let ctx = context();
-        assertions.assert("scheduler online", ctx.scheduler.state() == State::Online);
+        assertions.assert("scheduler online", ctx.scheduler().state() == State::Online);
         assertions.assert(
             "current kernel init",
             ctx.current_task_ref()
@@ -316,16 +316,14 @@ impl SmokeScenario for CooperativeContentionScenario {
         assertions.assert("unlock count", shared.lock.unlock_exited_count() == 2);
         assertions.assert(
             "smoke mutex task yielded",
-            context().scheduler.smoke_mutex_task().yielded_back(),
+            context().smoke_mutex_task().yielded_back(),
         );
         assertions.assert(
             "smoke mutex task dequeued",
             !context()
-                .scheduler
+                .scheduler()
                 .boot_cpu_owned_scheduler_view(&context().cpu_group)
-                .map(|view| {
-                    view.runqueue_contains_task_id(context().scheduler.smoke_mutex_task().task_id())
-                })
+                .map(|view| view.runqueue_contains_task_id(context().smoke_mutex_task().task_id()))
                 .unwrap_or(false),
         );
     }
@@ -420,7 +418,7 @@ extern "C" fn smoke_mutex_task_entry() -> ! {
     if context().mark_smoke_mutex_yielded_back().is_err() {
         crate::arch::riscv64::sbi::system_shutdown();
     }
-    if context().dequeue_smoke_mutex_task().is_err() {
+    if context().declare_current_scheduler_sleep().is_err() {
         crate::arch::riscv64::sbi::system_shutdown();
     }
     if context().schedule_current().is_err() {

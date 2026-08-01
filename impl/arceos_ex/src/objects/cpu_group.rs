@@ -1,6 +1,7 @@
 use super::{
     boot_args::BootArgs,
     cpu::{BOOT_CPU_LOGICAL_ID, Cpu, CpuRef, CpuRole, LogicId, MAX_CPUS},
+    default_sched_root_domain::DefaultSchedRootDomain,
     device_tree::DeviceTree,
     exception_type::ExceptionType,
     fdt_reader::read_cells,
@@ -21,6 +22,35 @@ pub struct CpuGroup {
     pre_smp_topology_ready: bool,
     boot_cpu_topology_recorded: bool,
     smp_concurrency_open: bool,
+}
+
+#[derive(Clone, Copy)]
+pub struct PossibleCpuInventory {
+    refs: [CpuRef; MAX_CPUS],
+    hartids: [usize; MAX_CPUS],
+    count: usize,
+}
+
+impl PossibleCpuInventory {
+    pub const fn count(&self) -> usize {
+        self.count
+    }
+
+    pub const fn cpu_ref(&self, logical_id: usize) -> Option<CpuRef> {
+        if logical_id < self.count {
+            Some(self.refs[logical_id])
+        } else {
+            None
+        }
+    }
+
+    pub const fn hartid(&self, logical_id: usize) -> Option<usize> {
+        if logical_id < self.count {
+            Some(self.hartids[logical_id])
+        } else {
+            None
+        }
+    }
 }
 
 impl CpuGroup {
@@ -122,6 +152,26 @@ impl CpuGroup {
         self.cpu(BOOT_CPU_LOGICAL_ID)
     }
 
+    pub fn boot_scheduler(&self) -> Option<&super::scheduler::Scheduler> {
+        Some(self.boot_cpu()?.scheduler())
+    }
+
+    pub fn boot_scheduler_mut(&mut self) -> Option<&mut super::scheduler::Scheduler> {
+        Some(self.cpu_mut(BOOT_CPU_LOGICAL_ID)?.scheduler_mut())
+    }
+
+    pub fn boot_scheduler_and_local_interrupt_mut(
+        &mut self,
+    ) -> Option<(
+        &mut super::scheduler::Scheduler,
+        &mut super::interrupt_type::InterruptType,
+    )> {
+        Some(
+            self.cpu_mut(BOOT_CPU_LOGICAL_ID)?
+                .scheduler_and_local_interrupt_mut(),
+        )
+    }
+
     pub fn cpu_ref_at(&self, logical_id: usize) -> Option<CpuRef> {
         let cpu = self.cpu(logical_id)?;
         let cpu_ref = cpu.cpu_ref();
@@ -218,6 +268,65 @@ impl CpuGroup {
         self.count_matching(Cpu::is_possible)
     }
 
+    pub fn possible_cpu_inventory(&self) -> Option<PossibleCpuInventory> {
+        if self.state() != State::Ready || !self.possible_cpu_boundary_ready() {
+            return None;
+        }
+        let mut inventory = PossibleCpuInventory {
+            refs: [CpuRef::invalid(); MAX_CPUS],
+            hartids: [usize::MAX; MAX_CPUS],
+            count: self.possible_cpu_count(),
+        };
+        let mut logical_id = 0usize;
+        while logical_id < inventory.count {
+            let cpu = self.cpu(logical_id)?;
+            inventory.refs[logical_id] = cpu.cpu_ref();
+            inventory.hartids[logical_id] = cpu.hartid();
+            logical_id += 1;
+        }
+        Some(inventory)
+    }
+
+    pub fn possible_schedulers_ready(&self, root_domain: &DefaultSchedRootDomain) -> bool {
+        if self.state() != State::Ready
+            || self.possible_cpu_count() == 0
+            || root_domain.covered_cpu_count() != self.possible_cpu_count()
+        {
+            return false;
+        }
+        let mut logical_id = 0usize;
+        while logical_id < self.cpu_count {
+            let Some(cpu) = self.cpu(logical_id) else {
+                return false;
+            };
+            let scheduler = cpu.scheduler();
+            let runqueue = scheduler;
+            let expected_state = if logical_id == BOOT_CPU_LOGICAL_ID || cpu.is_online() {
+                State::Online
+            } else {
+                State::Ready
+            };
+            if scheduler.state() != expected_state
+                || runqueue.runqueue_state() != State::Ready
+                || runqueue.cpu_ref() != cpu.cpu_ref()
+                || runqueue.cpu_hartid() != cpu.hartid()
+                || !runqueue.class_queues_ready()
+                || !runqueue.attached_to_root_domain()
+                || runqueue.balance_push_enabled()
+                || !root_domain.covers_cpu_ref(cpu.cpu_ref())
+            {
+                return false;
+            }
+            logical_id += 1;
+        }
+        true
+    }
+
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
+    pub fn possible_scheduler(&self, logical_id: usize) -> Option<&super::scheduler::Scheduler> {
+        Some(self.cpu(logical_id)?.scheduler())
+    }
+
     pub const fn pre_smp_topology_ready(&self) -> bool {
         self.pre_smp_topology_ready
     }
@@ -311,6 +420,7 @@ impl CpuGroup {
                     State::Ready,
                 );
             };
+            cpu.scheduler_mut().enable_secondary()?;
             cpu.mark_online();
             logical_id += 1;
         }

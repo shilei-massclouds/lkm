@@ -58,18 +58,19 @@ TaskFlow slot 常量和 `USER_FLOW_SLOTS_PER_TASK` 属于本 module。通用 non
 ## OnCpu 执行边界
 
 `TaskFlow` transition/action 在修改状态或执行 body 前，必须通过 owner bridge 解析 parent Task 并检查
-其状态为 `OnCpu` 且 authority 为 Live。`Task.Online` 只表示可被 Scheduler 派发，不等同于执行权或普通 runnable queue
-成员。`CurrentTask` 先读取本 CPU 已提交的 `tp` binding，再以 effective Flow 校验 parent/owner、
+其状态为 `OnCpu` 且 authority 为 Live。`Task.Online` 只表示具有可恢复上下文，不等同于执行权、runnable 或 on-rq。
+`CurrentTask` 先读取本 CPU 已提交的 `tp` binding，再以 effective Flow 校验 parent/owner、
 Task.active_flow、该 CPU 上的 OnCpu/Live authority 与唯一 TaskRef generation；`CurrentTaskRef` 从该
 唯一有效引用派生。它们不形成 object、slot 或 lifecycle state。BootTask 首次 BindTask 之前
 `CurrentCPU` 必须仍可从 BootInitFlow.cpu_ref 独立解析。
 
-Scheduler 切换按 `prepare -> physical save/restore -> next-stack finish` 排序。prepare 只校验双方
-authority/context/FlowRef；架构切换从 next context 恢复 `sp`，finish 在正式 commit 中调用只执行
-`BindCurrentTask(next)` 的 `CurrentTask.BindTask(next)` 实际更新 `tp`。外层 switch commit 随后以 live
-`sp` 和 `next.stack` 发布 CurrentStack，并原子发布 prev breakpoint、消费 next breakpoint、激活 next
-Flow。只有 task/stack pair 都可解析后，后续 continuation 才能确认新的 CurrentTask/CurrentStack；
-`next.Continue` 不能由旧 Task 栈提前提交 OnCpu。
+Scheduler 切换按 `SaveCoreContext(prev) -> Suspend(prev) -> RestoreCoreContext(next) ->
+next-stack finish -> next.Continue` 排序。入口先完整预检双方 TaskRef、lifecycle、authority、context、
+FlowRef 和 continuation 容量；架构切换从 next context 恢复 `sp`并提交 CPU-local CurrentTask/
+CurrentStack。finish 在 next stack 上发布 prev breakpoint、消费 next breakpoint并完成清理，然后才能一次性
+投递 `next.Continue`。Task 接受后提交 `Online/None/Valid -> OnCpu/Live/Invalid`，再 emits initial
+Flow Startup 或 active Flow Continue。identity path 不执行上述任何 lifecycle/context/binding 操作，只在
+Scheduler 处理结束后向原 active Flow 投递 Continue。
 
 入口与 scheduler commit 是 `cpu_ref` 的仅有写边界。迁移提交在激活新 Flow 前写入目标 CpuRef；
 同一 Task 的 Flow handoff 在提交 active binding 前复制 predecessor CpuRef。执行中的 Flow 及其同步

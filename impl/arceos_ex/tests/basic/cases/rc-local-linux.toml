@@ -23,5 +23,16 @@ exit_policy = "stress-mem"
 interaction = "none"
 
 [expect]
-markers = ["lkm-rc-local: begin", "lost+found", "lkm-rc-local: end status=0", "SyscallTable.Wait4"]
+markers = [
+  "lkm-rc-local: begin",
+  "lost+found",
+  "lkm-rc-local: end status=0",
+  "SyscallTable.Wait4",
+  "scheduler_diff_summary: total=",
+  "scheduler_diff: seq=0 stage=entry cpu=0 mode=0 prev=0 next=-1 prev_state=0 prev_on_rq=1 flags=0 class=none",
+  "scheduler_diff: seq=1 stage=prepare_prev cpu=0 mode=0 prev=0 next=-1 prev_state=0 prev_on_rq=1 flags=0 class=none",
+  "scheduler_diff: seq=2 stage=pick_next cpu=0 mode=0 prev=0 next=1 prev_state=0 prev_on_rq=1 flags=0 class=fair",
+  "scheduler_diff: seq=3 stage=switch_entry cpu=0 mode=0 prev=0 next=1 prev_state=0 prev_on_rq=1 flags=0 class=fair",
+  "scheduler_diff: seq=4 stage=finish_return cpu=0 mode=-128 prev=0 next=1 prev_state=0 prev_on_rq=1 flags=0 class=fair",
+]
 forbidden_markers = ["lkm-rc-local-init: execve failed", "overflow=1", "Kernel panic"]

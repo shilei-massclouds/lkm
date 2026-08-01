@@ -2305,7 +2305,7 @@ object IrqTimeInitPhase: PhaseObject {
             on Transition::Preset -> State::Prepared {
                 depends_on {
                     SchedInitPhase.state == State::Online;
-                    Scheduler.state == State::Online;
+                    Cpu0Scheduler.state == State::Online;
                     RcuCore.state == State::Ready;
                     Workqueue.state == State::Prepared;
                     Softirq.state == State::Prepared;

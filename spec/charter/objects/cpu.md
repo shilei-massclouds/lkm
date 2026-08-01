@@ -44,22 +44,29 @@ index 与 reference 关系；BootInitFlow 只按入口顺序驱动 BootCPU 完�
 
 ## CPU-local 子对象
 
-每个已发布 CPU 恰好拥有一个独立 `TrapType` 资源；Trap 再拥有独立 `InterruptType` 与
+每个已发布 CPU 恰好拥有一个独立 `Scheduler` 和一个独立 `TrapType` 资源；Trap 再拥有独立 `InterruptType` 与
 `ExceptionType`，Exception 拥有 page-fault、syscall、breakpoint、unexpected 四个具体资源。完整
 结构为：
 
 ```text
+CPU.scheduler: Scheduler
 CPU.trap: TrapType
 TrapType.interrupt: InterruptType
 TrapType.exception: ExceptionType
 ExceptionType.{page_fault, syscall, breakpoint, unexpected}
 ```
 
-这些 resident 资源随 CPU 建立并保持各自 lifecycle、入口容量与 handler/gate 状态，任何一个 CPU 的
+这些 resident 资源随 CPU 建立并保持各自 lifecycle、队列/入口容量与 handler/gate 状态，任何一个 CPU 的
 状态都不得由全局对象或其它 CPU 的缓存副本替代。CurrentTask 不属于 CPU 子对象，也不存在
 `CurrentTaskSlot` lifecycle；它是 CPU 执行上下文在入口或 scheduler commit 提交的 task binding，解析
 时与 effective TaskFlow 的 parent/owner/active 关系交叉校验。每个 CPU 的 binding 独立，不能由全局
 单例或其它 CPU 的缓存副本替代。
+
+Scheduler 直接对应该 CPU 的 Linux `struct rq`，拥有 CPU-local lock、`curr/idle/stop` 与 class queues；
+不得再建立全局 Scheduler singleton 或平行 RunQueue body。所有 possible CPU 的 Scheduler 在
+`sched_init()` 后为 Ready；CPU0 Scheduler 随 boot CPU 进入可调度状态而 Online，AP Scheduler 只在
+对应 CPU online handoff 时 Online。跨 CPU root/sched domain 保持独立共享对象。完整协议见
+[`Scheduler`](scheduler.md)。
 
 `active_translation_controller` 是 CPU-local 的 optional typed association，不是另一份页表状态。
 尚未进入内核的 stopped AP 必须保持 association absent，且没有该 CPU 的 live SATP 事实；启动协议中

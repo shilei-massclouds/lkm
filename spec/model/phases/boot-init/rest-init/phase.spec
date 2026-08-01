@@ -35,8 +35,8 @@ context WakeUpNewTaskContext: ResourceExclusiveContext {
     obj_refs {
         KernelInitTask;
         KernelInitFlow;
-        Scheduler;
-        BootRunQueue;
+        Cpu0Scheduler;
+        Cpu0Scheduler;
     }
 }
 
@@ -56,37 +56,36 @@ context WakeUpKthreaddTaskContext: ResourceExclusiveContext {
     obj_refs {
         KthreaddTask;
         KthreaddFlow;
-        Scheduler;
-        BootRunQueue;
+        Cpu0Scheduler;
     }
 }
 
 context EnqueueSelectedRunQueueContext: ResourceExclusiveContext {
     /*
      * Per SEM-EXCLUSIVE-CONTEXT-001, nested within uses the standard
-     * no-argument form and consumes lexically visible bindings. The selected_rq
-     * binding produced by Scheduler.Action::SelectRunQueue is visible inside
-     * this context. In the current UP path, selected_rq is proven to target
-     * BootRunQueue and BootCPURef, so this context is guarded by
-     * BootRunQueueLock and the task CPU update consumes that selected_rq CPU
+     * no-argument form and consumes lexically visible bindings. The selected_scheduler
+     * binding produced by Cpu0Scheduler.Action::SelectScheduler is visible inside
+     * this context. In the current UP path, selected_scheduler is proven to target
+     * Cpu0Scheduler and BootCPURef, so this context is guarded by
+     * Cpu0SchedulerLock and the Flow CPU update consumes that selected_scheduler CPU
      * fact as BootCPURef. Future generic runqueue enqueue modeling should
-     * resolve the lock, obj_refs and CPU fact from the selected RunQueueRef
-     * instead of this BootRunQueue specialization.
+     * resolve the lock, obj_refs and CPU fact from the selected SchedulerRef
+     * instead of this Cpu0Scheduler specialization.
      */
     guard {
-        lock_ref: BootRunQueueLock;
+        lock_ref: Cpu0SchedulerLock;
 
         entered_by {
-            BootRunQueueLock.Transition::LockIrqSave;
+            Cpu0SchedulerLock.Transition::LockIrqSave;
         }
 
         exited_by {
-            BootRunQueueLock.Transition::UnlockIrqRestore;
+            Cpu0SchedulerLock.Transition::UnlockIrqRestore;
         }
     }
 
     obj_refs {
-        BootRunQueue;
+        Cpu0Scheduler;
     }
 }
 
@@ -184,8 +183,8 @@ context SchedulePreemptionContext: Context {
 
     obj_refs {
         BootTask;
-        Scheduler;
-        BootRunQueue;
+        Cpu0Scheduler;
+        Cpu0Scheduler;
         CurrentCPU.trap.interrupt;
     }
 }
@@ -210,8 +209,8 @@ context ScheduleLocalInterruptContext: Context {
 
     obj_refs {
         BootTask;
-        Scheduler;
-        BootRunQueue;
+        Cpu0Scheduler;
+        Cpu0Scheduler;
         CurrentCPU.trap.interrupt;
     }
 }
@@ -219,38 +218,39 @@ context ScheduleLocalInterruptContext: Context {
 context ScheduleRunQueueContext: ResourceExclusiveContext {
     /*
      * This context models the rq_lock() region inside __schedule(). Current
-     * tooling infers the irq-save spinlock contribution from the BootRunQueueLock
+     * tooling infers the irq-save spinlock contribution from the Cpu0SchedulerLock
      * LockIrqSave/UnlockIrqRestore boundary;
      * the Linux path has local interrupts already disabled before rq_lock().
      * A narrower runqueue-lock guard can replace this once rq_lock/raw rq lock
      * is modeled separately from irq-save spinlock.
      */
     guard {
-        lock_ref: BootRunQueueLock;
+        lock_ref: Cpu0SchedulerLock;
 
         entered_by {
-            BootRunQueueLock.Transition::LockIrqSave;
+            Cpu0SchedulerLock.Transition::LockIrqSave;
         }
 
         exited_by {
-            BootRunQueueLock.Transition::UnlockIrqRestore;
+            Cpu0SchedulerLock.Transition::UnlockIrqRestore;
         }
     }
 
     obj_refs {
         BootTask;
-        Scheduler;
-        BootRunQueue;
+        Cpu0Scheduler;
+        Cpu0Scheduler;
     }
 }
 
 /*
  * Scheduler 的生命周期由 boot/sched-init/phase.spec 中的 Scheduler object
  * 建立：Preset/Setup/Enable 使其进入 Online。rest_init 三子阶段不再推进
- * Scheduler 生命周期，只消费 Scheduler.state == Online，并在
+ * Scheduler 生命周期，只消费 Cpu0Scheduler.state == Online，并在
  * BootInitScheduleHandoffPhase 只关闭首次切换的可逆预检与 BootIdleFlow
- * binding；真正的首次 handoff 在 BootInitFlow 提交 Online 后，由仍在执行的
- * Kernel.Enable 同步驱动 Scheduler.Action::Schedule。该 action 自身通过嵌套 within 进入
+ * binding；真正的首次 handoff 在 BootInitFlow 提交 Online 后，由当前 BootTask 的
+ * active BootIdleFlow 异步 emits Cpu0Scheduler.Action::Schedule。Kernel.Enable 不是 sender，
+ * 也不直接驱动 Scheduler 内部步骤。该 action 自身通过嵌套 within 进入
  * SchedulePreemptionContext -> ScheduleLocalInterruptContext ->
  * ScheduleRunQueueContext，分别覆盖 schedule-owned preempt-disabled guard、
  * __schedule() local-irq-disabled guard 和 rq->lock 独占区。
@@ -258,7 +258,7 @@ context ScheduleRunQueueContext: ResourceExclusiveContext {
  * 本文件中的 rest_init 相关同步边界均应保持为 within 或通用 Type process：
  * wake_up_new_task() 路径用 WakeUpNewTaskContext / WakeUpKthreaddTaskContext
  * 包住 p->pi_lock irqsave 区，并在其中嵌套 EnqueueSelectedRunQueueContext
- * 表达 BootRunQueueLock irqsave 区；PID lookup 使用
+ * 表达 Cpu0SchedulerLock irqsave 区；PID lookup 使用
  * KernelInitPidLookupRcuReadSideContext / KthreaddPidLookupRcuReadSideContext
  * 表达 rcu_read_lock()/unlock() 读侧边界；kthreadd_done 使用
  * KthreaddReadyGateWaitLockContext 包住 Completion Type 的 Complete process；
@@ -294,7 +294,7 @@ context BootIdleStartupContext: Context {
     obj_refs {
         BootTask;
         BootIdleFlow;
-        Scheduler;
+        Cpu0Scheduler;
     }
 }
 
@@ -344,17 +344,17 @@ context BootIdleWaitLocalInterruptContext: Context {
  * WakeUpNewTaskContext，再在该独占上下文内执行受保护资源动作；退出时
  * 通过 KernelInitTaskPiLock.UnlockIrqRestore 恢复本地中断和当前任务抢占。
  * 上下文通过 KernelInitTaskPiLock 建立边界，引用 KernelInitTask、
- * Scheduler、BootRunQueue 三个受保护对象。
+ * Scheduler、Cpu0Scheduler 三个受保护对象。
  * Enable 的 within WakeUpNewTaskContext 块直接驱动
  * Task.Transition::SetRuntimeState(Running)，再通过 action result binding 把
- * Scheduler.Action::SelectRunQueue(KernelInitTaskRef) 返回的
- * runqueue ref 绑定为 selected_rq。随后用标准无实参 within 进入
- * EnqueueSelectedRunQueueContext；selected_rq 作为外层 action result
- * binding 在嵌套 within 中直接可见。当前 UP 路径证明 selected_rq
- * 指向 BootRunQueue 且 CPU 事实为 BootCPURef，因此该 context 仍由
- * BootRunQueueLock 建立边界，Task.SetTaskCpu 消费 selected_rq 的 CPU 事实，
- * 并驱动 RunQueue.Transition::EnqueueTask(KernelInitTaskRef)。SelectRunQueue
- * 当前固定返回 BootRunQueueRef；完整选择策略后续 deferred。三者都成功后，
+ * Cpu0Scheduler.Action::SelectScheduler(KernelInitTaskRef) 返回的
+ * SchedulerRef 绑定为 selected_scheduler。随后用标准无实参 within 进入
+ * EnqueueSelectedRunQueueContext；selected_scheduler 作为外层 action result
+ * binding 在嵌套 within 中直接可见。当前 UP 路径证明 selected_scheduler
+ * 指向 Cpu0Scheduler 且 CPU 事实为 BootCPURef，因此该 context 仍由
+ * Cpu0SchedulerLock 建立边界，TaskFlow.AssignCpuRef 消费 selected_scheduler 的 CPU 事实，
+ * 并驱动 BootSchedulerRef.Transition::EnqueueTask(KernelInitTaskRef)。SelectScheduler
+ * 当前固定返回 BootSchedulerRef；完整选择策略后续 deferred。三者都成功后，
  * Enable 才提交 KernelInitTask Ready -> Online。
  *
  * KernelInitTask.PinToBootCpu 对应 rest_init() 随后的 PF_NO_SETAFFINITY
@@ -705,8 +705,8 @@ object BootInitRestInitPhase: PhaseObject {
                     SignalCore.state == State::Prepared;
                     TaskFileContext.state == State::Prepared;
                     SecurityCore.state == State::Ready;
-                    Scheduler.state == State::Online;
-                    BootRunQueue.state == State::Ready;
+                    Cpu0Scheduler.state == State::Online;
+                    scheduler_ready_after_sched_init(Cpu0Scheduler);
                     BootIdleSetup.state == State::Ready;
                     RcuCore.state == State::Ready;
                     CpuGroup.state == State::Ready;
@@ -730,13 +730,13 @@ object BootInitRestInitPhase: PhaseObject {
                         signal: SignalCore,
                         files: TaskFileContext,
                         security: SecurityCore,
-                        scheduler: Scheduler,
+                        scheduler: Cpu0Scheduler,
                         flow: KernelInitFlow
                     );
                     KernelInitTask.Transition::Setup(
                         parent_task: BootTask,
                         pid_ns: RootPidNamespace,
-                        scheduler: Scheduler,
+                        scheduler: Cpu0Scheduler,
                         initial_flow: KernelInitFlow
                     );
                 }
@@ -744,52 +744,51 @@ object BootInitRestInitPhase: PhaseObject {
                 within WakeUpNewTaskContext {
                     depends_on {
                         task_ref_ready(KernelInitTaskRef);
-                        runqueue_ref_ready(BootRunQueueRef);
                         task_state_new(KernelInitTask);
                         task_not_enqueued(KernelInitTask);
                         current_task_ref_derived_from_selector(BootTaskRef, BootTask);
-                        BootRunQueue.state == State::Ready;
+                        Cpu0Scheduler.state == State::Online;
                     }
 
                     drives {
                         KernelInitTask.Transition::SetRuntimeState(
                             TaskRuntimeState::Running
                         );
-                        let selected_rq: RunQueueRef <-
-                            Scheduler.Action::SelectRunQueue(KernelInitTaskRef);
+                        let selected_scheduler: SchedulerRef <-
+                            Cpu0Scheduler.Action::SelectScheduler(KernelInitTaskRef);
                         KernelInitFlow.Action::AssignCpuRef(BootCPURef);
                     }
 
                     within EnqueueSelectedRunQueueContext {
                         depends_on {
-                            runqueue_ref_targets(
-                                selected_rq,
-                                BootRunQueue
+                            scheduler_ref_targets(
+                                BootSchedulerRef,
+                                Cpu0Scheduler
                             );
-                            runqueue_ref_cpu_is(
-                                selected_rq,
+                            scheduler_ref_cpu_is(
+                                BootSchedulerRef,
                                 BootCPURef
                             );
                             task_flow_cpu_ref_is(KernelInitFlow, BootCPURef);
                         }
 
                         drives {
-                            selected_rq.Transition::EnqueueTask(
+                            Cpu0Scheduler.Transition::EnqueueTask(
                                 KernelInitTaskRef
                             );
                         }
 
                         ensures {
                             raw_spinlock_irqsave_entered(
-                                BootRunQueueLock,
+                                Cpu0SchedulerLock,
                                 CurrentCPU
                             );
                             raw_spinlock_irqrestore_exited(
-                                BootRunQueueLock,
+                                Cpu0SchedulerLock,
                                 CurrentCPU
                             );
-                            runqueue_contains_task(
-                                BootRunQueue,
+                            scheduler_contains_task(
+                                Cpu0Scheduler,
                                 KernelInitTaskRef
                             );
                         }
@@ -804,37 +803,37 @@ object BootInitRestInitPhase: PhaseObject {
                             KernelInitTaskPiLock,
                             CurrentCPU
                         );
-                        scheduler_select_runqueue_returns(
-                            Scheduler,
+                        scheduler_select_scheduler_returns(
+                            Cpu0Scheduler,
                             KernelInitTaskRef,
-                            BootRunQueueRef
+                            BootSchedulerRef
                         );
-                        task_runqueue_selected(
-                            Scheduler,
+                        task_scheduler_selected(
+                            Cpu0Scheduler,
                             KernelInitTaskRef,
-                            BootRunQueueRef
+                            BootSchedulerRef
                         );
                         task_flow_cpu_ref_targets(KernelInitFlow, CpuGroup.cpus[0]);
-                        task_enqueued_on_runqueue(
+                        task_enqueued_on_scheduler(
                             KernelInitTaskRef,
-                            BootRunQueueRef
+                            BootSchedulerRef
                         );
                         task_wakeup_new_rq_clock_updated(
                             KernelInitTask,
-                            BootRunQueue
+                            Cpu0Scheduler
                         );
                         task_wakeup_new_initial_util_avg_posted(
                             KernelInitTask,
-                            BootRunQueue
+                            Cpu0Scheduler
                         );
                         task_wakeup_new_trace_emitted(KernelInitTask);
                         task_wakeup_new_preempt_check_done(
                             KernelInitTask,
-                            BootRunQueue
+                            Cpu0Scheduler
                         );
                         task_wakeup_new_task_woken_hook_deferred(KernelInitTask);
                         task_state_running(KernelInitTask);
-                        task_runqueue_publication_committed(KernelInitTask);
+                        task_scheduler_publication_committed(KernelInitTask);
                         task_at_most_one_flow_online(KernelInitTask);
                         task_initial_flow_is(KernelInitTask, KernelInitFlow);
                         task_initial_flow_binding_consistent(KernelInitTask);
@@ -884,13 +883,13 @@ object BootInitRestInitPhase: PhaseObject {
                         signal: SignalCore,
                         files: TaskFileContext,
                         security: SecurityCore,
-                        scheduler: Scheduler,
+                        scheduler: Cpu0Scheduler,
                         flow: KthreaddFlow
                     );
                     KthreaddTask.Transition::Setup(
                         parent_task: BootTask,
                         pid_ns: RootPidNamespace,
-                        scheduler: Scheduler,
+                        scheduler: Cpu0Scheduler,
                         initial_flow: KthreaddFlow
                     );
                 }
@@ -898,49 +897,48 @@ object BootInitRestInitPhase: PhaseObject {
                 within WakeUpKthreaddTaskContext {
                     depends_on {
                         task_ref_ready(KthreaddTaskRef);
-                        runqueue_ref_ready(BootRunQueueRef);
                         task_state_new(KthreaddTask);
                         task_not_enqueued(KthreaddTask);
                         current_task_ref_derived_from_selector(BootTaskRef, BootTask);
-                        BootRunQueue.state == State::Ready;
+                        Cpu0Scheduler.state == State::Online;
                     }
 
                     drives {
                         KthreaddTask.Transition::SetRuntimeState(
                             TaskRuntimeState::Running
                         );
-                        let selected_rq: RunQueueRef <-
-                            Scheduler.Action::SelectRunQueue(KthreaddTaskRef);
+                        let selected_scheduler: SchedulerRef <-
+                            Cpu0Scheduler.Action::SelectScheduler(KthreaddTaskRef);
                         KthreaddFlow.Action::AssignCpuRef(BootCPURef);
                     }
 
                     within EnqueueSelectedRunQueueContext {
                         depends_on {
-                            runqueue_ref_targets(
-                                selected_rq,
-                                BootRunQueue
+                            scheduler_ref_targets(
+                                BootSchedulerRef,
+                                Cpu0Scheduler
                             );
-                            runqueue_ref_cpu_is(selected_rq, BootCPURef);
+                            scheduler_ref_cpu_is(BootSchedulerRef, BootCPURef);
                             task_flow_cpu_ref_is(KthreaddFlow, BootCPURef);
                         }
 
                         drives {
-                            selected_rq.Transition::EnqueueTask(
+                            Cpu0Scheduler.Transition::EnqueueTask(
                                 KthreaddTaskRef
                             );
                         }
 
                         ensures {
                             raw_spinlock_irqsave_entered(
-                                BootRunQueueLock,
+                                Cpu0SchedulerLock,
                                 CurrentCPU
                             );
                             raw_spinlock_irqrestore_exited(
-                                BootRunQueueLock,
+                                Cpu0SchedulerLock,
                                 CurrentCPU
                             );
-                            runqueue_contains_task(
-                                BootRunQueue,
+                            scheduler_contains_task(
+                                Cpu0Scheduler,
                                 KthreaddTaskRef
                             );
                         }
@@ -955,37 +953,37 @@ object BootInitRestInitPhase: PhaseObject {
                             KthreaddTaskPiLock,
                             CurrentCPU
                         );
-                        scheduler_select_runqueue_returns(
-                            Scheduler,
+                        scheduler_select_scheduler_returns(
+                            Cpu0Scheduler,
                             KthreaddTaskRef,
-                            BootRunQueueRef
+                            BootSchedulerRef
                         );
-                        task_runqueue_selected(
-                            Scheduler,
+                        task_scheduler_selected(
+                            Cpu0Scheduler,
                             KthreaddTaskRef,
-                            BootRunQueueRef
+                            BootSchedulerRef
                         );
                         task_flow_cpu_ref_targets(KthreaddFlow, CpuGroup.cpus[0]);
-                        task_enqueued_on_runqueue(
+                        task_enqueued_on_scheduler(
                             KthreaddTaskRef,
-                            BootRunQueueRef
+                            BootSchedulerRef
                         );
                         task_wakeup_new_rq_clock_updated(
                             KthreaddTask,
-                            BootRunQueue
+                            Cpu0Scheduler
                         );
                         task_wakeup_new_initial_util_avg_posted(
                             KthreaddTask,
-                            BootRunQueue
+                            Cpu0Scheduler
                         );
                         task_wakeup_new_trace_emitted(KthreaddTask);
                         task_wakeup_new_preempt_check_done(
                             KthreaddTask,
-                            BootRunQueue
+                            Cpu0Scheduler
                         );
                         task_wakeup_new_task_woken_hook_deferred(KthreaddTask);
                         task_state_running(KthreaddTask);
-                        task_runqueue_publication_committed(KthreaddTask);
+                        task_scheduler_publication_committed(KthreaddTask);
                         task_at_most_one_flow_online(KthreaddTask);
                         task_initial_flow_is(KthreaddTask, KthreaddFlow);
                         task_initial_flow_binding_consistent(KthreaddTask);
@@ -1069,10 +1067,10 @@ object BootInitRestInitPhase: PhaseObject {
                     kernel_init_task_ready(KernelInitTask);
                     kernel_init_task_pid_is_one(KernelInitTask);
                     kernel_init_thread_context_ready(KernelInitTask);
-                    kernel_init_sched_entity_ready(KernelInitTask, Scheduler);
+                    kernel_init_sched_entity_ready(KernelInitTask, Cpu0Scheduler);
                     kernel_init_waits_for_kthreadd_done(KernelInitTask);
                     kernel_init_task_online(KernelInitTask);
-                    kernel_init_task_enqueued(KernelInitTask, BootRunQueue);
+                    kernel_init_task_enqueued(KernelInitTask, Cpu0Scheduler);
                     task_owns_flow(KernelInitTask, KernelInitFlow);
                     kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
                     kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
@@ -1091,9 +1089,9 @@ object BootInitRestInitPhase: PhaseObject {
                     kthreadd_task_ready(KthreaddTask);
                     kthreadd_task_pid_allocated(KthreaddTask, RootPidNamespace);
                     kthreadd_thread_context_ready(KthreaddTask);
-                    kthreadd_sched_entity_ready(KthreaddTask, Scheduler);
+                    kthreadd_sched_entity_ready(KthreaddTask, Cpu0Scheduler);
                     kthreadd_task_online(KthreaddTask);
-                    kthreadd_task_enqueued(KthreaddTask, BootRunQueue);
+                    kthreadd_task_enqueued(KthreaddTask, Cpu0Scheduler);
                     task_owns_flow(KthreaddTask, KthreaddFlow);
                     KthreaddFlow.state == State::Base;
                     kthreadd_schedule_loop_deferred_until_on_cpu(
@@ -1153,10 +1151,10 @@ object BootInitRestInitPhase: PhaseObject {
                     kernel_init_task_ready(KernelInitTask);
                     kernel_init_task_pid_is_one(KernelInitTask);
                     kernel_init_thread_context_ready(KernelInitTask);
-                    kernel_init_sched_entity_ready(KernelInitTask, Scheduler);
+                    kernel_init_sched_entity_ready(KernelInitTask, Cpu0Scheduler);
                     kernel_init_waits_for_kthreadd_done(KernelInitTask);
                     kernel_init_task_online(KernelInitTask);
-                    kernel_init_task_enqueued(KernelInitTask, BootRunQueue);
+                    kernel_init_task_enqueued(KernelInitTask, Cpu0Scheduler);
                     task_owns_flow(KernelInitTask, KernelInitFlow);
                     kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
                     kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
@@ -1173,9 +1171,9 @@ object BootInitRestInitPhase: PhaseObject {
                     kthreadd_task_ready(KthreaddTask);
                     kthreadd_task_pid_allocated(KthreaddTask, RootPidNamespace);
                     kthreadd_thread_context_ready(KthreaddTask);
-                    kthreadd_sched_entity_ready(KthreaddTask, Scheduler);
+                    kthreadd_sched_entity_ready(KthreaddTask, Cpu0Scheduler);
                     kthreadd_task_online(KthreaddTask);
-                    kthreadd_task_enqueued(KthreaddTask, BootRunQueue);
+                    kthreadd_task_enqueued(KthreaddTask, Cpu0Scheduler);
                     task_owns_flow(KthreaddTask, KthreaddFlow);
                     KthreaddFlow.state == State::Base;
                     kthreadd_schedule_loop_deferred_until_on_cpu(
@@ -1227,11 +1225,11 @@ object BootInitRestInitPhase: PhaseObject {
             kernel_init_task_ready(KernelInitTask);
             kernel_init_task_pid_is_one(KernelInitTask);
             kernel_init_thread_context_ready(KernelInitTask);
-            kernel_init_sched_entity_ready(KernelInitTask, Scheduler);
+            kernel_init_sched_entity_ready(KernelInitTask, Cpu0Scheduler);
             kernel_init_waits_for_kthreadd_done(KernelInitTask);
             kernel_init_still_waiting_for_kthreadd_done(KernelInitTask);
             kernel_init_task_online(KernelInitTask);
-            kernel_init_task_enqueued(KernelInitTask, BootRunQueue);
+            kernel_init_task_enqueued(KernelInitTask, Cpu0Scheduler);
             task_owns_flow(KernelInitTask, KernelInitFlow);
             kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
             kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
@@ -1248,9 +1246,9 @@ object BootInitRestInitPhase: PhaseObject {
             kthreadd_task_ready(KthreaddTask);
             kthreadd_task_pid_allocated(KthreaddTask, RootPidNamespace);
             kthreadd_thread_context_ready(KthreaddTask);
-            kthreadd_sched_entity_ready(KthreaddTask, Scheduler);
+            kthreadd_sched_entity_ready(KthreaddTask, Cpu0Scheduler);
             kthreadd_task_online(KthreaddTask);
-            kthreadd_task_enqueued(KthreaddTask, BootRunQueue);
+            kthreadd_task_enqueued(KthreaddTask, Cpu0Scheduler);
             task_owns_flow(KthreaddTask, KthreaddFlow);
             KthreaddFlow.state == State::Base;
             kthreadd_schedule_loop_deferred_until_on_cpu(
@@ -1353,7 +1351,7 @@ object BootInitScheduleHandoffPhase: PhaseObject {
                     KthreaddReadyGate.state == State::Online;
                     kthreadd_ready_gate_completed(KthreaddReadyGate);
                     completion_complete_committed(KthreaddReadyGate);
-                    Scheduler.state == State::Online;
+                    Cpu0Scheduler.state == State::Online;
                     BootIdleSetup.state == State::Ready;
                 }
 
@@ -1377,11 +1375,23 @@ object BootInitScheduleHandoffPhase: PhaseObject {
                     kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
                     kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
                     scheduler_switch_prepare_validates_prev_live_active_flow(
-                        Scheduler,
+                        Cpu0Scheduler,
                         BootTaskRef
                     );
                     scheduler_switch_prepare_validates_next_breakpoint_flow_ref(
-                        Scheduler,
+                        Cpu0Scheduler,
+                        KernelInitTaskRef
+                    );
+                    scheduler_schedule_next_is(Cpu0Scheduler, KernelInitTaskRef);
+                    scheduler_task_declares_running(BootTaskRef);
+                    task_ref_targets_online_task(KernelInitTaskRef);
+                    scheduler_switch_preflight_complete(
+                        Cpu0Scheduler,
+                        BootTaskRef,
+                        KernelInitTaskRef
+                    );
+                    scheduler_switch_signal_capacity_preflight_complete(
+                        Cpu0Scheduler,
                         KernelInitTaskRef
                     );
                     task_concurrency_open();
@@ -1425,11 +1435,11 @@ object BootInitScheduleHandoffPhase: PhaseObject {
             BootIdleFlow.state == State::Ready;
             task_active_flow_is(BootTask, BootIdleFlow);
             scheduler_switch_prepare_validates_prev_live_active_flow(
-                Scheduler,
+                Cpu0Scheduler,
                 BootTaskRef
             );
             scheduler_switch_prepare_validates_next_breakpoint_flow_ref(
-                Scheduler,
+                Cpu0Scheduler,
                 KernelInitTaskRef
             );
             task_concurrency_open();
@@ -1479,7 +1489,7 @@ object BootIdleEntryPhase: PhaseObject {
             on Transition::Preset -> State::Prepared {
                 depends_on {
                     BootInitScheduleHandoffPhase.state == State::Online;
-                    scheduler_first_schedule_committed(Scheduler);
+                    scheduler_first_schedule_committed(Cpu0Scheduler);
                     BootIdleSetup.state == State::Ready;
                     BootIdleFlow.state == State::Ready;
                     task_active_flow_is(BootTask, BootIdleFlow);
@@ -1526,7 +1536,7 @@ object BootIdleEntryPhase: PhaseObject {
                     kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
                     kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
                     kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
-                    scheduler_first_schedule_committed(Scheduler);
+                    scheduler_first_schedule_committed(Cpu0Scheduler);
                     boot_idle_runtime_ready(BootIdleFlow, BootTask);
                     boot_idle_cpu_startup_entry_ready(BootIdleFlow, CpuGroup.cpus[0]);
                     boot_idle_entry_prepared(BootIdleFlow, BootTask);
@@ -1555,7 +1565,7 @@ object BootIdleEntryPhase: PhaseObject {
                     boot_cpu_idle_runtime_entered(BootIdleFlow);
                     secondary_cpus_not_started(CpuGroup);
                     kernel_init_task_stack_switch_committed(
-                        Scheduler,
+                        Cpu0Scheduler,
                         BootTask,
                         KernelInitTask
                     );
@@ -1623,9 +1633,9 @@ object BootIdleEntryPhase: PhaseObject {
                     kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
                     kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
                     kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
-                    scheduler_first_schedule_committed(Scheduler);
+                    scheduler_first_schedule_committed(Cpu0Scheduler);
                     kernel_init_task_stack_switch_committed(
-                        Scheduler,
+                        Cpu0Scheduler,
                         BootTask,
                         KernelInitTask
                     );
@@ -1656,7 +1666,7 @@ object BootIdleEntryPhase: PhaseObject {
             boot_idle_smp_call_function_queue_flushed(BootIdleFlow);
             boot_idle_loop_continues(BootIdleFlow);
             kernel_init_task_stack_switch_committed(
-                Scheduler,
+                Cpu0Scheduler,
                 BootTask,
                 KernelInitTask
             );
@@ -1687,9 +1697,9 @@ object BootIdleEntryPhase: PhaseObject {
                     kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
                     kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
                     kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
-                    scheduler_first_schedule_committed(Scheduler);
+                    scheduler_first_schedule_committed(Cpu0Scheduler);
                     kernel_init_task_stack_switch_committed(
-                        Scheduler,
+                        Cpu0Scheduler,
                         BootTask,
                         KernelInitTask
                     );

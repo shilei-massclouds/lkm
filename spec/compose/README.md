@@ -1,5 +1,12 @@
 # Compose 规格
 
+2026-08-01 per-CPU Scheduler 组合闭合：每个 canonical `CpuGroup.cpus[logical_id]` 内嵌且只拥有一个
+`Scheduler`，直接承载该 CPU 的 Linux `struct rq` 语义；`Context` 不再拥有全局 Scheduler singleton
+或 `[CpuRunQueueMetadata; MAX_CPUS]` 镜像。root domain、sched domain 与其它跨 CPU 协调资源继续由
+Scheduler 之外的共享对象承载，通过 `CpuRef` 覆盖目标 CPU 集合。`SchedulerTaskAccess` 只作为
+Scheduler 到既有 Task/TaskFlow storage 的私有 bridge，不形成新的 owner 或 component。上述关系已写入
+`spec/compose/main.spec`，不改变 Charter/Model/Coding 的调度语义。
+
 2026-07-30 tools2 Deferred/Trimmed/Obligation v9 复核：全局 boundary inventory、动态 occurrence、只读
 evidence proof、check/snapshot 门禁及 view/animation 投影只改变独立 tools2 协议与验证产物；不新增或
 调整内核 crate、Rust module、facade、feature、公开 API 或组件依赖。`spec/compose/main.spec` 已复核，

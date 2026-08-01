@@ -15,6 +15,9 @@ Rootfs/user fixture、发行版 smoke、BusyBox-init scripted interaction 和 pa
 CPU/CpuGroup 唯一所有权、CpuRef、CurrentCPU selector 与迁移/Flow handoff 的测试规则见
 [`cpu.md`](cpu.md)。
 
+per-CPU Scheduler inventory、PreparePrev、class handoff、identity/nonidentity continuation 与 Linux
+差分观测规则见 [`scheduler.md`](scheduler.md)。
+
 运行期 `declare` 的 parser/checker/derive/JSON/view、128 次声明点压力与差分门禁见
 [`dynamic-instance-declaration.md`](dynamic-instance-declaration.md)。
 
@@ -48,7 +51,7 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
   snapshot-out；只有 `check.allowed == true` 的 v9 snapshot 可作为下一 scenario 输入；
 - boundary 结构负例覆盖非法 category/ID、重复 ID、缺失或空 summary/evidence/resolution、错误
   close_when/revisit_when、重复属性/evidence 块及 legacy syntax；主模型 inventory 必须精确为 138
-  deferred、52 trimmed，且 Type process composition/实例展开不得复制 inventory ID；
+  deferred、53 trimmed，且 Type process composition/实例展开不得复制 inventory ID；
 - occurrence 正反例覆盖 declaration、state、Transition、Action、`within`、Type process 多实例与同一
   boundary 的重复 Signal 到达。每次到达必须保留独立 proof/obligation；obligation 不改变 Signal 数量、
   顺序、state、outcome 或 animation causal moment，完整主模型 unresolved obligation 必须为零；
@@ -124,10 +127,18 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
 - 提交的 `tools2/scenarios/BootInitFlow.Setup.snapshot.json` 必须与从模型初态执行
   `tools2/bin/pyveri -u BootInitFlow.Setup --snapshot-out /tmp/boot-init-flow-setup-presend.snapshot.json`
   得到的 canonical bytes 逐字节一致，并从仓库根与其它 cwd 重建出相同结果。当前正式模型下其
-  SHA-256 固定为 `34525a0131c1b94ecf848054c1c3fcaf962d91f6350f64b4bc1071bd28fbeb8d`，model
-  fingerprint 固定为 `sha256:b80e689285bb9384869ec487830913fc5d9ca85dcac7b2d1557080b08887f036`。
+  SHA-256 固定为 `1f0327b33e1de1a493ccb78c89a3ee2781b8799a07229ca6341864072d8c6906`，model
+  fingerprint 固定为 `sha256:36108bcafb76b847a0da2a05abc5fe6214033dbbbb9c0346f7906f798d196a05`。
   `tools2/bin/pyveri -t BootInitFlow.Setup` 必须自动采用该第 3 组入口 scenario；显式 `-s` 仍优先，
   其它模型必须因 stale fingerprint 拒绝，缺失 canonical scenario 必须在 derive 前返回 2。
+- 提交的 `tools2/scenarios/Cpu0Scheduler.Schedule.snapshot.json` 必须与从模型初态执行
+  `tools2/bin/pyveri -u Cpu0Scheduler.Schedule` 得到的 canonical bytes 逐字节一致；SHA-256 固定为
+  `acf73a92956b48045009d3c4334b702ed515506daab5b31c8b482b85efa131f7`，model fingerprint 与上述
+  Setup scenario 相同。该 before-send 边界的真实 sender 必须是 `BootIdleFlow`，上一个已完成 Signal
+  必须是 `BootInitFlow -> BootIdleFlow.RequestSchedule`；边界处 BootInitFlow=Online、BootTask=OnCpu、
+  BootIdleFlow=Ready，Cpu0Scheduler=Online、Cpu1Scheduler..Cpu7Scheduler=Ready，且 8 个
+  `CpuGroup.cpus[i].scheduler` reference 分别指向唯一的 `Cpu{i}Scheduler` lifecycle identity。推导中
+  不得已经存在 Cpu0Scheduler.Schedule Signal、PreparePrev 或 context switch occurrence。
 - `-u BootInitFlow.Setup` 的真实上游推导必须精确包含 52 个 Signal，并逐项固定
   `sig-0016..sig-0052` 在 charter 因果账本中的 source、target、canonical name、delivery、cause、
   handler kind/id、target before/after state 和创建顺序。0016 必须是唯一 stopped Signal；0017–0052
@@ -286,7 +297,7 @@ smoke 测试生成时必须先判定测试目标类别，再决定是否依赖�
 
 `TypeBehavior` 用于 `RawSpinLock`、`Completion` 这类可复用抽象类型。测试目标是类型语义，而不是某个生产实例。生成的 smoke case 默认应本地构造 subject 实例，只引入最小依赖对象，不绑定 `Context` 中的某个具体生产单例。若必须读取 live context 以满足前置条件，读取行为应保持为支撑条件，不得把该生产对象变成测试主体。
 
-`ObjectApiBehavior` 用于 `TaskCreationCore.copy_process()`、`CurrentRunQueueRef`/`RunQueue.EnqueueTask`/`RunQueue.PickNextTask` 这类正式对象 API 或 action 边界。测试目标是对象 API 契约本身，可以本地构造 subject 对象，并只读 live context 作为依赖前置条件。测试不得为了方便增加 `test_*` 被测入口；若实现缺少可调用边界，应补正式对象 API，使生产路径和测试路径共享同一语义入口。
+`ObjectApiBehavior` 用于 `TaskCreationCore.copy_process()`、`Scheduler.EnqueueTask`/`Scheduler.PickNextTask` 这类正式对象 API 或 action 边界。测试目标是对象 API 契约本身，可以本地构造 subject 对象，并只读 live context 作为依赖前置条件。测试不得为了方便增加 `test_*` 被测入口；若实现缺少可调用边界，应补正式对象 API，使生产路径和测试路径共享同一语义入口。
 
 `KernelEnvironmentBound` 用于 `MemBlock`、`CpuGroup`、`Scheduler` 这类启动路径中的真实对象或事实集合。它们通常只出现一次，或脱离内核环境后测试意义不足。生成的 smoke case 可以直接读取 `Context` 中的生产对象，并验证阶段事实、对象事实和关键派生行为。
 

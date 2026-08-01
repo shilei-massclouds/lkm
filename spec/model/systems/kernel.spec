@@ -360,14 +360,13 @@ object Kernel: KernelObject {
                     BootInitFlow.Action::AssignCpuRef(BootCPURef);
                     PhysicalDirect.Action::ActivateOnCpu(BootCPURef);
                     BootInitFlow.Transition::Preset;
-                    Scheduler.Action::Schedule(BootIdleFlow);
                     KernelInitFlow.Transition::Setup;
                     KernelInitFlow.Transition::Enable;
                 }
 
                 ensures {
                     BootInitFlow.state == State::Online;
-                    scheduler_first_schedule_committed(Scheduler);
+                    scheduler_first_schedule_committed(Cpu0Scheduler);
                     KernelInitTask.state == State::OnCpu;
                     KernelInitFlow.state == State::Online;
                     PayloadHandoffPreparePhase.state == State::Online;
@@ -375,7 +374,7 @@ object Kernel: KernelObject {
                     kernel_application_environment_ready(
                         self,
                         BootInitFlow,
-                        Scheduler,
+                        Cpu0Scheduler,
                         KernelInitTask,
                         KernelInitFlow,
                         PayloadHandoffPreparePhase,
@@ -412,7 +411,7 @@ object Kernel: KernelObject {
             kernel_application_environment_ready(
                 self,
                 BootInitFlow,
-                Scheduler,
+                Cpu0Scheduler,
                 KernelInitTask,
                 KernelInitFlow,
                 PayloadHandoffPreparePhase,

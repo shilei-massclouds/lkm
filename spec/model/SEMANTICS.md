@@ -688,15 +688,17 @@ parent 首次 dispatch。
 
 `BootTask` 的模型初态是 `OnCpu/Live/Invalid`，表示固件/架构入口已经交付 boot CPU；其首次执行
 不经过 Scheduler。Kernel 接受 OpenSBI Enable 后保持 Ready，并在同一 Enable 过程中直接驱动严格
-`BootInitFlow.Preset`；BootInitFlow、首次调度和 KernelInitFlow 都是该迁移的过程细化，不是提交后的
-异步后继事件。只有应用环境准备完成并提交 Kernel Online 后，才异步发出 payload handoff action。
+`BootInitFlow.Preset/Setup/Enable`。BootInitFlow 提交 Online 后，当前 BootTask 的 active
+`BootIdleFlow` 才向 CPU0 Scheduler 异步发出无 payload Schedule；Kernel 不是该 Signal 的 sender。
+首次非 identity switch 的 Task/TaskFlow continuation 承载 KernelInitFlow 的后续执行。只有应用环境
+准备完成并提交 Kernel Online 后，才异步发出 payload handoff action。
 普通 Task 的 Setup 只准备寄存器字节并把断点置为 Prepared；Enable 才把它绑定到 initial Flow，
-发布 `Online/None/Valid`。Scheduler 在物理切换后的 next 栈 finish 点消费该断点并提交
-`OnCpu/Live/Invalid`，再通过 `DispatchContinuation` 的
-`drives initial.Preset || active.Continue` 选择唯一可接受 handler：initial Flow 仍为 Base 时严格
-启动它，否则恢复唯一 active Flow。Suspend 把当前 active Flow 的现场保存回 Task 并重新发布
+发布 `Online/None/Valid`。非 identity SwitchTo 在 next 栈 finish 后由 Scheduler 向 next Task
+`emits Continue`；next Task 接受后才消费断点并提交 `OnCpu/Live/Invalid`，再通过
+`DispatchContinuation` 向 Base initial Flow `emits Startup`，或向唯一 active Flow `emits Continue`。
+Suspend 把当前 active Flow 的现场保存回 Task 并重新发布
 `Online/None/Valid`。没有候选、候选歧义、stale generation 或处理失败都使根执行失败。
-Scheduler 是普通 Task Continue 与 Suspend 的唯一发送者。
+Scheduler 是普通 Task Suspend 的唯一同步驱动者，也是普通 Task Continue 的唯一异步发送者。
 
 `UserAppFlow` 的统一 lifecycle 是：Base 中的结构 `Bind` 建立唯一 owner/parent、入口来源和 fresh/独占关系但不推进 lifecycle；Preset 启动已绑定 Flow；Setup 准备 exec 映像或 fork continuation 的执行上下文；Enable 成为 owner 唯一 Online Flow 并跨入用户应用黑盒；Disable 处理 exit、exit_group 或 successful-exec replacement；Cleanup 释放实例并保证它不再 active。用户应用内部不声明 action 或 transition；syscall、trap、files 和其它内核资源操作仍属于相应内核对象。successful exec 不替换 Task：新 Flow 先 Bind/Preset/Setup，旧 Flow 再 Disable，随后提交 active binding handoff、新 Flow Enable，最后旧 Flow Cleanup。
 
@@ -713,9 +715,9 @@ Scheduler 是普通 Task Continue 与 Suspend 的唯一发送者。
 
 `Task.Action::PinToBootCpu(cpu_ref: CpuRef)` 是状态内 action，用于提交 task 的亲和性约束属性，不推进 task lifecycle，也不改变 `TaskRuntimeState`。在 `rest_init()` 中，调用点写为 `KernelInitTask.Action::PinToBootCpu(BootCPURef)`：receiver 已经确定目标 task，`BootCPURef` 是 `BootCPU` 发布的 CPU 引用。该 action 只提交两类属性事实：设置 `PF_NO_SETAFFINITY` 等价的 task flag，以及把 task cpumask 限制到 boot CPU。Linux 源码中的 `find_task_by_pid_ns(pid, &init_pid_ns)` 是用局部 pid 重新取回 task 指针的实现路径，不作为正式参数或 drives；规格层已经持有 `KernelInitTask` receiver。该源码路径由 `rcu_read_lock()/unlock()` 定界，当前保留为 deferred 上下文建模问题：它是否属于资源独占上下文，还是应建模为独立的 RCU/读侧上下文，后续讨论。
 
-正式规格必须区分对象和对象引用。对象拥有 lifecycle/runtime state、facts 和 invariants；引用是在上下文中访问对象的类型化能力。`TaskRef`、`RunQueueRef` 与 `CpuRef` 分别绑定对应目标。`CurrentTask` 是 CPU 执行上下文已经提交的 task binding；通用 `CurrentTask.Action::BindTask(task: Task)` 只在 Scheduler switch commit 执行 `BindCurrentTask(task)`，`CurrentTaskRef` 再从已绑定 Task 的唯一有效 TaskRef 派生。BootTask 的入口例外使用 `BindTaskStack(BootTask, BootTask.stack)` 和 `RefreshTaskStack(BootTask, BootTask.stack)` 原子提交 task/stack pair。CurrentTask/CurrentStack 都不是 object、owned child、lifecycle 或 slot；`Stack` 只是 `Task.stack` 的值类型。`CurrentRunQueueRef` 仍是所选 CPU 的私有投影，而 `CurrentCPU` 是 effective `TaskFlow.cpu_ref` 的解引用结果。action 返回引用时，调用方使用 SSA 风格 `let` 绑定；后续可用 typed reference receiver 分发到目标对象。CPU 归属只保存在 TaskFlow：入口和 scheduler commit 写 `TaskFlow.Action::AssignCpuRef`，Task 不保存同义字段。
+正式规格必须区分对象和对象引用。对象拥有 lifecycle/runtime state、facts 和 invariants；引用是在上下文中访问对象的类型化能力。`TaskRef`、`SchedulerRef`、`CpuRef` 与 `SchedClassRef` 分别绑定对应目标。`CurrentTask` 是 CPU 执行上下文已经提交的 task binding；通用 `CurrentTask.Action::BindTask(task_ref: TaskRef)` 只在 Scheduler 非 identity switch commit 中执行，`CurrentTaskRef` 再从已绑定 Task 的唯一有效 TaskRef 派生。BootTask 的入口例外使用 `BindTaskStack(BootTask, BootTask.stack)` 和 `RefreshTaskStack(BootTask, BootTask.stack)` 原子提交 task/stack pair。CurrentTask/CurrentStack 都不是 object、owned child、lifecycle 或 slot；`Stack` 只是 `Task.stack` 的值类型。当前 Scheduler 由 effective `TaskFlow.cpu_ref` 解引用 CPU 后取得该 CPU 唯一 owned Scheduler；不存在独立 `CurrentRunQueueRef`。action 返回引用时，调用方使用 SSA 风格 `let` 绑定；后续可用 typed reference receiver 分发到目标对象。CPU 归属只保存在 TaskFlow：入口和 scheduler commit 写 `TaskFlow.Action::AssignCpuRef`，Task 不保存同义字段。
 
-Ref receiver 的正式分发规则是：若 `R` 是 `XXXRef` 类型的引用值，且 `XXXRef` 的目标对象类型 `XXX` 声明了 `Transition::E` 或 `Action::A`，则 `R.Transition::E(...)` / `R.Action::A(...)` 表示通过引用对目标对象执行 `XXX` 类型定义的 process；process 内部的 `self` 绑定到引用当前指向的目标对象。引用类型自身的 structural process，例如 `TaskRef.Action::Bind(task)`，只用于建立普通引用，不得用于改写 CurrentTaskRef。typed association path 允许引用目标的 association 透明访问，例如 Task 的 `initial_flow` 与 `active_flow`。普通 attribute 与 owned child 的通用 `Ref.attr` / `Ref.child` 仍未开放；其它引用关系继续使用 `task_ref_targets(...)`、`runqueue_ref_targets(...)`、`runqueue_ref_cpu_is(...)` 等 fact 承载。
+Ref receiver 的正式分发规则是：若 `R` 是 `XXXRef` 类型的引用值，且 `XXXRef` 的目标对象类型 `XXX` 声明了 `Transition::E` 或 `Action::A`，则 `R.Transition::E(...)` / `R.Action::A(...)` 表示通过引用对目标对象执行 `XXX` 类型定义的 process；process 内部的 `self` 绑定到引用当前指向的目标对象。引用类型自身的 structural process，例如 `TaskRef.Action::Bind(task)`，只用于建立普通引用，不得用于改写 CurrentTaskRef。typed association path 允许引用目标的 association 透明访问，例如 Task 的 `initial_flow` 与 `active_flow`。普通 attribute 与 owned child 的通用 `Ref.attr` / `Ref.child` 仍未开放；其它引用关系继续使用 `task_ref_targets(...)`、`scheduler_ref_targets(...)`、`scheduler_ref_cpu_is(...)` 等 fact 承载。
 
 `CurrentTask` 先从 effective Flow 的 CpuRef 找到 CPU-local binding，再以 effective TaskFlow 校验绑定
 目标。Flow parent/owner 必须与绑定 Task 一致，Task.active_flow 必须等于 effective TaskFlow，目标必须
@@ -724,10 +726,10 @@ Ref receiver 的正式分发规则是：若 `R` 是 `XXXRef` 类型的引用值�
 `OnCpu/Live`、悬空或重复引用一律拒绝。BootTask 首次绑定前 CurrentCPU 仍可从 BootInitFlow.cpu_ref
 解析。同步 drives continuation 继承 binding/effective Flow；异步 emits 在接收方重新解析。
 
-`CurrentTask.Action::BindTask(task: Task)` 只允许在 Scheduler switch commit：next 已成为
-`OnCpu/Live`，其 active Flow/parent/owner/CpuRef 和唯一 live TaskRef 全部成立后，替换本 CPU 的 task
-binding；它不绑定 stack。架构 switch 在同一个外层 commit 中另行恢复 next `sp` 并据 `task.stack`
-提交 CurrentStack，之后 continuation 才能解析新的 task/stack pair。
+`CurrentTask.Action::BindTask(task_ref: TaskRef)` 只允许在 Scheduler 非 identity switch commit：
+SwitchTo 已完整预检 next 的 `Online/None/Valid`、Flow/parent/owner/CpuRef 和唯一 live TaskRef，恢复
+next `sp` 并据 `task.stack` 提交 CurrentStack 后，替换本 CPU 的 task binding。此时 next 仍为 Online；
+只有随后发出的 Task.Continue 被接受后，它才提交 `OnCpu/Live/Invalid` 并分派 Flow continuation。
 
 BootTask 首次绑定前 CurrentCPU 仍由 `BootInitFlow.cpu_ref` 解析。PhysicalDirect 下的
 `BindTaskStack(BootTask, BootTask.stack)` 要求本 CPU 的 task/stack pair 均未绑定，并以单个 Action
@@ -736,9 +738,15 @@ BootTask 首次绑定前 CurrentCPU 仍由 `BootInitFlow.cpu_ref` 解析。Physi
 `BindStack`，任何验证失败都保持 task binding、stack binding 和当前执行地址表示不变。BootTask 的
 初始禁止抢占是静态初态属性，不由三种 Action 建立。
 
-`CurrentRunQueueRef` 的正式语义是 CPU 视角私有的 current-runqueue 引用。调度路径先从 effective Flow 的 CpuRef 解析 `CurrentCPU`，再通过 `CpuGroup.cpus[id].RunQueue` 解析当前 runqueue。BP 路径落到 `BootRunQueue`，是因为 active Flow 指向 CPU0；AP 路径同样由各自 Flow 的 CpuRef 决定。
+调度路径先从 effective Flow 的 CpuRef 解析 `CurrentCPU`，再通过 `CpuGroup.cpus[id].Scheduler` 解析当前
+per-CPU Scheduler。BP 路径落到 `Cpu0Scheduler`，是因为 active Flow 指向 CPU0；AP 路径同样由各自
+Flow 的 CpuRef 决定。Scheduler 本体同时承载 Linux `struct rq` 的 CPU-local lock、curr/idle/stop 与
+class queues，不存在第二套 RunQueue 对象拓扑。
 
-`SchedulerObject.Action::SelectRunQueue(task_ref: TaskRef) -> RunQueueRef` 只选择目标 runqueue，不推进 Scheduler lifecycle 或提交成员关系。所选 runqueue 的 CpuRef 必须在 enqueue 前写到目标可恢复 Flow，并在真正迁移时由 scheduler commit 再确认；Task 不接收 CPU assignment。`RunQueueRef` 与 `CurrentRunQueueRef` 保持类型分离。
+`Scheduler.Action::SelectScheduler(task_ref: TaskRef) -> SchedulerRef` 只选择目标 CPU Scheduler，不推进
+Scheduler lifecycle 或提交成员关系。所选 Scheduler 的 CpuRef 必须在 enqueue 前写到目标可恢复 Flow，
+并在真正迁移时由 scheduler commit 再确认；Task 不接收同义 CPU assignment。调用方随后通过所选
+SchedulerRef 所指 Scheduler 的 `Transition::EnqueueTask` 提交 class membership/on-rq 事实。
 
 `SchedulerObject.Action::Schedule` 是 `Scheduler.Online` 后的调度分界 action。
 
@@ -755,29 +763,30 @@ key 上前一 sibling Online 后才能推进后一 sibling，不同 key 之间�
 `state == State::Online` 表示目标集合中所有实例 Online，只提供聚合完成事实，不隐含跨 key 的
 阶段屏障，也不把实例 transition 的 owner 转移给聚合读取者。当前语法不增加 indexed-object
 表达式；具体 family key 和聚合解释必须由对应 charter/model 注释与 coding 映射共同固定。
-它不推进 `Scheduler` lifecycle state，但会提交一次调度边界的运行期事实。
+`Scheduler.Action::Schedule` 不推进 lifecycle state，但每次 Signal 接受都产生独立 occurrence。
 `schedule_preempt_disabled()` 仍由调用方展开为三段式：
 先退出调用方继承的 preempt-disabled guard，再调用
 `Scheduler.Action::Schedule`，最后进入新的 boot-idle preempt-disabled
 上下文。`Schedule` 自身内部则建模 `schedule()`/`__schedule()` 的最小边界：
 先由 `PreemptionControl.Disable` 边界建立 schedule-owned 不可抢占上下文，再由
 `InterruptType.SaveAndDisable` 边界关闭本 CPU 本地中断，然后在 runqueue lock context 中
-先从 effective TaskFlow 解析 `CurrentTaskRef`，再执行
-`let next: TaskRef <- CurrentRunQueueRef.Action::PickNextTask(CurrentTaskRef)`，
-最后进入 `SchedulerObject.Action::SwitchTo(CurrentTaskRef, next)`。
+先从 sender TaskFlow、其 CpuRef 与 CPU-local CurrentTask binding 推导 `prev: TaskRef`，然后严格执行
+`PreparePrev(prev) -> PickNextTask(prev, disposition) -> identity/nonidentity handoff`。PreparePrev 对
+running/preempt prev 保留 Runnable；对 sleeping prev，有匹配 pending wake signal 时一次性恢复
+running，否则在 pick 前 DeactivateTask 并返回 Blocked。它不改变 Task lifecycle 或保存 context。
 
-`SwitchTo` 对应 `prepare_task_switch()`、物理 switch 与 next 栈 `finish_task_switch()` 的三段边界。prepare 只验证
-prev 是 `OnCpu/Live/Invalid` 且存在 active Flow，并验证 next 是
-`Online/None/Valid` 且其 FlowRef slot/generation/owner 均有效；不得预提交 lifecycle。物理 switch
-保存 prev Task 的 context 并恢复 next context。next 栈上的 finish 是普通 Signal 不可观察中间态的
-原子提交：prev 失去执行权、next 成为 `OnCpu/Live/Invalid`、next active Flow 与
-`CurrentTask.BindTask(next)` 同时提交，然后 continuation 才能从新 binding 解析 CurrentTask 并严格选择 initial
-Flow Startup 或 active Flow Continue。terminal prev 走 `OnCpu --Disable--> Offline --Cleanup-->
-Destroyed`，context 保持 Invalid。`prev == next` 是严格 identity no-op，不发出 Suspend/Continue、
-不保存/恢复现场、不改变 lifecycle、authority、breakpoint 或计数。MM、FPU/vector、`last` 返回值、
-完整 prepare/finish hooks、worker 与 scheduler-class 细节继续按对象展开。
+PickNextTask 按 stop→DL→RT→fair→idle 优先级选择。类可提供组合 callback，或走
+`pick_task -> prev_class.PutPrevTask(prev,next) -> next_class.SetNextTask(next)` fallback；put/set 属于 pick
+内部协议，Blocked/on-rq=false prev 绝不能重入队。Scheduler 的 `task_refs` 与五类 queue membership
+表示 runnable/on-rq 资格；`Online` Task 可以是 Blocked，直到 wake/enqueue 恢复资格。
 
-`RunQueue` 使用 `RunQueueRuntimeState::{None, Some}` 表示是否至少存在一个可运行 task ref。`task_refs: TaskRefSet` 是该状态关联的数据视图，`nr_running` 不作为独立源状态，而是 `count(task_refs)` 的派生度量。当前 `RunQueue.task_refs` 是调度类队列尚未展开前的汇总视图；未来引入 CFS/RT/DL 等调度类子队列后，具体成员关系应由这些子队列维护，`RunQueue.task_refs` 退化为派生视图。`RunQueue.Transition::EnqueueTask(task_ref: TaskRef)` 是运行期 transition，因为它提交 runqueue 成员关系并推动 `None -> Some` 或 `Some -> Some` 的运行态迁移；重复入队应作为失败结果处理。该 transition 的基础成员事实统一表达为 `runqueue_contains_task(self, task_ref)`；阶段级或跨对象派生事实可以继续使用 `task_enqueued_on_runqueue(task_ref, runqueue_ref)` 表示已经经过 `SelectRunQueue`、`Task.SetTaskCpu` 和入队的整体结果。`EnqueueTask` 不能直接编码为 `BootRunQueue` 专属动作：调用方应先消费 `SelectRunQueue` 返回的 `RunQueueRef`，确认或更新 `task_ref` 的 CPU id，再在该 runqueue 的锁建立的资源独占上下文内通过 `selected_rq.Transition::EnqueueTask(...)` 提交入队。
+若 `next == prev`，不进入 SwitchTo，不改变 lifecycle/context/CurrentTask，并由 Scheduler 向原 sender
+active TaskFlow `emits Continue` 表达 `schedule()` 返回。若 `next != prev`，SwitchTo 先完整预检双方引用、
+状态、context/stack 与 Signal 容量，再按 `prev.SaveCoreContext -> prev.Suspend ->
+next.RestoreCoreContext/CurrentTask+CurrentStack commit -> next-stack finish` 顺序同步推进，最后向 next Task
+`emits Continue`。next Task 接受后才提交 `Online/None/Valid -> OnCpu/Live/Invalid`，再向 Base initial Flow
+`emits Startup`，或向唯一 active Flow `emits Continue`。MM、FPU/vector、`last` 返回值、完整 hooks、
+fairness、bandwidth 与 migration 细节继续按对象展开或保持 Deferred。
 
 ## SEM-EXCLUSIVE-CONTEXT-001: Guard And Resource Exclusive Context Are Distinct
 
@@ -822,8 +831,7 @@ context WakeUpNewTaskContext: ResourceExclusiveContext {
 
     obj_refs: {
         KernelInitTask;
-        Scheduler;
-        BootRunQueue;
+        Cpu0Scheduler;
     }
 }
 ```
@@ -894,47 +902,47 @@ state State::Ready {
 
                 drives {
                     KernelInitTask.Transition::SetRuntimeState(TaskRuntimeState::Running);
-                    let selected_rq: RunQueueRef <-
-                        Scheduler.Action::SelectRunQueue(KernelInitTaskRef);
+                    let selected_scheduler: SchedulerRef <-
+                        Cpu0Scheduler.Action::SelectScheduler(KernelInitTaskRef);
                     KernelInitFlow.Action::AssignCpuRef(BootCPURef);
                 }
 
                 within EnqueueSelectedRunQueueContext {
                     depends_on {
-                        runqueue_ref_targets(selected_rq, BootRunQueue);
-                        runqueue_ref_cpu_is(selected_rq, BootCPURef);
+                        scheduler_ref_targets(selected_scheduler, Cpu0Scheduler);
+                        scheduler_ref_cpu_is(selected_scheduler, BootCPURef);
                         task_flow_cpu_ref_is(KernelInitFlow, BootCPURef);
                     }
 
                     drives {
-                        selected_rq.Transition::EnqueueTask(KernelInitTaskRef);
+                        selected_scheduler.Transition::EnqueueTask(KernelInitTaskRef);
                     }
 
                     ensures {
-                        raw_spinlock_irqsave_entered(BootRunQueueLock, CurrentCPU);
-                        raw_spinlock_irqrestore_exited(BootRunQueueLock, CurrentCPU);
-                        runqueue_contains_task(BootRunQueue, KernelInitTaskRef);
+                        raw_spinlock_irqsave_entered(Cpu0SchedulerLock, CurrentCPU);
+                        raw_spinlock_irqrestore_exited(Cpu0SchedulerLock, CurrentCPU);
+                        scheduler_contains_task(Cpu0Scheduler, KernelInitTaskRef);
                     }
                 }
 
                 ensures {
-                    scheduler_select_runqueue_returns(Scheduler, KernelInitTaskRef, BootRunQueueRef);
-                    task_runqueue_selected(Scheduler, KernelInitTaskRef, BootRunQueueRef);
+                    scheduler_select_scheduler_returns(Cpu0Scheduler, KernelInitTaskRef, BootSchedulerRef);
+                    task_scheduler_selected(Cpu0Scheduler, KernelInitTaskRef, BootSchedulerRef);
                     task_flow_cpu_ref_is(KernelInitFlow, BootCPURef);
-                    task_enqueued_on_runqueue(KernelInitTaskRef, BootRunQueueRef);
+                    task_enqueued_on_scheduler(KernelInitTaskRef, BootSchedulerRef);
                 }
             }
 
             ensures {
                 kernel_init_task_online(KernelInitTask);
-                kernel_init_task_enqueued(KernelInitTask, BootRunQueue);
+                kernel_init_task_enqueued(KernelInitTask, Cpu0Scheduler);
             }
         }
     }
 }
 ```
 
-`within` 的语义是：先通过指定 context 的 guard 进入或确认该 context；进入成功后，在该作用域内执行块内的 `drives`；块内驱动全部成功后，`within` 的 `ensures` 成立，随后按 guard 退出或离开词法范围，外层 transition/action 才能继续提交自己的 `ensures`。`within` 不是普通参数传递，也不是对象所有权转移；它的标准形态始终是 `within ContextName { ... }`。外层 `drives` 中由 action result binding 产生的局部值在嵌套 `within` 中保持词法可见，因此 `selected_rq` 不需要也不允许作为 `EnqueueSelectedRunQueueContext` 的实参重复传入。当前 UP 路径通过 `runqueue_ref_targets(selected_rq, BootRunQueue)` 证明该 ref 指向 `BootRunQueue`，所以 context guard 暂时绑定 `BootRunQueueLock`；后续泛化时应从 `RunQueueRef` 解析目标 runqueue 及其 lock。
+`within` 的语义是：先通过指定 context 的 guard 进入或确认该 context；进入成功后，在该作用域内执行块内的 `drives`；块内驱动全部成功后，`within` 的 `ensures` 成立，随后按 guard 退出或离开词法范围，外层 transition/action 才能继续提交自己的 `ensures`。`within` 不是普通参数传递，也不是对象所有权转移；它的标准形态始终是 `within ContextName { ... }`。外层 `drives` 中由 action result binding 产生的局部值在嵌套 `within` 中保持词法可见，因此 `selected_scheduler` 不需要也不允许作为 `EnqueueSelectedRunQueueContext` 的实参重复传入。当前 UP 路径通过 `scheduler_ref_targets(selected_scheduler, Cpu0Scheduler)` 证明该 ref 指向 Cpu0Scheduler，所以 context guard 绑定 Cpu0SchedulerLock；泛化路径同样从 SchedulerRef 解析目标 Scheduler、CPU 与 lock。
 
 `only-once` 是 `within` 使用点上的可验证断言，不是 `Context` 类型属性。同一个
 context 可以在一个地方被 `only-once` 使用，在另一个地方作为普通可复用上下文使用。

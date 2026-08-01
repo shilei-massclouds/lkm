@@ -6,7 +6,7 @@ use crate::{
     context::context_ref,
     objects::{
         rest_init::{KERNEL_INIT_PID, KTHREADD_PID},
-        scheduler::{BootRunQueue, CurrentRunQueueRef, RunQueueRef},
+        scheduler::{PickNextProtocol, PrevDisposition, SchedClassRef, Scheduler},
         state::State,
         task::TaskRef,
     },
@@ -20,17 +20,135 @@ pub fn run() -> SmokeResult {
     suite.scenario(&mut MixedQueueScenario::new());
     suite.scenario(&mut InvalidTaskRefScenario::new());
     suite.scenario(&mut DynamicTaskGenerationScenario::new());
+    suite.scenario(&mut ClassProtocolScenario::new());
     suite.result()
 }
 
+struct ClassProtocolScenario {
+    fixture: CurrentRunQueueFixture,
+}
+
+impl ClassProtocolScenario {
+    fn new() -> Self {
+        Self {
+            fixture: CurrentRunQueueFixture::new(),
+        }
+    }
+}
+
+impl SmokeScenario for ClassProtocolScenario {
+    fn name(&self) -> &'static str {
+        "current_runqueue_ref.class_protocol"
+    }
+
+    fn setup(&mut self, assertions: &mut SmokeAssertions) {
+        self.fixture.setup_ready(assertions);
+    }
+
+    fn run(&mut self, assertions: &mut SmokeAssertions) {
+        let rq_ref = self.fixture.selected_ref();
+        assertions.assert_ok(
+            "enqueue fair",
+            self.fixture.runqueue.enqueue_task_in_class(
+                rq_ref,
+                TaskRef::KERNEL_INIT,
+                SchedClassRef::Fair,
+            ),
+        );
+        assertions.assert_ok(
+            "enqueue realtime",
+            self.fixture.runqueue.enqueue_task_in_class(
+                rq_ref,
+                TaskRef::KTHREADD,
+                SchedClassRef::Realtime,
+            ),
+        );
+        assertions.assert_ok(
+            "enqueue deadline",
+            self.fixture.runqueue.enqueue_task_in_class(
+                rq_ref,
+                TaskRef::SMOKE_SCHEDULER,
+                SchedClassRef::Deadline,
+            ),
+        );
+        assertions.assert_ok(
+            "enqueue stop",
+            self.fixture.runqueue.enqueue_task_in_class(
+                rq_ref,
+                TaskRef::SMOKE_MUTEX,
+                SchedClassRef::Stop,
+            ),
+        );
+
+        let current_ref = self.fixture.current_ref();
+        let combined = self.fixture.runqueue.pick_next_task_for_protocol(
+            current_ref,
+            TaskRef::BOOT,
+            PrevDisposition::Runnable,
+            PickNextProtocol::Combined,
+        );
+        let fallback = self.fixture.runqueue.pick_next_task_for_protocol(
+            current_ref,
+            TaskRef::BOOT,
+            PrevDisposition::Runnable,
+            PickNextProtocol::Fallback,
+        );
+        assertions.assert(
+            "combined and fallback agree",
+            combined == Ok(TaskRef::SMOKE_MUTEX) && fallback == combined,
+        );
+        assertions.assert(
+            "stop class first",
+            self.fixture.runqueue.task_class(TaskRef::SMOKE_MUTEX) == Some(SchedClassRef::Stop),
+        );
+        assertions.assert_ok("dequeue stop", self.fixture.dequeue(TaskRef::SMOKE_MUTEX));
+        assertions.assert(
+            "deadline class second",
+            self.fixture.pick_next() == Ok(TaskRef::SMOKE_SCHEDULER),
+        );
+        assertions.assert_ok(
+            "dequeue deadline",
+            self.fixture.dequeue(TaskRef::SMOKE_SCHEDULER),
+        );
+        assertions.assert(
+            "realtime class third",
+            self.fixture.pick_next() == Ok(TaskRef::KTHREADD),
+        );
+        assertions.assert_ok("dequeue realtime", self.fixture.dequeue(TaskRef::KTHREADD));
+        assertions.assert(
+            "fair class fourth",
+            self.fixture.pick_next() == Ok(TaskRef::KERNEL_INIT),
+        );
+        assertions.assert_ok(
+            "deactivate fair prev",
+            self.fixture.dequeue(TaskRef::KERNEL_INIT),
+        );
+        assertions.assert(
+            "blocked prev cannot be put back",
+            self.fixture.runqueue.pick_next_task_for_protocol(
+                current_ref,
+                TaskRef::KERNEL_INIT,
+                PrevDisposition::Blocked,
+                PickNextProtocol::Fallback,
+            ) == Ok(TaskRef::BOOT)
+                && !self
+                    .fixture
+                    .runqueue
+                    .contains_task_ref(TaskRef::KERNEL_INIT),
+        );
+    }
+
+    fn teardown(&mut self, _assertions: &mut SmokeAssertions) {}
+}
+
 struct CurrentRunQueueFixture {
-    runqueue: BootRunQueue,
+    runqueue: Scheduler,
 }
 
 impl CurrentRunQueueFixture {
     fn new() -> Self {
         Self {
-            runqueue: BootRunQueue::new(),
+            runqueue: Scheduler::new(),
         }
     }
 
@@ -38,20 +156,20 @@ impl CurrentRunQueueFixture {
         let ctx = context_ref();
         assertions.assert_ok(
             "setup",
-            self.runqueue.setup_for_local_subject(
+            self.runqueue.setup_runqueue_for_local_subject(
                 &ctx.cpu_group,
                 &ctx.per_cpu_storage,
-                ctx.scheduler.default_root_domain(),
+                ctx.scheduler_shared.default_root_domain(),
             ),
         );
     }
 
-    fn current_ref(&self) -> CurrentRunQueueRef {
-        CurrentRunQueueRef::cpu_owned(self.runqueue.cpu_id())
+    fn current_ref(&self) -> crate::objects::cpu::CpuRef {
+        self.runqueue.cpu_ref()
     }
 
-    fn selected_ref(&self) -> RunQueueRef {
-        RunQueueRef::cpu_owned(self.runqueue.cpu_id())
+    fn selected_ref(&self) -> crate::objects::cpu::CpuRef {
+        self.runqueue.cpu_ref()
     }
 
     fn enqueue(&mut self, task_ref: TaskRef) -> Result<(), crate::objects::state::EventError> {
@@ -61,15 +179,18 @@ impl CurrentRunQueueFixture {
 
     fn enqueue_with_ref(
         &mut self,
-        runqueue_ref: RunQueueRef,
+        runqueue_ref: crate::objects::cpu::CpuRef,
         task_ref: TaskRef,
     ) -> Result<(), crate::objects::state::EventError> {
         self.runqueue.enqueue_task_ref(runqueue_ref, task_ref)
     }
 
     fn pick_next(&self) -> Result<TaskRef, crate::objects::state::EventError> {
-        self.runqueue
-            .pick_next_task(self.current_ref(), TaskRef::BOOT)
+        self.runqueue.pick_next_task_for_local_subject(
+            self.current_ref(),
+            TaskRef::BOOT,
+            crate::objects::scheduler::PrevDisposition::Runnable,
+        )
     }
 
     fn enqueue_dynamic(
@@ -110,12 +231,15 @@ impl SmokeScenario for EmptyQueueScenario {
     }
 
     fn run(&mut self, assertions: &mut SmokeAssertions) {
-        assertions.assert("ready", self.fixture.runqueue.state() == State::Ready);
+        assertions.assert(
+            "ready",
+            self.fixture.runqueue.runqueue_state() == State::Ready,
+        );
         assertions.assert("boot cpu", self.fixture.runqueue.cpu_ref().is_boot_cpu());
         assertions.assert(
             "root domain covers runqueue cpu",
             context_ref()
-                .scheduler
+                .scheduler_shared
                 .default_root_domain()
                 .covers_cpu_ref(self.fixture.runqueue.cpu_ref()),
         );
@@ -123,12 +247,20 @@ impl SmokeScenario for EmptyQueueScenario {
             "current is idle",
             self.fixture.runqueue.curr_task_id() == self.fixture.runqueue.idle_task_id(),
         );
+        assertions.assert(
+            "stable idle and stop refs",
+            self.fixture.runqueue.idle_ref() == TaskRef::BOOT
+                && self.fixture.runqueue.stop_ref() == TaskRef::NONE,
+        );
         assertions.assert("empty", self.fixture.runqueue.task_count() == 0);
         assertions.assert(
             "no runnable",
             self.fixture.runqueue.first_runnable_task_ref() == TaskRef::NONE,
         );
-        assertions.assert_fail("pick empty", self.fixture.pick_next());
+        assertions.assert(
+            "idle selected when class queues empty",
+            self.fixture.pick_next() == Ok(TaskRef::BOOT),
+        );
     }
 
     fn teardown(&mut self, _assertions: &mut SmokeAssertions) {}
@@ -296,7 +428,7 @@ impl SmokeScenario for InvalidTaskRefScenario {
         assertions.assert_fail(
             "enqueue wrong cpu ref",
             self.fixture
-                .enqueue_with_ref(RunQueueRef::cpu_owned(usize::MAX), TaskRef::KERNEL_INIT),
+                .enqueue_with_ref(crate::objects::cpu::CpuRef::invalid(), TaskRef::KERNEL_INIT),
         );
         assertions.assert("still empty", self.fixture.runqueue.task_count() == 0);
     }

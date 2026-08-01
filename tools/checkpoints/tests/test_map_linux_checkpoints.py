@@ -650,6 +650,17 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
         self.assertEqual(rules["IrqTimeInitPhase.Ready"].mapping_kind, "range")
         self.assertEqual(rules["LocalIrqEnablePhase.Ready"].mapping_kind, "exact")
         self.assertEqual(rules["ProcessPreparePhase.Ready"].mapping_kind, "range")
+        self.assertEqual(rules["Scheduler.Schedule"].linux_symbol, "__schedule")
+        self.assertEqual(
+            rules["Scheduler.PreparePrev.Exit"].mapping_kind, "range"
+        )
+        self.assertEqual(
+            rules["Scheduler.PickNextTask.Exit"].linux_symbol, "__schedule"
+        )
+        self.assertEqual(
+            rules["Scheduler.SwitchTo.Exit"].linux_symbol,
+            "finish_task_switch",
+        )
 
     def test_ap_phase_lifecycle_additions_default_to_unmapped(self) -> None:
         names = [

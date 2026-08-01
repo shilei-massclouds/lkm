@@ -1463,12 +1463,12 @@ fn capture_return_cpu(
         task_ref.same_identity(entry.task_ref) && task_flow_ref.same_identity(entry.task_flow_ref);
     let committed_terminal_switch = migration_allowed
         && !task_ref.same_identity(entry.task_ref)
-        && ctx.scheduler.switch_to_entry_prev_ref() == entry.task_ref
-        && ctx.scheduler.switch_to_entry_next_ref() == task_ref
-        && ctx.scheduler.switch_to_exit_prev_ref() == entry.task_ref
-        && ctx.scheduler.switch_to_exit_next_ref() == task_ref
-        && ctx.scheduler.switch_to_exit_current_ref() == task_ref
-        && ctx.scheduler.switch_to_exit_count() != 0;
+        && ctx.scheduler().switch_to_entry_prev_ref() == entry.task_ref
+        && ctx.scheduler().switch_to_entry_next_ref() == task_ref
+        && ctx.scheduler().switch_to_exit_prev_ref() == entry.task_ref
+        && ctx.scheduler().switch_to_exit_next_ref() == task_ref
+        && ctx.scheduler().switch_to_exit_current_ref() == task_ref
+        && ctx.scheduler().switch_to_exit_count() != 0;
     let committed_exec_flow_handoff = migration_allowed
         && task_ref.same_identity(entry.task_ref)
         && !task_flow_ref.same_identity(entry.task_flow_ref)

@@ -37,7 +37,9 @@ fn check_ready(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> Ch
     let total = super::kunit_case_count();
     let name = "kernel_init_task.ready";
     sink.start_case(total, "", name, checkpoint);
-    let Some(boot_scheduler_view) = ctx.scheduler.boot_cpu_owned_scheduler_view(&ctx.cpu_group)
+    let Some(boot_scheduler_view) = ctx
+        .scheduler()
+        .boot_cpu_owned_scheduler_view(&ctx.cpu_group)
     else {
         sink.fail(
             total,
@@ -79,7 +81,9 @@ fn check_online(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> C
         sink.fail(total, "", name, "KernelInitTask Online boot CPU missing");
         return CheckpointOutcome::FailAndShutdown;
     };
-    let Some(boot_scheduler_view) = ctx.scheduler.boot_cpu_owned_scheduler_view(&ctx.cpu_group)
+    let Some(boot_scheduler_view) = ctx
+        .scheduler()
+        .boot_cpu_owned_scheduler_view(&ctx.cpu_group)
     else {
         sink.fail(
             total,

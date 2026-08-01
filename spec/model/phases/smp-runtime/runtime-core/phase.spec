@@ -5,7 +5,7 @@
  * kernel_init_freeable() from sched_init_smp() through page_alloc_init_late(),
  * after secondary CPUs have become online and before do_basic_setup().
  * For Linux paired-diff ordering, SchedulerSmpRuntime.Setup is the first
- * action and `Scheduler.SmpReady` precedes the `RuntimeCorePhase.Started`
+ * action and `Cpu0Scheduler.SmpReady` precedes the `RuntimeCorePhase.Started`
  * checkpoint, whose exact Linux anchor is the following
  * workqueue_init_topology() call-site.
  */
@@ -17,7 +17,7 @@
  */
 object SchedDomainsMutex: Mutex {
     initial_state: State::Base;
-    parent: Scheduler;
+    parent: RuntimeCorePhase;
 
     state State::Base {
         transitions {
@@ -72,7 +72,7 @@ context SchedDomainsMutexContext: ResourceExclusiveContext {
 
     obj_refs {
         SchedulerSmpRuntime;
-        Scheduler;
+        Cpu0Scheduler;
         SchedDomainsMutex;
     }
 }
@@ -84,14 +84,14 @@ context SchedDomainsMutexContext: ResourceExclusiveContext {
  */
 object SchedulerSmpRuntime: KernelObject {
     initial_state: State::Base;
-    parent: Scheduler;
+    parent: RuntimeCorePhase;
 
     state State::Base {
         transitions {
             on Transition::Setup -> State::Ready {
                 depends_on {
                     SmpBringupPhase.state == State::Online;
-                    Scheduler.state == State::Online;
+                    Cpu0Scheduler.state == State::Online;
                     KernelInitTask.state == State::OnCpu;
                     task_execution_authority_is(
                         KernelInitTask,
@@ -111,8 +111,8 @@ object SchedulerSmpRuntime: KernelObject {
                     ensures {
                         mutex_lock_acquired(SchedDomainsMutex, KernelInitTaskRef);
                         mutex_unlock_released(SchedDomainsMutex, KernelInitTaskRef);
-                        scheduler_domains_mutex_guard_used(Scheduler, SchedDomainsMutex);
-                        scheduler_smp_cpu_masks_stable(Scheduler, CpuGroup);
+                        scheduler_domains_mutex_guard_used(Cpu0Scheduler, SchedDomainsMutex);
+                        scheduler_smp_cpu_masks_stable(Cpu0Scheduler, CpuGroup);
                     }
                 }
 
@@ -120,14 +120,14 @@ object SchedulerSmpRuntime: KernelObject {
                     mutex_ready(SchedDomainsMutex);
                     mutex_unlocked(SchedDomainsMutex);
                     mutex_wait_queue_ready(SchedDomainsMutex);
-                    scheduler_smp_initialized(Scheduler);
-                    scheduler_smp_domains_ready(Scheduler, CpuGroup);
-                    scheduler_domains_mutex_guard_used(Scheduler, SchedDomainsMutex);
-                    scheduler_smp_cpu_masks_stable(Scheduler, CpuGroup);
+                    scheduler_smp_initialized(Cpu0Scheduler);
+                    scheduler_smp_domains_ready(Cpu0Scheduler, CpuGroup);
+                    scheduler_domains_mutex_guard_used(Cpu0Scheduler, SchedDomainsMutex);
+                    scheduler_smp_cpu_masks_stable(Cpu0Scheduler, CpuGroup);
                     kernel_init_boot_cpu_affinity_released(KernelInitTask);
                     kernel_init_pf_no_setaffinity_cleared(KernelInitTask);
-                    scheduler_rt_dl_smp_ready(Scheduler);
-                    scheduler_granularity_refreshed(Scheduler);
+                    scheduler_rt_dl_smp_ready(Cpu0Scheduler);
+                    scheduler_granularity_refreshed(Cpu0Scheduler);
                 }
             }
         }
@@ -136,14 +136,14 @@ object SchedulerSmpRuntime: KernelObject {
     state State::Ready {
         invariant {
             SchedDomainsMutex.state == State::Ready;
-            scheduler_smp_initialized(Scheduler);
-            scheduler_smp_domains_ready(Scheduler, CpuGroup);
-            scheduler_domains_mutex_guard_used(Scheduler, SchedDomainsMutex);
-            scheduler_smp_cpu_masks_stable(Scheduler, CpuGroup);
+            scheduler_smp_initialized(Cpu0Scheduler);
+            scheduler_smp_domains_ready(Cpu0Scheduler, CpuGroup);
+            scheduler_domains_mutex_guard_used(Cpu0Scheduler, SchedDomainsMutex);
+            scheduler_smp_cpu_masks_stable(Cpu0Scheduler, CpuGroup);
             kernel_init_boot_cpu_affinity_released(KernelInitTask);
             kernel_init_pf_no_setaffinity_cleared(KernelInitTask);
-            scheduler_rt_dl_smp_ready(Scheduler);
-            scheduler_granularity_refreshed(Scheduler);
+            scheduler_rt_dl_smp_ready(Cpu0Scheduler);
+            scheduler_granularity_refreshed(Cpu0Scheduler);
         }
     }
 }
@@ -169,7 +169,7 @@ object WorkqueueTopology: KernelObject {
                     SecondaryCpuOnlineAck.state == State::Ready;
                     WorkqueuePoolMutex.state == State::Ready;
                     WorkqueueStructMutex.state == State::Ready;
-                    scheduler_domains_mutex_guard_used(Scheduler, SchedDomainsMutex);
+                    scheduler_domains_mutex_guard_used(Cpu0Scheduler, SchedDomainsMutex);
                 }
 
                 within KernelInitWorkqueuePoolMutexContext {
@@ -424,7 +424,7 @@ object RuntimeCorePhase: PhaseObject {
                         KernelInitTask,
                         TaskExecutionAuthority::Live
                     );
-                    Scheduler.state == State::Online;
+                    Cpu0Scheduler.state == State::Online;
                     Workqueue.state == State::Ready;
                     PageAllocator.state == State::Ready;
                     CpuGroup.state == State::Ready;
@@ -443,8 +443,8 @@ object RuntimeCorePhase: PhaseObject {
 
                 ensures {
                     runtime_core_phase_ready(RuntimeCorePhase);
-                    scheduler_smp_initialized(Scheduler);
-                    scheduler_domains_mutex_guard_used(Scheduler, SchedDomainsMutex);
+                    scheduler_smp_initialized(Cpu0Scheduler);
+                    scheduler_domains_mutex_guard_used(Cpu0Scheduler, SchedDomainsMutex);
                     kernel_init_boot_cpu_affinity_released(KernelInitTask);
                     workqueue_topology_ready(Workqueue, CpuGroup);
                     workqueue_topology_pool_mutex_guard_used(
@@ -560,7 +560,7 @@ object RuntimeCorePhase: PhaseObject {
             PageAllocatorLate.state == State::Ready;
             RuntimeCoreBoundary.state == State::Ready;
             runtime_core_phase_ready(RuntimeCorePhase);
-            scheduler_domains_mutex_guard_used(Scheduler, SchedDomainsMutex);
+            scheduler_domains_mutex_guard_used(Cpu0Scheduler, SchedDomainsMutex);
             workqueue_topology_pool_mutex_guard_used(Workqueue, WorkqueuePoolMutex);
             workqueue_topology_struct_mutex_guard_used(Workqueue, WorkqueueStructMutex);
         }

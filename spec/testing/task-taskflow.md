@@ -28,9 +28,11 @@ carrier and its independently-lived `TaskFlow` instances.
 - BootInitFlow tests must observe the standard Started/Prepared/Ready/Online
   lifecycle and must not observe BP EntryPrelude checkpoints. Preset must drive
   the original entry-object order directly and commit Prepared only after the
-  complete entry facts hold. Online must precede and be adjacent to the first real
-  BootTask-to-KernelInitTask switch commit; BootIdleEntry may start only after
-  that scheduler call later restores BootTask.
+  complete entry facts hold. The boot scheduling endpoint is the stable boundary
+  after BootInitFlow commits Online and immediately before BootIdleFlow emits
+  `Cpu0Scheduler.Schedule`; at that boundary BootTask remains OnCpu and no
+  Schedule Signal, PreparePrev or switch occurrence exists. BootIdleEntry may
+  start only after a later scheduler call restores BootTask.
 - Execution-boundary coverage must prove that a Flow process proceeds only
   when its parent Task is OnCpu/Live. Reserved authority, stale Flow generation or another mismatch must fail without changing Flow
   lifecycle state. CurrentTask must first read the CPU-local binding and resolve
@@ -84,8 +86,8 @@ carrier and its independently-lived `TaskFlow` instances.
   binding changes, the new flow is Ready at commit, and at most one owned flow
   is Online afterward. A post-Kernel.Online emitted handoff failure must fail
   the root result without rolling Kernel back or submitting Online again.
-- Identity switch must not emit Suspend/Continue, change lifecycle/authority/breakpoint, or increment
-  physical context save/restore counts. Terminal switch must take OnCpu directly to Offline and cleanup
+- Identity schedule must not emit Task Suspend/Continue, change lifecycle/authority/breakpoint, or increment
+  physical context save/restore counts; it emits Continue only to the original active TaskFlow. Terminal switch must take OnCpu directly to Offline and cleanup
   on the next stack without publishing an Online breakpoint.
 - BootTask begins OnCpu/Live/Invalid; its first Suspend binds BootIdleFlow and publishes its first Valid
   breakpoint. Each AP begins OnCpu/Reserved/Invalid with Base ApIdleFlow; HSM preserves TaskRef/FlowRef,

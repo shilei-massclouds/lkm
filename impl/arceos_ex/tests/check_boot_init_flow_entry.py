@@ -26,13 +26,23 @@ def symbols(objdump: str, elf: Path) -> dict[str, tuple[int, int]]:
     result: dict[str, tuple[int, int]] = {}
     for line in run_objdump(objdump, "-t", str(elf)).splitlines():
         parts = line.split()
-        if (
-            len(parts) < 4
-            or re.fullmatch(r"[0-9a-f]+", parts[0]) is None
-            or re.fullmatch(r"[0-9a-f]+", parts[-2]) is None
-        ):
+        if len(parts) < 4 or re.fullmatch(r"[0-9a-f]+", parts[0]) is None:
             continue
-        result[parts[-1]] = (int(parts[0], 16), int(parts[-2], 16))
+        # GNU/LLVM objdump may insert a visibility column (for example
+        # ``.hidden``) between the size and symbol name.  The size is the
+        # rightmost hexadecimal field before the name, not necessarily the
+        # penultimate column.
+        size = next(
+            (
+                int(field, 16)
+                for field in reversed(parts[1:-1])
+                if re.fullmatch(r"[0-9a-f]+", field) is not None
+            ),
+            None,
+        )
+        if size is None:
+            continue
+        result[parts[-1]] = (int(parts[0], 16), size)
     return result
 
 

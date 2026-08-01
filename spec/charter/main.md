@@ -59,8 +59,9 @@ Model 到代码表示的约束。两个具体实现之间的静态对照、差�
 `PayloadPhase` 已删除；本文后续保留的旧名称只用于记录历史分析目录/批次，不再定义对象、parent、
 lifecycle 或 checkpoint。
 
-- `Kernel.Enable` 把 BootInitFlow 三段 lifecycle、首次 Scheduler 调度以及 KernelInitFlow 三段 lifecycle
-  作为自己的下层实现过程；物理栈切换不改变这项逻辑 `drives` 关系。
+- `Kernel.Enable` 同步驱动 BootInitFlow 三段 lifecycle；BootInitFlow Online 后，当前 BootTask 的 active
+  `BootIdleFlow` 向 CPU0 Scheduler `emits Schedule()`。非 identity switch 通过
+  Scheduler→next Task→next TaskFlow continuation 承载 KernelInitFlow 的后续执行；Kernel 不是 Schedule sender。
 - `BootInitFlow.Preset` 直接驱动入口对象并提交 Prepared；Setup 直接驱动 boot/interrupt 叶子以及
   `BootInitRestInitPhase`；Enable 只驱动 `BootInitScheduleHandoffPhase`。
 - `KernelInitFlow.Preset` 直接驱动 PreSMP/SMP bringup；Setup 直接驱动 runtime、initcall、rootfs、
@@ -1738,7 +1739,7 @@ Linux 调用分类、图示和结束状态的第一轮整理；默认 `charter-f
 当前先将子阶段 5 的对象和边界记录如下：
 
 1. `调度准备期对象`（暂名 `SchedInitPhase`）：属于阶段对象，是 `BootPhase` 的第四个直接子阶段对象。它从 `MmCoreInitPhase.Ready` 接续，按 `mm_core_init()` 后到 `context_tracking_init()` 调用点完成的有效调用顺序编排对象推进。
-2. `调度器对象`（暂名 `Scheduler`）：覆盖 `sched_init()`。它在 `preset()` 中准备调度器的全局前置对象，并预留未来驱动各 `SchedClass.preset()` 形成基本对象壳；在 `setup()` 中驱动每个 possible CPU 的 `RunQueue`，并通过 `BootIdleSetup` 把既有 `BootTask` 绑定为 boot CPU idle task，绝不创建另一个 Task；最后通过 `enable()` 设置 `scheduler_running`。当前阶段只要求 boot CPU 上调度器基础可用，不启动 secondary CPU，不建立完整 SMP 调度拓扑。`sched_class` 顺序检查更接近 Linux 链接/实现细节，暂不作为独立 checkpoint 建模。
+2. `调度器对象`（`Scheduler`）：覆盖 Linux 每 CPU 的 `struct rq`。每个 possible CPU 恰好拥有一个 Scheduler；Scheduler 内含 CPU-local lock、`curr/idle/stop` 引用和 stop/DL/RT/fair/idle 类队列，不再另建独立 `RunQueue` 对象。`sched_init()` 使全部 possible CPU Scheduler 到达 Ready；CPU0 Scheduler 随 boot CPU 可调度 handoff 进入 Online，AP Scheduler 只在对应 CPU online handoff 时进入 Online。`BootIdleSetup` 把既有 `BootTask` 绑定为 CPU0 Scheduler 的 idle/curr，不创建第二个 Task。
 3. `RadixTree 对象`：覆盖 `radix_tree_init()`。当前把该调用建模为 `RadixTree.setup()`，使对象进入 `Ready`：建立 `"radix_tree_node"` SLUB cache，登记 `CPUHP_RADIX_DEAD` CPU hotplug dead 回调，并形成后续 IDR/XArray/radix tree 实例可申请 node 的全局基础。具体 radix tree 实例和使用者对象不在本阶段建立；实现阶段应至少生成 `RadixTree` 对象本体、node cache 子对象/属性、CPU hotplug 回调事实和后续 `alloc_node/free_node` API 边界。
 4. `MapleTree 对象`：覆盖 `maple_tree_init()`。当前把该调用建模为 `MapleTree.setup()`，使对象进入 `Ready`：建立 `"maple_node"` SLUB cache，并形成后续 maple tree 实例可申请 node 的全局基础。具体 maple tree 实例，例如后续 VMA tree，不在本阶段建立；实现阶段应至少生成 `MapleTree` 对象本体、node cache 子对象/属性和后续 `alloc_node/free_node` API 边界。
 5. `Housekeeping`：`housekeeping_init()` 用于管理 routine work 可运行的 CPU 集合，包括 unbound workqueue、timer、kthread、RCU、tick/nohz 和 CPU isolation 相关路径。该对象将来需要实现；当前最小启动输入尚未建模 `nohz_full=` / `isolcpus=` 等参数来源，因此先作为 deferred 保留调用位置，并记录当前 no-op 条件：`housekeeping.flags == 0` 时直接返回，不进入当前主线 formal 对象。
@@ -1756,23 +1757,30 @@ Linux 调用分类、图示和结束状态的第一轮整理；默认 `charter-f
 
 图 16 用于说明子阶段 5 的对象分类和依赖关系。左侧是阶段边界、中断检查、`initcall_debug_enable()` checkpoint 和当前配置下 trimmed/no-op 的 `context_tracking_init()`；中间是 `sched_init()` 及其后的 `RadixTree`、`MapleTree` 基础缓存；右侧是 deferred/no-op 的 housekeeping、单一 `Workqueue` 的 early 框架、`Softirq.Prepared` action table 和 `RcuCore`。灰色虚线框记录未来可能恢复的 `LinuxTracing` 候选对象。图中对象仍是初步分类，后续可以按讨论结果继续拆分、合并或降级为 checkpoint。
 
-`DefaultSchedRootDomain` 是 `Scheduler` 在 `sched_init()` 中建立的默认调度根域，对应 Linux 默认 `root_domain` 的规格抽象。它不承担 CPU 枚举、logical-id 分配或 CPU 本体状态维护；这些身份事实仍由 `CpuGroup` 负责。`DefaultSchedRootDomain` 从调度视角维护一组 CPU 实例引用，作为后续 `RunQueue` attach、RT/DL 共享状态、负载均衡和调度拓扑边界的默认覆盖域。当前 `sched_init()` 阶段只建立默认 root domain 的最小覆盖事实：`DefaultSchedRootDomain.covered_cpus == CpuGroup.possible_cpus`，集合元素是 `CpuRef` 或等价 CPU 引用，不是新的 CPU 本体对象。
+`DefaultSchedRootDomain` 是 `sched_init()` 建立的独立共享对象，对应 Linux 默认 `root_domain` 的规格抽象。它不承担 CPU 枚举、logical-id 分配或 CPU 本体状态维护；这些身份事实仍由 `CpuGroup` 负责。`DefaultSchedRootDomain` 从调度视角维护一组 CPU/Scheduler 引用，作为 RT/DL 共享状态、负载均衡和调度拓扑边界的默认覆盖域。当前 `sched_init()` 阶段只建立最小覆盖事实：`DefaultSchedRootDomain.covered_cpus == CpuGroup.possible_cpus`；它不拥有或复制 CPU/Scheduler 本体。
 
 因此，`CpuGroup` 与 `DefaultSchedRootDomain` 不是彼此拥有关系，而是“CPU 实例拥有/身份索引源”和“调度覆盖视图”的关系。`CpuGroup.cpus[logical_id]` 提供稳定 CPU identity，`CpuGroup.possible_cpus` 是从元素状态派生的引用集合；`DefaultSchedRootDomain.setup(CpuGroup)` 读取该集合并建立自身的 `covered_cpus` 视图。secondary CPU 在 online 前也可以被覆盖，但只有获得执行权且已有 CpuRef 的 TaskFlow 才能解析对应 `CurrentCPU`。
 
-参照 Linux 的 per-CPU `struct rq` 和 per-CPU idle thread 关系，规格中把 `RunQueue` 和 `IdleTask` 建模为对应 CPU 实例的子对象，而不是 `Scheduler` 全局对象直接拥有的成员。正式访问路径应写成 `CpuGroup.cpus[id].RunQueue` 和 `CpuGroup.cpus[id].IdleTask`；其中 `RunQueue.cpu_ref == CpuGroup.cpus[id].ref`，`RunQueue.idle == CpuGroup.cpus[id].IdleTask`，`IdleTask.cpu_ref == CpuGroup.cpus[id].ref`。`Scheduler` 的职责是编排这些 CPU-owned 对象的 setup/enable/action，并维护全局调度事实、调度类和选择策略；它不拥有每个 CPU 的 runqueue 或 idle task 本体。
+参照 Linux 的 per-CPU `struct rq` 和 per-CPU idle thread 关系，正式访问路径写成
+`CpuGroup.cpus[id].Scheduler` 和 `CpuGroup.cpus[id].IdleTask`；其中 Scheduler 的 owner/cpu_ref 与该 CPU
+一致，Scheduler 的 `idle` 指向该 CPU IdleTask。Scheduler 本身就是 CPU-local 调度队列与状态承载者，
+不得再建立全局 Scheduler singleton 或第二套 `Cpu.RunQueue` 拓扑。
 
-运行期解析当前 runqueue 时，也应使用 CPU-owned 关系，而不是从 boot CPU 身份硬编码出发。正式链条是：effective `TaskFlow.cpu_ref` 解引用为 `CurrentCPU`，再从 `CpuGroup.cpus[id].RunQueue` 得到当前 runqueue；Task 本体不保存同义 CPU 归属字段。当前 UP 最小路径解析到 `BootRunQueue`，原因是 active Flow 的 CpuRef 指向 `CpuGroup.cpus[0]`，而不是因为 `CpuGroup.boot_cpu()` 被硬编码为 primary source。
+运行期解析当前 Scheduler 时，从 active `TaskFlow.cpu_ref` 解引用 `CurrentCPU`，再取得该 CPU 唯一拥有的
+Scheduler；Task 本体不保存同义 CPU 归属字段。CPU0 路径落到 `Cpu0Scheduler`，是因为 active Flow 的
+CpuRef 指向 `CpuGroup.cpus[0]`，不是因为 boot CPU 身份被硬编码为 primary source。
 
 ```mermaid
 flowchart LR
     EffectiveTaskFlow --> CpuRef["TaskFlow.cpu_ref"]
     CpuRef --> CpuIndex["CpuGroup.cpus[logical_id]"]
-    CpuIndex --> RunQueue["Cpu.RunQueue"]
+    CpuIndex --> Scheduler["Cpu.Scheduler"]
     CpuIndex --> IdleTask["Cpu.IdleTask"]
 ```
 
-当前实现若仍把 boot CPU 的 `BootRunQueue` 和 boot-task scheduler metadata 存在 `Scheduler` 结构体字段中，只能视为 Rust lowering；对外规格事实、smoke 检查和后续代码生成指引必须把它解释为 `BootCPU.RunQueue` 与唯一 `BootTask` 的投影视图，不得暴露为独立 idle Task carrier。secondary CPU 的 `RunQueue` 元数据可以在 `sched_init()` 的 possible CPU 遍历中准备并 attach 到默认 root domain；secondary CPU 的 `IdleTask` 身份则跟随 `idle_threads_init()` / SMP bringup 路径推进，不能因为 `RunQueue` 已准备就假定 AP 已有 live `CurrentCPU` 或可运行任务流。
+`sched_init()` 在 possible CPU 遍历中准备每个 CPU-owned Scheduler 并把它纳入默认 root domain 覆盖；
+secondary CPU 的 `IdleTask` 身份跟随 `idle_threads_init()` / SMP bringup 路径推进。Scheduler Ready 不等于
+AP 已有 live `CurrentCPU`、Online Scheduler 或可运行 TaskFlow。
 
 <p align="center">
   <img src="pic/scheduler-root-domain-cpu-group.svg" alt="DefaultSchedRootDomain 与 CpuGroup 的引用关系" width="900">
@@ -1805,10 +1813,10 @@ flowchart LR
 
 当前不拘泥于 Linux 函数层次，而按可指导实现的对象边界展开 `sched_init()`：
 
-1. `Scheduler.preset()`：执行调度器全局前置准备。`SchedClasses` 本体暂时 deferred，但未来应由 `Scheduler.preset()` 统一驱动 `StopSchedClass.preset()`、`DeadlineSchedClass.preset()`、`RealtimeSchedClass.preset()`、`FairSchedClass.preset()` 和 `IdleSchedClass.preset()`，先形成可引用的基本对象壳。`BitWaitQueueTable.preset()` 预置 bit wait 机制使用的全局 waitqueue bucket 表。`DefaultSchedRootDomain.setup()` 建立默认的 CPU 间共享调度信息区域，供后续 `RunQueue` attach。调度类顺序检查暂不单独建 checkpoint，除非后续证明它是模型边界而不是实现细节。
-2. `Scheduler.setup()`：遍历 possible CPU，驱动 `Cpu[id].RunQueue.setup(DefaultSchedRootDomain)`。`RunQueue` 挂在对应 `Cpu` 对象下面，内部当前只显式展开 `CfsRunQueue`、`RealtimeRunQueue` 和 `DeadlineRunQueue` 三个子队列；其它 runqueue 字段先作为属性处理。`FairServer` 先作为 deferred 子结构保留。`Scheduler.setup()` 是编排者，不拥有这些 runqueue；当前实现中 `Scheduler.boot_runqueue` 只是 `BootCPU.RunQueue` 的临时 lowering。未来 `Scheduler.setup()` 还应驱动各 `SchedClass.setup()`，把 preset 阶段形成的调度类对象壳推进为正式对象。
-3. `BootIdleSetup.setup(source = BootTask/current)`：把已有的 `BootTask/current` 绑定为 boot CPU idle task，而不是新分配一个 task。该过程覆盖 `set_load_weight()`、`init_task.se.slice`、`mmgrab_lazy_tlb()`、`enter_lazy_tlb()`、`set_kthread_struct()`、`__sched_fork()` 和 `init_idle()`，并形成 `CpuGroup.cpus[0].RunQueue.idle == BootTask`、`CpuGroup.cpus[0].RunQueue.curr == BootTask`、`BootInitFlow.cpu_ref == ref(CpuGroup.cpus[0])`、`CpuGroup.cpus[0].IdleTask == BootTask` 等 checkpoints。
-4. `Scheduler.setup()` 的收尾属性动作包括初始化全局 load 更新期限、设置 `BootCPU.idle_thread_ref` / `per_cpu(idle_threads, BootCPU.id)` 指向 `BootTask`，以及将 `BootCPU.RunQueue.balance_push_enabled` 置为 `false`。
+1. 对每个 possible CPU 驱动其 owned `Scheduler.Preset/Setup`：建立 CPU-local lock、`curr/idle/stop` 引用槽和 stop/DL/RT/fair/idle 类队列，并使 Scheduler 到达 Ready。`BitWaitQueueTable.preset()` 与 `DefaultSchedRootDomain.setup()` 是独立共享对象动作，不由任一 CPU Scheduler 拥有。
+2. Scheduler 类队列只保存稳定 `TaskRef`，优先级固定为 stop→DL→RT→fair→idle。具体公平性、带宽、迁移与 SMP balance 算法保持 Deferred；`FairServer` 等细节不在本轮提升为对象边界。
+3. `BootIdleSetup.setup(source = BootTask/current)`：把已有的 `BootTask/current` 绑定为 CPU0 idle task，而不是新分配一个 task。该过程覆盖 `set_load_weight()`、`init_task.se.slice`、`mmgrab_lazy_tlb()`、`enter_lazy_tlb()`、`set_kthread_struct()`、`__sched_fork()` 和 `init_idle()`，并形成 `Cpu0Scheduler.idle == BootTaskRef`、`Cpu0Scheduler.curr == BootTaskRef`、`BootInitFlow.cpu_ref == ref(CpuGroup.cpus[0])`、`CpuGroup.cpus[0].IdleTask == BootTask` 等 facts。
+4. CPU0 Scheduler 在 boot CPU scheduling handoff 中 Ready→Online；AP Scheduler 保持 Ready，直到对应 CPU online handoff。共享 load/topology/root-domain 状态不下沉为某个 Scheduler 的私有副本。
 5. `SchedClass.setup()` 当前整体 deferred。`FairSchedClass.setup()` 对应 Linux `init_sched_fair_class()`，后续可在该边界内展开；`init_sched_ext_class()`、`psi_init()`、`init_uclamp()` 和 `preempt_dynamic_init()` 在当前 `default_config` 下为空实现或配置禁用，直接从当前主线省略。
 6. `Scheduler.enable()`：设置 `scheduler_running = true`，使调度器进入当前启动范围内的 running/online 状态。
 
@@ -1816,7 +1824,7 @@ flowchart LR
 
 - 调度类链接顺序 `BUG_ON(!sched_class_above(...))` 暂按实现一致性检查处理，不进入对象生命周期。
 - `CONFIG_FAIR_GROUP_SCHED`、`CONFIG_RT_GROUP_SCHED`、`CONFIG_CGROUP_SCHED`、`CONFIG_SCHED_CORE`、`CONFIG_PSI`、`CONFIG_UCLAMP_TASK` 和 `CONFIG_PREEMPT_DYNAMIC` 在当前 `default_config` 下未启用，对应 root task group、task group cache、sched core、PSI、uclamp 和 preempt dynamic 路径裁剪。
-- `CONFIG_NO_HZ_COMMON=y` 与 `CONFIG_HOTPLUG_CPU=y` 对应 runqueue 上的 nohz callback、hotplug wait 等字段，当前作为 `RunQueue` 属性或子事实处理，不单独建顶层对象。
+- `CONFIG_NO_HZ_COMMON=y` 与 `CONFIG_HOTPLUG_CPU=y` 对应 Scheduler 上的 nohz callback、hotplug wait 等字段，当前作为属性或子事实处理，不单独建顶层对象。
 
 <p align="center">
   <img src="pic/scheduler-init-sequence-effective.svg" alt="调度准备期对象构建时序" width="900">
@@ -2622,7 +2630,7 @@ Boot idle 入口不构成其前置条件。
 当前先将 `SmpBringupPhase` 的对象和边界记录如下：
 
 1. `SMP 启动期对象`（暂名 `SmpBringupPhase`）：属于阶段对象，是 `SMP Runtime Phase` 的第二个子阶段对象。它从 `PreSmpInitPhase.Ready` 接续，由 `KernelInitTask` 驱动，按 `smp_init()` 的有效顺序推进 secondary CPU 从 present 到 online。
-2. `secondary idle 任务对象`（`CpuGroup.cpus[cpu].IdleTask`）：覆盖 `idle_threads_init()`。它遍历 possible CPU，跳过 `BootCPU.id`，对每个 possible non-boot CPU 驱动 `CpuGroup.cpus[cpu].IdleTask.preset/setup/enable()`：形成并初始化该 CPU 的 inactive idle task，内部对应 Linux `fork_idle(cpu)` / `init_idle(task, cpu)`，并写入 `per_cpu(idle_threads, cpu)`、`CpuGroup.cpus[cpu].RunQueue.idle` 和 `CpuGroup.cpus[cpu].RunQueue.curr` 等引用。这里的 Online 表示 idle task 已可作为 `rq->idle` 选择，不表示普通 runnable class queue membership。每个 AP idle task 必须有独立 task 记录和 dedicated stack；传给 SBI HSM boot data 的 `task_ptr` 指向该 AP idle task，`stack_ptr` 指向该 task 的 AP pt_regs/栈顶边界。该调用不启动 CPU，也不设置 `cpu.online`；目标 hart 从 `secondary_start_sbi` 开始执行时由架构入口直接把同一 idle Task 置为 OnCpu 并启动 initial idle Flow，不发送 Scheduler Continue。`cpu_startup_entry(CPUHP_AP_ONLINE_IDLE)` 继续负责进入可中断的 AP idle/park 路径和发布 hotplug online-idle 完成事实。
+2. `secondary idle 任务对象`（`CpuGroup.cpus[cpu].IdleTask`）：覆盖 `idle_threads_init()`。它遍历 possible CPU，跳过 `BootCPU.id`，对每个 possible non-boot CPU 驱动 `CpuGroup.cpus[cpu].IdleTask.preset/setup/enable()`：形成并初始化该 CPU 的 inactive idle task，内部对应 Linux `fork_idle(cpu)` / `init_idle(task, cpu)`，并把该 TaskRef 写入 `CpuGroup.cpus[cpu].Scheduler.idle/curr`。这里的 Online 表示 idle task 已可作为 Scheduler idle 选择，不表示普通 runnable class queue membership。每个 AP idle task必须有独立 task 记录和 dedicated stack；传给 SBI HSM boot data 的 `task_ptr` 指向该 AP idle task，`stack_ptr` 指向该 task 的 AP pt_regs/栈顶边界。该调用不启动 CPU，也不设置 `cpu.online`；目标 hart 从 `secondary_start_sbi` 开始执行时由架构入口直接把同一 idle Task 置为 OnCpu并启动 initial idle Flow，不发送 Scheduler Continue。`cpu_startup_entry(CPUHP_AP_ONLINE_IDLE)` 继续负责进入可中断的 AP idle/park 路径、使对应 Scheduler Online，并发布 hotplug online-idle 完成事实。
 3. `CPU hotplug 状态与线程对象`：覆盖 `cpuhp_threads_init()`。`CpuHotplugState` 是 `CpuGroup.cpus[cpu]` 的子对象，不再作为顶层集合对象；`CpuHotplugThread` 是 smpboot 模板创建的统一 `Task + TaskFlow` 的特化角色视图，挂在对应 CPU 下，写作 `CpuGroup.cpus[cpu].CpuHotplugThread`，但不另存 Task lifecycle、PID 或 switch context。本调用先驱动所有 possible CPU 的 `CpuHotplugState.preset_sync_gates()`，初始化 `done_up` / `done_down` completion；这两个 completion 按通用规则作为 `CpuHotplugState` 的同步子对象/属性，不单独建立 gate 对象。随后记录 `CpuHotplugThread.template.registered == true`；最后只为当前 online 的 `BootCPU` 创建并 unpark `CpuGroup.cpus[BootCPU.id].CpuHotplugThread`。secondary CPU 的 `CpuHotplugThread` 不要求在本调用结束时存在。
 4. `CPU 组对象`（`CpuGroup`）的正式启用动作：覆盖 `bringup_nonboot_cpus(setup_max_cpus)` 的主线。`max_cpus == 0` 只作为 `nosmp` checkpoint，成立时跳过 secondary bringup。当前未启用 `CONFIG_HOTPLUG_PARALLEL`，并且 `cpuhp_bringup_cpus_parallel(max_cpus)` 折叠为 false，因此实际走串行 `cpuhp_bringup_mask(cpu_present_mask, setup_max_cpus, CPUHP_ONLINE)`。规格层把它建模为集合级 `CpuGroup.enable(mask = present_cpus, limit = setup_max_cpus, target = CPUHP_ONLINE)`，它不直接执行 arch 启动，而是逐个对目标 CPU 调用 `CpuGroup.cpus[cpu].CpuHotplugState.advance(target = CPUHP_ONLINE)`。
 5. `CPU hotplug 单 CPU 推进动作`：覆盖 `cpu_up(cpu, CPUHP_ONLINE)` / `_cpu_up(cpu, 0, CPUHP_ONLINE)`。该动作先检查 `cpu_possible` / `cpu_present` / `cpu_bootable` 等前置条件；若目标 CPU 仍处于 `CPUHP_OFFLINE`，要求前序 `CpuGroup.cpus[cpu].IdleTask.state == Prepared`；随后设置 `CpuHotplugState.target_step = CPUHP_ONLINE`。Linux 在 boot CPU 上只推进到 `CPUHP_BRINGUP_CPU`，超过该 step 的 AP-side callbacks 交给目标 CPU 的 `CpuHotplugThread` 继续执行。因此该动作是单 CPU 的 hotplug 状态推进入口，不等同于一次性设置 `online = true`。
@@ -3777,7 +3785,7 @@ boot/primary hart 事实并精确建立
 负责关闭 BootCPU 的中断分路门控或完成待决中断清除写。CpuGroup 效果由真实内核入口 adoption，不要求修改外部固件。实际字节放置可以由
 QEMU/loader 完成；OpenSBI.Enable 交接域保证其结果，不虚构
 固件内部复制。Kernel 在 Ready 内 drives BootInitFlow，后者的 Preset 首先由
-InterruptType 关闭 BootCPU 的全部中断分路门控、完成一次待决中断清除写并建立相应顺序事实；该写不保证硬件驱动的待决位随后保持为零。BootInitFlow 再推进首次 Scheduler 调度和 KernelInitFlow；
+InterruptType 关闭 BootCPU 的全部中断分路门控、完成一次待决中断清除写并建立相应顺序事实；该写不保证硬件驱动的待决位随后保持为零。BootInitFlow Online 后由 active BootIdleFlow 发出首次 Schedule；非 identity switch 的 Task/Flow continuation 再推进 KernelInitFlow；
 `PayloadHandoffPreparePhase.Online` 后提交
 Online，再 emits `KernelInitFlow.CommitPayloadHandoff`。其余启动相关寄存器由入口阶段逐步更新。
 全局 `Startup` 仍规范化为 `Preset`，不重绑定为 `Enable`。

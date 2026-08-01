@@ -2797,7 +2797,7 @@ object SyscallTable: ResourceObject {
                     UserTaskSet.state == State::Ready;
                     user_task_set_allows_multiple_independent_tasks(UserTaskSet);
                     UserCloneDeferredBoundaries.state == State::Ready;
-                    Scheduler.state == State::Online;
+                    Cpu0Scheduler.state == State::Online;
                     RootPidNamespace.state == State::Ready;
                     FsStruct.state == State::Ready;
                     FilesStruct.state == State::Ready;
@@ -2827,7 +2827,7 @@ object SyscallTable: ResourceObject {
                         dst_ref: child_ref,
                         flow: fork_flow,
                         pid_ns: RootPidNamespace,
-                        scheduler: Scheduler,
+                        scheduler: Cpu0Scheduler,
                         fs: FsStruct,
                         files: FilesStruct,
                         address_space: UserAddressSpace,
@@ -2838,7 +2838,7 @@ object SyscallTable: ResourceObject {
                     child.Transition::Setup(
                         parent_task: KernelInitTask,
                         pid_ns: RootPidNamespace,
-                        scheduler: Scheduler,
+                        scheduler: Cpu0Scheduler,
                         initial_flow: fork_flow
                     );
                     child.Transition::Enable;
@@ -2857,7 +2857,7 @@ object SyscallTable: ResourceObject {
                     syscall_clone_vfork_parent_frame_saved(self, child);
                     syscall_clone_vfork_child_handoff(self, child);
                     syscall_clone_vfork_next_child_accepted(self, child);
-                    syscall_clone_wake_up_new_task_shape(self, Scheduler);
+                    syscall_clone_wake_up_new_task_shape(self, Cpu0Scheduler);
                     user_child_process_process_group_visible_to_parent(child, KernelInitTask);
                     user_task_child_process_group_visible(KernelInitTask, child);
                     user_child_process_user_stack_snapshot_copied(child, UserAddressSpace);
@@ -2989,7 +2989,7 @@ object SyscallTable: ResourceObject {
                     KernelInitTask.state == State::Online;
                     child.state == State::Online;
                     user_task_set_contains(UserTaskSet, child);
-                    Scheduler.state == State::Online;
+                    Cpu0Scheduler.state == State::Online;
                 }
 
                 ensures {

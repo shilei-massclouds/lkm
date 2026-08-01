@@ -248,19 +248,23 @@ object BootInitFlow: TaskFlow {
                     kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
                     boot_init_flow_switch_precommit_ready(
                         BootInitFlow,
-                        Scheduler,
+                        Cpu0Scheduler,
                         BootTask,
                         KernelInitTask
                     );
                     scheduler_switch_to_prepared(
-                        Scheduler,
-                        BootRunQueue,
+                        Cpu0Scheduler,
+                        Cpu0Scheduler,
                         BootTaskRef,
                         KernelInitTaskRef
                     );
                     BootTask.state == State::OnCpu;
                     task_flow_online_on_cpu(self);
                     task_has_unique_active_flow(self.parent);
+                }
+
+                emits {
+                    BootIdleFlow.Action::RequestSchedule;
                 }
             }
         }
@@ -275,13 +279,13 @@ object BootInitFlow: TaskFlow {
             task_active_flow_is(BootTask, BootIdleFlow);
             boot_init_flow_switch_precommit_ready(
                 BootInitFlow,
-                Scheduler,
+                Cpu0Scheduler,
                 BootTask,
                 KernelInitTask
             );
             scheduler_switch_to_prepared(
-                Scheduler,
-                BootRunQueue,
+                Cpu0Scheduler,
+                Cpu0Scheduler,
                 BootTaskRef,
                 KernelInitTaskRef
             );

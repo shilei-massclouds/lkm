@@ -46,6 +46,9 @@ TOOLS2 = ROOT / "tools2"
 PIPELINE = TOOLS2 / "tests" / "fixtures" / "pipeline.spec"
 KERNEL_ENABLE_SCENARIO = TOOLS2 / "scenarios" / "Kernel.Enable.snapshot.json"
 BOOT_INIT_SETUP_SCENARIO = TOOLS2 / "scenarios" / "BootInitFlow.Setup.snapshot.json"
+CPU0_SCHEDULER_SCHEDULE_SCENARIO = (
+    TOOLS2 / "scenarios" / "Cpu0Scheduler.Schedule.snapshot.json"
+)
 
 
 class SignalPipelineTests(unittest.TestCase):
@@ -100,7 +103,11 @@ class SignalPipelineTests(unittest.TestCase):
         self.assertEqual(view_main([str(derivation), "-o", str(view)]), 0)
         with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
             self.assertEqual(render_main([str(view), "-o", str(text)]), 0)
-        return read_json(derivation), checked_data, text.read_text(encoding="utf-8")
+        rendered = text.read_text(encoding="utf-8")
+        model_diagnostics = read_json(model).get("diagnostics", [])
+        if model_diagnostics:
+            rendered += "\nmodel diagnostics: " + json.dumps(model_diagnostics, sort_keys=True)
+        return read_json(derivation), checked_data, rendered
 
     def test_drives_and_emits_order(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2525,6 +2532,135 @@ class SignalPipelineTests(unittest.TestCase):
         self.assertEqual(async_signal["outcome"], "failed")
         self.assertIn("CurrentTask requires an effective TaskFlow", async_signal["reason"])
 
+    def test_sender_flow_context_property_resolves_async_scheduler_current_task(self) -> None:
+        source = """
+            type CpuRef { }
+            type TaskRef { }
+            type Stack { }
+            enum TaskExecutionAuthority { Live }
+            type CPU {
+                initial_state: State::Base;
+                state State::Base { }
+            }
+            type Task {
+                associations { initial_flow: TaskFlow; mutable active_flow: TaskFlow; }
+                processes {
+                    Action::Touch {
+                        state_effect: StateEffect::None;
+                        ensures { task_touched(self); }
+                    }
+                }
+            }
+            type TaskFlow {
+                parent: Task;
+                associations { cpu_ref: CpuRef; }
+                processes {
+                    Action::Send {
+                        state_effect: StateEffect::None;
+                        emits { Scheduler.Action::Schedule; }
+                    }
+                }
+            }
+            type SchedulerType {
+                initial_state: State::Base;
+                processes {
+                    Action::Schedule {
+                        state_effect: StateEffect::None;
+                        sender_flow_context: true;
+                        drives { CurrentTask.Action::Touch; }
+                    }
+                }
+                state State::Base { }
+            }
+            external Human {
+                drives { BootFlow.Action::Send; }
+                emits { Async.Action::Noop; }
+            }
+            system Async {
+                initial_state: State::Base;
+                state State::Base { actions { on Action::Noop { } } }
+            }
+            object CPU0: CPU { }
+            object BootTask: Task {
+                associations { initial_flow = BootFlow; active_flow = BootFlow; }
+                initial_state: State::OnCpu;
+                state State::OnCpu {
+                    invariant {
+                        task_execution_authority_is(BootTask, TaskExecutionAuthority::Live);
+                        task_ref_targets(BootTaskRef, BootTask);
+                        task_ref_ready(BootTaskRef);
+                    }
+                }
+            }
+            object BootFlow: TaskFlow {
+                parent: BootTask;
+                associations { cpu_ref = BootCPURef; }
+                initial_state: State::Base;
+                state State::Base {
+                    invariant {
+                        cpu_ref_targets(BootCPURef, CPU0);
+                        task_flow_parent_is(BootFlow, BootTask);
+                        task_flow_owner_is(BootFlow, BootTask);
+                        task_active_flow_is(BootTask, BootFlow);
+                    }
+                }
+            }
+            object Scheduler: SchedulerType { }
+        """
+        scenario = {
+            "contextual_bindings": {
+                "current_task": {
+                    "CPU0": {
+                        "task": "BootTask",
+                        "task_ref": "BootTaskRef",
+                        "source_flow": "BootFlow",
+                        "source_cpu_ref": "BootCPURef",
+                        "address_view": "CanonicalTaskAddress",
+                        "revision": 1,
+                    }
+                },
+                "current_stack": {
+                    "CPU0": {
+                        "task": "BootTask",
+                        "stack": "BootTask.stack",
+                        "source_flow": "BootFlow",
+                        "source_cpu_ref": "BootCPURef",
+                        "address_view": "CanonicalTaskAddress",
+                        "revision": 1,
+                    }
+                },
+            }
+        }
+        derivation, checked, trace = self.run_source(
+            source,
+            None,
+            max_depth="all",
+            max_breadth="all",
+            scenario=scenario,
+        )
+        self.assertEqual(
+            checked["verdict"],
+            "complete",
+            {
+                "signals": [(item["id"], item["target"], item["name"], item.get("reason")) for item in derivation["signals"]],
+                "trace": trace,
+            },
+        )
+        schedules = [
+            item for item in derivation["signals"]
+            if item["target"] == "Scheduler" and item["name"] == "Schedule"
+        ]
+        self.assertEqual(
+            len(schedules),
+            1,
+            [(item["target"], item["name"], item.get("reason")) for item in derivation["signals"]],
+        )
+        schedule = schedules[0]
+        self.assertEqual(schedule["source"], "BootFlow")
+        touch = next(item for item in derivation["signals"] if item["name"] == "Touch")
+        self.assertEqual(touch["target"], "BootTask")
+        self.assertEqual(touch["selector_resolutions"][0]["source_flow"], "BootFlow")
+
     def test_current_task_rejects_inconsistent_execution_contexts(self) -> None:
         def source(
             *,
@@ -2831,7 +2967,8 @@ class SignalPipelineTests(unittest.TestCase):
                 type CpuRef {{ }}
                 type TaskRef {{ }}
                 type Stack {{ }}
-                enum TaskExecutionAuthority {{ Live }}
+                enum TaskExecutionAuthority {{ None, Live }}
+                enum TaskBreakpointState {{ Valid }}
                 type CPU {{
                     initial_state: State::Base;
                     state State::Base {{ }}
@@ -2875,10 +3012,11 @@ class SignalPipelineTests(unittest.TestCase):
                 }}
                 object OtherTask: Task {{
                     associations {{ initial_flow = OtherFlow; active_flow = OtherFlow; }}
-                    initial_state: State::OnCpu;
-                    state State::OnCpu {{
+                    initial_state: State::Online;
+                    state State::Online {{
                         invariant {{
-                            task_execution_authority_is(OtherTask, TaskExecutionAuthority::Live);
+                            task_execution_authority_is(OtherTask, TaskExecutionAuthority::None);
+                            task_breakpoint_state_is(OtherTask, TaskBreakpointState::Valid);
                             task_ref_targets(OtherTaskRef, OtherTask);
                             task_ref_ready(OtherTaskRef);
                         }}
@@ -4247,7 +4385,9 @@ class SignalPipelineTests(unittest.TestCase):
             boot_started_index = signal_index("Kernel", "BootInitFlow", "Preset")
             boot_ready_index = signal_index("BootInitFlow", "BootInitFlow", "Setup")
             boot_online_index = signal_index("BootInitFlow", "BootInitFlow", "Enable")
-            first_schedule_index = signal_index("Kernel", "Scheduler", "Schedule")
+            first_schedule_index = signal_index(
+                "BootIdleFlow", "Cpu0Scheduler", "Schedule"
+            )
             kernel_init_started_index = signal_index(
                 "KernelInitTask", "KernelInitFlow", "Preset"
             )
@@ -4420,9 +4560,9 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(resumed_checked["exit_code"], 0)
             self.assertTrue(resumed_checked["allowed"])
             self.assertEqual(resumed_data["summary"]["inventory_deferred"], 138)
-            self.assertEqual(resumed_data["summary"]["inventory_trimmed"], 52)
+            self.assertEqual(resumed_data["summary"]["inventory_trimmed"], 53)
             self.assertEqual(resumed_data["summary"]["unresolved_obligations"], 0)
-            self.assertEqual(len(resumed_data["boundary_inventory"]), 190)
+            self.assertEqual(len(resumed_data["boundary_inventory"]), 191)
             occurrence_by_boundary = {
                 item["boundary_id"]: item
                 for item in resumed_data["boundary_occurrences"]
@@ -4914,7 +5054,7 @@ class SignalPipelineTests(unittest.TestCase):
                     "completed": 51,
                     "failed": 0,
                     "inventory_deferred": 138,
-                    "inventory_trimmed": 52,
+                    "inventory_trimmed": 53,
                     "pending": 0,
                     "rejected": 0,
                     "signals": 52,
@@ -5372,14 +5512,14 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(snapshot.read_bytes(), BOOT_INIT_SETUP_SCENARIO.read_bytes())
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "8cd841b9904ad98f92a619e627be657b7d610a050ad2625ca68841b1c6c208e4",
+                "1f0327b33e1de1a493ccb78c89a3ee2781b8799a07229ca6341864072d8c6906",
             )
             self.assertEqual(
                 {
                     derivation["model_fingerprint"], model["model_fingerprint"],
                     view["model_fingerprint"], saved["model_fingerprint"],
                 },
-                {"sha256:658f02fd9242257810f6c7d43e83235999960148febb30e0357e20aeec7828a7"},
+                {"sha256:36108bcafb76b847a0da2a05abc5fe6214033dbbbb9c0346f7906f798d196a05"},
             )
             with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
                 compact_text = render_text(view)
@@ -5483,6 +5623,112 @@ class SignalPipelineTests(unittest.TestCase):
             )
             self.assertEqual(missing.returncode, 2)
             self.assertIn("tools2/scenarios/BootInitFlow.Enable.snapshot.json", missing.stderr)
+
+    def test_main_model_schedule_presend_has_unique_cpu_schedulers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            work = root / "cpu0-scheduler-schedule-boundary"
+            snapshot = root / "Cpu0Scheduler.Schedule.snapshot.json"
+            reached = subprocess.run(
+                [
+                    str(TOOLS2 / "bin" / "pyveri"),
+                    "-u",
+                    "Cpu0Scheduler.Schedule",
+                    "--work-dir",
+                    str(work),
+                    "--snapshot-out",
+                    str(snapshot),
+                ],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(reached.returncode, 0, reached.stderr)
+            derivation = read_json(work / "derive.json")
+            self.assertEqual(derivation["verdict"], "reached")
+            self.assertEqual(
+                derivation["summary"],
+                {
+                    "boundary_occurrences": 118,
+                    "completed": 341,
+                    "failed": 0,
+                    "inventory_deferred": 138,
+                    "inventory_trimmed": 53,
+                    "pending": 0,
+                    "rejected": 0,
+                    "signals": 342,
+                    "stopped": 1,
+                    "truncated": 0,
+                    "unresolved_obligations": 0,
+                },
+            )
+            boundary = derivation["boundary"]
+            self.assertEqual(
+                (
+                    boundary["kind"],
+                    boundary["normalized_signal"],
+                    boundary["source"],
+                    boundary["target"],
+                    boundary["send_position"]["delivery"],
+                ),
+                (
+                    "before_signal_send",
+                    "Cpu0Scheduler.Schedule",
+                    "BootIdleFlow",
+                    "Cpu0Scheduler",
+                    "emits",
+                ),
+            )
+            states = boundary["snapshot"]["states"]
+            self.assertEqual(
+                (states["BootInitFlow"], states["BootTask"], states["BootIdleFlow"]),
+                ("Online", "OnCpu", "Ready"),
+            )
+            references = boundary["snapshot"]["references"]
+            for index in range(8):
+                scheduler = f"Cpu{index}Scheduler"
+                self.assertEqual(
+                    references[f"CpuGroup.cpus[{index}].scheduler"], scheduler
+                )
+                self.assertEqual(
+                    states[scheduler], "Online" if index == 0 else "Ready"
+                )
+                self.assertNotIn(f"CpuGroup.cpus[{index}].scheduler", states)
+            self.assertFalse(
+                any(
+                    item["target"] == "Cpu0Scheduler" and item["name"] == "Schedule"
+                    for item in derivation["signals"]
+                )
+            )
+            self.assertEqual(
+                (
+                    derivation["signals"][-1]["source"],
+                    derivation["signals"][-1]["target"],
+                    derivation["signals"][-1]["name"],
+                    derivation["signals"][-1]["outcome"],
+                ),
+                ("BootInitFlow", "BootIdleFlow", "RequestSchedule", "completed"),
+            )
+            self.assertEqual(
+                snapshot.read_bytes(), CPU0_SCHEDULER_SCHEDULE_SCENARIO.read_bytes()
+            )
+            self.assertEqual(
+                hashlib.sha256(snapshot.read_bytes()).hexdigest(),
+                "acf73a92956b48045009d3c4334b702ed515506daab5b31c8b482b85efa131f7",
+            )
+            model = read_json(work / "model.json")
+            view = read_json(work / "view.json")
+            saved = read_json(snapshot)
+            self.assertEqual(
+                {
+                    derivation["model_fingerprint"],
+                    model["model_fingerprint"],
+                    view["model_fingerprint"],
+                    saved["model_fingerprint"],
+                },
+                {"sha256:36108bcafb76b847a0da2a05abc5fe6214033dbbbb9c0346f7906f798d196a05"},
+            )
 
     def test_main_model_boot_init_entry_stops_at_first_missing_guard(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

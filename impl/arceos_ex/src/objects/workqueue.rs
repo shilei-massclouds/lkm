@@ -5,7 +5,7 @@ use super::{
     mutex::{Mutex, MutexLockOutcome, MutexOwner},
     per_cpu_storage::PerCpuStorage,
     rest_init::KernelInitTask,
-    scheduler::Scheduler,
+    scheduler_shared::SchedulerShared,
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
 };
 use crate::checkpoint::Checkpoint;
@@ -366,11 +366,17 @@ impl Workqueue {
         )
     }
 
-    pub fn setup_topology(&mut self, scheduler: &Scheduler, cpu_group: &CpuGroup) -> EventResult {
+    pub fn setup_topology(
+        &mut self,
+        scheduler_shared: &SchedulerShared,
+        cpu_group: &CpuGroup,
+    ) -> EventResult {
         if self.lifecycle.state() != State::Ready
             || !self.worker_creation_open
-            || scheduler.state() != State::Online
-            || !scheduler.smp_initialized()
+            || !scheduler_shared.smp_initialized()
+            || cpu_group
+                .boot_scheduler()
+                .is_none_or(|scheduler| scheduler.state() != State::Online)
             || cpu_group.state() != State::Ready
             || !cpu_group.secondary_cpus_online()
             || !cpu_group.smp_concurrency_open()

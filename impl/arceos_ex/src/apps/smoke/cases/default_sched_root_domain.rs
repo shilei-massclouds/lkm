@@ -10,7 +10,7 @@ use crate::{
 
 pub fn run() -> SmokeResult {
     let ctx = context();
-    let root_domain = ctx.scheduler.default_root_domain();
+    let root_domain = ctx.scheduler_shared.default_root_domain();
     let cpu_group = &ctx.cpu_group;
 
     if root_domain.state() != State::Ready {

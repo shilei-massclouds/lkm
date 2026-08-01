@@ -396,7 +396,7 @@ impl SmokeScenario for CooperativeWriterScenario {
         assertions.assert_ok("setup shared rwlock", shared.lock.setup());
 
         let ctx = context();
-        assertions.assert("scheduler online", ctx.scheduler.state() == State::Online);
+        assertions.assert("scheduler online", ctx.scheduler().state() == State::Online);
         assertions.assert(
             "current kernel init",
             ctx.current_task_ref()
@@ -467,18 +467,14 @@ impl SmokeScenario for CooperativeWriterScenario {
         assertions.assert("read blocked count", shared.lock.read_blocked_count() >= 1);
         assertions.assert(
             "smoke rwlock task yielded",
-            context().scheduler.smoke_rwlock_task().yielded_back(),
+            context().smoke_rwlock_task().yielded_back(),
         );
         assertions.assert(
             "smoke rwlock task dequeued",
             !context()
-                .scheduler
+                .scheduler()
                 .boot_cpu_owned_scheduler_view(&context().cpu_group)
-                .map(|view| {
-                    view.runqueue_contains_task_id(
-                        context().scheduler.smoke_rwlock_task().task_id(),
-                    )
-                })
+                .map(|view| view.runqueue_contains_task_id(context().smoke_rwlock_task().task_id()))
                 .unwrap_or(false),
         );
     }
@@ -617,7 +613,7 @@ extern "C" fn smoke_rwlock_task_entry() -> ! {
     if context().mark_smoke_rwlock_yielded_back().is_err() {
         crate::arch::riscv64::sbi::system_shutdown();
     }
-    if context().dequeue_smoke_rwlock_task().is_err() {
+    if context().declare_current_scheduler_sleep().is_err() {
         crate::arch::riscv64::sbi::system_shutdown();
     }
     if context().schedule_current().is_err() {

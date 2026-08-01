@@ -425,9 +425,9 @@ object TaskCreationCore: KernelObject {
                 }
 
                 drives {
-                    let runqueue: RunQueueRef <- scheduler.Action::SelectRunQueue(dst_ref);
+                    let runqueue: SchedulerRef <- scheduler.Action::SelectScheduler(dst_ref);
                     flow.Action::AssignCpuRef(BootCPURef);
-                    BootRunQueue.Action::EnqueueTask(runqueue, dst_ref);
+                    Cpu0Scheduler.Action::EnqueueTask(runqueue, dst_ref);
                 }
 
                 ensures {
@@ -441,7 +441,7 @@ object TaskCreationCore: KernelObject {
                     task_sched_entity_initialized(dst_process, scheduler);
                     task_state_new(dst_process);
                     task_state_running(dst_process);
-                    task_runqueue_publication_committed(dst_process);
+                    task_scheduler_publication_committed(dst_process);
                     user_child_process_parent_pid1_or_current_child(dst_process, src_process);
                     user_child_process_pid_allocated(dst_process, pid_ns);
                     user_child_process_tgid_equals_pid(dst_process);
@@ -454,8 +454,8 @@ object TaskCreationCore: KernelObject {
                     user_child_process_trap_frame_copied(dst_process, trap_frame);
                     user_child_process_trap_frame_child_return_zero(dst_process);
                     user_child_process_tls_inherited(dst_process);
-                    user_child_process_enqueued(dst_process, BootRunQueue);
-                    task_enqueued_on_runqueue(dst_ref, BootRunQueue);
+                    user_child_process_enqueued(dst_process, Cpu0Scheduler);
+                    task_enqueued_on_scheduler(dst_ref, Cpu0Scheduler);
                     task_owns_flow(dst_process, flow);
                     task_flow_owner_is(flow, dst_process);
                     task_flow_owner_exclusive(flow);
@@ -1000,7 +1000,7 @@ object ProcessPreparePhase: PhaseObject {
                     Console.state == State::Prepared;
                     SchedClock.state == State::Ready;
                     DelayLoop.state == State::Ready;
-                    Scheduler.state == State::Online;
+                    Cpu0Scheduler.state == State::Online;
                     Workqueue.state == State::Prepared;
                     Softirq.state == State::Ready;
                     RcuCore.state == State::Ready;

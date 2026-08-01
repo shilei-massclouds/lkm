@@ -34,6 +34,11 @@ This file is the testing authority for CPU ownership, references and the
 
 ## Runtime observations and gates
 
+- Scheduler inventory coverage must resolve the Scheduler owned by every possible
+  `CpuGroup.cpus[i]` and prove one-to-one ownership. CPU0 reaches Scheduler Online
+  with the boot scheduling handoff; every AP remains Scheduler Ready until its
+  own CPU-online handoff. The audit must reject a Context-level Scheduler
+  singleton or a parallel per-CPU runqueue metadata array.
 - Kernel-environment smoke observes the production CpuGroup in Context and
   proves CPU0/AP roles, set membership, topology uniqueness, valid CpuRefs and
   the absence of a second boot/current CPU or current-task store. `current_cpu()`

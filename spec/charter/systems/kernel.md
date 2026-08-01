@@ -115,9 +115,10 @@ Linux 6.12 `Documentation/arch/riscv/boot.rst` 与当前 RV64 Image contract 提
   `BootInitFlow.cpu_ref`，随后同步驱动
   `PhysicalDirect.Action::ActivateOnCpu(BootCPURef)`，以 `InitialActivation` 原子建立启动 CPU 的首个
   translation controller。只有这三项均成功后，同一个 Enable handler 才顺序驱动 BootInitFlow 的
-  Preset/Setup/Enable、首次 Scheduler 调度和
-  KernelInitFlow 的 Preset/Setup/Enable。首次调度和 PID 1 叶阶段可以由真实跨栈 continuation 承载，
-  但逻辑上仍是同一个 Kernel.Enable 响应。`PayloadHandoffPreparePhase.Online` 证明 selected payload
+  Preset/Setup/Enable。BootInitFlow Online 后，当前 BootTask 的 active `BootIdleFlow` 向 CPU0
+  Scheduler 异步发送无 payload 的 Schedule；首次非 identity switch 由 Scheduler→next Task→next
+  TaskFlow 的 continuation 启动 KernelInitFlow 的 Preset/Setup/Enable。该跨栈 continuation 仍承载同一个
+  Kernel.Enable 响应的后续执行，但 Kernel 不是 Schedule 的 sender。`PayloadHandoffPreparePhase.Online` 证明 selected payload
   的可逆预提交与应用运行环境准备完成；随后 Kernel.Enable 才提交 Kernel.Online。
 
 * Online：应用运行环境已经准备就绪，等待应用启动。提交后 Kernel 作为唯一发送者异步发送
@@ -141,8 +142,9 @@ PhysicalDirect.ActivateOnCpu` 排序，任何后项都不得反向成为前项�
 Linux `_start_kernel` 的防御性中断屏蔽，也是 Kernel 而非 OpenSBI 的责任。Setup 直接顺序驱动
 `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、`SchedInitPhase`、
 `IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、`ProcessPreparePhase`、
-`BootInitRestInitPhase` 并提交 Ready；Enable 只驱动 `BootInitScheduleHandoffPhase`，提交
-Online 后由仍在执行的 Kernel.Enable 驱动 `Scheduler.Action::Schedule`。
+`BootInitRestInitPhase` 并提交 Ready；Enable 只驱动 `BootInitScheduleHandoffPhase`。BootInitFlow 提交
+Online 后，当前 BootTask 的 active `BootIdleFlow` 向其 `CpuRef` 所指的 CPU0 Scheduler
+`emits Schedule()`；Kernel.Enable 不直接驱动 Scheduler 内部步骤。
 
 `KernelImage.Preset` 在真实入口位置建立 `KernelImage.phys_start`，并核对该值等于
 `OpenSBI.kernel_load_pa`。设计期 linker symbol `Lds.kernel_start` 仍描述 ELF 入口和布局，但

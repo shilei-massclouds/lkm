@@ -6,14 +6,16 @@ use crate::{
 
 pub fn run() -> SmokeResult {
     let ctx = context();
-    let Some(boot_scheduler_view) = ctx.scheduler.boot_cpu_owned_scheduler_view(&ctx.cpu_group)
+    let Some(boot_scheduler_view) = ctx
+        .scheduler()
+        .boot_cpu_owned_scheduler_view(&ctx.cpu_group)
     else {
         printk::write_str("boot CPU scheduler view missing\n");
         return SmokeResult::Failed;
     };
     let boot_idle_setup_state = boot_scheduler_view.idle_task();
 
-    if ctx.scheduler.state() != State::Online || !ctx.scheduler.scheduler_running() {
+    if ctx.scheduler().state() != State::Online || !ctx.scheduler().scheduler_running() {
         printk::write_str("scheduler is not online\n");
         return SmokeResult::Failed;
     }
@@ -21,16 +23,16 @@ pub fn run() -> SmokeResult {
         || !ctx
             .current_task_ref()
             .is_ok_and(|task_ref| task_ref == TaskRef::KERNEL_INIT)
-        || ctx.scheduler.boot_idle_preemption().state() != State::Ready
-        || ctx.scheduler.boot_idle_preemption().disabled()
+        || ctx.scheduler().boot_idle_preemption().state() != State::Ready
+        || ctx.scheduler().boot_idle_preemption().disabled()
     {
         printk::write_fmt(format_args!(
             "current CPU or idle task control facts invalid: cpu_online={} current_is_kernel_init={} idle_preemption_ready={} idle_preemption_disabled={}\n",
             ctx.cpu_group.boot_cpu_state() == State::Online,
             ctx.current_task_ref()
                 .is_ok_and(|task_ref| task_ref == TaskRef::KERNEL_INIT),
-            ctx.scheduler.boot_idle_preemption().state() == State::Ready,
-            ctx.scheduler.boot_idle_preemption().disabled(),
+            ctx.scheduler().boot_idle_preemption().state() == State::Ready,
+            ctx.scheduler().boot_idle_preemption().disabled(),
         ));
         return SmokeResult::Failed;
     }
@@ -89,46 +91,65 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
-    if ctx.scheduler.state() != State::Online
-        || ctx.scheduler.schedule_passes() == 0
-        || ctx.scheduler.current_runqueue_resolve_passes() == 0
-        || ctx.scheduler.pick_next_task_passes() == 0
-        || ctx.scheduler.switch_to_passes() == 0
-        || ctx.scheduler.pick_next_task_exit_count() == 0
-        || ctx.scheduler.switch_to_entry_count() == 0
-        || ctx.scheduler.schedule_preemption_disable_count() == 0
-        || ctx.scheduler.schedule_preemption_enable_no_resched_count() == 0
-        || ctx.scheduler.scheduler_rcu_context_switch_count() == 0
-        || ctx.scheduler.scheduler_rq_lock_mb_after_spinlock_count() == 0
-        || ctx.scheduler.scheduler_rq_clock_update_count() == 0
-        || ctx.scheduler.scheduler_need_resched_clear_count() == 0
-        || ctx.scheduler.scheduler_rq_curr_publish_rcu_count() == 0
-        || ctx.scheduler.scheduler_trace_sched_switch_count() == 0
-        || ctx.scheduler.scheduler_prepare_task_switch_count() == 0
-        || ctx.scheduler.scheduler_finish_task_switch_count() == 0
-        || ctx.scheduler.scheduler_finish_released_rq_lock_count() == 0
-        || ctx.scheduler.scheduler_finish_preempt_count_restore_count() == 0
-        || !ctx.scheduler.scheduler_switch_mm_or_lazy_tlb_deferred()
-        || !ctx.scheduler.scheduler_membarrier_switch_barrier_deferred()
-        || ctx.scheduler.boot_runqueue_lock().irqsave_entered_count() == 0
-        || ctx.scheduler.boot_runqueue_lock().irqrestore_exited_count() == 0
-        || ctx.scheduler.pick_next_task_exit_prev_ref() != TaskRef::BOOT
-        || ctx.scheduler.pick_next_task_exit_next_ref() != TaskRef::KERNEL_INIT
+    if ctx.scheduler().state() != State::Online
+        || ctx.scheduler().schedule_passes() == 0
+        || ctx.scheduler().current_runqueue_resolve_passes() == 0
+        || ctx.scheduler().pick_next_task_passes() == 0
+        || ctx.scheduler().switch_to_passes() == 0
+        || ctx.scheduler().pick_next_task_exit_count() == 0
+        || ctx.scheduler().switch_to_entry_count() == 0
+        || ctx.scheduler().schedule_preemption_disable_count() == 0
+        || ctx
+            .scheduler()
+            .schedule_preemption_enable_no_resched_count()
+            == 0
+        || ctx.scheduler().scheduler_rcu_context_switch_count() == 0
+        || ctx.scheduler().scheduler_rq_lock_mb_after_spinlock_count() == 0
+        || ctx.scheduler().scheduler_rq_clock_update_count() == 0
+        || ctx.scheduler().scheduler_need_resched_clear_count() == 0
+        || ctx.scheduler().scheduler_rq_curr_publish_rcu_count() == 0
+        || ctx.scheduler().scheduler_trace_sched_switch_count() == 0
+        || ctx.scheduler().scheduler_prepare_task_switch_count() == 0
+        || ctx.scheduler().scheduler_finish_task_switch_count() == 0
+        || ctx.scheduler().scheduler_finish_released_rq_lock_count() == 0
+        || ctx
+            .scheduler()
+            .scheduler_finish_preempt_count_restore_count()
+            == 0
+        || !ctx.scheduler().scheduler_switch_mm_or_lazy_tlb_deferred()
+        || !ctx
+            .scheduler()
+            .scheduler_membarrier_switch_barrier_deferred()
+        || ctx.scheduler().boot_runqueue_lock().irqsave_entered_count() == 0
+        || ctx
+            .scheduler()
+            .boot_runqueue_lock()
+            .irqrestore_exited_count()
+            == 0
+        || ctx.scheduler().pick_next_task_exit_prev_ref() != TaskRef::BOOT
+        || ctx.scheduler().pick_next_task_exit_next_ref() != TaskRef::KERNEL_INIT
         || !ctx
             .current_task_ref()
             .is_ok_and(|task_ref| task_ref == TaskRef::KERNEL_INIT)
         || !boot_cpu_owned_scheduler_view_matches()
         || !scheduler_possible_runqueues_match_cpu_group()
-        || ctx.scheduler.default_root_domain().covered_cpu_count()
+        || ctx
+            .scheduler_shared
+            .default_root_domain()
+            .covered_cpu_count()
             != ctx.cpu_group.possible_cpu_count()
-        || ctx.scheduler.default_root_domain().covered_cpu_ref(0) != ctx.cpu_group.boot_cpu_ref()
+        || ctx
+            .scheduler_shared
+            .default_root_domain()
+            .covered_cpu_ref(0)
+            != ctx.cpu_group.boot_cpu_ref()
         || !default_root_domain_entries_match_cpu_group()
         || !ctx
-            .scheduler
+            .scheduler_shared
             .default_root_domain()
             .covers_cpu_group_possible(&ctx.cpu_group)
         || !ctx
-            .scheduler
+            .scheduler_shared
             .default_root_domain()
             .covers_cpu_ref(boot_scheduler_view.runqueue().cpu_ref())
         || !boot_idle_setup_state.switch_ctx_initialized()
@@ -140,25 +161,80 @@ pub fn run() -> SmokeResult {
             .thread_context()
             .core_restored_count()
             == 0
-        || ctx.scheduler.idle_schedule_passes() != 0
-        || ctx.scheduler.idle_schedule_returned_passes() != 0
-        || ctx.scheduler.idle_schedule_identity_passes() != 0
-        || ctx.scheduler.identity_switch_passes() != 0
+        || ctx.scheduler().idle_schedule_passes() != 0
+        || ctx.scheduler().idle_schedule_returned_passes() != 0
+        || ctx.scheduler().idle_schedule_identity_passes() != 0
+        || ctx.scheduler().identity_switch_passes() != 0
         || crate::flows::boot_idle_flow::entry_is_online()
-        || ctx.scheduler.kernel_init_stack_switch_started_count() != 1
-        || ctx.scheduler.kernel_init_stack_switch_returned_count() != 0
+        || ctx.scheduler().kernel_init_stack_switch_started_count() != 1
+        || ctx.scheduler().kernel_init_stack_switch_returned_count() != 0
         || ctx.boot_cpu_local_interrupt().saved_and_disabled_count() == 0
         || ctx.boot_cpu_local_interrupt().restored_count() == 0
     {
+        printk::write_fmt(format_args!(
+            "scheduler first-switch snapshot schedule={} resolve={} pick={} switch={} pick_exit={} switch_entry={} disable={} enable={} rcu={} lock_mb={} clock={} need_resched={} curr_publish={} trace={} prepare={} finish={} rq_unlock={} preempt_restore={} irq_enter={} irq_exit={} boot_saved={} boot_restored={} next_restored={} idle={} idle_return={} idle_identity={} identity={} boot_entry={} stack_start={} stack_return={} saved_irq={} restored_irq={}\n",
+            ctx.scheduler().schedule_passes(),
+            ctx.scheduler().current_runqueue_resolve_passes(),
+            ctx.scheduler().pick_next_task_passes(),
+            ctx.scheduler().switch_to_passes(),
+            ctx.scheduler().pick_next_task_exit_count(),
+            ctx.scheduler().switch_to_entry_count(),
+            ctx.scheduler().schedule_preemption_disable_count(),
+            ctx.scheduler()
+                .schedule_preemption_enable_no_resched_count(),
+            ctx.scheduler().scheduler_rcu_context_switch_count(),
+            ctx.scheduler().scheduler_rq_lock_mb_after_spinlock_count(),
+            ctx.scheduler().scheduler_rq_clock_update_count(),
+            ctx.scheduler().scheduler_need_resched_clear_count(),
+            ctx.scheduler().scheduler_rq_curr_publish_rcu_count(),
+            ctx.scheduler().scheduler_trace_sched_switch_count(),
+            ctx.scheduler().scheduler_prepare_task_switch_count(),
+            ctx.scheduler().scheduler_finish_task_switch_count(),
+            ctx.scheduler().scheduler_finish_released_rq_lock_count(),
+            ctx.scheduler()
+                .scheduler_finish_preempt_count_restore_count(),
+            ctx.scheduler().boot_runqueue_lock().irqsave_entered_count(),
+            ctx.scheduler()
+                .boot_runqueue_lock()
+                .irqrestore_exited_count(),
+            boot_idle_setup_state.core_saved_count(),
+            boot_idle_setup_state.core_restored_count(),
+            ctx.kernel_init_task
+                .task()
+                .thread_context()
+                .core_restored_count(),
+            ctx.scheduler().idle_schedule_passes(),
+            ctx.scheduler().idle_schedule_returned_passes(),
+            ctx.scheduler().idle_schedule_identity_passes(),
+            ctx.scheduler().identity_switch_passes(),
+            crate::flows::boot_idle_flow::entry_is_online(),
+            ctx.scheduler().kernel_init_stack_switch_started_count(),
+            ctx.scheduler().kernel_init_stack_switch_returned_count(),
+            ctx.boot_cpu_local_interrupt().saved_and_disabled_count(),
+            ctx.boot_cpu_local_interrupt().restored_count(),
+        ));
+        printk::write_fmt(format_args!(
+            "scheduler first-switch refs pick_prev_boot={} pick_next_kernel={} current_kernel={} boot_view={} possible={} root_entries={} root_covers={}\n",
+            ctx.scheduler().pick_next_task_exit_prev_ref() == TaskRef::BOOT,
+            ctx.scheduler().pick_next_task_exit_next_ref() == TaskRef::KERNEL_INIT,
+            ctx.current_task_ref()
+                .is_ok_and(|task_ref| task_ref == TaskRef::KERNEL_INIT),
+            boot_cpu_owned_scheduler_view_matches(),
+            scheduler_possible_runqueues_match_cpu_group(),
+            default_root_domain_entries_match_cpu_group(),
+            ctx.scheduler_shared
+                .default_root_domain()
+                .covers_cpu_group_possible(&ctx.cpu_group),
+        ));
         printk::write_str("scheduler first-switch facts invalid\n");
         return SmokeResult::Failed;
     }
 
     printk::write_fmt(format_args!(
         "schedule_passes={} switch_to_passes={} idle_schedule_passes={} boot_cpu={} current_task={}\n",
-        ctx.scheduler.schedule_passes(),
-        ctx.scheduler.switch_to_passes(),
-        ctx.scheduler.idle_schedule_passes(),
+        ctx.scheduler().schedule_passes(),
+        ctx.scheduler().switch_to_passes(),
+        ctx.scheduler().idle_schedule_passes(),
         boot_scheduler_view.runqueue().cpu_id(),
         boot_idle_setup_state.task_id()
     ));
@@ -167,7 +243,7 @@ pub fn run() -> SmokeResult {
 
 fn default_root_domain_entries_match_cpu_group() -> bool {
     let ctx = context();
-    let root_domain = ctx.scheduler.default_root_domain();
+    let root_domain = ctx.scheduler_shared.default_root_domain();
     let mut logical_id = 0usize;
     while logical_id < ctx.cpu_group.possible_cpu_count() {
         if root_domain.covered_cpu_ref(logical_id) != ctx.cpu_group.possible_cpu_ref_at(logical_id)
@@ -181,25 +257,22 @@ fn default_root_domain_entries_match_cpu_group() -> bool {
 
 fn scheduler_possible_runqueues_match_cpu_group() -> bool {
     let ctx = context();
-    if ctx.scheduler.cpu_runqueue_count() != ctx.cpu_group.possible_cpu_count()
-        || !ctx.scheduler.possible_cpu_runqueues_ready(&ctx.cpu_group)
-        || !ctx.scheduler.boot_runqueue_matches_metadata()
-    {
+    let root_domain = ctx.scheduler_shared.default_root_domain();
+    if !ctx.cpu_group.possible_schedulers_ready(root_domain) {
         return false;
     }
 
     let mut logical_id = 0usize;
     while logical_id < ctx.cpu_group.possible_cpu_count() {
-        let Some(runqueue) = ctx.scheduler.cpu_runqueue(logical_id) else {
-            return false;
-        };
         let Some(cpu) = ctx.cpu_group.cpu(logical_id) else {
             return false;
         };
+        let scheduler = cpu.scheduler();
+        let runqueue = scheduler;
         let Some(cpu_ref) = ctx.cpu_group.possible_cpu_ref_at(logical_id) else {
             return false;
         };
-        if runqueue.state() != State::Ready
+        if runqueue.runqueue_state() != State::Ready
             || runqueue.cpu_ref() != cpu_ref
             || runqueue.cpu_ref() != cpu.cpu_ref()
             || runqueue.cpu_id() != logical_id
@@ -207,41 +280,47 @@ fn scheduler_possible_runqueues_match_cpu_group() -> bool {
             || !runqueue.class_queues_ready()
             || !runqueue.attached_to_root_domain()
             || runqueue.balance_push_enabled()
-            || !ctx
-                .scheduler
-                .default_root_domain()
-                .covers_cpu_ref(runqueue.cpu_ref())
+            || !root_domain.covers_cpu_ref(runqueue.cpu_ref())
         {
             return false;
         }
         if logical_id == 0 {
-            if !runqueue.is_boot_backed()
+            if scheduler.state() != State::Online
                 || runqueue.cpu_ref() != cpu.cpu_ref()
                 || runqueue.cpu_hartid() != cpu.hartid()
             {
                 return false;
             }
-        } else if runqueue.is_boot_backed() {
+        } else if scheduler.state()
+            != if cpu.is_online() {
+                State::Online
+            } else {
+                State::Ready
+            }
+        {
             return false;
         }
         logical_id += 1;
     }
 
-    ctx.scheduler
-        .cpu_runqueue(ctx.cpu_group.possible_cpu_count())
+    ctx.cpu_group
+        .possible_scheduler(ctx.cpu_group.possible_cpu_count())
         .is_none()
 }
 
 fn boot_cpu_owned_scheduler_view_matches() -> bool {
     let ctx = context();
     if !ctx
-        .scheduler
+        .scheduler()
         .boot_cpu_owned_scheduler_view_ready(&ctx.cpu_group)
     {
         return false;
     }
 
-    let Some(view) = ctx.scheduler.boot_cpu_owned_scheduler_view(&ctx.cpu_group) else {
+    let Some(view) = ctx
+        .scheduler()
+        .boot_cpu_owned_scheduler_view(&ctx.cpu_group)
+    else {
         return false;
     };
     let Some(boot_cpu) = ctx.cpu_group.boot_cpu() else {
@@ -249,8 +328,7 @@ fn boot_cpu_owned_scheduler_view_matches() -> bool {
     };
     let runqueue = view.runqueue();
     let idle_task = view.idle_task();
-
-    view.cpu_ref() == boot_cpu.cpu_ref()
+    let matches = view.cpu_ref() == boot_cpu.cpu_ref()
         && view.cpu_id() == boot_cpu.logical_id()
         && view.cpu_hartid() == boot_cpu.hartid()
         && runqueue.cpu_ref() == boot_cpu.cpu_ref()
@@ -258,11 +336,40 @@ fn boot_cpu_owned_scheduler_view_matches() -> bool {
         && runqueue.is_boot_backed()
         && idle_task.cpu_ref() == boot_cpu.cpu_ref()
         && idle_task.cpu_id() == boot_cpu.logical_id()
-        && view.runqueue_current_task_id() == idle_task.task_id()
+        && ctx
+            .current_task_ref()
+            .is_ok_and(|task_ref| view.runqueue_current_task_ref().same_identity(task_ref))
+        && view.runqueue_current_task_id() != usize::MAX
         && view.runqueue_idle_task_id() == idle_task.task_id()
-        && view.runqueue_task_count() == ctx.scheduler.boot_runqueue().task_count()
+        && view.runqueue_task_count() == ctx.scheduler().task_count()
         && view.runqueue_idle_task_matches()
         && idle_task.uses_current_init_task()
         && idle_task.lazy_tlb_mm_ready()
-        && idle_task.no_set_affinity()
+        && idle_task.no_set_affinity();
+    if !matches {
+        printk::write_fmt(format_args!(
+            "boot scheduler view snapshot view_cpu={} boot_cpu={} view_hart={} boot_hart={} rq_cpu={} rq_hart={} boot_backed={} idle_cpu={} current_ref={} current_id={} idle_id={} idle_view_id={} count_view={} count_scheduler={} idle_match={} uses_init={} lazy_tlb={} no_affinity={} ready={}\n",
+            view.cpu_id(),
+            boot_cpu.logical_id(),
+            view.cpu_hartid(),
+            boot_cpu.hartid(),
+            runqueue.cpu_ref().logical_id(),
+            runqueue.cpu_hartid(),
+            runqueue.is_boot_backed(),
+            idle_task.cpu_id(),
+            view.runqueue_current_task_ref() == TaskRef::KERNEL_INIT,
+            view.runqueue_current_task_id(),
+            view.runqueue_idle_task_id(),
+            idle_task.task_id(),
+            view.runqueue_task_count(),
+            ctx.scheduler().task_count(),
+            view.runqueue_idle_task_matches(),
+            idle_task.uses_current_init_task(),
+            idle_task.lazy_tlb_mm_ready(),
+            idle_task.no_set_affinity(),
+            ctx.scheduler()
+                .boot_cpu_owned_scheduler_view_ready(&ctx.cpu_group),
+        ));
+    }
+    matches
 }

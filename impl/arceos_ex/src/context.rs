@@ -5,7 +5,12 @@ use crate::objects::irq_time::{
     Serial8250ConsoleLongBurstIrqTxProbe, Serial8250ConsoleLongIrqTxProbe,
     Serial8250ConsoleTxQuiesceProbe, TtyWriteBatchRuntimeTxProbe, TtyWriteRuntimeTxProbe,
 };
-use crate::objects::state::{EventError, EventErrorCode, EventResult, LifecycleEvent, State};
+use crate::objects::scheduler::{SchedulerTestStacks, SchedulerTestTasks};
+use crate::objects::scheduler_shared::SchedulerShared;
+use crate::objects::scheduler_task_access::SchedulerTaskAccess;
+use crate::objects::state::{
+    EventError, EventErrorCode, EventResult, LifecycleEvent, State, failed_condition,
+};
 use crate::objects::{
     binary_format_registry::BinaryFormatRegistry,
     block_device::BlockDeviceRegistry,
@@ -98,7 +103,6 @@ use crate::objects::{
     rwlock::RwLock,
     sbi::Sbi,
     sched_init_boundaries::{SchedInitPreludeTrimmedPaths, SchedInitTraceContextBoundaries},
-    scheduler::Scheduler,
     selected_payload::SelectedPayloadHandoff,
     smp_bringup::{
         CpuHotplugSyncSet, CpuStartProvider, SecondaryCpuOnlineAck, SecondaryCpuStartupAck,
@@ -185,7 +189,6 @@ pub struct Context {
     pub mm_struct_cache: MmStructCache,
     pub mm_core_trimmed_paths: MmCoreTrimmedPaths,
 
-    pub scheduler: Scheduler,
     pub radix_tree: RadixTree,
     pub maple_tree: MapleTree,
     pub workqueue: Workqueue,
@@ -193,6 +196,9 @@ pub struct Context {
     pub rcu_core: RcuCore,
     pub sched_init_prelude_trimmed_paths: SchedInitPreludeTrimmedPaths,
     pub sched_init_trace_context_boundaries: SchedInitTraceContextBoundaries,
+    pub scheduler_shared: SchedulerShared,
+    pub(crate) scheduler_test_tasks: SchedulerTestTasks,
+    scheduler_test_stacks: SchedulerTestStacks,
 
     pub irq_controller: IrqController,
     pub riscv_intc: RiscvIntc,
@@ -341,6 +347,38 @@ pub struct Context {
 }
 
 impl Context {
+    pub fn scheduler(&self) -> &crate::objects::scheduler::Scheduler {
+        self.cpu_group
+            .boot_scheduler()
+            .expect("published Context must contain CPU0 Scheduler")
+    }
+
+    pub fn scheduler_mut(&mut self) -> &mut crate::objects::scheduler::Scheduler {
+        self.cpu_group
+            .boot_scheduler_mut()
+            .expect("published Context must contain CPU0 Scheduler")
+    }
+
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
+    pub const fn smoke_scheduler_task(&self) -> &crate::objects::scheduler::SmokeSchedulerTask {
+        self.scheduler_test_tasks.smoke_scheduler_task()
+    }
+
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
+    pub const fn smoke_mutex_task(&self) -> &crate::objects::scheduler::SmokeSchedulerTask {
+        self.scheduler_test_tasks.smoke_mutex_task()
+    }
+
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
+    pub const fn smoke_rwsem_task(&self) -> &crate::objects::scheduler::SmokeSchedulerTask {
+        self.scheduler_test_tasks.smoke_rwsem_task()
+    }
+
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
+    pub const fn smoke_rwlock_task(&self) -> &crate::objects::scheduler::SmokeSchedulerTask {
+        self.scheduler_test_tasks.smoke_rwlock_task()
+    }
+
     pub const fn new() -> Self {
         Self {
             config: Config::new(),
@@ -399,7 +437,6 @@ impl Context {
             ioremap: Ioremap::new(),
             mm_struct_cache: MmStructCache::new(),
             mm_core_trimmed_paths: MmCoreTrimmedPaths::new(),
-            scheduler: Scheduler::new(),
             radix_tree: RadixTree::new(),
             maple_tree: MapleTree::new(),
             workqueue: Workqueue::new(),
@@ -407,6 +444,9 @@ impl Context {
             rcu_core: RcuCore::new(),
             sched_init_prelude_trimmed_paths: SchedInitPreludeTrimmedPaths::new(),
             sched_init_trace_context_boundaries: SchedInitTraceContextBoundaries::new(),
+            scheduler_shared: SchedulerShared::new(),
+            scheduler_test_tasks: SchedulerTestTasks::new(),
+            scheduler_test_stacks: SchedulerTestStacks::new(),
             irq_controller: IrqController::new(),
             riscv_intc: RiscvIntc::new(),
             riscv_irq_stack_set: RiscvIrqStackSet::new(),
@@ -750,7 +790,10 @@ impl Context {
         if identity == self.kthreadd_task.task() as *const Task as usize {
             return Some(self.kthreadd_task.task_ref());
         }
-        if let Some(candidate) = self.scheduler.current_task_candidate_by_identity(identity) {
+        if let Some(candidate) = self
+            .scheduler_test_tasks
+            .current_task_candidate_by_identity(identity)
+        {
             return Some(candidate.task.task_ref());
         }
         if let Some(candidate) = self
@@ -768,10 +811,20 @@ impl Context {
             TaskRef::BOOT => Some(self.boot_task.task_mut()),
             TaskRef::KERNEL_INIT => Some(self.kernel_init_task.task_mut()),
             TaskRef::KTHREADD => Some(self.kthreadd_task.task_mut()),
-            TaskRef::SMOKE_SCHEDULER => Some(self.scheduler.smoke_scheduler_task_mut().task_mut()),
-            TaskRef::SMOKE_MUTEX => Some(self.scheduler.smoke_mutex_task_mut().task_mut()),
-            TaskRef::SMOKE_RWSEM => Some(self.scheduler.smoke_rwsem_task_mut().task_mut()),
-            TaskRef::SMOKE_RWLOCK => Some(self.scheduler.smoke_rwlock_task_mut().task_mut()),
+            TaskRef::SMOKE_SCHEDULER => Some(
+                self.scheduler_test_tasks
+                    .smoke_scheduler_task_mut()
+                    .task_mut(),
+            ),
+            TaskRef::SMOKE_MUTEX => {
+                Some(self.scheduler_test_tasks.smoke_mutex_task_mut().task_mut())
+            }
+            TaskRef::SMOKE_RWSEM => {
+                Some(self.scheduler_test_tasks.smoke_rwsem_task_mut().task_mut())
+            }
+            TaskRef::SMOKE_RWLOCK => {
+                Some(self.scheduler_test_tasks.smoke_rwlock_task_mut().task_mut())
+            }
             _ if task_ref.is_user() => self.user_task_set.task_mut_by_ref(task_ref),
             _ => crate::objects::smp_bringup::ap_task_mut_by_ref(task_ref),
         }
@@ -796,7 +849,10 @@ impl Context {
                 task,
                 flow: self.kthreadd_flow.core(),
             })
-        } else if let Some(candidate) = self.scheduler.current_task_candidate_by_ref(task_ref) {
+        } else if let Some(candidate) = self
+            .scheduler_test_tasks
+            .current_task_candidate_by_ref(task_ref)
+        {
             Some(candidate)
         } else if let Some(candidate) = self.user_task_set.current_task_candidate_by_ref(task_ref) {
             Some(candidate)
@@ -909,65 +965,162 @@ impl Context {
 
     #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn setup_smoke_scheduler_task(&mut self, entry: extern "C" fn() -> !) -> EventResult {
-        self.scheduler.setup_smoke_scheduler_task(entry)
+        let Self {
+            cpu_group,
+            scheduler_test_tasks,
+            scheduler_test_stacks,
+            ..
+        } = self;
+        let Some(scheduler) = cpu_group.boot_scheduler_mut() else {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                State::Base,
+                State::Online,
+                State::Online,
+            );
+        };
+        scheduler.setup_smoke_scheduler_task(entry, scheduler_test_stacks, scheduler_test_tasks)
     }
 
     #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn enqueue_smoke_scheduler_task(&mut self) -> EventResult {
-        self.scheduler.enqueue_smoke_scheduler_task()
+        let Self {
+            cpu_group,
+            scheduler_test_tasks,
+            ..
+        } = self;
+        cpu_group
+            .boot_scheduler_mut()
+            .ok_or_else(|| {
+                crate::objects::state::EventError::failed(
+                    crate::objects::state::EventErrorCode::ConditionFailed,
+                    LifecycleEvent::Setup,
+                    State::Base,
+                    State::Online,
+                    State::Online,
+                )
+            })?
+            .enqueue_smoke_scheduler_task(scheduler_test_tasks)
     }
 
     #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn setup_smoke_mutex_task(&mut self, entry: extern "C" fn() -> !) -> EventResult {
-        self.scheduler.setup_smoke_mutex_task(entry)
+        let Self {
+            cpu_group,
+            scheduler_test_tasks,
+            scheduler_test_stacks,
+            ..
+        } = self;
+        let Some(scheduler) = cpu_group.boot_scheduler_mut() else {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                State::Base,
+                State::Online,
+                State::Online,
+            );
+        };
+        scheduler.setup_smoke_mutex_task(entry, scheduler_test_stacks, scheduler_test_tasks)
     }
 
     #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn enqueue_smoke_mutex_task(&mut self) -> EventResult {
-        self.scheduler.enqueue_smoke_mutex_task()
-    }
-
-    #[cfg_attr(not(app_smoke), allow(dead_code))]
-    pub fn dequeue_smoke_mutex_task(&mut self) -> EventResult {
-        self.scheduler.dequeue_smoke_mutex_task()
+        let Self {
+            cpu_group,
+            scheduler_test_tasks,
+            ..
+        } = self;
+        cpu_group
+            .boot_scheduler_mut()
+            .ok_or_else(missing_scheduler_error)?
+            .enqueue_smoke_mutex_task(scheduler_test_tasks)
     }
 
     #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn setup_smoke_rwsem_task(&mut self, entry: extern "C" fn() -> !) -> EventResult {
-        self.scheduler.setup_smoke_rwsem_task(entry)
+        let Self {
+            cpu_group,
+            scheduler_test_tasks,
+            scheduler_test_stacks,
+            ..
+        } = self;
+        let Some(scheduler) = cpu_group.boot_scheduler_mut() else {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                State::Base,
+                State::Online,
+                State::Online,
+            );
+        };
+        scheduler.setup_smoke_rwsem_task(entry, scheduler_test_stacks, scheduler_test_tasks)
     }
 
     #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn enqueue_smoke_rwsem_task(&mut self) -> EventResult {
-        self.scheduler.enqueue_smoke_rwsem_task()
-    }
-
-    #[cfg_attr(not(app_smoke), allow(dead_code))]
-    pub fn dequeue_smoke_rwsem_task(&mut self) -> EventResult {
-        self.scheduler.dequeue_smoke_rwsem_task()
+        let Self {
+            cpu_group,
+            scheduler_test_tasks,
+            ..
+        } = self;
+        cpu_group
+            .boot_scheduler_mut()
+            .ok_or_else(missing_scheduler_error)?
+            .enqueue_smoke_rwsem_task(scheduler_test_tasks)
     }
 
     #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn setup_smoke_rwlock_task(&mut self, entry: extern "C" fn() -> !) -> EventResult {
-        self.scheduler.setup_smoke_rwlock_task(entry)
+        let Self {
+            cpu_group,
+            scheduler_test_tasks,
+            scheduler_test_stacks,
+            ..
+        } = self;
+        let Some(scheduler) = cpu_group.boot_scheduler_mut() else {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                State::Base,
+                State::Online,
+                State::Online,
+            );
+        };
+        scheduler.setup_smoke_rwlock_task(entry, scheduler_test_stacks, scheduler_test_tasks)
     }
 
     #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn enqueue_smoke_rwlock_task(&mut self) -> EventResult {
-        self.scheduler.enqueue_smoke_rwlock_task()
-    }
-
-    #[cfg_attr(not(app_smoke), allow(dead_code))]
-    pub fn dequeue_smoke_rwlock_task(&mut self) -> EventResult {
-        self.scheduler.dequeue_smoke_rwlock_task()
+        let Self {
+            cpu_group,
+            scheduler_test_tasks,
+            ..
+        } = self;
+        cpu_group
+            .boot_scheduler_mut()
+            .ok_or_else(missing_scheduler_error)?
+            .enqueue_smoke_rwlock_task(scheduler_test_tasks)
     }
 
     pub fn schedule_current(&mut self) -> EventResult {
         let current_task = self.current_task().map_err(current_task_event_error)?;
+        let sender_flow_ref = self
+            .current_task_flow_ref()
+            .map_err(current_task_event_error)?;
         let current_cpu = self.current_cpu().map_err(current_task_event_error)?;
+        self.schedule_from_refs(
+            sender_flow_ref,
+            current_task.task_ref(),
+            current_cpu.cpu_ref(),
+        )
+    }
+
+    fn schedule_from_refs(
+        &mut self,
+        sender_flow_ref: TaskFlowRef,
+        current_task_ref: TaskRef,
+        current_cpu_ref: crate::objects::cpu::CpuRef,
+    ) -> EventResult {
         let Self {
-            scheduler,
             cpu_group,
+            scheduler_test_tasks,
             kernel_init_task,
             kernel_init_flow,
             user_app_flow,
@@ -977,7 +1130,8 @@ impl Context {
             user_task_set,
             ..
         } = self;
-        let Some(local_interrupt) = cpu_group.boot_cpu_local_interrupt_mut() else {
+        let Some((scheduler, local_interrupt)) = cpu_group.boot_scheduler_and_local_interrupt_mut()
+        else {
             return crate::objects::state::failed_condition(
                 crate::objects::state::LifecycleEvent::Setup,
                 crate::objects::state::State::Base,
@@ -985,9 +1139,7 @@ impl Context {
                 crate::objects::state::State::Online,
             );
         };
-        scheduler.schedule(
-            current_task,
-            current_cpu,
+        let mut task_access = SchedulerTaskAccess::new(
             kernel_init_task,
             kernel_init_flow,
             user_app_flow,
@@ -995,16 +1147,47 @@ impl Context {
             kthreadd_flow,
             boot_idle_flow,
             user_task_set,
+            scheduler_test_tasks,
+        );
+        scheduler.schedule(
+            sender_flow_ref,
+            current_task_ref,
+            current_cpu_ref,
+            &mut task_access,
             local_interrupt,
         )?;
         let current_task = self.current_task().map_err(current_task_event_error)?;
-        if self.scheduler.switch_to_entry_prev_ref() != current_task.task_ref()
-            && self.scheduler.switch_to_entry_next_ref() == current_task.task_ref()
-            && self.scheduler.switch_to_exit_current_ref() != current_task.task_ref()
+        if self.scheduler().switch_to_entry_prev_ref() != current_task.task_ref()
+            && self.scheduler().switch_to_entry_next_ref() == current_task.task_ref()
+            && self.scheduler().schedule_exit_current_ref() != current_task.task_ref()
         {
-            self.scheduler.record_task_switch_finish(current_task)?;
+            self.scheduler_mut().record_schedule_exit(current_task)?;
         }
         Ok(())
+    }
+
+    #[cfg(app_smoke)]
+    pub(crate) fn schedule_from_refs_for_test(
+        &mut self,
+        sender_flow_ref: TaskFlowRef,
+        current_task_ref: TaskRef,
+        current_cpu_ref: crate::objects::cpu::CpuRef,
+    ) -> EventResult {
+        self.schedule_from_refs(sender_flow_ref, current_task_ref, current_cpu_ref)
+    }
+
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
+    pub fn declare_current_scheduler_sleep(&mut self) -> EventResult {
+        let task_ref = self.current_task_ref().map_err(current_task_event_error)?;
+        let Some(task) = self.task_mut_for_ref(task_ref) else {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                State::Base,
+                State::OnCpu,
+                State::OnCpu,
+            );
+        };
+        task.declare_scheduler_sleep()
     }
 
     pub fn replace_current_user_task(
@@ -1046,23 +1229,50 @@ impl Context {
                 State::OnCpu,
             );
         }
-        self.scheduler
-            .replace_user_task_on_runqueue(&self.cpu_group, previous, next, next_pid)?;
-        self.scheduler.prepare_simulated_task_switch(
-            previous,
-            next,
-            current_task,
-            &self.kernel_init_task,
-            &self.kthreadd_task,
-            &self.user_task_set,
-        )?;
+        self.scheduler_mut()
+            .replace_user_task_on_runqueue(previous, next, next_pid)?;
+        {
+            let Self {
+                cpu_group,
+                scheduler_test_tasks,
+                kernel_init_task,
+                kernel_init_flow,
+                user_app_flow,
+                kthreadd_task,
+                kthreadd_flow,
+                boot_idle_flow,
+                user_task_set,
+                ..
+            } = self;
+            let scheduler = cpu_group.boot_scheduler_mut().ok_or_else(|| {
+                EventError::failed(
+                    EventErrorCode::ConditionFailed,
+                    LifecycleEvent::Setup,
+                    State::Base,
+                    State::Online,
+                    State::Online,
+                )
+            })?;
+            let task_access = SchedulerTaskAccess::new(
+                kernel_init_task,
+                kernel_init_flow,
+                user_app_flow,
+                kthreadd_task,
+                kthreadd_flow,
+                boot_idle_flow,
+                user_task_set,
+                scheduler_test_tasks,
+            );
+            scheduler.prepare_simulated_task_switch(previous, next, current_task, &task_access)?;
+        }
         self.establish_simulated_task_identity(next)?;
         self.finish_task_switch(next)
     }
 
     pub fn finish_task_switch(&mut self, next: crate::objects::task::TaskRef) -> EventResult {
         let Self {
-            scheduler,
+            cpu_group,
+            scheduler_test_tasks,
             kernel_init_task,
             kernel_init_flow,
             user_app_flow,
@@ -1072,8 +1282,15 @@ impl Context {
             user_task_set,
             ..
         } = self;
-        scheduler.continue_task_after_switch(
-            next,
+        let Some(scheduler) = cpu_group.boot_scheduler_mut() else {
+            return failed_condition(
+                LifecycleEvent::Continue,
+                State::Base,
+                State::Online,
+                State::Online,
+            );
+        };
+        let mut task_access = SchedulerTaskAccess::new(
             kernel_init_task,
             kernel_init_flow,
             user_app_flow,
@@ -1081,12 +1298,14 @@ impl Context {
             kthreadd_flow,
             boot_idle_flow,
             user_task_set,
-        )?;
+            scheduler_test_tasks,
+        );
+        scheduler.continue_task_after_switch(next, &mut task_access)?;
         self.refresh_current_cpu_trap_entry_task(next)?;
         let current_task = self
             .resolve_current_task_identity(crate::arch::riscv64::csr::read_tp(), next)
             .map_err(current_task_event_error)?;
-        self.scheduler.record_task_switch_finish(current_task)
+        self.scheduler_mut().record_schedule_exit(current_task)
     }
 
     fn refresh_current_cpu_trap_entry_task(&mut self, task_ref: TaskRef) -> EventResult {
@@ -1127,14 +1346,37 @@ impl Context {
     pub fn smoke_identity_switch(&mut self) -> EventResult {
         let current_task = self.current_task().map_err(current_task_event_error)?;
         let current = current_task.task_ref();
-        self.scheduler.prepare_simulated_task_switch(
-            current,
-            current,
-            current_task,
-            &self.kernel_init_task,
-            &self.kthreadd_task,
-            &self.user_task_set,
-        )
+        let Self {
+            cpu_group,
+            scheduler_test_tasks,
+            kernel_init_task,
+            kernel_init_flow,
+            user_app_flow,
+            kthreadd_task,
+            kthreadd_flow,
+            boot_idle_flow,
+            user_task_set,
+            ..
+        } = self;
+        let Some(scheduler) = cpu_group.boot_scheduler_mut() else {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                State::Base,
+                State::Online,
+                State::Online,
+            );
+        };
+        let task_access = SchedulerTaskAccess::new(
+            kernel_init_task,
+            kernel_init_flow,
+            user_app_flow,
+            kthreadd_task,
+            kthreadd_flow,
+            boot_idle_flow,
+            user_task_set,
+            scheduler_test_tasks,
+        );
+        scheduler.prepare_simulated_task_switch(current, current, current_task, &task_access)
     }
 
     fn establish_simulated_task_identity(&self, task_ref: TaskRef) -> EventResult {
@@ -1144,7 +1386,7 @@ impl Context {
             TaskRef::KTHREADD => Some(self.kthreadd_task.task() as *const Task as usize),
             _ if task_ref.is_user() => self.user_task_set.task_identity_ptr(task_ref),
             _ => self
-                .scheduler
+                .scheduler_test_tasks
                 .current_task_candidate_by_ref(task_ref)
                 .map(|candidate| candidate.task as *const Task as usize),
         };
@@ -1164,28 +1406,68 @@ impl Context {
             let Some(task_ref) = self.user_task_set.prepare_active_task_for_shutdown() else {
                 return false;
             };
-            self.scheduler
-                .suspend_task(
-                    task_ref,
-                    &mut self.kernel_init_task,
-                    &mut self.kthreadd_task,
-                    &mut self.user_task_set,
-                )
-                .is_ok()
+            let Self {
+                cpu_group,
+                scheduler_test_tasks,
+                kernel_init_task,
+                kernel_init_flow,
+                user_app_flow,
+                kthreadd_task,
+                kthreadd_flow,
+                boot_idle_flow,
+                user_task_set,
+                ..
+            } = self;
+            let mut task_access = SchedulerTaskAccess::new(
+                kernel_init_task,
+                kernel_init_flow,
+                user_app_flow,
+                kthreadd_task,
+                kthreadd_flow,
+                boot_idle_flow,
+                user_task_set,
+                scheduler_test_tasks,
+            );
+            cpu_group
+                .boot_scheduler_mut()
+                .is_some_and(|scheduler| scheduler.suspend_task(task_ref, &mut task_access).is_ok())
         } else {
             if self
                 .user_app_flow
                 .cleanup_active_flow_for_shutdown(&mut self.kernel_init_task)
                 .is_err()
-                || self
-                    .scheduler
-                    .suspend_task(
-                        crate::objects::task::TaskRef::KERNEL_INIT,
-                        &mut self.kernel_init_task,
-                        &mut self.kthreadd_task,
-                        &mut self.user_task_set,
-                    )
-                    .is_err()
+                || {
+                    let Self {
+                        cpu_group,
+                        scheduler_test_tasks,
+                        kernel_init_task,
+                        kernel_init_flow,
+                        user_app_flow,
+                        kthreadd_task,
+                        kthreadd_flow,
+                        boot_idle_flow,
+                        user_task_set,
+                        ..
+                    } = self;
+                    let mut task_access = SchedulerTaskAccess::new(
+                        kernel_init_task,
+                        kernel_init_flow,
+                        user_app_flow,
+                        kthreadd_task,
+                        kthreadd_flow,
+                        boot_idle_flow,
+                        user_task_set,
+                        scheduler_test_tasks,
+                    );
+                    cpu_group.boot_scheduler_mut().is_none_or(|scheduler| {
+                        scheduler
+                            .suspend_task(
+                                crate::objects::task::TaskRef::KERNEL_INIT,
+                                &mut task_access,
+                            )
+                            .is_err()
+                    })
+                }
             {
                 return false;
             }
@@ -1210,14 +1492,39 @@ impl Context {
         if previous.same_identity(next) {
             return Ok(());
         }
-        self.scheduler.prepare_simulated_task_switch(
-            previous,
-            next,
-            current_task,
-            &self.kernel_init_task,
-            &self.kthreadd_task,
-            &self.user_task_set,
-        )?;
+        {
+            let Self {
+                cpu_group,
+                scheduler_test_tasks,
+                kernel_init_task,
+                kernel_init_flow,
+                user_app_flow,
+                kthreadd_task,
+                kthreadd_flow,
+                boot_idle_flow,
+                user_task_set,
+                ..
+            } = self;
+            let Some(scheduler) = cpu_group.boot_scheduler_mut() else {
+                return failed_condition(
+                    LifecycleEvent::Setup,
+                    State::Base,
+                    State::Online,
+                    State::Online,
+                );
+            };
+            let task_access = SchedulerTaskAccess::new(
+                kernel_init_task,
+                kernel_init_flow,
+                user_app_flow,
+                kthreadd_task,
+                kthreadd_flow,
+                boot_idle_flow,
+                user_task_set,
+                scheduler_test_tasks,
+            );
+            scheduler.prepare_simulated_task_switch(previous, next, current_task, &task_access)?;
+        }
         self.establish_simulated_task_identity(next)?;
         self.finish_task_switch(next)
     }
@@ -1239,14 +1546,39 @@ impl Context {
         if previous.same_identity(next) {
             return Ok(());
         }
-        self.scheduler.prepare_simulated_task_switch(
-            previous,
-            next,
-            current_task,
-            &self.kernel_init_task,
-            &self.kthreadd_task,
-            &self.user_task_set,
-        )?;
+        {
+            let Self {
+                cpu_group,
+                scheduler_test_tasks,
+                kernel_init_task,
+                kernel_init_flow,
+                user_app_flow,
+                kthreadd_task,
+                kthreadd_flow,
+                boot_idle_flow,
+                user_task_set,
+                ..
+            } = self;
+            let Some(scheduler) = cpu_group.boot_scheduler_mut() else {
+                return failed_condition(
+                    LifecycleEvent::Setup,
+                    State::Base,
+                    State::Online,
+                    State::Online,
+                );
+            };
+            let task_access = SchedulerTaskAccess::new(
+                kernel_init_task,
+                kernel_init_flow,
+                user_app_flow,
+                kthreadd_task,
+                kthreadd_flow,
+                boot_idle_flow,
+                user_task_set,
+                scheduler_test_tasks,
+            );
+            scheduler.prepare_simulated_task_switch(previous, next, current_task, &task_access)?;
+        }
         self.establish_simulated_task_identity(next)?;
         self.finish_task_switch(next)
     }
@@ -1254,12 +1586,14 @@ impl Context {
     #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn mark_smoke_scheduler_entry_ran(&mut self) -> EventResult {
         self.finish_task_switch(crate::objects::task::TaskRef::SMOKE_SCHEDULER)?;
-        self.scheduler.smoke_scheduler_task_mut().mark_entry_ran()
+        self.scheduler_test_tasks
+            .smoke_scheduler_task_mut()
+            .mark_entry_ran()
     }
 
     #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn mark_smoke_scheduler_yielded_back(&mut self) -> EventResult {
-        self.scheduler
+        self.scheduler_test_tasks
             .smoke_scheduler_task_mut()
             .mark_yielded_back()
     }
@@ -1267,34 +1601,46 @@ impl Context {
     #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn mark_smoke_mutex_entry_ran(&mut self) -> EventResult {
         self.finish_task_switch(crate::objects::task::TaskRef::SMOKE_MUTEX)?;
-        self.scheduler.smoke_mutex_task_mut().mark_entry_ran()
+        self.scheduler_test_tasks
+            .smoke_mutex_task_mut()
+            .mark_entry_ran()
     }
 
     #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn mark_smoke_mutex_yielded_back(&mut self) -> EventResult {
-        self.scheduler.smoke_mutex_task_mut().mark_yielded_back()
+        self.scheduler_test_tasks
+            .smoke_mutex_task_mut()
+            .mark_yielded_back()
     }
 
     #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn mark_smoke_rwsem_entry_ran(&mut self) -> EventResult {
         self.finish_task_switch(crate::objects::task::TaskRef::SMOKE_RWSEM)?;
-        self.scheduler.smoke_rwsem_task_mut().mark_entry_ran()
+        self.scheduler_test_tasks
+            .smoke_rwsem_task_mut()
+            .mark_entry_ran()
     }
 
     #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn mark_smoke_rwsem_yielded_back(&mut self) -> EventResult {
-        self.scheduler.smoke_rwsem_task_mut().mark_yielded_back()
+        self.scheduler_test_tasks
+            .smoke_rwsem_task_mut()
+            .mark_yielded_back()
     }
 
     #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn mark_smoke_rwlock_entry_ran(&mut self) -> EventResult {
         self.finish_task_switch(crate::objects::task::TaskRef::SMOKE_RWLOCK)?;
-        self.scheduler.smoke_rwlock_task_mut().mark_entry_ran()
+        self.scheduler_test_tasks
+            .smoke_rwlock_task_mut()
+            .mark_entry_ran()
     }
 
     #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn mark_smoke_rwlock_yielded_back(&mut self) -> EventResult {
-        self.scheduler.smoke_rwlock_task_mut().mark_yielded_back()
+        self.scheduler_test_tasks
+            .smoke_rwlock_task_mut()
+            .mark_yielded_back()
     }
 
     pub fn platform_driver_register(&mut self, driver: DeviceDriverRef) -> InitcallReturn {
@@ -1336,6 +1682,16 @@ fn current_task_event_error(error: CurrentTaskError) -> EventError {
         State::Online,
         State::OnCpu,
         State::OnCpu,
+    )
+}
+
+fn missing_scheduler_error() -> EventError {
+    EventError::failed(
+        EventErrorCode::ConditionFailed,
+        LifecycleEvent::Setup,
+        State::Base,
+        State::Online,
+        State::Online,
     )
 }
 

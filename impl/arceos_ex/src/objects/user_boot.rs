@@ -3562,6 +3562,10 @@ impl UserTaskSet {
             .unwrap_or(false)
     }
 
+    pub(crate) fn task_state(&self, task_ref: TaskRef) -> Option<State> {
+        self.slot_for_ref(task_ref).map(|slot| slot.task.state())
+    }
+
     pub(crate) fn task_identity_ptr(&self, task_ref: TaskRef) -> Option<usize> {
         self.slot_for_ref(task_ref)
             .map(|slot| &slot.task as *const Task as usize)
@@ -3650,6 +3654,36 @@ impl UserTaskSet {
     }
 
     pub fn continue_task(&mut self, task_ref: TaskRef, cpu_ref: super::cpu::CpuRef) -> EventResult {
+        self.accept_task_continue(task_ref)?;
+        self.continue_task_flow(task_ref, cpu_ref)
+    }
+
+    pub(crate) fn accept_task_continue(&mut self, task_ref: TaskRef) -> EventResult {
+        let Some(index) = task_ref.user_slot() else {
+            return failed_condition(
+                LifecycleEvent::Continue,
+                State::Destroyed,
+                State::Online,
+                State::OnCpu,
+            );
+        };
+        let slot = &mut self.task_slots[index];
+        if !slot.occupied || !slot.task_ref().same_identity(task_ref) {
+            return failed_condition(
+                LifecycleEvent::Continue,
+                slot.state(),
+                State::Online,
+                State::OnCpu,
+            );
+        }
+        slot.task.continue_on_cpu()
+    }
+
+    pub(crate) fn continue_task_flow(
+        &mut self,
+        task_ref: TaskRef,
+        cpu_ref: super::cpu::CpuRef,
+    ) -> EventResult {
         let Some(index) = task_ref.user_slot() else {
             return failed_condition(
                 LifecycleEvent::Continue,
@@ -3668,7 +3702,6 @@ impl UserTaskSet {
             );
         }
         let UserTaskStorageSlot { task, flows, .. } = slot;
-        task.continue_on_cpu()?;
         let flow_index = slot.active_flow_slot;
         if !task.active_flow().is_valid() && flows[flow_index].state() == State::Base {
             if !flows[flow_index].bind_cpu_ref(cpu_ref) {
@@ -3721,6 +3754,35 @@ impl UserTaskSet {
             slot.task.cleanup()?;
         } else {
             slot.task.suspend_from_cpu()?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn continue_active_flow(&self, task_ref: TaskRef) -> EventResult {
+        let Some(index) = task_ref.user_slot() else {
+            return failed_condition(
+                LifecycleEvent::Continue,
+                State::Destroyed,
+                State::Online,
+                State::Online,
+            );
+        };
+        let slot = &self.task_slots[index];
+        let flow = &slot.flows[slot.active_flow_slot];
+        if !slot.occupied
+            || !slot.task_ref().same_identity(task_ref)
+            || slot.task.state() != State::OnCpu
+            || flow.state() != State::Online
+            || !flow.active()
+            || !slot.task.active_flow().same_identity(flow.flow_ref())
+            || !super::task_flow::task_flow_execution_guard_satisfied(flow, &slot.task)
+        {
+            return failed_condition(
+                LifecycleEvent::Continue,
+                flow.state(),
+                State::Online,
+                State::Online,
+            );
         }
         Ok(())
     }

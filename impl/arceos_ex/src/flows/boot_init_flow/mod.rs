@@ -296,9 +296,10 @@ pub fn enable_after_boot_init_schedule_handoff() -> ! {
     schedule()
 }
 
-/// Lowers Kernel.Enable's Scheduler.Action::Schedule after BootInitFlow has
-/// committed Online. The call returns only after a later switch restores the
-/// original BootTask.
+/// Lowers the active BootIdleFlow's Schedule signal after BootInitFlow has
+/// committed Online. Kernel.Enable remains the enclosing continuation but is
+/// not the Scheduler signal sender. The call returns only after a later switch
+/// restores the original BootTask.
 fn schedule() -> ! {
     if !crate::systems::kernel::enable_in_progress() || !is_online() {
         crate::phases::shutdown_on_error(
@@ -339,15 +340,15 @@ pub(crate) fn schedule_handoff_is_online() -> bool {
 pub fn dispatch_ready() -> bool {
     let ctx = crate::context::context_ref();
     is_online()
-        && ctx.scheduler.schedule_passes() != 0
-        && ctx.scheduler.current_runqueue_resolve_passes() != 0
-        && ctx.scheduler.pick_next_task_passes() != 0
-        && ctx.scheduler.switch_to_passes() != 0
-        && ctx.scheduler.scheduler_finish_task_switch_count() != 0
+        && ctx.scheduler().schedule_passes() != 0
+        && ctx.scheduler().current_runqueue_resolve_passes() != 0
+        && ctx.scheduler().pick_next_task_passes() != 0
+        && ctx.scheduler().switch_to_passes() != 0
+        && ctx.scheduler().scheduler_finish_task_switch_count() != 0
         && ctx
             .current_task_ref()
             .is_ok_and(|task_ref| task_ref.same_identity(ctx.kernel_init_task.task_ref()))
-        && ctx.scheduler.kernel_init_stack_switch_started_count() == 1
+        && ctx.scheduler().kernel_init_stack_switch_started_count() == 1
 }
 
 pub fn is_prepared() -> bool {

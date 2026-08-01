@@ -51,6 +51,17 @@ impl TaskSwitchContext {
             && self.sp <= self.kernel_stack_top()
     }
 
+    /// A running prev context is a save destination, not yet a restore
+    /// source. Its saved `sp` may still be the first-switch dummy value; the
+    /// architecture switch overwrites it. Preflight the live stack against
+    /// the installed bounds instead.
+    pub const fn physical_save_ready(&self, live_sp: usize) -> bool {
+        self.kernel_stack_base() != 0
+            && self.kernel_stack_top() > self.kernel_stack_base()
+            && live_sp >= self.kernel_stack_base()
+            && live_sp <= self.kernel_stack_top()
+    }
+
     #[cfg(app_smoke)]
     pub const fn sp(&self) -> usize {
         self.sp

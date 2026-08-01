@@ -116,8 +116,8 @@ preset()  ← 由 BootInitFlow.setup_after_mm_core_init() 调用
 | Object | Required State |
 |---|---|
 | MmCoreInitPhase | Online |
-| Scheduler | Online |
-| BootRunQueue | Ready |
+| All possible CPU Scheduler instances | Ready |
+| Cpu0Scheduler | Online |
 | BootTask | OnCpu |
 | BootIdleSetup | Ready |
 | RadixTree | Ready |

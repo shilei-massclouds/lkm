@@ -90,6 +90,8 @@ pub mod rwlock;
 pub mod sbi;
 pub mod sched_init_boundaries;
 pub mod scheduler;
+pub mod scheduler_shared;
+pub mod scheduler_task_access;
 pub mod selected_payload;
 pub mod smp_bringup;
 pub mod soc;

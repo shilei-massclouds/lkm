@@ -262,7 +262,7 @@ object SecondaryIdleTaskSet: TaskSet {
                 depends_on {
                     PreSmpInitPhase.state == State::Online;
                     CpuGroup.state == State::Ready;
-                    Scheduler.state == State::Online;
+                    Cpu0Scheduler.state == State::Online;
                     PerCpuStorage.state == State::Ready;
                 }
 
@@ -943,11 +943,28 @@ object SecondaryCpuOnlineAck: HardwareObject {
                     }
                 }
 
+                drives {
+                    Cpu1Scheduler.Transition::Enable;
+                    Cpu2Scheduler.Transition::Enable;
+                    Cpu3Scheduler.Transition::Enable;
+                    Cpu4Scheduler.Transition::Enable;
+                    Cpu5Scheduler.Transition::Enable;
+                    Cpu6Scheduler.Transition::Enable;
+                    Cpu7Scheduler.Transition::Enable;
+                }
+
                 ensures {
                     ap_online_acknowledged(CpuGroup);
                     done_up_completion_observed(CpuGroup);
                     secondary_cpus_online_after_ap_ack(CpuGroup);
                     secondary_cpus_online(CpuGroup);
+                    Cpu1Scheduler.state == State::Online;
+                    Cpu2Scheduler.state == State::Online;
+                    Cpu3Scheduler.state == State::Online;
+                    Cpu4Scheduler.state == State::Online;
+                    Cpu5Scheduler.state == State::Online;
+                    Cpu6Scheduler.state == State::Online;
+                    Cpu7Scheduler.state == State::Online;
                     smp_concurrency_open(CpuGroup);
                     ap_idle_entry_detail_deferred(CpuGroup);
                     done_up_wait_lock_guard_used(CpuHotplugSyncSet, DoneUpWaitLock);

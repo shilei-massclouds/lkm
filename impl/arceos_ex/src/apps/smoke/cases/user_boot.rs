@@ -2167,16 +2167,17 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
             return;
         };
         let Some(runqueue_ref) = ctx
-            .scheduler
-            .select_runqueue_for_task(child_pid, &ctx.cpu_group)
+            .scheduler_mut()
+            .select_scheduler_for_task(child_pid)
             .ok()
         else {
             assertions.assert("pid1 plain fork runqueue select", false);
             return;
         };
+        let task_ref = ctx.user_task_set.active_task_ref();
         if ctx
-            .scheduler
-            .enqueue_task_on_runqueue(child_pid, ctx.user_task_set.active_task_ref(), runqueue_ref)
+            .scheduler_mut()
+            .enqueue_task_on_scheduler(child_pid, task_ref, runqueue_ref)
             .is_err()
             || !ctx.user_task_set.mark_enqueued()
             || !ctx
@@ -2763,13 +2764,12 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
             || ctx
                 .commit_terminal_kernel_init_dispatch(exiting_task)
                 .is_err()
-            || ctx
-                .scheduler
-                .dequeue_user_child_from_runqueue(
-                    &ctx.cpu_group,
-                    ctx.user_task_set.last_exited_task_ref(),
-                )
-                .is_err()
+            || {
+                let exited_ref = ctx.user_task_set.last_exited_task_ref();
+                ctx.scheduler_mut()
+                    .dequeue_user_child_from_runqueue(exited_ref)
+            }
+            .is_err()
             || !ctx.user_task_set.release_reaped_active_task_record()
         {
             assertions.assert("pid1 plain child restores outer parent", false);
@@ -3074,7 +3074,18 @@ fn archive_completed_vfork_child(index: usize) -> Option<usize> {
             true,
             true,
         )?;
+        let child_pid = ctx.user_task_set.pid();
         let child_task = ctx.user_task_set.active_task_ref();
+        let runqueue_ref = ctx
+            .scheduler_mut()
+            .select_scheduler_for_task(child_pid)
+            .ok()?;
+        ctx.scheduler_mut()
+            .enqueue_task_on_scheduler(child_pid, child_task, runqueue_ref)
+            .ok()?;
+        if !ctx.user_task_set.mark_enqueued() {
+            return None;
+        }
         ctx.commit_user_dispatch(child_task).ok()?;
     }
 
@@ -3095,6 +3106,14 @@ fn archive_completed_vfork_child(index: usize) -> Option<usize> {
         let ctx = context();
         if ctx
             .commit_terminal_kernel_init_dispatch(exiting_task)
+            .is_err()
+        {
+            return None;
+        }
+        let exited_ref = ctx.user_task_set.last_exited_task_ref();
+        if ctx
+            .scheduler_mut()
+            .dequeue_user_child_from_runqueue(exited_ref)
             .is_err()
         {
             return None;
@@ -3539,8 +3558,7 @@ fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
         );
         assertions.assert(
             "observed plain fork preserves shell runqueue visibility",
-            ctx.scheduler
-                .boot_runqueue()
+            ctx.scheduler()
                 .contains_task_ref(ctx.user_task_set.active_task_ref()),
         );
         assertions.assert(
@@ -3639,17 +3657,15 @@ fn start_active_vfork_child(index: usize) -> Option<usize> {
 
     {
         let ctx = context();
-        if !ctx.scheduler.boot_runqueue().contains_task(USER_CHILD_PID) {
+        if !ctx.scheduler().contains_task(USER_CHILD_PID) {
+            let task_pid = ctx.user_task_set.pid();
+            let task_ref = ctx.user_task_set.active_task_ref();
             let runqueue_ref = ctx
-                .scheduler
-                .select_runqueue_for_task(ctx.user_task_set.pid(), &ctx.cpu_group)
+                .scheduler_mut()
+                .select_scheduler_for_task(task_pid)
                 .ok()?;
-            ctx.scheduler
-                .enqueue_task_on_runqueue(
-                    ctx.user_task_set.pid(),
-                    ctx.user_task_set.active_task_ref(),
-                    runqueue_ref,
-                )
+            ctx.scheduler_mut()
+                .enqueue_task_on_scheduler(task_pid, task_ref, runqueue_ref)
                 .ok()?;
         }
         if !ctx.user_task_set.mark_enqueued() {
@@ -3675,7 +3691,10 @@ fn copy_user_process_for_current_slot(allow_nested_vfork: bool) -> bool {
                 src_process: &ctx.kernel_init_user_state,
                 dst_process: &ctx.user_task_set,
                 root_pid_namespace: &ctx.root_pid_namespace,
-                scheduler: &ctx.scheduler,
+                scheduler: ctx
+                    .cpu_group
+                    .boot_scheduler()
+                    .expect("CPU0 Scheduler must be published"),
                 cpu_group: &ctx.cpu_group,
                 fs_struct: &ctx.fs_struct,
                 files_struct: &ctx.files_struct,

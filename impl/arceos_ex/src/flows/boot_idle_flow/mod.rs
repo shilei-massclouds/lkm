@@ -10,7 +10,8 @@ use crate::{
         rest_init::{
             KernelInitFlow, KernelInitTask, KthreaddFlow, KthreaddReadyGate, KthreaddTask,
         },
-        scheduler::Scheduler,
+        scheduler::{Scheduler, SchedulerTestTasks},
+        scheduler_task_access::SchedulerTaskAccess,
         state::{EventResult, LifecycleEvent, State, failed_condition},
         task::{Task, TaskRef},
         task_flow::{TaskFlow, TaskFlowRef},
@@ -465,6 +466,7 @@ impl BootIdleFlow {
     pub fn run_idle_loop(
         &mut self,
         scheduler: &mut Scheduler,
+        test_tasks: &mut SchedulerTestTasks,
         current_task: CurrentTask,
         current_cpu: CurrentCpu,
         kernel_init_task: &mut KernelInitTask,
@@ -489,6 +491,7 @@ impl BootIdleFlow {
 
         self.do_idle_cycle(
             scheduler,
+            test_tasks,
             current_task,
             current_cpu,
             kernel_init_task,
@@ -509,6 +512,7 @@ impl BootIdleFlow {
     fn do_idle_cycle(
         &mut self,
         scheduler: &mut Scheduler,
+        test_tasks: &mut SchedulerTestTasks,
         current_task: CurrentTask,
         current_cpu: CurrentCpu,
         kernel_init_task: &mut KernelInitTask,
@@ -536,6 +540,7 @@ impl BootIdleFlow {
         self.observe_need_resched(boot_task)?;
         self.schedule_if_need_resched(
             scheduler,
+            test_tasks,
             current_task,
             current_cpu,
             kernel_init_task,
@@ -625,6 +630,7 @@ impl BootIdleFlow {
     fn schedule_if_need_resched(
         &mut self,
         scheduler: &mut Scheduler,
+        test_tasks: &mut SchedulerTestTasks,
         current_task: CurrentTask,
         current_cpu: CurrentCpu,
         kernel_init_task: &mut KernelInitTask,
@@ -652,9 +658,8 @@ impl BootIdleFlow {
         }
 
         self.idle_schedule_requested = true;
-        scheduler.schedule_idle(
-            current_task,
-            current_cpu,
+        let sender_flow_ref = self.flow_ref();
+        let mut task_access = SchedulerTaskAccess::new(
             kernel_init_task,
             kernel_init_flow,
             user_app_flow,
@@ -662,6 +667,13 @@ impl BootIdleFlow {
             kthreadd_flow,
             self,
             user_task_set,
+            test_tasks,
+        );
+        scheduler.schedule_idle(
+            sender_flow_ref,
+            current_task.task_ref(),
+            current_cpu.cpu_ref(),
+            &mut task_access,
             local_interrupt,
         )?;
         self.idle_schedule_returned = true;

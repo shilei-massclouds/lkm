@@ -1,5 +1,5 @@
 {
-  "total_checkpoints": 476,
+  "total_checkpoints": 479,
   "mapping_kind_counts": [
     {
       "mapping_kind": "exact",
@@ -7,25 +7,25 @@
     },
     {
       "mapping_kind": "range",
-      "count": 14
+      "count": 21
     },
     {
       "mapping_kind": "unmapped",
-      "count": 359
+      "count": 355
     }
   ],
   "confidence_counts": [
     {
       "confidence": "none",
-      "count": 359
+      "count": 355
+    },
+    {
+      "confidence": "high",
+      "count": 62
     },
     {
       "confidence": "medium",
       "count": 62
-    },
-    {
-      "confidence": "high",
-      "count": 55
     }
   ],
   "mapped_linux_file_counts": [
@@ -36,6 +36,10 @@
     {
       "linux_file": "arch/riscv/kernel/head.S",
       "count": 14
+    },
+    {
+      "linux_file": "kernel/sched/core.c",
+      "count": 8
     },
     {
       "linux_file": "arch/riscv/mm/init.c",
@@ -94,10 +98,6 @@
       "count": 1
     },
     {
-      "linux_file": "kernel/sched/core.c",
-      "count": 1
-    },
-    {
       "linux_file": "kernel/sched/idle.c",
       "count": 1
     },
@@ -107,10 +107,6 @@
     }
   ],
   "unmapped_checkpoint_family_counts": [
-    {
-      "family": "Scheduler",
-      "count": 8
-    },
     {
       "family": "CpuHotplugSync",
       "count": 7
@@ -153,6 +149,10 @@
     },
     {
       "family": "PayloadHandoffPreparePhase",
+      "count": 4
+    },
+    {
+      "family": "Scheduler",
       "count": 4
     },
     {

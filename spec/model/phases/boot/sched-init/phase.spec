@@ -6,7 +6,7 @@
  * foundation and early asynchronous support while interrupts are still closed.
  */
 
-lock BootRunQueueLock: RawSpinLock;
+lock Cpu0SchedulerLock: RawSpinLock;
 lock BootIdlePiLock: RawSpinLock;
 
 context RunQueueRootAttachContext: ResourceExclusiveContext {
@@ -15,22 +15,21 @@ context RunQueueRootAttachContext: ResourceExclusiveContext {
      * rq->__lock through rq_lock_irqsave()/rq_unlock_irqrestore().
      */
     guard {
-        lock_ref: BootRunQueueLock;
+        lock_ref: Cpu0SchedulerLock;
 
         entered_by {
-            BootRunQueueLock.Transition::LockIrqSave;
+            Cpu0SchedulerLock.Transition::LockIrqSave;
         }
 
         exited_by {
-            BootRunQueueLock.Transition::UnlockIrqRestore;
+            Cpu0SchedulerLock.Transition::UnlockIrqRestore;
         }
     }
 
     obj_refs {
-        BootRunQueue;
+        Cpu0Scheduler;
         BootInitPreemption;
         DefaultSchedRootDomain;
-        Scheduler;
     }
 }
 
@@ -55,12 +54,11 @@ context BootIdlePiLockContext: ResourceExclusiveContext {
     obj_refs {
         BootTask;
         BootInitFlow;
-        BootRunQueue;
-        Scheduler;
+        Cpu0Scheduler;
     }
 }
 
-context BootRunQueueLockContext: ResourceExclusiveContext {
+context BootSchedulerLockContext: ResourceExclusiveContext {
     /*
      * init_idle() takes rq->__lock with raw_spin_rq_lock() while the outer
      * BootIdlePiLockContext already holds idle->pi_lock and has saved and
@@ -69,21 +67,21 @@ context BootRunQueueLockContext: ResourceExclusiveContext {
      * scope without pretending to run a second irq-save protocol.
      */
     guard {
-        lock_ref: BootRunQueueLock;
+        lock_ref: Cpu0SchedulerLock;
 
         entered_by {
-            BootRunQueueLock.Action::Acquire;
+            Cpu0SchedulerLock.Action::Acquire;
         }
 
         exited_by {
-            BootRunQueueLock.Action::Release;
+            Cpu0SchedulerLock.Action::Release;
         }
     }
 
     obj_refs {
-        BootRunQueue;
+        Cpu0Scheduler;
         BootTask;
-        Scheduler;
+        Cpu0Scheduler;
     }
 }
 
@@ -112,8 +110,8 @@ context BootIdleRcuReadSideContext: Context {
     obj_refs {
         BootTask;
         BootInitFlow;
-        BootRunQueue;
-        Scheduler;
+        Cpu0Scheduler;
+        Cpu0Scheduler;
     }
 }
 
@@ -161,7 +159,7 @@ context BitWaitQueueTableInitContext: Context {
 
     obj_refs {
         BitWaitQueueTable;
-        Scheduler;
+        Cpu0Scheduler;
     }
 }
 
@@ -271,6 +269,99 @@ context KernelInitWorkqueueStructMutexContext: ResourceExclusiveContext {
 }
 
 /*
+ * Materialized elements of CPU.owned.scheduler.  The explicit names let both
+ * verifiers address the indexed CPU children; they alias the owned elements
+ * rather than creating additional Scheduler instances or a global singleton.
+ */
+object Cpu0Scheduler: Scheduler {
+    parent: CpuGroup.cpus[0];
+    associations {
+        curr = BootTaskRef;
+        idle = BootTaskRef;
+        stop = BootTaskRef;
+        selected_next = KernelInitTaskRef;
+        canonical_ref = BootSchedulerRef;
+    }
+}
+
+object Cpu1Scheduler: Scheduler {
+    parent: CpuGroup.cpus[1];
+    associations {
+        curr = ApIdleTaskRef;
+        idle = ApIdleTaskRef;
+        stop = ApIdleTaskRef;
+        selected_next = ApIdleTaskRef;
+        canonical_ref = ApSchedulerRef1;
+    }
+}
+
+object Cpu2Scheduler: Scheduler {
+    parent: CpuGroup.cpus[2];
+    associations {
+        curr = ApIdleTaskRef;
+        idle = ApIdleTaskRef;
+        stop = ApIdleTaskRef;
+        selected_next = ApIdleTaskRef;
+        canonical_ref = ApSchedulerRef2;
+    }
+}
+
+object Cpu3Scheduler: Scheduler {
+    parent: CpuGroup.cpus[3];
+    associations {
+        curr = ApIdleTaskRef;
+        idle = ApIdleTaskRef;
+        stop = ApIdleTaskRef;
+        selected_next = ApIdleTaskRef;
+        canonical_ref = ApSchedulerRef3;
+    }
+}
+
+object Cpu4Scheduler: Scheduler {
+    parent: CpuGroup.cpus[4];
+    associations {
+        curr = ApIdleTaskRef;
+        idle = ApIdleTaskRef;
+        stop = ApIdleTaskRef;
+        selected_next = ApIdleTaskRef;
+        canonical_ref = ApSchedulerRef4;
+    }
+}
+
+object Cpu5Scheduler: Scheduler {
+    parent: CpuGroup.cpus[5];
+    associations {
+        curr = ApIdleTaskRef;
+        idle = ApIdleTaskRef;
+        stop = ApIdleTaskRef;
+        selected_next = ApIdleTaskRef;
+        canonical_ref = ApSchedulerRef5;
+    }
+}
+
+object Cpu6Scheduler: Scheduler {
+    parent: CpuGroup.cpus[6];
+    associations {
+        curr = ApIdleTaskRef;
+        idle = ApIdleTaskRef;
+        stop = ApIdleTaskRef;
+        selected_next = ApIdleTaskRef;
+        canonical_ref = ApSchedulerRef6;
+    }
+}
+
+object Cpu7Scheduler: Scheduler {
+    parent: CpuGroup.cpus[7];
+    associations {
+        curr = ApIdleTaskRef;
+        idle = ApIdleTaskRef;
+        stop = ApIdleTaskRef;
+        selected_next = ApIdleTaskRef;
+        canonical_ref = ApSchedulerRef7;
+    }
+}
+
+/*
  * BootInitPreemption 表示 rq_attach_root() 调用点仍在 BootTask/current
  * 身份下执行时的 preemption control 视图。它只用于
  * RunQueueRootAttachContext 的 rq_lock_irqsave() 协议；不能与
@@ -302,214 +393,13 @@ object BootInitPreemption: PreemptionControl {
 }
 
 /*
- * Scheduler 表示启动期调度器基础编排对象。本阶段只要求 boot CPU 的
- * CPU-owned runqueue、CPU-owned idle task 关联和主动调度入口可用；同时记录
- * Linux for_each_possible_cpu() 已基于 CpuGroup possible 集合初始化 runqueue
- * 元数据，并把这些 runqueue attach 到 DefaultSchedRootDomain。完整 SMP 调度
- * 拓扑留给后续阶段。
- */
-object Scheduler: SchedulerObject {
-    initial_state: State::Base;
-
-    state State::Base {
-        transitions {
-            on Transition::Preset -> State::Prepared {
-                depends_on {
-                    MmCoreInitPhase.state == State::Online;
-                    CpuGroup.state == State::Ready;
-                    PerCpuStorage.state == State::Ready;
-                    StaticBranch.state == State::Ready;
-                }
-
-                drives {
-                    DefaultSchedRootDomain.Transition::Setup;
-                    BitWaitQueueTable.Transition::Preset;
-                    BootIdleRcuReadSide.Transition::Preset;
-                }
-
-                ensures {
-                    scheduler_preset_ready(Scheduler);
-                    sched_class_skeletons_deferred(Scheduler);
-                    scheduler_default_root_domain_ready(Scheduler, DefaultSchedRootDomain);
-                    default_sched_root_domain_covers_cpu_group_possible(
-                        DefaultSchedRootDomain,
-                        CpuGroup
-                    );
-                    bit_wait_queue_table_ready(BitWaitQueueTable);
-                    bit_wait_queue_table_bucket_count_matches_wait_table_size(
-                        BitWaitQueueTable
-                    );
-                    bit_wait_queue_table_bucket_waitqueues_ready(BitWaitQueueTable);
-                    bit_wait_queue_table_bucket_locks_ready(BitWaitQueueTable);
-                    bit_wait_queue_table_bucket_lists_empty(BitWaitQueueTable);
-                    rcu_read_side_ready(BootIdleRcuReadSide);
-                    rcu_read_side_incomplete_first_slice(BootIdleRcuReadSide);
-                    rcu_read_side_full_semantics_deferred(BootIdleRcuReadSide);
-                }
-            }
-        }
-    }
-
-    state State::Prepared {
-        invariant {
-            DefaultSchedRootDomain.state == State::Ready;
-            BitWaitQueueTable.state == State::Prepared;
-            BootIdleRcuReadSide.state == State::Prepared;
-            scheduler_preset_ready(Scheduler);
-            sched_class_skeletons_deferred(Scheduler);
-            scheduler_default_root_domain_ready(Scheduler, DefaultSchedRootDomain);
-            bit_wait_queue_table_ready(BitWaitQueueTable);
-            bit_wait_queue_table_bucket_count_matches_wait_table_size(
-                BitWaitQueueTable
-            );
-            bit_wait_queue_table_bucket_waitqueues_ready(BitWaitQueueTable);
-            bit_wait_queue_table_bucket_locks_ready(BitWaitQueueTable);
-            bit_wait_queue_table_bucket_lists_empty(BitWaitQueueTable);
-            default_sched_root_domain_covers_cpu_group_possible(
-                DefaultSchedRootDomain,
-                CpuGroup
-            );
-        }
-
-        transitions {
-            on Transition::Setup -> State::Ready {
-                depends_on {
-                    CpuGroup.state == State::Ready;
-                    PerCpuStorage.state == State::Ready;
-                    BootTask.state == State::OnCpu;
-                    InitMM.state == State::Ready;
-                    BootIdleRcuReadSide.state == State::Prepared;
-                }
-
-                drives {
-                    BootRunQueue.Transition::Setup;
-                    BootIdleSetup.Transition::Setup;
-                }
-
-                ensures {
-                    scheduler_runqueues_ready(Scheduler, CpuGroup);
-                    scheduler_possible_cpu_runqueues_ready(Scheduler, CpuGroup);
-                    scheduler_orchestrates_cpu_owned_runqueues(Scheduler, CpuGroup);
-                    cpu_owns_runqueue(CpuGroup.cpus[0], BootRunQueue);
-                    cpu_owns_idle_task(CpuGroup.cpus[0], BootTask);
-                    cpu_runqueue_idle_is_cpu_idle_task(
-                        CpuGroup.cpus[0],
-                        BootRunQueue,
-                        BootTask
-                    );
-                    task_preemption_control_ready(BootTask);
-                    task_preemption_disabled(BootTask);
-                    boot_runqueue_ready(BootRunQueue, CpuGroup.cpus[0]);
-                    runqueue_ref_targets(BootRunQueueRef, BootRunQueue);
-                    runqueue_ref_ready(BootRunQueueRef);
-                    runqueue_ref_cpu_is(BootRunQueueRef, BootCPURef);
-                    runqueue_ref_targets(CurrentRunQueueRef, BootRunQueue);
-                    runqueue_ref_ready(CurrentRunQueueRef);
-                    runqueue_ref_cpu_is(CurrentRunQueueRef, BootCPURef);
-                    current_runqueue_ref_private_to_cpu(CurrentRunQueueRef, CurrentCPU);
-                    current_runqueue_ref_from_current_task(CurrentRunQueueRef, CurrentCPU, CurrentTaskRef, BootTask, BootCPURef);
-                    boot_task_idle_role_ready(BootTask, BootRunQueue);
-                    current_task_resolved_target_is(BootInitFlow, BootTaskRef, BootTask);
-                    current_task_ref_derived_from_selector(BootTaskRef, BootTask);
-                    boot_cpu_current_is_idle_task(CpuGroup.cpus[0], BootTask);
-                    task_flow_cpu_ref_targets(BootInitFlow, CpuGroup.cpus[0]);
-                    scheduler_possible_cpu_runqueues_attached_to_default_root_domain(
-                        Scheduler,
-                        CpuGroup,
-                        DefaultSchedRootDomain
-                    );
-                    scheduler_schedule_event_available(Scheduler);
-                    rcu_read_side_ready(BootIdleRcuReadSide);
-                    rcu_read_side_incomplete_first_slice(BootIdleRcuReadSide);
-                    rcu_read_side_full_semantics_deferred(BootIdleRcuReadSide);
-                }
-            }
-        }
-    }
-
-    state State::Ready {
-        invariant {
-            BootRunQueue.state == State::Ready;
-            BootInitPreemption.state == State::Ready;
-            BootIdleSetup.state == State::Ready;
-            scheduler_runqueues_ready(Scheduler, CpuGroup);
-            scheduler_possible_cpu_runqueues_ready(Scheduler, CpuGroup);
-            scheduler_orchestrates_cpu_owned_runqueues(Scheduler, CpuGroup);
-            cpu_owns_runqueue(CpuGroup.cpus[0], BootRunQueue);
-            cpu_owns_idle_task(CpuGroup.cpus[0], BootTask);
-            cpu_runqueue_idle_is_cpu_idle_task(CpuGroup.cpus[0], BootRunQueue, BootTask);
-            task_preemption_control_ready(BootTask);
-            task_preemption_disabled(BootTask);
-            scheduler_possible_cpu_runqueues_attached_to_default_root_domain(
-                Scheduler,
-                CpuGroup,
-                DefaultSchedRootDomain
-            );
-            runqueue_ref_ready(BootRunQueueRef);
-            runqueue_ref_cpu_is(BootRunQueueRef, BootCPURef);
-            runqueue_ref_targets(CurrentRunQueueRef, BootRunQueue);
-            runqueue_ref_ready(CurrentRunQueueRef);
-            runqueue_ref_cpu_is(CurrentRunQueueRef, BootCPURef);
-            current_runqueue_ref_private_to_cpu(CurrentRunQueueRef, CurrentCPU);
-            current_runqueue_ref_from_current_task(CurrentRunQueueRef, CurrentCPU, CurrentTaskRef, BootTask, BootCPURef);
-            current_task_resolved_target_is(BootInitFlow, BootTaskRef, BootTask);
-            current_task_ref_derived_from_selector(BootTaskRef, BootTask);
-            boot_cpu_current_is_idle_task(CpuGroup.cpus[0], BootTask);
-            task_flow_cpu_ref_targets(BootInitFlow, CpuGroup.cpus[0]);
-            scheduler_schedule_event_available(Scheduler);
-            rcu_read_side_ready(BootIdleRcuReadSide);
-            rcu_read_side_incomplete_first_slice(BootIdleRcuReadSide);
-            rcu_read_side_full_semantics_deferred(BootIdleRcuReadSide);
-            sched_class_skeletons_deferred(Scheduler);
-        }
-
-        transitions {
-            on Transition::Enable -> State::Online {
-                ensures {
-                    scheduler_running_flag_set(Scheduler);
-                    scheduler_schedule_event_available(Scheduler);
-                }
-            }
-        }
-    }
-
-    state State::Online {
-        invariant {
-            scheduler_running_flag_set(Scheduler);
-            BootRunQueue.state == State::Ready;
-            BootInitPreemption.state == State::Ready;
-            BootIdleSetup.state == State::Ready;
-            scheduler_orchestrates_cpu_owned_runqueues(Scheduler, CpuGroup);
-            cpu_owns_runqueue(CpuGroup.cpus[0], BootRunQueue);
-            cpu_owns_idle_task(CpuGroup.cpus[0], BootTask);
-            cpu_runqueue_idle_is_cpu_idle_task(CpuGroup.cpus[0], BootRunQueue, BootTask);
-            task_preemption_control_ready(BootTask);
-            task_preemption_disabled(BootTask);
-            runqueue_ref_ready(BootRunQueueRef);
-            runqueue_ref_cpu_is(BootRunQueueRef, BootCPURef);
-            runqueue_ref_targets(CurrentRunQueueRef, BootRunQueue);
-            runqueue_ref_ready(CurrentRunQueueRef);
-            runqueue_ref_cpu_is(CurrentRunQueueRef, BootCPURef);
-            current_runqueue_ref_private_to_cpu(CurrentRunQueueRef, CurrentCPU);
-            current_runqueue_ref_from_current_task(CurrentRunQueueRef, CurrentCPU, CurrentTaskRef, BootTask, BootCPURef);
-            task_flow_cpu_ref_targets(BootInitFlow, CpuGroup.cpus[0]);
-            scheduler_schedule_event_available(Scheduler);
-            rcu_read_side_ready(BootIdleRcuReadSide);
-            rcu_read_side_incomplete_first_slice(BootIdleRcuReadSide);
-            rcu_read_side_full_semantics_deferred(BootIdleRcuReadSide);
-            sched_class_skeletons_deferred(Scheduler);
-        }
-    }
-}
-
-/*
  * DefaultSchedRootDomain 表示 sched_init() 中建立的默认 root domain。它是
  * Scheduler 的调度覆盖视图，不拥有 CPU 本体；其 covered_cpus 由
  * CpuGroup.possible_cpus 的 CpuRef 集合建立。
  */
 object DefaultSchedRootDomain: ResourceObject {
     initial_state: State::Base;
-    parent: Scheduler;
+    parent: SchedInitPhase;
 
     state State::Base {
         transitions {
@@ -571,7 +461,7 @@ object DefaultSchedRootDomain: ResourceObject {
  */
 object BitWaitQueueTable: ResourceObject {
     initial_state: State::Base;
-    parent: Scheduler;
+    parent: SchedInitPhase;
 
     state State::Base {
         transitions {
@@ -623,7 +513,7 @@ object BitWaitQueueTable: ResourceObject {
  */
 object BootIdleRcuReadSide: RcuReadSide {
     initial_state: State::Base;
-    parent: Scheduler;
+    parent: SchedInitPhase;
 
     state State::Base {
         transitions {
@@ -647,110 +537,6 @@ object BootIdleRcuReadSide: RcuReadSide {
 }
 
 /*
- * BootRunQueue 表示 CpuGroup.cpus[0].RunQueue 的物化实例。Linux 同时在
- * for_each_possible_cpu() 中初始化所有 possible CPU 的 rq；当前模型用
- * Scheduler/CpuGroup 上的聚合事实表达全 possible 集合，用 BootRunQueue
- * 继续承载 boot CPU 的可直接观测 rq。Scheduler 只编排 setup，不拥有
- * 该 runqueue 本体。
- */
-object BootRunQueue: RunQueue {
-    initial_state: State::Base;
-    parent: CpuGroup.cpus[0];
-
-    state State::Base {
-        transitions {
-            on Transition::Setup -> State::Ready {
-                depends_on {
-                    DefaultSchedRootDomain.state == State::Ready;
-                    CpuGroup.state == State::Ready;
-                    PerCpuStorage.state == State::Ready;
-                    BootTask.state == State::OnCpu;
-                }
-
-                drives {
-                    BootInitPreemption.Transition::Setup;
-                }
-
-                within RunQueueRootAttachContext {
-                    ensures {
-                        raw_spinlock_irqsave_entered(BootRunQueueLock, CurrentCPU);
-                        raw_spinlock_irqrestore_exited(BootRunQueueLock, CurrentCPU);
-                        boot_runqueue_attached_to_root_domain(
-                            BootRunQueue,
-                            DefaultSchedRootDomain
-                        );
-                        boot_runqueue_root_attach_held_runqueue_lock(
-                            BootRunQueue,
-                            BootRunQueueLock
-                        );
-                    }
-                }
-
-                ensures {
-                    cpu_owns_runqueue(CpuGroup.cpus[0], BootRunQueue);
-                    boot_runqueue_ready(BootRunQueue, CpuGroup.cpus[0]);
-                    raw_spinlock_initialized(BootRunQueueLock);
-                    raw_spinlock_ready(BootRunQueueLock);
-                    boot_runqueue_lock_ready(BootRunQueue, BootRunQueueLock);
-                    boot_runqueue_possible_cpu_set_covered_by_cpu_group(BootRunQueue, CpuGroup);
-                    cpu_group_possible_contains(CpuGroup, BootCPURef);
-                    default_sched_root_domain_covers_cpu_ref(
-                        DefaultSchedRootDomain,
-                        BootCPURef
-                    );
-                    boot_runqueue_cpu_ref_covered_by_root_domain(
-                        BootRunQueue,
-                        DefaultSchedRootDomain,
-                        BootCPURef
-                    );
-                    runqueue_runtime_state_is(BootRunQueue, RunQueueRuntimeState::None);
-                    runqueue_task_refs_empty(BootRunQueue);
-                    runqueue_ref_targets(BootRunQueueRef, BootRunQueue);
-                    runqueue_ref_ready(BootRunQueueRef);
-                    runqueue_ref_cpu_is(BootRunQueueRef, BootCPURef);
-                    runqueue_ref_targets(CurrentRunQueueRef, BootRunQueue);
-                    runqueue_ref_ready(CurrentRunQueueRef);
-                    runqueue_ref_cpu_is(CurrentRunQueueRef, BootCPURef);
-                    boot_runqueue_attached_to_root_domain(BootRunQueue, DefaultSchedRootDomain);
-                    boot_runqueue_root_attach_held_runqueue_lock(
-                        BootRunQueue,
-                        BootRunQueueLock
-                    );
-                    boot_runqueue_class_queues_ready(BootRunQueue);
-                    boot_runqueue_balance_push_disabled(BootRunQueue);
-                }
-            }
-        }
-    }
-
-    state State::Ready {
-        invariant {
-            cpu_owns_runqueue(CpuGroup.cpus[0], BootRunQueue);
-            boot_runqueue_ready(BootRunQueue, CpuGroup.cpus[0]);
-            raw_spinlock_ready(BootRunQueueLock);
-            boot_runqueue_lock_ready(BootRunQueue, BootRunQueueLock);
-            boot_runqueue_possible_cpu_set_covered_by_cpu_group(BootRunQueue, CpuGroup);
-            cpu_group_possible_contains(CpuGroup, BootCPURef);
-            default_sched_root_domain_covers_cpu_ref(DefaultSchedRootDomain, BootCPURef);
-            boot_runqueue_cpu_ref_covered_by_root_domain(
-                BootRunQueue,
-                DefaultSchedRootDomain,
-                BootCPURef
-            );
-            runqueue_ref_targets(BootRunQueueRef, BootRunQueue);
-            runqueue_ref_ready(BootRunQueueRef);
-            runqueue_ref_cpu_is(BootRunQueueRef, BootCPURef);
-            runqueue_ref_targets(CurrentRunQueueRef, BootRunQueue);
-            runqueue_ref_ready(CurrentRunQueueRef);
-            runqueue_ref_cpu_is(CurrentRunQueueRef, BootCPURef);
-            boot_runqueue_attached_to_root_domain(BootRunQueue, DefaultSchedRootDomain);
-            boot_runqueue_root_attach_held_runqueue_lock(BootRunQueue, BootRunQueueLock);
-            boot_runqueue_class_queues_ready(BootRunQueue);
-        }
-    }
-}
-
-/*
  * BootIdleSetup 只编排 sched_init() 把既有 BootTask 设为
  * CpuGroup.cpus[0] idle task 的元数据初始化；它不是第二个 Task 实例。
  */
@@ -762,10 +548,9 @@ object BootIdleSetup: KernelObject {
         transitions {
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    BootRunQueue.state == State::Ready;
+                    Cpu0Scheduler.state == State::Ready;
                     BootTask.state == State::OnCpu;
                     InitMM.state == State::Ready;
-                    raw_spinlock_ready(BootRunQueueLock);
                 }
 
                 drives {
@@ -773,10 +558,9 @@ object BootIdleSetup: KernelObject {
                 }
 
                 within BootIdlePiLockContext {
-                    within BootRunQueueLockContext {
+                    within BootSchedulerLockContext {
                         depends_on {
-                            BootRunQueue.state == State::Ready;
-                            raw_spinlock_ready(BootRunQueueLock);
+                            Cpu0Scheduler.state == State::Ready;
                         }
 
                         drives {
@@ -805,13 +589,13 @@ object BootIdleSetup: KernelObject {
                             raw_spinlock_ready(BootIdlePiLock);
                             boot_idle_pi_lock_ready(BootTask, BootIdlePiLock);
                             boot_idle_init_held_pi_lock(BootTask, BootIdlePiLock);
-                            raw_spinlock_acquired(BootRunQueueLock);
-                            raw_spinlock_released(BootRunQueueLock);
-                            boot_idle_init_held_runqueue_lock(BootRunQueue, BootRunQueueLock);
+                            raw_spinlock_acquired(Cpu0SchedulerLock);
+                            raw_spinlock_released(Cpu0SchedulerLock);
+                            boot_idle_init_held_runqueue_lock(Cpu0Scheduler, Cpu0SchedulerLock);
                             rcu_read_side_entered(BootIdleRcuReadSide, CurrentCPU);
                             rcu_read_side_exited(BootIdleRcuReadSide, CurrentCPU);
                             boot_idle_task_cpu_set_under_rcu_read(BootTask, BootCPURef);
-                            boot_runqueue_current_published_with_rcu(BootRunQueue, BootTask);
+                            boot_runqueue_current_published_with_rcu(Cpu0Scheduler, BootTask);
                         }
                     }
                 }
@@ -820,18 +604,23 @@ object BootIdleSetup: KernelObject {
                     cpu_owns_idle_task(CpuGroup.cpus[0], BootTask);
                     cpu_runqueue_idle_is_cpu_idle_task(
                         CpuGroup.cpus[0],
-                        BootRunQueue,
+                        Cpu0Scheduler,
                         BootTask
                     );
-                    boot_task_idle_role_ready(BootTask, BootRunQueue);
+                    boot_task_idle_role_ready(BootTask, Cpu0Scheduler);
                     boot_task_identity_preserved_for_idle(BootTask);
                     boot_idle_task_uses_init_mm_lazy_tlb(BootTask, InitMM);
                     task_ref_targets(BootTaskRef, BootTask);
                     task_ref_ready(BootTaskRef);
                     current_task_resolved_target_is(BootInitFlow, BootTaskRef, BootTask);
                     current_task_ref_derived_from_selector(BootTaskRef, BootTask);
-                    current_runqueue_ref_private_to_cpu(CurrentRunQueueRef, CurrentCPU);
-                    current_runqueue_ref_from_current_task(CurrentRunQueueRef, CurrentCPU, CurrentTaskRef, BootTask, BootCPURef);
+                    current_scheduler_ref_private_to_cpu(CurrentSchedulerRef, CurrentCPU);
+                    current_scheduler_ref_from_current_task(
+                        CurrentSchedulerRef,
+                        CurrentCPU,
+                        CurrentTaskRef,
+                        BootIdleFlow
+                    );
                     task_thread_context_owned(BootTask, BootTask.thread_context);
                     task_thread_context_core_register_set(BootTask.thread_context);
                     task_preemption_control_ready(BootTask);
@@ -839,9 +628,9 @@ object BootIdleSetup: KernelObject {
                     raw_spinlock_ready(BootIdlePiLock);
                     boot_idle_pi_lock_ready(BootTask, BootIdlePiLock);
                     boot_idle_init_held_pi_lock(BootTask, BootIdlePiLock);
-                    boot_idle_init_held_runqueue_lock(BootRunQueue, BootRunQueueLock);
+                    boot_idle_init_held_runqueue_lock(Cpu0Scheduler, Cpu0SchedulerLock);
                     boot_idle_task_cpu_set_under_rcu_read(BootTask, BootCPURef);
-                    boot_runqueue_current_published_with_rcu(BootRunQueue, BootTask);
+                    boot_runqueue_current_published_with_rcu(Cpu0Scheduler, BootTask);
                     boot_cpu_current_is_idle_task(CpuGroup.cpus[0], BootTask);
                     task_flow_cpu_ref_targets(BootInitFlow, CpuGroup.cpus[0]);
                 }
@@ -852,22 +641,27 @@ object BootIdleSetup: KernelObject {
     state State::Ready {
         invariant {
             cpu_owns_idle_task(CpuGroup.cpus[0], BootTask);
-            cpu_runqueue_idle_is_cpu_idle_task(CpuGroup.cpus[0], BootRunQueue, BootTask);
-            boot_task_idle_role_ready(BootTask, BootRunQueue);
+            cpu_runqueue_idle_is_cpu_idle_task(CpuGroup.cpus[0], Cpu0Scheduler, BootTask);
+            boot_task_idle_role_ready(BootTask, Cpu0Scheduler);
             boot_task_identity_preserved_for_idle(BootTask);
             task_ref_targets(BootTaskRef, BootTask);
             task_ref_ready(BootTaskRef);
             current_task_resolved_target_is(BootInitFlow, BootTaskRef, BootTask);
             current_task_ref_derived_from_selector(BootTaskRef, BootTask);
-            current_runqueue_ref_private_to_cpu(CurrentRunQueueRef, CurrentCPU);
-            current_runqueue_ref_from_current_task(CurrentRunQueueRef, CurrentCPU, CurrentTaskRef, BootTask, BootCPURef);
+            current_scheduler_ref_private_to_cpu(CurrentSchedulerRef, CurrentCPU);
+            current_scheduler_ref_from_current_task(
+                CurrentSchedulerRef,
+                CurrentCPU,
+                CurrentTaskRef,
+                BootIdleFlow
+            );
             task_thread_context_owned(BootTask, BootTask.thread_context);
             task_thread_context_core_register_set(BootTask.thread_context);
             task_preemption_control_ready(BootTask);
             raw_spinlock_ready(BootIdlePiLock);
             boot_idle_pi_lock_ready(BootTask, BootIdlePiLock);
             boot_idle_task_cpu_set_under_rcu_read(BootTask, BootCPURef);
-            boot_runqueue_current_published_with_rcu(BootRunQueue, BootTask);
+            boot_runqueue_current_published_with_rcu(Cpu0Scheduler, BootTask);
             boot_cpu_current_is_idle_task(CpuGroup.cpus[0], BootTask);
             task_flow_cpu_ref_targets(BootInitFlow, CpuGroup.cpus[0]);
         }
@@ -1344,7 +1138,7 @@ object RcuCore: KernelObject {
         transitions {
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    Scheduler.state == State::Online;
+                    Cpu0Scheduler.state == State::Online;
                     Workqueue.state == State::Prepared;
                     Softirq.state == State::Prepared;
                     CpuGroup.state == State::Ready;
@@ -1646,9 +1440,28 @@ object SchedInitPhase: PhaseObject {
 
                 drives {
                     SchedInitPreludeTrimmedPaths.Transition::Setup;
-                    Scheduler.Transition::Preset;
-                    Scheduler.Transition::Setup;
-                    Scheduler.Transition::Enable;
+                    DefaultSchedRootDomain.Transition::Setup;
+                    BitWaitQueueTable.Transition::Preset;
+                    BootIdleRcuReadSide.Transition::Preset;
+                    Cpu0Scheduler.Transition::Preset;
+                    Cpu0Scheduler.Transition::Setup;
+                    Cpu1Scheduler.Transition::Preset;
+                    Cpu1Scheduler.Transition::Setup;
+                    Cpu2Scheduler.Transition::Preset;
+                    Cpu2Scheduler.Transition::Setup;
+                    Cpu3Scheduler.Transition::Preset;
+                    Cpu3Scheduler.Transition::Setup;
+                    Cpu4Scheduler.Transition::Preset;
+                    Cpu4Scheduler.Transition::Setup;
+                    Cpu5Scheduler.Transition::Preset;
+                    Cpu5Scheduler.Transition::Setup;
+                    Cpu6Scheduler.Transition::Preset;
+                    Cpu6Scheduler.Transition::Setup;
+                    Cpu7Scheduler.Transition::Preset;
+                    Cpu7Scheduler.Transition::Setup;
+                    BootInitPreemption.Transition::Setup;
+                    BootIdleSetup.Transition::Setup;
+                    Cpu0Scheduler.Transition::Enable;
                     RadixTree.Transition::Setup;
                     MapleTree.Transition::Setup;
                     Workqueue.Transition::Preset;
@@ -1659,7 +1472,33 @@ object SchedInitPhase: PhaseObject {
 
                 ensures {
                     sched_init_ready(SchedInitPhase);
-                    scheduler_schedule_smoke_ready(Scheduler);
+                    scheduler_possible_cpu_inventory_ready(
+                        Cpu0Scheduler,
+                        CpuGroup
+                    );
+                    scheduler_ref_ready(BootSchedulerRef);
+                    scheduler_ref_targets(BootSchedulerRef, Cpu0Scheduler);
+                    scheduler_ref_cpu_is(BootSchedulerRef, BootCPURef);
+                    scheduler_ready_after_sched_init(Cpu0Scheduler);
+                    Cpu1Scheduler.state == State::Ready;
+                    Cpu2Scheduler.state == State::Ready;
+                    Cpu3Scheduler.state == State::Ready;
+                    Cpu4Scheduler.state == State::Ready;
+                    Cpu5Scheduler.state == State::Ready;
+                    Cpu6Scheduler.state == State::Ready;
+                    Cpu7Scheduler.state == State::Ready;
+                    scheduler_online_with_owner_cpu(
+                        Cpu0Scheduler,
+                        CpuGroup.cpus[0]
+                    );
+                    scheduler_ap_online_only_at_cpu_online_handoff(
+                        Cpu0Scheduler,
+                        CpuGroup
+                    );
+                    scheduler_root_domains_are_shared_separate_objects(
+                        Cpu0Scheduler
+                    );
+                    scheduler_schedule_smoke_ready(Cpu0Scheduler);
                     sched_init_prelude_trimmed_paths_ready(SchedInitPreludeTrimmedPaths);
                     sched_init_trace_context_boundaries_ready(
                         SchedInitTraceContextBoundaries
@@ -1689,9 +1528,9 @@ object SchedInitPhase: PhaseObject {
                 }
                 deferred sched_init.004 {
                     category: DeferredCategory::ModelDetail;
-                    summary: "Expand scheduler-class policies beyond the boot runqueue skeleton.";
-                    evidence { sched_class_skeletons_deferred(Scheduler); }
-                    close_when: "Supported scheduler classes, selection policies and differential scheduling tests pass.";
+                    summary: "Complete scheduler-class fairness, bandwidth and migration algorithms beyond the fixed Linux class order.";
+                    evidence { scheduler_fairness_bandwidth_migration_deferred(Cpu0Scheduler); }
+                    close_when: "Fairness, bandwidth and migration algorithms pass their class-specific Linux differential tests.";
                 }
                 deferred sched_init.005 {
                     category: DeferredCategory::Protocol;
@@ -1726,6 +1565,12 @@ object SchedInitPhase: PhaseObject {
                     }
                     revisit_when: "The reference configuration enables CONFIG_CONTEXT_TRACKING_USER_FORCE.";
                 }
+                trimmed sched_init.009 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "The SCX scheduling class is absent from the reference configuration.";
+                    evidence { scheduler_scx_trimmed_for_reference_config(Cpu0Scheduler); }
+                    revisit_when: "The reference configuration enables CONFIG_SCHED_CLASS_EXT.";
+                }
 
                 emits {
                     Transition::Setup;
@@ -1739,8 +1584,8 @@ object SchedInitPhase: PhaseObject {
             on Transition::Setup -> State::Ready {
                 ensures {
                     sched_init_ready(SchedInitPhase);
-                    Scheduler.state == State::Online;
-                    BootRunQueue.state == State::Ready;
+                    Cpu0Scheduler.state == State::Online;
+                    scheduler_ready_after_sched_init(Cpu0Scheduler);
                     BootIdleSetup.state == State::Ready;
                     RadixTree.state == State::Ready;
                     MapleTree.state == State::Ready;
@@ -1767,8 +1612,8 @@ object SchedInitPhase: PhaseObject {
     state State::Ready {
         invariant {
             sched_init_ready(SchedInitPhase);
-            Scheduler.state == State::Online;
-            BootRunQueue.state == State::Ready;
+            Cpu0Scheduler.state == State::Online;
+            scheduler_ready_after_sched_init(Cpu0Scheduler);
             BootIdleSetup.state == State::Ready;
             RadixTree.state == State::Ready;
             MapleTree.state == State::Ready;
@@ -1789,8 +1634,8 @@ object SchedInitPhase: PhaseObject {
             on Transition::Enable -> State::Online {
                 ensures {
                     sched_init_ready(SchedInitPhase);
-                    Scheduler.state == State::Online;
-                    BootRunQueue.state == State::Ready;
+                    Cpu0Scheduler.state == State::Online;
+                    scheduler_ready_after_sched_init(Cpu0Scheduler);
                     BootIdleSetup.state == State::Ready;
                     RadixTree.state == State::Ready;
                     MapleTree.state == State::Ready;

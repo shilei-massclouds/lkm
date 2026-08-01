@@ -49,8 +49,11 @@ PhaseObject，它从 `_start` 开始承载并编排启动执行片段，同时�
 - Enable 只驱动 `BootInitScheduleHandoffPhase`，由该叶子建立首次调度的可逆预检与
   `BootIdleFlow` owner/active binding。
 - 不可逆切换前必须完整建立 `BootIdleFlow` 的 owner/active binding 并使其到达 Ready；随后提交
-  `BootInitFlow.Online` 与 Prepared switch result，再由 Kernel.Enable 驱动首次 Scheduler 调度并执行
-  真实 BootTask→KernelInitTask task-stack switch。此时 Kernel 仍为 Ready。
+  `BootInitFlow.Online`。此时 BootTask 的当前 active Flow 已是 `BootIdleFlow`。本轮 BootInitFlow 的可观察终点
+  固定在即将由 `BootIdleFlow` 向
+  `CpuGroup.cpus[0].scheduler` `emits Schedule()` 的 before-send 边界：Schedule Signal 尚未产生，
+  PreparePrev/PickNextTask/SwitchTo occurrence 均不存在，BootTask 仍为 `OnCpu/Live/Invalid`。发送 Schedule
+  本身也不改变 BootTask；只有 Scheduler 实际选择 `next != prev` 并执行 SwitchTo 后才 Suspend 它。
 
 BootInitFlow 的每个 lifecycle transition 都在执行时重新检查 parent BootTask 必须为 OnCpu；不存在
 另一个 dispatch guard 字段、状态或镜像对象。
@@ -87,7 +90,7 @@ Base --Preset--> Prepared --Setup--> Ready --Enable--> Online
 PhysicalDirect InitialActivation 之后、Preset 第一个直接 child action 之前，不是第五种状态，也不是
 Startup 的独立 signal identity。记录 Started 时 BootInitFlow 仍为 Base；只有全部 Preset 事实成立后
 才原子提交 Prepared。Prepared、Ready、Online 均使用标准 phase checkpoint；
-`BootInitFlow.Online` 必须紧邻真实 PID 1 switch commit，且位于不可逆切换之前。
+`BootInitFlow.Online` 必须紧邻首次 Schedule 的 before-send 边界，且位于任何 PreparePrev 或不可逆切换之前。
 
 `BootIdleEntryPhase` 不属于 `BootInitFlow`。它是 `BootIdleFlow` 的 PhaseObject 子对象，只在未来
 调度恢复 `BootTask`、真实 current/SP 已回到 PID 0 后才开始，随后进入 `cpu_startup_entry()` 和

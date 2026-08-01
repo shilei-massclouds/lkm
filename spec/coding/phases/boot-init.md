@@ -30,7 +30,8 @@ OpenSBI -> Kernel.Enable accepts -> AssignCpuRef -> PhysicalDirect InitialActiva
   -> IrqTimeInit -> LocalIrqEnable -> IrqOpenPrepare -> ProcessPrepare
   -> BootInitRestInit -> BootInitFlow.Ready -> emits BootInitFlow.Enable
   -> BootInitScheduleHandoff -> BootInitFlow.Online
-  -> Kernel drives Scheduler.Schedule -> real BootTask-to-KernelInitTask switch
+  -> active BootIdleFlow emits Cpu0.Scheduler.Schedule (before-send endpoint)
+  -> Scheduler may perform the real BootTask-to-KernelInitTask switch
   -> KernelInitFlow leaves while Kernel.Ready
 ```
 
@@ -39,9 +40,10 @@ OpenSBI -> Kernel.Enable accepts -> AssignCpuRef -> PhysicalDirect InitialActiva
 Task Enable 只负责 `wake_up_new_task` 等价动作；创建 PID 1 和 kthreadd 时不发送 initial-flow Signal，
 不得预执行任何 Flow。
 
-首次真实调度在逻辑上由 Kernel.Enable 于 BootInitFlow.Online 后驱动；`drives` 不要求物理调用栈同步。
-调度先同步处理 BootTask Suspend，再保存上下文并提交 CPU-local current Task/context facts，
-完成物理栈切换；随后在 `kernel_init_entry()` 中处理 KernelInitTask Continue 并严格向
+首次真实调度由已是 BootTask active Flow 的 `BootIdleFlow` 于 BootInitFlow.Online 后 emits 无实参
+Schedule；Scheduler 从 sender Flow/CpuRef 和 CPU-local current binding 解析 prev。调度先 PreparePrev，再 PickNextTask；
+只在 next != prev 时按保存 BootTask 上下文、Suspend、恢复 next 上下文并提交 CPU-local current
+Task/context、next-stack finish 的顺序完成物理切换；随后在 `kernel_init_entry()` 中处理 KernelInitTask Continue 并严格向
 `KernelInitFlow` 发出 Startup。真正的 KernelInitFlow 叶阶段代码在验证 16 KiB vmalloc
 stack 后执行，不能在 BootTask 的 `schedule()` 调用栈上执行。
 

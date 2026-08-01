@@ -19,15 +19,15 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
-    if ctx.scheduler.state() != State::Online
-        || !ctx.scheduler.smp_initialized()
-        || !ctx.scheduler.sched_domains_ready()
-        || !ctx.scheduler.sched_domains_mutex().ready()
-        || !ctx.scheduler.sched_domains_mutex_guard_used()
-        || !ctx.scheduler.smp_cpu_masks_stable()
-        || !ctx.scheduler.kernel_init_affinity_released()
-        || !ctx.scheduler.rt_dl_smp_ready()
-        || !ctx.scheduler.granularity_refreshed()
+    if ctx.scheduler().state() != State::Online
+        || !ctx.scheduler_shared.smp_initialized()
+        || !ctx.scheduler_shared.sched_domains_ready()
+        || !ctx.scheduler_shared.sched_domains_mutex().ready()
+        || !ctx.scheduler_shared.sched_domains_mutex_guard_used()
+        || !ctx.scheduler_shared.smp_cpu_masks_stable()
+        || !ctx.scheduler_shared.kernel_init_affinity_released()
+        || !ctx.scheduler_shared.rt_dl_smp_ready()
+        || !ctx.scheduler_shared.granularity_refreshed()
     {
         printk::write_str("scheduler SMP runtime facts invalid\n");
         return SmokeResult::Failed;
@@ -104,7 +104,7 @@ pub fn run() -> SmokeResult {
 
     printk::write_fmt(format_args!(
         "runtime_core sched_smp={} workqueue_topology={} page_late={}\n",
-        ctx.scheduler.smp_initialized(),
+        ctx.scheduler_shared.smp_initialized(),
         ctx.workqueue.topology_ready(),
         ctx.page_allocator.late_ready()
     ));

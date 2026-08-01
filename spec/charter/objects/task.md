@@ -42,9 +42,10 @@ OnCpu --Disable(terminal)--> Offline --Cleanup--> Destroyed
 运行期实例进入继承状态时都必须检查同一类型 invariant，其中 `self` 绑定到实际 instance identity，
 而不是类型名或 declaration site。
 
-`Online` 是普通 Task 唯一持有有效、可恢复 TaskFlow 断点的状态；它同时表示 Task 已发布并可被
-Scheduler 派发。idle task 可以是 runqueue 的 `rq->idle` / `rq->curr` 而不属于普通 runnable class
-queue，因此 Online 不承诺普通 RunQ membership。`OnCpu` 表示该 Task 是 CPU 唯一 current/执行权
+`Online` 是普通 Task 唯一持有有效、可恢复 TaskFlow 断点的状态；它不表示 runnable、on-rq 或必然可被
+Scheduler 派发。idle task 可以是 Scheduler 的 `idle` / `curr` 而不属于普通 runnable class queue；
+普通 Task 也可以因 blocking 而保持 Online/Valid 但不在任何 class queue。`OnCpu` 表示该 Task 是 CPU
+唯一 current/执行权
 carrier；它是 Task 专属扩展状态，不得扩展为 `Object`、`PhaseObject` 或其它类型的通用生命周期状态。
 
 Task lifecycle 之外必须保存两组正交状态：
@@ -67,7 +68,7 @@ FlowRef；Prepared/Invalid context 不得被 Scheduler 恢复。
 `BootTask` 是允许的静态 Task lifecycle override。它没有 Preset、Setup 或 Enable，初始状态为
 `OnCpu/Live/Invalid`，并保留 `OnCpu --Suspend--> Online --Continue--> OnCpu`
 往返。入口初态表示固件/架构入口已把 boot CPU 执行权直接交给该 Task；它不由 Scheduler Continue
-建立，也不依赖尚未建立的 BootRunQueue。该状态同时保证静态 `init_task` storage、
+建立，也不依赖尚未 Ready 的 CPU0 Scheduler。该状态同时保证静态 `init_task` storage、
 固定 PID 0、`TaskRef::BOOT`、静态 `stack` 属性和 canonical identity；`BootTask.stack` 对应 Linux
 `init_thread_union` / `init_stack`。不得把会变化的 `tp/sp`、entry role、preemption 状态
 或 active TaskFlow 放入 invariant。boot-only const 初始化器直接构造这一状态，不复用普通 Task
@@ -106,21 +107,23 @@ FlowRef 并原子发布 `Online/None/Valid`；它不启动 Flow。`BootInitRestI
 flags、provider
 与 schedule-loop 等角色事实属于创建它们的 Phase，不得成为 `Task` 类型 invariant。
 
-Scheduler 是普通 `Task.Continue` 与 `Task.Suspend` 的唯一发送者。一次真实切换分为 prepare、物理
-switch、finish：prepare 通过 CurrentTask binding 校验 prev `OnCpu/Live/Invalid`、prev active Flow 与
-next `Online/None/Valid` 的 FlowRef/generation；架构 switch 保存 prev、恢复 next 的
-`ra/sp/s0..s11`；架构 restore 的 next `sp` 与正式 switch commit 中只绑定 task 的
-`CurrentTask.BindTask(next)` / `tp` 更新由外层 switch commit 共同提交 next 的 CurrentStack，next 栈上的 finish
-原子提交 prev `Online/None/Valid`、next `OnCpu/Live/Invalid`、next Flow CpuRef、active Flow、CPU-local
-task/stack binding 与观察事实，然后严格
+Scheduler 是普通 `Task.Continue` 与 `Task.Suspend` 的唯一发送者。发出 Schedule、PreparePrev 与
+PickNextTask 都不改变 Task lifecycle；PreparePrev 只确定 Runnable/Blocked，并在需要 blocking 时先从
+class queue 移除 prev。一次 `next != prev` 的真实切换分为 prepare、物理 switch、next-stack finish：
+先完整预检双方引用、状态、上下文与后续信号容量，再依次保存 prev、Suspend prev 为
+`Online/None/Valid`、恢复 next 的 `ra/sp/s0..s11` 并提交 CPU-local CurrentTask/CurrentStack，完成
+next-stack finish，最后向 next Task emits Continue。prev Suspend 不改变 PreparePrev 已确定的 runnable
+或 blocked 资格。next Task 接受 Continue 后才提交 `Online/None/Valid -> OnCpu/Live/Invalid`，再严格
 Startup/Continue next Flow。若 prev 是
 终止 Task，finish 提交 `OnCpu --Disable--> Offline`，context 保持 Invalid，并在 next 侧 Cleanup，
-不得先制造不可恢复的 Online。`prev == next` 是无动作路径：不发送 Suspend/Continue，不保存/恢复
-context，也不改变 lifecycle、authority、Flow binding、CurrentTask 选择结果或计数。
+不得先制造不可恢复的 Online。`prev == next` 不进入 SwitchTo：不发送 Task Suspend/Continue，不保存/
+恢复 context，也不改变 lifecycle、authority、Flow binding、CurrentTask 选择结果或计数；Scheduler
+只向原 active TaskFlow emits Continue，表达 schedule 返回。class callback 路径允许完成自身 put/set
+记账。
 
-调度 finish 是普通 Signal 不可观察中间态的原子提交边界：prev 失去执行权、next 获得
-`OnCpu/Live`、next Flow 激活与 CurrentTask/CurrentStack pair 必须同时可见。除同一 Task/Stack pair 的
-地址表示刷新外，不同目标换绑只能发生在这一正式 commit 边界。terminal switch 必须在回收 prev 前
+调度 switch commit 必须保证 prev 已失去执行权且 CurrentTask/CurrentStack 已完整换绑到 next，之后才
+允许 next Task 接收 Continue 并获得 `OnCpu/Live`。普通 Signal 不得观察半绑定 task/stack pair。除同一
+Task/Stack pair 的地址表示刷新外，不同目标换绑只能发生在这一正式 commit 边界。terminal switch 必须在回收 prev 前
 先使 next 的 CurrentTask 与 CurrentStack 可解析；identity switch 不改变两种解析结果。
 
 Task 接受 Continue 并提交 OnCpu 后必须严格启动恰好一个 execution continuation：若 initial Flow 仍为

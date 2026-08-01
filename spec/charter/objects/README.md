@@ -8,6 +8,7 @@ Object-level charter notes live here when they need a dedicated topic file.
 | --- | --- |
 | `CPU` | [`cpu.md`](cpu.md) |
 | `CpuGroup` | [`cpu-group.md`](cpu-group.md) |
+| `Scheduler` | [`scheduler.md`](scheduler.md) |
 | `KernelImage` | [`kernel-image.md`](kernel-image.md) |
 | `KernelAddrSpace` | [`kernel-address-space.md`](kernel-address-space.md) |
 | `FixMap` | [`fix-map.md`](fix-map.md) |
