@@ -85,11 +85,11 @@ adoption 方式必须由对应 system coding 文件记录，但不能降低普�
 映射到 `arceos_ex` 时，`ax-hal-ex` 只应承载最低层入口前导路径。它负责从 `_start` 开始建立进入 Rust 代码所需的最小执行条件，并推进到
 `BootInitFlow.Preset` 完成前的最低层入口路径。
 
-`BootInitFlow.Prepared` 之后应交由 `ax-runtime-ex` 接管。`EntrySuccessorPhase` 是
-`ax-runtime-ex` 引导过程的第一部分，而不是 `ax-hal-ex` 的长期编排职责。`ax-runtime-ex`
+`BootInitFlow.Prepared` 之后应交由 `ax-runtime-ex` 接管。`start_kernel()` 到 `setup_arch()` 返回由
+BootInitFlow 私有 Setup helper 直接编排，而不是 `ax-hal-ex` 的长期编排职责。`ax-runtime-ex`
 可以调用 `ax-hal-ex`、平台 crate 和其它组件提供的对象 transition函数，但阶段编排边界应保留在 runtime 侧。
 
-`ax-runtime-ex` 覆盖从 `EntrySuccessorPhase` 到 selected payload commit 的内核引导过程。整个区间
+`ax-runtime-ex` 覆盖从 `BootInitFlow.Setup` 到 selected payload commit 的内核引导过程。整个区间
 仍是 Kernel Ready→Online 的 Enable 执行过程：BootInitFlow 直接编排 boot/interrupt/rest-init 叶阶段，
 KernelInitFlow 在首次 dispatch 后直接编排 SMP/runtime 与 payload prepare 叶阶段；后续阶段必须插入
 正式 TaskFlow parent 的 transition，而不是添加目录 wrapper。

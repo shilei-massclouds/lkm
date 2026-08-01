@@ -200,7 +200,7 @@ BootInit 内部语义。
 - Linux 6.12 RISC-V `head.S`、`setup_vm()`/`relocate_enable_mmu()` 与现有 model/coding/compose/实现、
   checkpoint 顺序复核一致，因此本组没有修改 model、coding、compose 或 `impl/arceos_ex`。focused
   `hello-native` 为 schema v2 passed/completed、exit 0、无 QEMU timeout；入口序列在
-  `BootInitFlow.Prepared` 后才出现 `EntrySuccessorPhase.Started`，没有提前的 Setup 归因。
+  `BootInitFlow.Prepared` 后才发送 `BootInitFlow.Setup`，其直接对象 Signal 均归因到 BootInitFlow。
 - 精确 `make -C tools2 test-all` 通过：Python 74/74、Svelte 0 error/0 warning、Vitest 16/16、bundle
   stale check 和 Playwright 8/8。默认 `make stress-test` 四组各 10/10、合计 40/40；默认
   `rc-local-difftest` 与长期 `linux-exact-baseline-difftest` 各 1/1，均为

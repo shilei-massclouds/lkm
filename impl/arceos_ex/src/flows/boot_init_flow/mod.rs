@@ -3,6 +3,7 @@ mod idle_entry;
 mod preset;
 mod rest_init;
 mod schedule_handoff;
+mod setup;
 
 use core::arch::global_asm;
 
@@ -175,20 +176,7 @@ pub extern "C" fn start_kernel() -> ! {
         phase_failure(LifecycleEvent::Setup, State::Prepared, State::Ready)
     };
     crate::phases::shutdown_on_error(result, "arceos_ex start_kernel guard failed\n");
-    crate::phases::boot::entry_successor::preset(crate::context::context())
-}
-
-pub fn setup_after_entry_successor() -> ! {
-    if crate::context::context_ref().boot_init_flow.state() != State::Prepared
-        || !boot_task_on_cpu_and_canonical()
-        || !crate::phases::boot::entry_successor::is_online()
-    {
-        crate::arch::riscv64::sbi::putstr(
-            "arceos_ex boot init after entry successor invariant failed\n",
-        );
-        crate::arch::riscv64::sbi::system_shutdown()
-    }
-    crate::phases::boot::core_prepare::preset(crate::context::context())
+    setup::run(crate::context::context())
 }
 
 pub fn setup_after_core_prepare() -> ! {
@@ -414,8 +402,7 @@ fn require_setup_leaf(child_online: bool, child: &str) {
 }
 
 fn setup_leaves_online() -> bool {
-    crate::phases::boot::entry_successor::is_online()
-        && crate::phases::boot::core_prepare::is_online()
+    crate::phases::boot::core_prepare::is_online()
         && crate::phases::boot::mm_core_init::is_online()
         && crate::phases::boot::sched_init::is_online()
         && crate::phases::interrupt::irq_time_init::is_online()

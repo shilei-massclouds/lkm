@@ -1,8 +1,8 @@
 /*
- * Entry Successor Phase Specification
+ * BootInitFlow Setup Object Specification
  *
- * This subphase starts at start_kernel() and ends after setup_arch()
- * completes paging_init(), where the shared SwapperVm controller is Ready,
+ * These objects are driven directly by BootInitFlow.Setup from start_kernel()
+ * through setup_arch() return. The shared SwapperVm controller becomes Ready,
  * KernelAddrSpace/Vm are Online, the boot CPU is owned by SwapperVm, and MemBlock has been
  * enabled for later early allocation metadata growth.
  */
@@ -209,7 +209,7 @@ object MemBlock: MemoryObject {
 
 /*
  * PhysicalMemory 表示平台提供的物理 RAM 和设备 I/O 地址布局。
- * 它由入口后继期 EarlyDtb.Preset 从 RawDtb 的 /memory 描述中建立。
+ * 它由 BootInitFlow.Setup 中的 EarlyDtb.Preset 从 RawDtb 的 /memory 描述中建立。
  */
 object PhysicalMemory: PrepareObject {
     initial_state: State::Base;
@@ -342,7 +342,7 @@ object PlatformCpuInfo: PrepareObject {
 }
 
 /*
- * EarlyDtb 表示入口后继期短暂存在的早期 DTB 解析对象。
+ * EarlyDtb 表示 BootInitFlow.Setup 中短暂存在的早期 DTB 解析对象。
  */
 object EarlyDtb: ResourceObject {
     initial_state: State::Base;
@@ -454,7 +454,7 @@ object EarlyDtb: ResourceObject {
  * CommandLine 表示启动命令行管理对象。它是顶层对象，管理 raw/saved/static
  * 三个命令行视图；参数解析对象 EarlyParam/BootParam/PayloadParam 归入 Params，
  * 不归入本对象。
- * 入口后继期只通过 Preset 建立 raw view，核心准备期再通过 Setup 建立 saved/static
+ * BootInitFlow.Setup 只通过 Preset 建立 raw view，核心准备期再通过 Setup 建立 saved/static
  * 副本。
  */
 object CommandLine: ResourceObject {
@@ -588,7 +588,7 @@ object Params: KernelObject {
     state State::Base {
         transitions {
             /*
-             * Preset 对应入口后继期第一次 parse_early_param() 路径。
+             * Preset 对应 BootInitFlow.Setup 第一次 parse_early_param() 路径。
              */
             on Transition::Preset -> State::Prepared {
                 depends_on {
@@ -1030,190 +1030,5 @@ object SBI: PlatformServiceObject {
             sbi_capability_view_ready(SBI, SbiSpec, OpenSBI);
             sbi_hsm_extension_available(SBI);
         }
-    }
-}
-
-/*
- * EntrySuccessorPhase 表示入口后继子阶段对象。它承接入口前导期完成边界，
- * 并推进到 KernelAddrSpace/Vm Online、BootCPU 的 SwapperVm owner 与 MemBlock.Online。
- */
-object EntrySuccessorPhase: PhaseObject {
-    initial_state: State::Base;
-    parent: BootInitFlow;
-
-    /*
-     * Base 表示入口后继期尚未开始；系统独占事实由 BootInitFlow.Preset
-     * 建立，并在本对象接受 Preset 时检查，不能由初态 invariant 预置。
-     */
-    state State::Base {
-        transitions {
-            /*
-             * Setup 按 start_kernel/setup_arch 到 paging_init() 的最小核心路径编排对象推进。
-             */
-            on Transition::Preset -> State::Prepared {
-                depends_on {
-                    BootInitFlow.state == State::Prepared;
-                    Vm.state == State::Ready;
-                    EarlyVm.state == State::Ready;
-                    cpu_active_translation_controller_for_ref_is(
-                        BootCPURef,
-                        TranslationControllerKind::EarlyVm
-                    );
-                    BootTask.state == State::OnCpu;
-                    current_stack_binding_matches_task(
-                        CpuGroup.cpus[0],
-                        BootTask,
-                        BootTask.stack
-                    );
-                    current_stack_pointer_matches_active_controller(
-                        CpuGroup.cpus[0],
-                        BootTask,
-                        BootTask.stack
-                    );
-                    CurrentCPU.trap.interrupt.state == State::Ready;
-                    RawDtb.state == State::Ready;
-                    FixMap.state == State::Ready;
-                    KernelImage.state == State::Online;
-                    interrupt_concurrency_closed();
-                    task_concurrency_closed();
-                    context_is(SystemExclusive);
-                }
-
-                drives {
-                    BootTask.Action::EnableStackGuard;
-                    EarlyDtb.Transition::Preset;
-                    CurrentCPU.Transition::Enable;
-                    PrintkBuffer.Transition::Preset;
-                    EarlyDtb.Transition::Setup;
-                    InitMM.Transition::Setup;
-                    EarlyIoremap.Transition::Setup;
-                    SBI.Transition::Setup;
-                    Params.Transition::Preset;
-                    MemBlock.Transition::Setup;
-                    Vm.Transition::Enable;
-                    MemBlock.Transition::Enable;
-                    EarlyDtb.Transition::Cleanup;
-                }
-
-                ensures {
-                    early_boot_irqs_disabled_true();
-                    efi_boot_init_deferred(EntrySuccessorPhase);
-                    vmlinux_build_id_deferred(EntrySuccessorPhase);
-                    page_address_init_deferred(EntrySuccessorPhase);
-                    entry_successor_start_kernel_position_preserved(EntrySuccessorPhase);
-                }
-
-                deferred entry_successor.001 {
-                    category: DeferredCategory::AlternatePath;
-                    summary: "Model the enabled EFI boot initialization path as a firmware interface object.";
-                    evidence { efi_boot_init_deferred(EntrySuccessorPhase); }
-                    close_when: "EFI initialization, handoff facts and enabled-reference-path tests pass.";
-                }
-
-                deferred entry_successor.002 {
-                    category: DeferredCategory::ModelDetail;
-                    summary: "Model init_vmlinux_build_id metadata publication.";
-                    evidence { vmlinux_build_id_deferred(EntrySuccessorPhase); }
-                    close_when: "Build-ID metadata ownership, publication and implementation checks are modeled and tested.";
-                }
-
-                deferred entry_successor.003 {
-                    category: DeferredCategory::ModelDetail;
-                    summary: "Model page_address freelist and hash metadata initialization.";
-                    evidence { page_address_init_deferred(EntrySuccessorPhase); }
-                    close_when: "page_address metadata lifecycle and reference call-position tests pass.";
-                }
-
-                emits {
-                    Transition::Setup;
-                }
-            }
-        }
-    }
-
-    state State::Prepared {
-        transitions {
-            on Transition::Setup -> State::Ready {
-                ensures {
-                    interrupt_concurrency_closed();
-                    task_concurrency_closed();
-                    context_is(SystemExclusive);
-                    early_boot_irqs_disabled_true();
-                    BootInitFlow.state == State::Prepared;
-                    task_stack_guard_ready(BootTask, BootTask.stack);
-                    CpuGroup.cpus[0].state == State::Online;
-                    CurrentCPU.trap.interrupt.state == State::Ready;
-                    PrintkBuffer.state == State::Prepared;
-                    EarlyDtb.state == State::Destroyed;
-                    KernelCmdline.state == State::Ready;
-                    InitMM.state == State::Ready;
-                    EarlyIoremap.state == State::Ready;
-                    SBI.state == State::Ready;
-                    Params.state == State::Prepared;
-                    EarlyParam.state == State::Ready;
-                    EarlyCon.state == State::Online;
-                    MemBlock.state == State::Online;
-                    Vm.state == State::Online;
-                    SwapperVm.state == State::Ready;
-                    KernelAddrSpace.state == State::Online;
-                    EarlyVm.state == State::Ready;
-                    cpu_active_translation_controller_for_ref_is(
-                        BootCPURef,
-                        TranslationControllerKind::SwapperVm
-                    );
-                    vmlinux_build_id_deferred(EntrySuccessorPhase);
-                    page_address_init_deferred(EntrySuccessorPhase);
-                    entry_successor_start_kernel_position_preserved(EntrySuccessorPhase);
-                }
-
-                emits {
-                    Transition::Enable;
-                }
-            }
-        }
-    }
-
-    /*
-     * Ready 表示入口后继期核心路径完成，完整内核虚拟内存空间已经启用。
-     */
-    state State::Ready {
-        transitions {
-            on Transition::Enable -> State::Online {
-                ensures {
-                    interrupt_concurrency_closed();
-                    task_concurrency_closed();
-                    context_is(SystemExclusive);
-                    early_boot_irqs_disabled_true();
-                    BootInitFlow.state == State::Prepared;
-                    task_stack_guard_ready(BootTask, BootTask.stack);
-                    CpuGroup.cpus[0].state == State::Online;
-                    CurrentCPU.trap.interrupt.state == State::Ready;
-                    PrintkBuffer.state == State::Prepared;
-                    EarlyDtb.state == State::Destroyed;
-                    KernelCmdline.state == State::Ready;
-                    InitMM.state == State::Ready;
-                    EarlyIoremap.state == State::Ready;
-                    SBI.state == State::Ready;
-                    Params.state == State::Prepared;
-                    EarlyParam.state == State::Ready;
-                    EarlyCon.state == State::Online;
-                    MemBlock.state == State::Online;
-                    Vm.state == State::Online;
-                    SwapperVm.state == State::Ready;
-                    KernelAddrSpace.state == State::Online;
-                    EarlyVm.state == State::Ready;
-                    cpu_active_translation_controller_for_ref_is(
-                        BootCPURef,
-                        TranslationControllerKind::SwapperVm
-                    );
-                    vmlinux_build_id_deferred(EntrySuccessorPhase);
-                    page_address_init_deferred(EntrySuccessorPhase);
-                    entry_successor_start_kernel_position_preserved(EntrySuccessorPhase);
-                }
-            }
-        }
-    }
-
-    state State::Online {
     }
 }

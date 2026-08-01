@@ -96,7 +96,7 @@ impl DeviceTree {
         if self.lifecycle.state() != State::Base
             || raw_dtb.state() != State::Ready
             || vm.state() != State::Online
-            || !vm.entry_successor_ready()
+            || !vm.boot_init_setup_ready()
             || memblock.state() != State::Online
             || config.state() != State::Online
         {

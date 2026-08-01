@@ -906,7 +906,6 @@ class ModelToolTests(unittest.TestCase):
             self.assertEqual(
                 objects["BootInitFlow"]["children"],
                 [
-                    "EntrySuccessorPhase",
                     "CorePreparePhase",
                     "MmCoreInitPhase",
                     "SchedInitPhase",
@@ -919,6 +918,7 @@ class ModelToolTests(unittest.TestCase):
                     "BootInitScheduleHandoffPhase",
                 ],
             )
+            self.assertNotIn("EntrySuccessorPhase", objects)
             self.assertNotIn("EntryPreludePhase", objects)
             self.assertNotIn("BootPhase", objects)
             self.assertNotIn("InterruptPhase", objects)
@@ -1022,7 +1022,29 @@ class ModelToolTests(unittest.TestCase):
                     for entry in block["entries"]
                 ],
                 [
-                    "EntrySuccessorPhase.Transition::Preset",
+                    "BootTask.Action::EnableStackGuard",
+                    "EarlyDtb.Transition::Preset",
+                    "CurrentCPU.Transition::Enable",
+                    "PrintkBuffer.Transition::Preset",
+                    "EarlyDtb.Transition::Setup",
+                    "InitMM.Transition::Setup",
+                    "EarlyIoremap.Transition::Setup",
+                    "SBI.Transition::Setup",
+                    "Params.Transition::Preset",
+                    "MemBlock.Transition::Setup",
+                    "Vm.Transition::Enable",
+                    "MemBlock.Transition::Enable",
+                    "EarlyDtb.Transition::Cleanup",
+                    "DeviceTree.Transition::Setup",
+                    "Zones.Transition::Setup",
+                    "PageMetadataMap.Transition::Setup",
+                    "ResourceLock.Transition::Preset",
+                    "ResourceLock.Transition::Setup",
+                    "ResourceTree.Transition::Setup",
+                    "CpuGroup.Transition::Setup",
+                    "CacheBlockInfo.Transition::Setup",
+                    "CpuCapabilities.Transition::Setup",
+                    "DmaCachePolicy.Transition::Setup",
                     "CorePreparePhase.Transition::Preset",
                     "MmCoreInitPhase.Transition::Preset",
                     "SchedInitPhase.Transition::Preset",
@@ -1034,7 +1056,24 @@ class ModelToolTests(unittest.TestCase):
             self.assertEqual(
                 [entry["text"] for entry in boot_init_setup["ensures"][0]["entries"]],
                 [
-                    "EntrySuccessorPhase.state == State::Online",
+                    "efi_boot_init_deferred(BootInitFlow)",
+                    "vmlinux_build_id_deferred(BootInitFlow)",
+                    "page_address_init_deferred(BootInitFlow)",
+                    "boot_init_setup_start_kernel_position_preserved(BootInitFlow)",
+                    "boot_init_setup_debug_objects_trimmed(BootInitFlow)",
+                    "boot_init_setup_cgroup_early_trimmed(BootInitFlow)",
+                    "boot_init_setup_acpi_boot_tables_trimmed(BootInitFlow)",
+                    "boot_init_setup_early_memtest_input_trimmed(BootInitFlow)",
+                    "boot_init_setup_sparse_init_trimmed(BootInitFlow)",
+                    "boot_init_setup_vmemmap_tlb_flush_trimmed(BootInitFlow)",
+                    "boot_init_setup_crashkernel_trimmed(BootInitFlow)",
+                    "boot_init_setup_kasan_trimmed(BootInitFlow)",
+                    "boot_init_setup_acpi_rintc_trimmed(BootInitFlow)",
+                    "boot_init_setup_acpi_cpu_numa_trimmed(BootInitFlow)",
+                    "boot_init_setup_cbop_block_size_deferred(BootInitFlow)",
+                    "boot_init_setup_boot_alternatives_deferred(BootInitFlow)",
+                    "boot_init_setup_rt_signal_env_deferred(BootInitFlow)",
+                    "boot_init_setup_user_isa_deferred(BootInitFlow)",
                     "CorePreparePhase.state == State::Online",
                     "MmCoreInitPhase.state == State::Online",
                     "SchedInitPhase.state == State::Online",
@@ -1043,8 +1082,8 @@ class ModelToolTests(unittest.TestCase):
                     "IrqOpenPreparePhase.state == State::Online",
                     "ProcessPreparePhase.state == State::Online",
                     "BootInitRestInitPhase.state == State::Online",
-                    "KernelInitFlow.state == State::Base",
-                    "KthreaddFlow.state == State::Base",
+                    "KernelInitFlow.state == State::Online",
+                    "KthreaddFlow.state == State::Online",
                     "BootTask.state == State::OnCpu",
                 ],
             )

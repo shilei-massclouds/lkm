@@ -235,7 +235,7 @@ tools/pyveri/bin/pyveri spec/model/main.spec -T custom-trace.svg -a state,transi
 - 纵向时间自底向上。
 - 先生成状态单元，再由状态单元合并出上层阶段单元和子阶段单元。
 - 阶段列当前显示 `PreparePhase` 和 `BootPhase`。
-- 子阶段列当前在 `BootPhase` 内从 `EntrySuccessorPhase` 开始；`BootInitFlow.Preset` 直接驱动的入口对象不再合成子阶段单元。
+- 子阶段列当前在 `BootPhase` 内从 `CorePreparePhase` 开始；`BootInitFlow.Preset/Setup` 直接驱动的入口对象不再合成子阶段单元。
 - 子阶段单元必须嵌在所属阶段单元内部，并与其覆盖的状态单元边界对齐；入口对象信号直接归属于 `BootInitFlow.Preset`。
 - 状态列当前包括 `PreparePhase.Ready`、`PreparePhase.Online` 和 `BootPhase.Ready`，不包含已删除的 BP 入口 wrapper 状态。
 - 对象列只填入达到某个阶段或子阶段状态时形成的对象状态结果。
@@ -251,7 +251,7 @@ tools/pyveri/bin/pyveri spec/model/main.spec -T custom-trace.svg -a state,transi
 
 待确认或后续改进：
 
-- 当前 `EntrySuccessorPhase` 到 `BootPhase` 的展示归属仍由工具内的阶段关系规则确定；后续应尽量从 `.spec` 的阶段父子关系和推导路径中通用推导。
+- 当前 `CorePreparePhase` 到 `BootPhase` 的展示归属仍由工具内的阶段关系规则确定；后续应尽量从 `.spec` 的阶段父子关系和推导路径中通用推导。
 - 当前对象列显示的是视图级状态结果，不代表完整证明引擎已经验证所有 `depends_on` 和 `invariant`。
 - 单元宽度、对象宽度、对象列数、行高和内边距已经集中在 SVG 渲染逻辑中，后续可暴露为 CLI 参数或配置。
 

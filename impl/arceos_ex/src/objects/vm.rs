@@ -266,7 +266,7 @@ impl Vm {
             && self.early_vm.current_on_cpu(cpu)
     }
 
-    pub fn entry_successor_ready(&self) -> bool {
+    pub fn boot_init_setup_ready(&self) -> bool {
         self.lifecycle.state() == State::Online
             && self.physical_direct.state() == State::Ready
             && self.trampoline_vm.state() == State::Ready
@@ -277,14 +277,14 @@ impl Vm {
             && self.swapper_vm.final_permissions_not_split_yet()
     }
 
-    pub fn entry_successor_ready_for(&self, cpu: &Cpu) -> bool {
-        self.entry_successor_ready() && self.swapper_vm.current_on_cpu(cpu)
+    pub fn boot_init_setup_ready_for(&self, cpu: &Cpu) -> bool {
+        self.boot_init_setup_ready() && self.swapper_vm.current_on_cpu(cpu)
     }
 
     pub fn complete_ap_translation_chain(&self, cpu: &Cpu, live_satp: usize) -> bool {
         let expected_chain =
             ap_translation_chain(self.trampoline_vm.satp(), self.swapper_vm.satp());
-        self.entry_successor_ready()
+        self.boot_init_setup_ready()
             && cpu.verify_translation_chain(&expected_chain, live_satp)
             && self.physical_direct.complete_arch_activation_on(cpu)
             && self.trampoline_vm.complete_arch_activation_on(cpu)
@@ -296,7 +296,7 @@ impl Vm {
     pub fn ap_translation_ready(&self, cpu: &Cpu) -> bool {
         let expected_chain =
             ap_translation_chain(self.trampoline_vm.satp(), self.swapper_vm.satp());
-        self.entry_successor_ready()
+        self.boot_init_setup_ready()
             && self.physical_direct.activation_complete_on(cpu)
             && self.trampoline_vm.translation_sync_complete(cpu)
             && self.swapper_vm.activation_complete_on(cpu)

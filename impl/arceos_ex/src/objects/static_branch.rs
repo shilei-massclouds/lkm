@@ -98,7 +98,7 @@ impl StaticBranch {
         if self.lifecycle.state() != State::Base
             || kernel_image.state() != State::Online
             || vm.state() != State::Online
-            || !vm.entry_successor_ready()
+            || !vm.boot_init_setup_ready()
             || !cpu_hotplug_lock.ready()
             || !jump_label_mutex.ready()
             || boot_task.state() != State::OnCpu

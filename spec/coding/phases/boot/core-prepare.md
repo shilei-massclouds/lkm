@@ -4,7 +4,10 @@
 
 核心准备子阶段，对应 model `spec/model/phases/boot/core-prepare/phase.spec` 中 `CorePreparePhase` 对象的 Preset → Online 生命周期。
 
-本阶段从 `EntrySuccessorPhase.Online` 开始，驱动 DeviceTree、Zones、PageMetadataMap、ResourceTree、CpuGroup、PerCpuStorage、StaticBranch、CommandLine、Params、PrintkBuffer、ExceptionType 等对象的建立，对应 Linux `paging_init()` 之后到 `trap_init()` 之间的核心准备路径。
+本阶段从 `setup_arch()` 返回开始，驱动 PerCpuStorage、StaticBranch、CommandLine、Params、
+PrintkBuffer 与 ExceptionType 等返回后对象，对应 Linux `setup_arch()` 返回到 `trap_init()` 的路径。
+DeviceTree、Zones、PageMetadataMap、ResourceTree、CpuGroup、CacheBlockInfo、CpuCapabilities 和
+DmaCachePolicy 已由 BootInitFlow.Setup 直接推进，只作为本阶段前置条件。
 
 按[阶段范式代码映射](../../phase-paradigm.md)，每个迁移对应一个概念函数。
 
@@ -12,8 +15,8 @@
 
 ### 1. depends_on
 
-由 `BootInitFlow.setup_after_entry_successor()` 启动，并在 `preset()` 中逐项检查：
-- `EntrySuccessorPhase.state == Online`
+由 BootInitFlow 私有 Setup helper 完成直接对象编排后启动，并在 `preset()` 中逐项检查：
+- `BootInitFlow.state == Prepared`
 - `KernelAddrSpace.state == Online`、`Vm.state == Online`、共享 `SwapperVm.state == Ready`
 - `MemBlock.state == Online`
 - `Params.state == Prepared`、`EarlyParam.state == Ready`
@@ -21,6 +24,8 @@
 - `BootCPU.state == Online`、`BootCpuLocalInterrupt.state == Ready`
 - `PrintkBuffer.state == Prepared`
 - `ExceptionType.state == Prepared`
+- `DeviceTree`、`Zones`、`PageMetadataMap`、`ResourceLock`、`ResourceTree`、`CpuGroup`、
+  `CacheBlockInfo`、`CpuCapabilities`、`DmaCachePolicy` 均为 Ready
 
 `preset()` 还必须先检查 `CORE_PREPARE_PHASE_STATE == Base`；全部检查通过后才发出
 `CorePreparePhase.Started`。
@@ -31,33 +36,23 @@
 
 | # | Model drives | Impl |
 |---|---|---|
-| 1 | `DeviceTree.Transition::Setup` | `ctx.device_tree.setup()` |
-| 2 | `Zones.Transition::Setup` | `ctx.zones.setup()` |
-| 3 | `PageMetadataMap.Transition::Setup` | `ctx.page_metadata_map.setup()` |
-| 4 | `ResourceLock.Transition::Preset` | `ctx.resource_lock.preset_static()` |
-| 5 | `ResourceLock.Transition::Setup` | `ctx.resource_lock.setup()` |
-| 6 | `ResourceTree.Transition::Setup` | `ctx.resource_tree.setup()` |
-| 7 | `CpuGroup.Transition::Setup` | `ctx.cpu_group.setup_smp()` |
-| 8 | `CacheBlockInfo.Transition::Setup` | `ctx.cache_block_info.setup()` |
-| 9 | `CpuCapabilities.Transition::Setup` | `ctx.cpu_capabilities.setup()` |
-| 10 | `DmaCachePolicy.Transition::Setup` | `ctx.dma_cache_policy.setup()` |
-| 11 | `PerCpuStorage.Transition::Preset` | `ctx.per_cpu_storage.preset()` |
-| 12 | `CpuHotplugLock.Transition::Preset` | `ctx.cpu_hotplug_lock.preset_static_with_per_cpu_storage()` |
-| 13 | `CpuHotplugLock.Transition::Setup` | `ctx.cpu_hotplug_lock.setup()` |
-| 14 | `JumpLabelMutex.Transition::Preset` | `ctx.jump_label_mutex.preset_static()` |
-| 15 | `JumpLabelMutex.Transition::Setup` | `ctx.jump_label_mutex.setup()` |
-| 16 | `StaticBranch.Transition::Setup` | `ctx.static_branch.setup()` |
-| 17 | `CommandLine.Transition::Setup` | `ctx.command_line.setup()` |
-| 18 | `PerCpuStorage.Transition::Setup` | `ctx.per_cpu_storage.setup()` |
-| 19 | `CpuHotplugState.Transition::Setup` | `ctx.cpu_hotplug_state.setup()` |
-| 20 | `Params.Transition::Setup` | `ctx.params.setup()` |
-| 21 | `Randomness.Transition::Preset` | `ctx.randomness.preset()` |
-| 22 | `PrintkBuffer.Transition::Setup` | `printk::setup()` |
-| 23 | `ExceptionTable.Transition::Setup` | `ctx.exception_table.setup()` |
-| 24 | `ExceptionType.Transition::Setup` | `ctx.boot_cpu_exception_mut().setup()` |
-| 25 | `PageFaultExceptionType.Transition::Enable` | `ctx.boot_cpu_exception_mut().enable_non_syscall_children()` |
-| 26 | `BreakpointExceptionType.Transition::Enable` | 同一 CPU-local child enable 事务 |
-| 27 | `UnexpectedExceptionType.Transition::Enable` | 同一 CPU-local child enable 事务 |
+| 1 | `PerCpuStorage.Transition::Preset` | `ctx.per_cpu_storage.preset()` |
+| 2 | `CpuHotplugLock.Transition::Preset` | `ctx.cpu_hotplug_lock.preset_static_with_per_cpu_storage()` |
+| 3 | `CpuHotplugLock.Transition::Setup` | `ctx.cpu_hotplug_lock.setup()` |
+| 4 | `JumpLabelMutex.Transition::Preset` | `ctx.jump_label_mutex.preset_static()` |
+| 5 | `JumpLabelMutex.Transition::Setup` | `ctx.jump_label_mutex.setup()` |
+| 6 | `StaticBranch.Transition::Setup` | `ctx.static_branch.setup()` |
+| 7 | `CommandLine.Transition::Setup` | `ctx.command_line.setup()` |
+| 8 | `PerCpuStorage.Transition::Setup` | `ctx.per_cpu_storage.setup()` |
+| 9 | `CpuHotplugState.Transition::Setup` | `ctx.cpu_hotplug_state.setup()` |
+| 10 | `Params.Transition::Setup` | `ctx.params.setup()` |
+| 11 | `Randomness.Transition::Preset` | `ctx.randomness.preset()` |
+| 12 | `PrintkBuffer.Transition::Setup` | `printk::setup()` |
+| 13 | `ExceptionTable.Transition::Setup` | `ctx.exception_table.setup()` |
+| 14 | `ExceptionType.Transition::Setup` | `ctx.boot_cpu_exception_mut().setup()` |
+| 15 | `PageFaultExceptionType.Transition::Enable` | `ctx.boot_cpu_exception_mut().enable_non_syscall_children()` |
+| 16 | `BreakpointExceptionType.Transition::Enable` | 同一 CPU-local child enable 事务 |
+| 17 | `UnexpectedExceptionType.Transition::Enable` | 同一 CPU-local child enable 事务 |
 
 ### 3. ensures
 
@@ -113,7 +108,7 @@
 ## 迁移间调用关系
 
 ```
-preset()  ← 由 BootInitFlow.setup_after_entry_successor() 调用
+preset()  ← 由 BootInitFlow Setup direct-object helper 调用
   │
   ├─ preset_objects()  ← 按模型 drives 顺序驱动全部对象 transition
   │
@@ -134,7 +129,7 @@ preset()  ← 由 BootInitFlow.setup_after_entry_successor() 调用
 
 | Object | Required State |
 |---|---|
-| EntrySuccessorPhase | Online |
+| BootInitFlow | Prepared |
 | DeviceTree | Ready |
 | Zones | Ready |
 | PageMetadataMap | Ready |
@@ -175,11 +170,13 @@ preset()  ← 由 BootInitFlow.setup_after_entry_successor() 调用
 
 ## Coding Constraints
 
-- CorePreparePhase 运行在 `paging_init()` 完成后、`trap_init()`/`mm_core_init()` 之前的系统独占上下文中：中断、任务并发、SMP 并发均未打开。
+- CorePreparePhase 运行在 `setup_arch()` 返回后、`trap_init()`/`mm_core_init()` 之前的系统独占上下文中：中断、任务并发、SMP 并发均未打开。
 - `StaticBranch.setup()` 必须保持 `CpuHotplugLock.ReadLock/ReadUnlock` 和 `JumpLabelMutex.Lock/Unlock` 的 guard 协议可见，不得因 SingleTaskContext 事实而隐藏或擦除。
 - `PrintkBuffer.setup()` 中的 `local_irq_save/restore` 临界区必须绑定到 `BootCpuLocalInterrupt` 对象，如 `PrintkBufferSetupLocalInterruptContext` 模型上下文所示。
 - `Randomness.preset()` 对应的 `random_init_early()` 中的 `_mix_pool_bytes()` 不持有 `input_pool.lock`，实现不得添加该锁。
-- 所有 deferred 路径（如 `acpi_boot_table_init()`、`early_memtest()`、`sparse_init()`、`kasan_init()`、`bootconfig`、`VFS caches` 等）保留调用位置标记，不得在当前实现中提前推进或隐含状态。
+- `acpi_boot_table_init()`、`early_memtest()`、`sparse_init()`、`kasan_init()` 等 setup_arch-tail
+  deferred/trimmed 路径归属 BootInitFlow.Setup；本阶段只保留 `static_call_init()`、early security、
+  bootconfig、boot CPU hook、extra init args 与 early VFS caches 等返回后路径。
 - `checkpoint_setup_nr_cpu_ids` 仅验证 `CpuGroup` 的 `possible_cpu_boundary_ready` 和 `BootCPU == CpuGroup[0]`，不推进额外对象状态。
 - `checkpoint_second_parse_early_param` 仅检查 `EarlyParam.state == Ready`（标志第二次 `parse_early_param()` 调用位置），不重新推进 `EarlyParam` 或 `EarlyCon`。
 - `checkpoint_print_unknown_bootoptions` 仅输出 `BootParam` 收集到的未知选项，不改变 `BootParam` 状态。

@@ -81,7 +81,7 @@ pub fn run() -> SmokeResult {
         if logical_id == BOOT_CPU_LOGICAL_ID {
             if cpu.role() != CpuRole::Boot
                 || !cpu.is_online()
-                || !ctx.vm.entry_successor_ready_for(cpu)
+                || !ctx.vm.boot_init_setup_ready_for(cpu)
             {
                 printk::write_str("CpuGroup boot CPU slot is invalid\n");
                 return SmokeResult::Failed;

@@ -5066,9 +5066,9 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(resumed_checked["exit_code"], 0)
             self.assertTrue(resumed_checked["allowed"])
             self.assertEqual(resumed_data["summary"]["inventory_deferred"], 138)
-            self.assertEqual(resumed_data["summary"]["inventory_trimmed"], 53)
+            self.assertEqual(resumed_data["summary"]["inventory_trimmed"], 55)
             self.assertEqual(resumed_data["summary"]["unresolved_obligations"], 0)
-            self.assertEqual(len(resumed_data["boundary_inventory"]), 191)
+            self.assertEqual(len(resumed_data["boundary_inventory"]), 193)
             occurrence_by_boundary = {
                 item["boundary_id"]: item
                 for item in resumed_data["boundary_occurrences"]
@@ -5560,7 +5560,7 @@ class SignalPipelineTests(unittest.TestCase):
                     "completed": 51,
                     "failed": 0,
                     "inventory_deferred": 138,
-                    "inventory_trimmed": 53,
+                    "inventory_trimmed": 55,
                     "pending": 0,
                     "rejected": 0,
                     "signals": 52,
@@ -5824,10 +5824,10 @@ class SignalPipelineTests(unittest.TestCase):
                 boundary["call_span"],
                 {
                     "end_column": 1,
-                    "end_line": 168,
+                    "end_line": 169,
                     "source_file": "spec/model/phases/boot-init/phase.spec",
                     "start_column": 1,
-                    "start_line": 167,
+                    "start_line": 168,
                 },
             )
             self.assertEqual(boundary["snapshot"], derivation["signals"][19]["after_snapshot"])
@@ -6019,14 +6019,14 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(snapshot.read_bytes(), BOOT_INIT_SETUP_SCENARIO.read_bytes())
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "5621c3bbca374491d98c8888ec9189d591cdcbb4d04fb7beba9ad6e9af97c49f",
+                "41b6b87aa6c93cc41edf521ff554e0e4f9397e030d710ad1473a8282afd85b3b",
             )
             self.assertEqual(
                 {
                     derivation["model_fingerprint"], model["model_fingerprint"],
                     view["model_fingerprint"], saved["model_fingerprint"],
                 },
-                {"sha256:331e2f94b9bc453473be347fbe9ac51d1b502ce511a1fe3f1ee6b85ac248dc72"},
+                {"sha256:86f8506515619e9fc601261d5d169c81d335625c9edb2e944ad1be95da096300"},
             )
             with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
                 compact_text = render_text(view)
@@ -6131,6 +6131,163 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(missing.returncode, 2)
             self.assertIn("tools2/scenarios/BootInitFlow.Enable.snapshot.json", missing.stderr)
 
+    def test_main_model_boot_init_setup_stops_at_setup_arch_return(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            work = root / "setup-arch-return"
+            snapshot = root / "CorePreparePhase.Preset.snapshot.json"
+            text_output = root / "setup-arch-return.txt"
+            html_output = root / "setup-arch-return.html"
+            reached = subprocess.run(
+                [
+                    str(TOOLS2 / "bin" / "pyveri"),
+                    "-t",
+                    "BootInitFlow.Setup",
+                    "-u",
+                    "CorePreparePhase.Preset",
+                    "--work-dir",
+                    str(work),
+                    "--snapshot-out",
+                    str(snapshot),
+                    "-o",
+                    str(text_output),
+                    "--html-out",
+                    str(html_output),
+                ],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(reached.returncode, 0, reached.stderr)
+            derivation = read_json(work / "derive.json")
+            self.assertEqual(derivation["verdict"], "reached")
+            self.assertEqual(
+                derivation["summary"],
+                {
+                    "boundary_occurrences": 2,
+                    "completed": 61,
+                    "failed": 0,
+                    "inventory_deferred": 138,
+                    "inventory_trimmed": 55,
+                    "pending": 0,
+                    "rejected": 0,
+                    "signals": 62,
+                    "stopped": 1,
+                    "truncated": 0,
+                    "unresolved_obligations": 0,
+                    "yielded": 0,
+                },
+            )
+            self.assertEqual(
+                (
+                    derivation["root_request"]["source"],
+                    derivation["root_request"]["target"],
+                    derivation["root_request"]["signal"],
+                ),
+                ("BootInitFlow", "BootInitFlow", "Setup"),
+            )
+            boundary = derivation["boundary"]
+            self.assertEqual(
+                {
+                    key: boundary[key]
+                    for key in ("kind", "normalized_signal", "source", "target", "signal")
+                },
+                {
+                    "kind": "before_signal_send",
+                    "normalized_signal": "CorePreparePhase.Preset",
+                    "source": "BootInitFlow",
+                    "target": "CorePreparePhase",
+                    "signal": "Preset",
+                },
+            )
+            self.assertEqual(
+                (
+                    boundary["send_position"]["delivery"],
+                    boundary["send_position"]["cause_id"],
+                ),
+                ("drives", "sig-0001"),
+            )
+
+            direct = [
+                (item["id"], item["source"], item["target"], item["name"],
+                 item["delivery"], item["cause_id"], item["handler"]["id"],
+                 item["before_snapshot"]["states"][item["target"]],
+                 item["after_snapshot"]["states"][item["target"]])
+                for item in derivation["signals"]
+                if item.get("cause_id") == "sig-0001" and item["outcome"] == "completed"
+            ]
+            self.assertEqual(
+                direct,
+                [
+                    ("sig-0002", "BootInitFlow", "BootTask", "EnableStackGuard", "drives", "sig-0001", "BootTask.Action::EnableStackGuard@process", "OnCpu", "OnCpu"),
+                    ("sig-0003", "BootInitFlow", "EarlyDtb", "Preset", "drives", "sig-0001", "EarlyDtb.Transition::Preset@Base", "Base", "Prepared"),
+                    ("sig-0008", "BootInitFlow", "CpuGroup.cpus[0]", "Enable", "drives", "sig-0001", "CpuGroup.cpus[0].Transition::Enable@Ready", "Ready", "Online"),
+                    ("sig-0009", "BootInitFlow", "PrintkBuffer", "Preset", "drives", "sig-0001", "PrintkBuffer.Transition::Preset@Base", "Base", "Prepared"),
+                    ("sig-0010", "BootInitFlow", "EarlyDtb", "Setup", "drives", "sig-0001", "EarlyDtb.Transition::Setup@Prepared", "Prepared", "Ready"),
+                    ("sig-0014", "BootInitFlow", "InitMM", "Setup", "drives", "sig-0001", "InitMM.Transition::Setup@Base", "Base", "Ready"),
+                    ("sig-0015", "BootInitFlow", "EarlyIoremap", "Setup", "drives", "sig-0001", "EarlyIoremap.Transition::Setup@Base", "Base", "Ready"),
+                    ("sig-0016", "BootInitFlow", "SBI", "Setup", "drives", "sig-0001", "SBI.Transition::Setup@Base", "Base", "Ready"),
+                    ("sig-0017", "BootInitFlow", "Params", "Preset", "drives", "sig-0001", "Params.Transition::Preset@Base", "Base", "Prepared"),
+                    ("sig-0025", "BootInitFlow", "MemBlock", "Setup", "drives", "sig-0001", "MemBlock.Transition::Setup@Prepared", "Prepared", "Ready"),
+                    ("sig-0026", "BootInitFlow", "Vm", "Enable", "drives", "sig-0001", "Vm.Transition::Enable@Ready", "Ready", "Online"),
+                    ("sig-0030", "BootInitFlow", "MemBlock", "Enable", "drives", "sig-0001", "MemBlock.Transition::Enable@Ready", "Ready", "Online"),
+                    ("sig-0031", "BootInitFlow", "EarlyDtb", "Cleanup", "drives", "sig-0001", "EarlyDtb.Transition::Cleanup@Ready", "Ready", "Destroyed"),
+                    ("sig-0032", "BootInitFlow", "DeviceTree", "Setup", "drives", "sig-0001", "DeviceTree.Transition::Setup@Base", "Base", "Ready"),
+                    ("sig-0033", "BootInitFlow", "Zones", "Setup", "drives", "sig-0001", "Zones.Transition::Setup@Base", "Base", "Ready"),
+                    ("sig-0034", "BootInitFlow", "PageMetadataMap", "Setup", "drives", "sig-0001", "PageMetadataMap.Transition::Setup@Base", "Base", "Ready"),
+                    ("sig-0035", "BootInitFlow", "ResourceLock", "Preset", "drives", "sig-0001", "ResourceLock.Transition::Preset@Base", "Base", "Prepared"),
+                    ("sig-0036", "BootInitFlow", "ResourceLock", "Setup", "drives", "sig-0001", "ResourceLock.Transition::Setup@Prepared", "Prepared", "Ready"),
+                    ("sig-0037", "BootInitFlow", "ResourceTree", "Setup", "drives", "sig-0001", "ResourceTree.Transition::Setup@Base", "Base", "Ready"),
+                    ("sig-0038", "BootInitFlow", "CpuGroup", "Setup", "drives", "sig-0001", "CpuGroup.Transition::Setup@Prepared", "Prepared", "Ready"),
+                    ("sig-0060", "BootInitFlow", "CacheBlockInfo", "Setup", "drives", "sig-0001", "CacheBlockInfo.Transition::Setup@Base", "Base", "Ready"),
+                    ("sig-0061", "BootInitFlow", "CpuCapabilities", "Setup", "drives", "sig-0001", "CpuCapabilities.Transition::Setup@Base", "Base", "Ready"),
+                    ("sig-0062", "BootInitFlow", "DmaCachePolicy", "Setup", "drives", "sig-0001", "DmaCachePolicy.Transition::Setup@Base", "Base", "Ready"),
+                ],
+            )
+
+            saved = read_json(snapshot)
+            self.assertEqual(saved["snapshot"], boundary["snapshot"])
+            states = saved["snapshot"]["states"]
+            self.assertEqual(states["BootInitFlow"], "Prepared")
+            self.assertEqual(states["CorePreparePhase"], "Base")
+            for name in (
+                "DeviceTree", "Zones", "PageMetadataMap", "ResourceLock",
+                "ResourceTree", "CpuGroup", "CacheBlockInfo", "CpuCapabilities",
+                "DmaCachePolicy",
+            ):
+                self.assertEqual(states[name], "Ready")
+            self.assertEqual(states["EarlyDtb"], "Destroyed")
+            self.assertEqual(states["MemBlock"], "Online")
+            self.assertEqual(states["Vm"], "Online")
+            self.assertEqual(states["SwapperVm"], "Ready")
+            self.assertEqual(states["KernelAddrSpace"], "Online")
+            self.assertEqual(states["PerCpuStorage"], "Base")
+            self.assertEqual(states["CommandLine"], "Prepared")
+            self.assertEqual(states["Params"], "Prepared")
+            self.assertEqual(states["BootParam"], "Base")
+            self.assertEqual(states["PayloadParam"], "Base")
+            self.assertEqual(states["CpuGroup.cpus[0].trap.exception"], "Prepared")
+            facts = set(saved["snapshot"]["facts"])
+            for fact in (
+                "task_stack_guard_ready(BootTask,BootTask.stack)",
+                "memblock_resize_allowed(MemBlock)",
+                "swapper_vm_translation_sync_complete(SwapperVm,BootCPURef)",
+                "device_tree_unflattened_from_raw_dtb(DeviceTree,RawDtb)",
+                "zones_ready(Zones,MemBlock)",
+                "page_metadata_map_ready(PageMetadataMap,Zones)",
+                "resource_tree_ready(ResourceTree,MemBlock)",
+                "cache_block_info_ready(CacheBlockInfo,DeviceTree,CpuGroup)",
+                "cpu_capabilities_ready(CpuCapabilities,DeviceTree,CpuGroup)",
+                "dma_cache_policy_ready(DmaCachePolicy,CpuCapabilities,CacheBlockInfo)",
+            ):
+                self.assertIn(fact, facts)
+
+            serialized = json.dumps(derivation, sort_keys=True)
+            self.assertNotIn("EntrySuccessorPhase", serialized)
+            self.assertNotIn("EntrySuccessorPhase", text_output.read_text(encoding="utf-8"))
+            self.assertNotIn("EntrySuccessorPhase", html_output.read_text(encoding="utf-8"))
+
     def test_main_model_schedule_presend_has_unique_cpu_schedulers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -6157,14 +6314,14 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(
                 derivation["summary"],
                 {
-                    "boundary_occurrences": 118,
-                    "completed": 345,
+                    "boundary_occurrences": 120,
+                    "completed": 342,
                     "failed": 0,
                     "inventory_deferred": 138,
-                    "inventory_trimmed": 53,
+                    "inventory_trimmed": 55,
                     "pending": 0,
                     "rejected": 0,
-                    "signals": 347,
+                    "signals": 344,
                     "stopped": 2,
                     "truncated": 0,
                     "unresolved_obligations": 0,
@@ -6223,7 +6380,7 @@ class SignalPipelineTests(unittest.TestCase):
             )
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "975c7c5903b2e2e88d7976e80d648f364db1443f40b683cdd5a1b6a9ee720632",
+                "d2deffece24b21984050a254900f557a9f7b0a50e923fc005bdecec50c6f5773",
             )
             model = read_json(work / "model.json")
             view = read_json(work / "view.json")
@@ -6235,7 +6392,7 @@ class SignalPipelineTests(unittest.TestCase):
                     view["model_fingerprint"],
                     saved["model_fingerprint"],
                 },
-                {"sha256:331e2f94b9bc453473be347fbe9ac51d1b502ce511a1fe3f1ee6b85ac248dc72"},
+                {"sha256:86f8506515619e9fc601261d5d169c81d335625c9edb2e944ad1be95da096300"},
             )
 
     def test_main_model_boot_init_entry_stops_at_first_missing_guard(self) -> None:

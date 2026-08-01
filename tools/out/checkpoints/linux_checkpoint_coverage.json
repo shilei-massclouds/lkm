@@ -1,9 +1,9 @@
 {
-  "total_checkpoints": 478,
+  "total_checkpoints": 474,
   "mapping_kind_counts": [
     {
       "mapping_kind": "exact",
-      "count": 103
+      "count": 102
     },
     {
       "mapping_kind": "range",
@@ -11,13 +11,13 @@
     },
     {
       "mapping_kind": "unmapped",
-      "count": 354
+      "count": 351
     }
   ],
   "confidence_counts": [
     {
       "confidence": "none",
-      "count": 354
+      "count": 351
     },
     {
       "confidence": "high",
@@ -25,13 +25,13 @@
     },
     {
       "confidence": "medium",
-      "count": 62
+      "count": 61
     }
   ],
   "mapped_linux_file_counts": [
     {
       "linux_file": "init/main.c",
-      "count": 53
+      "count": 52
     },
     {
       "linux_file": "arch/riscv/kernel/head.S",
@@ -132,10 +132,6 @@
       "count": 4
     },
     {
-      "family": "EntrySuccessorPhase",
-      "count": 4
-    },
-    {
       "family": "IrqOpenPreparePhase",
       "count": 4
     },
@@ -173,6 +169,10 @@
     },
     {
       "family": "Completion",
+      "count": 3
+    },
+    {
+      "family": "CorePreparePhase",
       "count": 3
     },
     {
@@ -233,10 +233,6 @@
     },
     {
       "family": "CommandLine",
-      "count": 2
-    },
-    {
-      "family": "CorePreparePhase",
       "count": 2
     },
     {

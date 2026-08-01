@@ -5,7 +5,6 @@
  * SingleTaskContext used by BootInitFlow's direct drives.
  */
 
-include "entry-successor/main.spec";
 include "core-prepare/main.spec";
 include "mm-core-init/main.spec";
 include "sched-init/main.spec";

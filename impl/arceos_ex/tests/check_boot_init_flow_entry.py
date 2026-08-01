@@ -250,8 +250,11 @@ def check_adoption_sources(source_root: Path) -> None:
     start_kernel = rust_function(flow_source, 'pub extern "C" fn start_kernel')
     if "start_kernel_entry_guard_satisfied()" not in start_kernel:
         raise AssertionError("start_kernel does not enforce the exact entry guard")
-    if "entry_successor::preset" not in start_kernel:
-        raise AssertionError("start_kernel does not start EntrySuccessorPhase.Preset")
+    if "setup::run" not in start_kernel:
+        raise AssertionError("start_kernel does not start the BootInitFlow direct Setup helper")
+    setup_source = (source_root / "flows/boot_init_flow/setup.rs").read_text()
+    if "CorePreparePhaseStarted" in setup_source:
+        raise AssertionError("BootInitFlow direct Setup helper emits a phase checkpoint")
     start_guard = rust_function(flow_source, "fn start_kernel_entry_guard_satisfied")
     if "crate::systems::kernel::enable_in_progress()" not in start_guard:
         raise AssertionError("start_kernel guard does not require accepted Kernel.Enable in progress")

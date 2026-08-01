@@ -140,8 +140,8 @@ class ListCheckpointsTests(unittest.TestCase):
         self.assertEqual(by_name["Kernel.Online"].early_byte, "L")
         self.assertEqual(by_name["BootTask.OnCpu"].early_byte, "T")
         self.assertEqual(by_name["BootInitFlow.Started"].early_byte, "O")
+        self.assertFalse(any(name.startswith("EntrySuccessorPhase.") for name in by_name))
         for phase in (
-            "EntrySuccessorPhase",
             "CorePreparePhase",
             "MmCoreInitPhase",
             "SchedInitPhase",
@@ -173,7 +173,7 @@ class ListCheckpointsTests(unittest.TestCase):
                 self.assertNotIn(f"{removed}.{boundary}", by_name)
 
         self.assertEqual([record.index for record in records], list(range(len(records))))
-        self.assertEqual(len(records), 478)
+        self.assertEqual(len(records), 474)
 
 
 if __name__ == "__main__":

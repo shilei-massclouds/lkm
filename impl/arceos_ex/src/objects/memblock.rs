@@ -50,7 +50,7 @@ impl MemBlock {
         &self.reserved
     }
 
-    pub const fn entry_successor_setup_facts_ready(&self) -> bool {
+    pub const fn boot_init_setup_facts_ready(&self) -> bool {
         self.phys_ram_base_ready
             && self.kernel_va_pa_offset_ready
             && self.dma32_limit_ready

@@ -191,7 +191,7 @@ class ViewToolTests(unittest.TestCase):
             rows = data["metadata"]["timeline_rows"]
             self.assertFalse(any(row["phase"] == "PreparePhase" for row in rows))
             self.assertTrue(any(row["phase"] == "BootPhase" for row in rows))
-            self.assertTrue(
+            self.assertFalse(
                 any(row["subphase"] == "EntrySuccessorPhase" for row in rows)
             )
             self.assertTrue(any(row["phase"] == "IrqTimeInitPhase" for row in rows))
@@ -341,7 +341,7 @@ class ViewToolTests(unittest.TestCase):
                 "transition_span", "BootInitFlow.Transition::Enable"
             )
             boot_setup_cell = trace_cell(
-                "transition_span", "EntrySuccessorPhase.Transition::Setup"
+                "transition_span", "BootInitFlow.Transition::Setup"
             )
             kernel_setup_cell = trace_cell(
                 "transition_span", "Kernel.Transition::Setup"

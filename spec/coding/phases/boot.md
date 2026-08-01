@@ -1,12 +1,14 @@
 # Boot 叶阶段 namespace 编码指引
 
-`phases/boot/` 仅组织 `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase` 与
+`phases/boot/` 仅组织 `CorePreparePhase`、`MmCoreInitPhase` 与
 `SchedInitPhase` 的实现。不存在 `BootPhase` 或入口前导对象、状态机、checkpoint 或父
 continuation。
 
 - 入口具体对象由 `flows/boot_init_flow/preset.rs` 在 `BootInitFlow.Preset` 中直接驱动。
-- 四个阶段由 `BootInitFlow.Setup` 按顺序直接驱动，每个阶段 Online 后只返回
+- 三个阶段由 `BootInitFlow.Setup` 按顺序直接驱动，每个阶段 Online 后只返回
   `BootInitFlow.Setup` 的下一 continuation。
+- `start_kernel()` 到 `setup_arch()` 返回的对象推进位于 BootInitFlow 私有 Setup helper，不属于本
+  leaf namespace。
 - namespace module 可以提供子 module 声明和纯查询聚合，但不得保存 wrapper lifecycle 或代发叶
   checkpoint。
 - 所有叶阶段代码仍运行于 BootTask 且必须满足 BootInitFlow 的 dispatch guard。

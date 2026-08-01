@@ -589,7 +589,6 @@ def _timeline_phase_order_from_id(phase_id: str) -> int:
         "Kernel": 3,
         "PreparePhase": 4,
         "BootPhase": 5,
-        "EntrySuccessorPhase": 6,
     }
     return order.get(phase_id, 1000)
 

@@ -77,8 +77,8 @@ pub fn run() -> SmokeResult {
         printk::write_str("memblock reserved metadata missing after offline\n");
         return SmokeResult::Failed;
     }
-    if !ctx.memblock.entry_successor_setup_facts_ready() {
-        printk::write_str("memblock entry successor setup facts missing\n");
+    if !ctx.memblock.boot_init_setup_facts_ready() {
+        printk::write_str("memblock boot init setup facts missing\n");
         return SmokeResult::Failed;
     }
     if ctx.vm.swapper_vm().state() != State::Ready
@@ -90,7 +90,7 @@ pub fn run() -> SmokeResult {
         || !ctx.vm.swapper_vm().strict_kernel_rwx_boundary_deferred()
         || !ctx.vm.swapper_vm().final_permissions_not_split_yet()
     {
-        printk::write_str("swapper vm entry successor facts invalid\n");
+        printk::write_str("swapper vm boot init setup facts invalid\n");
         return SmokeResult::Failed;
     }
 

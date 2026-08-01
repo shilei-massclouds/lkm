@@ -1,28 +1,28 @@
 # Linux Checkpoint Mapping Coverage
 
-- total checkpoints: 478
+- total checkpoints: 474
 
 ## Mapping Kind Counts
 
 | mapping_kind | count |
 | --- | ---: |
-| exact | 103 |
+| exact | 102 |
 | range | 21 |
-| unmapped | 354 |
+| unmapped | 351 |
 
 ## Confidence Counts
 
 | confidence | count |
 | --- | ---: |
-| none | 354 |
+| none | 351 |
 | high | 62 |
-| medium | 62 |
+| medium | 61 |
 
 ## Mapped Linux File Counts
 
 | linux_file | count |
 | --- | ---: |
-| init/main.c | 53 |
+| init/main.c | 52 |
 | arch/riscv/kernel/head.S | 14 |
 | kernel/sched/core.c | 8 |
 | arch/riscv/mm/init.c | 7 |
@@ -52,7 +52,6 @@
 | BootInitScheduleHandoffPhase | 4 |
 | CpuGroup | 4 |
 | EarlyCon | 4 |
-| EntrySuccessorPhase | 4 |
 | IrqOpenPreparePhase | 4 |
 | KthreaddTask | 4 |
 | MemBlock | 4 |
@@ -63,6 +62,7 @@
 | BootCPU | 3 |
 | BootInitRestInitPhase | 3 |
 | Completion | 3 |
+| CorePreparePhase | 3 |
 | EarlyDtb | 3 |
 | InitStack | 3 |
 | InterruptType | 3 |
@@ -78,7 +78,6 @@
 | ApSmpCallinPhase | 2 |
 | BootInitFlow | 2 |
 | CommandLine | 2 |
-| CorePreparePhase | 2 |
 | FinalizePhase | 2 |
 | InitcallPhase | 2 |
 | IrqChipInitTable | 2 |

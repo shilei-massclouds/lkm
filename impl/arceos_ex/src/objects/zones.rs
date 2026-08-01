@@ -143,7 +143,7 @@ impl Zones {
         if self.lifecycle.state() != State::Base
             || memblock.state() != State::Online
             || vm.state() != State::Online
-            || !vm.entry_successor_ready()
+            || !vm.boot_init_setup_ready()
         {
             return failed_condition(
                 LifecycleEvent::Setup,

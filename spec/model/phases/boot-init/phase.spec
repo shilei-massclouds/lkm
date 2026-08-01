@@ -4,6 +4,7 @@
  */
 
 include "preset.spec";
+include "setup.spec";
 include "rest-init/main.spec";
 
 object BootInitFlow: TaskFlow {
@@ -188,11 +189,55 @@ object BootInitFlow: TaskFlow {
                         self.parent,
                         TaskExecutionAuthority::Live
                     );
+                    Vm.state == State::Ready;
+                    EarlyVm.state == State::Ready;
+                    cpu_active_translation_controller_for_ref_is(
+                        BootCPURef,
+                        TranslationControllerKind::EarlyVm
+                    );
+                    current_stack_binding_matches_task(
+                        CpuGroup.cpus[0],
+                        BootTask,
+                        BootTask.stack
+                    );
+                    current_stack_pointer_matches_active_controller(
+                        CpuGroup.cpus[0],
+                        BootTask,
+                        BootTask.stack
+                    );
+                    CurrentCPU.trap.interrupt.state == State::Ready;
+                    RawDtb.state == State::Ready;
+                    FixMap.state == State::Ready;
+                    KernelImage.state == State::Online;
+                    interrupt_concurrency_closed();
+                    task_concurrency_closed();
                 }
 
                 within SingleTaskContext {
                     drives {
-                        EntrySuccessorPhase.Transition::Preset;
+                        BootTask.Action::EnableStackGuard;
+                        EarlyDtb.Transition::Preset;
+                        CurrentCPU.Transition::Enable;
+                        PrintkBuffer.Transition::Preset;
+                        EarlyDtb.Transition::Setup;
+                        InitMM.Transition::Setup;
+                        EarlyIoremap.Transition::Setup;
+                        SBI.Transition::Setup;
+                        Params.Transition::Preset;
+                        MemBlock.Transition::Setup;
+                        Vm.Transition::Enable;
+                        MemBlock.Transition::Enable;
+                        EarlyDtb.Transition::Cleanup;
+                        DeviceTree.Transition::Setup;
+                        Zones.Transition::Setup;
+                        PageMetadataMap.Transition::Setup;
+                        ResourceLock.Transition::Preset;
+                        ResourceLock.Transition::Setup;
+                        ResourceTree.Transition::Setup;
+                        CpuGroup.Transition::Setup;
+                        CacheBlockInfo.Transition::Setup;
+                        CpuCapabilities.Transition::Setup;
+                        DmaCachePolicy.Transition::Setup;
                         CorePreparePhase.Transition::Preset;
                         MmCoreInitPhase.Transition::Preset;
                         SchedInitPhase.Transition::Preset;
@@ -216,7 +261,24 @@ object BootInitFlow: TaskFlow {
                 }
 
                 ensures {
-                    EntrySuccessorPhase.state == State::Online;
+                    efi_boot_init_deferred(BootInitFlow);
+                    vmlinux_build_id_deferred(BootInitFlow);
+                    page_address_init_deferred(BootInitFlow);
+                    boot_init_setup_start_kernel_position_preserved(BootInitFlow);
+                    boot_init_setup_debug_objects_trimmed(BootInitFlow);
+                    boot_init_setup_cgroup_early_trimmed(BootInitFlow);
+                    boot_init_setup_acpi_boot_tables_trimmed(BootInitFlow);
+                    boot_init_setup_early_memtest_input_trimmed(BootInitFlow);
+                    boot_init_setup_sparse_init_trimmed(BootInitFlow);
+                    boot_init_setup_vmemmap_tlb_flush_trimmed(BootInitFlow);
+                    boot_init_setup_crashkernel_trimmed(BootInitFlow);
+                    boot_init_setup_kasan_trimmed(BootInitFlow);
+                    boot_init_setup_acpi_rintc_trimmed(BootInitFlow);
+                    boot_init_setup_acpi_cpu_numa_trimmed(BootInitFlow);
+                    boot_init_setup_cbop_block_size_deferred(BootInitFlow);
+                    boot_init_setup_boot_alternatives_deferred(BootInitFlow);
+                    boot_init_setup_rt_signal_env_deferred(BootInitFlow);
+                    boot_init_setup_user_isa_deferred(BootInitFlow);
                     CorePreparePhase.state == State::Online;
                     MmCoreInitPhase.state == State::Online;
                     SchedInitPhase.state == State::Online;
@@ -228,6 +290,109 @@ object BootInitFlow: TaskFlow {
                     KernelInitFlow.state == State::Online;
                     KthreaddFlow.state == State::Online;
                     BootTask.state == State::OnCpu;
+                }
+
+                deferred boot_init_setup.001 {
+                    category: DeferredCategory::AlternatePath;
+                    summary: "Model the enabled EFI boot initialization path as a firmware interface object.";
+                    evidence { efi_boot_init_deferred(BootInitFlow); }
+                    close_when: "EFI initialization, handoff facts and enabled-reference-path tests pass.";
+                }
+                deferred boot_init_setup.002 {
+                    category: DeferredCategory::ModelDetail;
+                    summary: "Model init_vmlinux_build_id metadata publication.";
+                    evidence { vmlinux_build_id_deferred(BootInitFlow); }
+                    close_when: "Build-ID metadata ownership, publication and implementation checks are modeled and tested.";
+                }
+                deferred boot_init_setup.003 {
+                    category: DeferredCategory::ModelDetail;
+                    summary: "Model page_address freelist and hash metadata initialization.";
+                    evidence { page_address_init_deferred(BootInitFlow); }
+                    close_when: "page_address metadata lifecycle and reference call-position tests pass.";
+                }
+                trimmed boot_init_setup.004 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "debug_objects_early_init is absent because CONFIG_DEBUG_OBJECTS=n.";
+                    evidence { boot_init_setup_debug_objects_trimmed(BootInitFlow); }
+                    revisit_when: "The reference configuration enables CONFIG_DEBUG_OBJECTS.";
+                }
+                trimmed boot_init_setup.005 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "cgroup_init_early is absent because CONFIG_CGROUPS=n.";
+                    evidence { boot_init_setup_cgroup_early_trimmed(BootInitFlow); }
+                    revisit_when: "The reference configuration enables CONFIG_CGROUPS.";
+                }
+                trimmed boot_init_setup.006 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "acpi_boot_table_init is absent because CONFIG_ACPI=n.";
+                    evidence { boot_init_setup_acpi_boot_tables_trimmed(BootInitFlow); }
+                    revisit_when: "The reference configuration enables CONFIG_ACPI.";
+                }
+                trimmed boot_init_setup.007 {
+                    category: TrimmedCategory::ReferenceInput;
+                    summary: "early_memtest has no work because the fixed reference command line has no memtest request.";
+                    evidence { boot_init_setup_early_memtest_input_trimmed(BootInitFlow); }
+                    revisit_when: "The reference boot arguments request an early memory test.";
+                }
+                trimmed boot_init_setup.008 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "sparse_init is a no-op under CONFIG_FLATMEM=y and CONFIG_SPARSEMEM=n.";
+                    evidence { boot_init_setup_sparse_init_trimmed(BootInitFlow); }
+                    revisit_when: "The reference configuration selects sparse memory.";
+                }
+                trimmed boot_init_setup.009 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "The VMEMMAP kernel-range TLB flush path is unreachable without SPARSEMEM_VMEMMAP.";
+                    evidence { boot_init_setup_vmemmap_tlb_flush_trimmed(BootInitFlow); }
+                    revisit_when: "The reference configuration selects SPARSEMEM_VMEMMAP.";
+                }
+                trimmed boot_init_setup.010 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "Crashkernel reservation is absent with KEXEC/crash support disabled.";
+                    evidence { boot_init_setup_crashkernel_trimmed(BootInitFlow); }
+                    revisit_when: "The reference configuration enables crashkernel support.";
+                }
+                trimmed boot_init_setup.011 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "kasan_init is absent because CONFIG_KASAN=n.";
+                    evidence { boot_init_setup_kasan_trimmed(BootInitFlow); }
+                    revisit_when: "The reference configuration enables CONFIG_KASAN.";
+                }
+                trimmed boot_init_setup.012 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "ACPI RINTC mapping is absent because CONFIG_ACPI=n.";
+                    evidence { boot_init_setup_acpi_rintc_trimmed(BootInitFlow); }
+                    revisit_when: "The reference configuration enables CONFIG_ACPI.";
+                }
+                trimmed boot_init_setup.013 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "ACPI CPU-to-NUMA mapping is absent because ACPI and NUMA are disabled.";
+                    evidence { boot_init_setup_acpi_cpu_numa_trimmed(BootInitFlow); }
+                    revisit_when: "The reference configuration enables ACPI or NUMA CPU topology.";
+                }
+                deferred boot_init_setup.014 {
+                    category: DeferredCategory::ModelDetail;
+                    summary: "Publish and validate the RISC-V CBOP block-size binding.";
+                    evidence { boot_init_setup_cbop_block_size_deferred(BootInitFlow); }
+                    close_when: "CBOP discovery, validation and implementation tests cover supported platform data.";
+                }
+                deferred boot_init_setup.015 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Model and implement the generic boot alternatives text-patch protocol.";
+                    evidence { boot_init_setup_boot_alternatives_deferred(BootInitFlow); }
+                    close_when: "Alternative patch selection, ordering and synchronization match the reference path.";
+                }
+                deferred boot_init_setup.016 {
+                    category: DeferredCategory::Feature;
+                    summary: "Initialize the user real-time signal environment.";
+                    evidence { boot_init_setup_rt_signal_env_deferred(BootInitFlow); }
+                    close_when: "RT signal environment state and user-visible tests pass.";
+                }
+                deferred boot_init_setup.017 {
+                    category: DeferredCategory::Feature;
+                    summary: "Expose the supported RISC-V user ISA capabilities.";
+                    evidence { boot_init_setup_user_isa_deferred(BootInitFlow); }
+                    close_when: "User ISA exposure is modeled and validated against the reference capability set.";
                 }
 
                 emits {

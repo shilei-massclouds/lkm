@@ -9,3 +9,7 @@ the idle loop. The call must return through the same Rust continuation when iden
 through the restored TaskThreadContext plus contextual Continue after a non-identity A->B->A sequence.
 
 No separate idle Flow storage, FlowRef, checkpoint family or dispatch branch may exist.
+
+`BootInitFlow.Setup` 的 `start_kernel()` 到 `setup_arch()` 返回直接编排映射位于
+[`boot-init/setup.md`](boot-init/setup.md)。该 helper 属于 Flow 私有实现，不拥有 lifecycle、state、
+checkpoint 或公开 API。

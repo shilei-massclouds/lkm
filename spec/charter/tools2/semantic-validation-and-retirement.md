@@ -75,7 +75,7 @@ snapshot 缺失、损坏或其 boundary source 不可用时必须在 derive 前�
 | --- | --- | --- | --- |
 | 1. 上游构造与交接 | Computer 顺序驱动三个直接子 System 的 Preset/Setup、建立 assembly，以及平台和 OpenSBI 的 FIFO 启动交接 | `Kernel.Enable` 发送前 | `Kernel.Enable` 被接受，Kernel 的启动前提和 a0/a1 交接得到核对 |
 | 2. Kernel 与 BootInit 入口 | `Kernel.Enable` 在 Ready 内同步驱动 `BootInitFlow.Preset`，以及 BootInit 最早入口对象建立 | `Kernel.Enable` 发送前 | `BootInitFlow.Setup` 发送前，Kernel 保持 Ready 且 BootInitFlow 已到 Prepared |
-| 3. BootInit 引导、中断与进程准备 | `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、`SchedInitPhase`、`IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、`ProcessPreparePhase` | `BootInitFlow.Setup` 发送前 | `BootInitRestInitPhase.Preset` 发送前，前述叶子均已按顺序完成 |
+| 3. BootInit 引导、中断与进程准备 | BootInitFlow 直接编排到 `setup_arch()` 返回，随后为 `CorePreparePhase`、`MmCoreInitPhase`、`SchedInitPhase`、`IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、`ProcessPreparePhase` | `BootInitFlow.Setup` 发送前 | 渐进校准；首阶段到 `CorePreparePhase.Preset` 发送前，最终到 `BootInitRestInitPhase.Preset` 发送前 |
 | 4. rest-init 与首次调度切换 | PID 1/kthreadd 及固定 Flow 发布、BootInitFlow idle/schedule 预检、BootTask 到 KernelInitTask 的真实 switch | `BootInitRestInitPhase.Preset` 发送前 | 首个 `KernelInitFlow.Continue` 前，PID 1 已真实 OnCpu 且执行权完成迁移 |
 | 5. PID 1 内核初始化 | `PreSmpInitPhase`、`SmpBringupPhase`、`RuntimeCorePhase`、`InitcallPhase`、`RootfsPhase`、`FinalizePhase` 和 `PayloadPreparePhase` | 首个 `KernelInitFlow.Continue` 前 | `PayloadHandoffPreparePhase` 前述叶子全部完成，KernelInitFlow 保持 Online |
 | 6. payload 预提交与交接 | `PayloadHandoffPreparePhase`、Kernel Online、由 Kernel 发出的 `CommitPayloadHandoff`，以及 Hello/Smoke/UserBoot 各自的 no-return 或 ApplicationInstance replacement 边界 | `PayloadHandoffPreparePhase` 发送前 | `KernelInitFlow.PayloadHandoffCommitted` 或对应确定失败边界；失败时 Kernel 保持 Online、根结果 failed |
@@ -226,10 +226,16 @@ Linux 6.12 的 RISC-V `head.S` 依次关闭 BootCPU 的全部中断分路门控�
 hart、建立 `tp/sp/stvec`，再由 `setup_vm()` 建立 trampoline、early kernel mapping 和 FDT fixmap，
 `relocate_enable_mmu()` 完成 trampoline 到 early page table 的切换。现有 entry checkpoint 与实现把
 Rust 前不可延迟的动作作为同一 BootInitFlow.Preset 的 head segment adoption，并在 VM continuation
-返回、TrapType、task/stack 地址表示刷新与 Soc 完成后提交 `BootInitFlow.Prepared`；`EntrySuccessorPhase.Started`
-只能出现在其后，属于第 3 组 Setup。`BootInitFlow.Started` 必须观察 Preset 已在前三项 Kernel child
+返回、TrapType、task/stack 地址表示刷新与 Soc 完成后提交 `BootInitFlow.Prepared`；其后的第 3 组由
+`BootInitFlow.Setup` 直接进入 `start_kernel()` 对象编排。`BootInitFlow.Started` 必须观察 Preset 已在前三项 Kernel child
 完成后被接受，并位于首个 Preset child action 之前；Rust 可以稍后验证和采用 head handoff facts，但
 这种物理 adoption 时点不得重排 Signal 账本、伪造提前 child commit 或提前提交 BootInitFlow.Prepared。
+
+第 3 组首阶段必须从已提交的 `BootInitFlow.Setup` canonical scenario 触发，并在创建
+`CorePreparePhase.Preset` 前停止。结束 snapshot 必须证明 `setup_arch()` 范围内的直接对象驱动已完成，
+BootInitFlow 仍为 Prepared、CorePreparePhase 仍为 Base；PerCpuStorage、普通参数解析和正式异常 setup
+仍未推进。结构化账本中这些直接对象的 Signal source 必须是 BootInitFlow，且不得出现已撤销的入口
+wrapper instance、state、Signal 或 checkpoint。
 
 失败账本按首个边界停止：缺失 Kernel acceptance、BootTask `OnCpu/Live/Invalid` 或 initial-flow binding
 时，0020 必须拒绝且不得创建 0021；缺失/悬空 CpuRef 必须在 0018 写入或 0027 解引用边界拒绝，缺失

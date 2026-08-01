@@ -138,7 +138,7 @@ impl PerCpuStorage {
             || self.static_image.state() != State::Ready
             || memblock.state() != State::Online
             || vm.state() != State::Online
-            || !vm.entry_successor_ready()
+            || !vm.boot_init_setup_ready()
             || config.state() != State::Online
             || cpu_group.state() != State::Ready
             || !cpu_group.possible_cpu_boundary_ready()
@@ -366,7 +366,7 @@ impl PerCpuFirstChunk {
             || static_image.state() != State::Ready
             || memblock.state() != State::Online
             || vm.state() != State::Online
-            || !vm.entry_successor_ready()
+            || !vm.boot_init_setup_ready()
             || config.state() != State::Online
             || cpu_group.state() != State::Ready
             || !cpu_group.possible_cpu_boundary_ready()

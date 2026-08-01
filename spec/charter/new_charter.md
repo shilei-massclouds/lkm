@@ -192,8 +192,9 @@ Task/TaskFlow Continue 再承载 KernelInitFlow 的后续执行。
 ### 启动执行阶段 BootInitFlow
 
 `BootInitFlow` 是静态 `BootTask.flow` 指向的终身 TaskFlow；TaskFlow 继承 PhaseObject，因此它使用标准
-`Base -> Prepared -> Ready -> Online` 生命周期。Preset 直接执行入口前导对象编排；Setup 直接顺序驱动
-`EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、`SchedInitPhase`、`IrqTimeInitPhase`、
+`Base -> Prepared -> Ready -> Online` 生命周期。Preset 直接执行入口前导对象编排；Setup 从
+`start_kernel()` 起直接编排对象直到 `setup_arch()` 返回，该返回点不新增 Phase 或 checkpoint；随后顺序驱动
+`CorePreparePhase`、`MmCoreInitPhase`、`SchedInitPhase`、`IrqTimeInitPhase`、
 `LocalIrqEnablePhase`、`IrqOpenPreparePhase`、`ProcessPreparePhase`、`BootInitRestInitPhase`；Enable 只驱动
 `BootInitScheduleHandoffPhase`。三段 lifecycle 由 Kernel.Enable 依次驱动；Enable 提交 Online 后，
 同一 Flow 的 Online Action 向 CPU0 Scheduler `yields Schedule()`。不存在 `BootPhase` 或 `InterruptPhase` 包装
@@ -228,13 +229,13 @@ identity、active Flow、`BootTask.stack` identity/range 与当前 CPU 的地址
 
 从入口前导完成到中断期开始之前的阶段。
 
-#### EntrySuccessorPhase
+#### BootInitFlow.Setup 到 setup_arch() 返回
 
-待补充。
+这一区间由 BootInitFlow 直接驱动对象，没有独立 PhaseObject、parent、状态或 checkpoint。
 
 #### CorePreparePhase
 
-待补充。
+从 `setup_arch()` 返回开始，到 `trap_init()` 完成为止。
 
 #### MmCoreInitPhase
 

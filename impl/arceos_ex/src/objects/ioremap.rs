@@ -321,7 +321,7 @@ impl Ioremap {
     ) -> EventResult {
         let vmap_space = vmalloc_allocator.address_space();
         if self.lifecycle.state() != State::Base
-            || !vm.entry_successor_ready()
+            || !vm.boot_init_setup_ready()
             || vmalloc_allocator.state() != State::Ready
             || vmap_space.state() != State::Ready
             || page_table_caches.state() != State::Ready

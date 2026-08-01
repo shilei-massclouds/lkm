@@ -650,7 +650,7 @@ impl PageMetadataMap {
         if self.lifecycle.state() != State::Base
             || memblock.state() != State::Online
             || zones.state() != State::Ready
-            || !vm.entry_successor_ready()
+            || !vm.boot_init_setup_ready()
             || config.state() != State::Online
             || config.page_size() == 0
             || !config.page_size().is_power_of_two()
@@ -3542,7 +3542,7 @@ impl PageTableCaches {
             || config.state() != State::Online
             || config.page_size() != VMALLOC_RUNTIME_PAGE_SIZE
             || vm.state() != State::Online
-            || !vm.entry_successor_ready()
+            || !vm.boot_init_setup_ready()
         {
             return self.failed_setup();
         }

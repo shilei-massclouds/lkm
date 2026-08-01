@@ -141,8 +141,9 @@ PhysicalDirect.ActivateOnCpu` 排序，任何后项都不得反向成为前项�
 全部中断分路门控，再完成一次待决中断清除写；该动作只保证写按序完成，不保证硬件驱动的待决位随后
 保持为零，也不改变或判定中断总门控或建立 handler、fallback、正式分派框架。随后 BootInitFlow 再
 编排其余入口对象并提交 Prepared。该动作对应
-Linux `_start_kernel` 的防御性中断屏蔽，也是 Kernel 而非 OpenSBI 的责任。Setup 直接顺序驱动
-`EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、`SchedInitPhase`、
+Linux `_start_kernel` 的防御性中断屏蔽，也是 Kernel 而非 OpenSBI 的责任。Setup 从 `start_kernel()`
+起直接编排入口 C 初始化和完整 `setup_arch()`；`setup_arch()` 返回只作为校准停点，不建立 Phase 或
+checkpoint。返回后 Setup 直接顺序驱动 `CorePreparePhase`、`MmCoreInitPhase`、`SchedInitPhase`、
 `IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、`ProcessPreparePhase`、
 `BootInitRestInitPhase` 并提交 Ready；Enable 只驱动 `BootInitScheduleHandoffPhase`。BootInitFlow 提交
 Online 后，由同一 Flow 的 Online Action 向其 `CpuRef` 所指 CPU0 Scheduler
@@ -159,7 +160,7 @@ controller；`KernelAddrSpace.Preset/Setup` 是 `Vm.Preset` 协调的下层 driv
 平级直接 drive，其中 `KernelAddrSpace.Preset` 是 Vm 的第一个 child。BootInitFlow 在 head 前缀后固定按
 `BindTaskStack -> CurrentCPU.Setup -> InterruptType.Setup -> TrapType.Preset -> Vm.Preset` 驱动。
 随后 `Vm.Setup` 使启动 CPU 按 PhysicalDirect → TrampolineVm → EarlyVm 切换并提交
-`Vm.Ready`。`Vm.Enable` 留给后续 SwapperVm 阶段。本组每个系统的所有权、生命周期和 CPU-local
+`Vm.Ready`。`Vm.Enable` 由 BootInitFlow.Setup 直接编排的 SwapperVm 步骤推进。本组每个系统的所有权、生命周期和 CPU-local
 activation 边界由 [`objects/README.md`](../objects/README.md) 所列独立 Charter 文件定义，本系统文件
 只规定 Kernel 的直接拥有关系和启动编排入口。
 

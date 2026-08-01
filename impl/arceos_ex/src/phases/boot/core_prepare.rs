@@ -34,7 +34,7 @@ fn preset_start(ctx: &Context) -> EventResult {
 }
 
 fn preset_dependencies_ready(ctx: &Context) -> bool {
-    crate::phases::boot::entry_successor::is_online()
+    crate::flows::boot_init_flow::is_prepared()
         && ctx.vm.state() == State::Online
         && ctx.kernel_addr_space.state() == State::Online
         && ctx.vm.swapper_vm().state() == State::Ready
@@ -47,29 +47,19 @@ fn preset_dependencies_ready(ctx: &Context) -> bool {
         && ctx.boot_cpu_local_interrupt().disabled()
         && printk::is_prepared()
         && ctx.boot_cpu_exception().state() == State::Prepared
+        && ctx.device_tree.state() == State::Ready
+        && ctx.zones.state() == State::Ready
+        && ctx.page_metadata_map.state() == State::Ready
+        && ctx.resource_lock.state() == State::Ready
+        && ctx.resource_lock.ready()
+        && ctx.resource_tree.state() == State::Ready
+        && ctx.cpu_group.state() == State::Ready
+        && ctx.cache_block_info.state() == State::Ready
+        && ctx.cpu_capabilities.state() == State::Ready
+        && ctx.dma_cache_policy.state() == State::Ready
 }
 
 fn preset_objects(ctx: &mut Context) -> EventResult {
-    ctx.device_tree
-        .setup(&ctx.raw_dtb, &ctx.vm, &mut ctx.memblock, &ctx.config)?;
-    ctx.zones.setup(&ctx.memblock, &ctx.vm)?;
-    ctx.page_metadata_map
-        .setup(&mut ctx.memblock, &ctx.zones, &ctx.vm, &ctx.config)?;
-    ctx.resource_lock.preset_static()?;
-    ctx.resource_lock.setup()?;
-    ctx.resource_tree.setup(
-        &ctx.memblock,
-        &ctx.kernel_image,
-        &ctx.lds,
-        &mut ctx.resource_lock,
-    )?;
-    ctx.cpu_group.setup_smp(&ctx.device_tree, &ctx.sbi)?;
-    ctx.cache_block_info
-        .setup(&ctx.device_tree, &ctx.cpu_group)?;
-    ctx.cpu_capabilities
-        .setup(&ctx.device_tree, &ctx.cpu_group, &ctx.cache_block_info)?;
-    ctx.dma_cache_policy
-        .setup(&ctx.cpu_capabilities, &ctx.cache_block_info)?;
     ctx.per_cpu_storage.preset(&ctx.lds, &ctx.static_objects)?;
     ctx.cpu_hotplug_lock
         .preset_static_with_per_cpu_storage(&ctx.per_cpu_storage)?;
@@ -200,7 +190,7 @@ pub fn is_online() -> bool {
 }
 
 fn core_prepare_phase_ready(ctx: &Context) -> bool {
-    crate::phases::boot::entry_successor::is_online()
+    crate::flows::boot_init_flow::is_prepared()
         && ctx.device_tree.state() == State::Ready
         && ctx.zones.state() == State::Ready
         && ctx.page_metadata_map.state() == State::Ready

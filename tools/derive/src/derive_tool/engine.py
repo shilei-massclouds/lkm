@@ -3468,10 +3468,6 @@ class _Deriver:
                     entry, entry_span, kind, transition, state
                 ):
                     continue
-                elif self._try_prove_phase_context(
-                    entry, entry_span, kind, transition, state
-                ):
-                    continue
                 elif self._try_prove_builtin_predicate(
                     entry, entry_span, kind, transition, state
                 ):
@@ -4366,56 +4362,6 @@ class _Deriver:
             predicate=_predicate_name(expression),
             proof_class=proof_class,
             proof_provider="prior_derivation_facts",
-        )
-        return True
-
-    def _try_prove_phase_context(
-        self,
-        expression: str,
-        span: SourceSpan,
-        kind: str,
-        transition: TransitionDef | None,
-        state: StateDef | None,
-    ) -> bool:
-        if (
-            kind != "invariant"
-            or state is None
-            or state.object_name != "EntrySuccessorPhase"
-        ):
-            return False
-
-        if expression == "task_concurrency_closed()":
-            self._validate_state("SbiSpec", "Online")
-            self._validate_state("OpenSBI", "Ready")
-            if not {
-                "sbi_hsm_available()",
-                "ordered_booting_enabled()",
-                "primary_hart_only_at_kernel_entry()",
-            }.issubset(self.proved_expressions):
-                return False
-            proof_class = "system_exclusive_context"
-            proof_provider = "prior_derivation_facts"
-        elif expression == "context_is(SystemExclusive)" and {
-            "interrupt_concurrency_closed()",
-            "task_concurrency_closed()",
-        }.issubset(self.proved_expressions):
-            proof_class = "phase_context"
-            proof_provider = "prior_derivation_facts"
-        else:
-            return False
-
-        self._record(
-            DerivationStatus.PROVED,
-            f"{kind}: {expression}",
-            span,
-            object_name=_context_object(transition, state),
-            transition_name=transition.name if transition is not None else None,
-            state_name=state.name,
-            expression=expression,
-            source_kind=kind,
-            predicate=_predicate_name(expression),
-            proof_class=proof_class,
-            proof_provider=proof_provider,
         )
         return True
 

@@ -73,7 +73,7 @@
 | arceos_ex | 对象级公共基础落地 | 已定义状态集合、transition 集合、`EventResult`、生命周期 transition 检查和 checkpoint hook。 |
 | model/derive | 推导义务阶段性收口 | 当前 `make verify` 为 `0 obligation / 45 deferred`。 |
 | arceos_ex | `BootInitFlow.Preset` 入口步骤当前轮复核完成 | 已按 Linux `head.S` / `setup_vm()` 对照复核入口步骤锁/同步面：该步骤无 mutex/spinlock/rwlock/RCU guard 临界区，保留系统独占、早期中断关闭、init task preempt disabled 和 RISC-V SATP/`sfence.vma` 地址转换同步事实；`apply_early_boot_alternatives()` 已作为 `Vm.Preset` 显式 deferred/ready 事实记录，实际 alternatives/errata text patch 对象后续再展开。 |
-| arceos_ex | `EntrySuccessorPhase` 当前轮复核完成 | 已覆盖 EarlyDtb、PlatformCpuInfo、PhysicalMemory、InterruptType、BootCPU setup/enable、PrintkBuffer、CommandLine/KernelCmdline、EarlyParam、SBI、EarlyCon、MemBlock、InitMM、EarlyIoremap 和 SwapperVm；本轮按 Linux `start_kernel()` / RISC-V `setup_bootmem()` / `paging_init()` 对照补齐 `init_vmlinux_build_id()`、`page_address_init()`、`phys_ram_base`、`kernel_map.va_pa_offset`、DMA32 zone input、hugetlb CMA reserve deferred 和 `CONFIG_STRICT_KERNEL_RWX` 最终权限拆分 deferred 事实。 |
+| arceos_ex | `BootInitFlow.Setup` 入口直接编排当前轮复核完成 | 已覆盖 EarlyDtb、PlatformCpuInfo、PhysicalMemory、InterruptType、BootCPU setup/enable、PrintkBuffer、CommandLine/KernelCmdline、EarlyParam、SBI、EarlyCon、MemBlock、InitMM、EarlyIoremap 和 SwapperVm；本轮按 Linux `start_kernel()` / RISC-V `setup_bootmem()` / `paging_init()` 对照补齐 `init_vmlinux_build_id()`、`page_address_init()`、`phys_ram_base`、`kernel_map.va_pa_offset`、DMA32 zone input、hugetlb CMA reserve deferred 和 `CONFIG_STRICT_KERNEL_RWX` 最终权限拆分 deferred 事实。 |
 | arceos_ex | `CorePreparePhase` 当前轮复核完成 | 已按 Linux `setup_arch()` 后半段和 `start_kernel()` 中 `setup_arch()` 返回后到 `trap_init()` 对照复核锁/同步面；现有模型已覆盖 DeviceTree、Zones、PageMetadataMap、ResourceTree、CpuGroup.setup_smp、CacheBlockInfo、CpuCapabilities、DmaCachePolicy、CommandLine saved/static 视图、PerCpuStorage、CpuHotplugState、Params、BootParam、PayloadParam、Randomness、PrintkBuffer.setup、ExceptionTable 和 ExceptionType.setup，并用 `ResourceTreeWriteContext`、`CpuHotplugReadContext`、`StaticBranchJumpLabelContext`、`PrintkBufferSetupLocalInterruptContext` 保留 resource_lock、cpu_hotplug_lock、jump_label_mutex 和 local IRQ save/restore 协议；本轮补齐 `Randomness.Preset` 对 `random_init_early()` 主线不经 input-pool lock 与条件 base-crng irqsave deferred 的实现观测。 |
 | arceos_ex | `MmCoreInitPhase` 最小闭环 | 已覆盖 MemoryTopology、MemoryNode/ZoneSet/ZonelistSet、PageAllocator、MemoryDebugHardening、StackDepot、Swiotlb、SlubSubsystem、KernelGlobalAllocator、DynamicContainerRuntime、PageTableCaches、VmallocAllocator 和 MmStructCache。 |
 | arceos_ex | `SchedInitPhase` 最小闭环 | 已正式落到 `spec/model/boot/sched-init/` 和 `impl/arceos_ex/src/phases/boot/sched_init.rs`，覆盖 Scheduler、BootRunQueue、BootTask、RadixTree、MapleTree、Workqueue.Prepared、Softirq.Prepared、RcuCore 和 `Scheduler.schedule_preempt_disabled()` smoke。 |
@@ -95,7 +95,7 @@
 | arceos_ex | 顶层 Makefile 入口 | 顶层 `make build`、`make run`、`make run PROBE=announce`、`make verify`、`make clean` 已可用，并支持 `APP=smoke` / `APP=hello` payload 选择；`LOG=trace` 暂时作为 `PROBE=announce` 兼容 alias 保留。 |
 | arceos_ex | announce/checkpoint 一致性复查 | `make verify REPORT=graph`、`make run PROBE=announce` 和实现阶段顺序一致，checkpoint 单字符映射无重复。 |
 | spec/coding | 规则强度分层 | 已为 `MUST`、`SHOULD`、`MAY`、`NOTE` 建立统一标注与解释规则，并把全局 `Context` 映射记录为 `SHOULD`。 |
-| arceos_ex | 第一轮源码结构清理 | 已拆分 `entry_successor`、`entry_prelude`、FDT、静态页表、VM setup bridge 等聚合文件，保留后续目录分层为 P2。 |
+| arceos_ex | 第一轮源码结构清理 | 已把入口 Setup、入口 Preset、FDT、静态页表、VM setup bridge 等聚合责任拆入相应私有模块，保留后续目录分层为 P2。 |
 
 ## 当前交接标记
 

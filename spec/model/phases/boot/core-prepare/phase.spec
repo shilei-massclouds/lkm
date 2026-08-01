@@ -351,7 +351,7 @@ object ResourceTree: ResourceObject {
 
 /*
  * CacheBlockInfo 表示 RISC-V cache block operation 的平台级块大小事实。
- * 它是独立事实对象；CorePreparePhase 只编排其 Setup，不拥有该对象。
+ * 它是独立事实对象；BootInitFlow.Setup 直接编排其 Setup，不拥有该对象。
  * 当前最小模型按 Linux 6.12 的 riscv_init_cbo_blocksizes() 建模：
  * 从 DeviceTree CPU nodes 收集 CBOM/CBOZ block size，并发布为系统级事实。
  */
@@ -404,7 +404,7 @@ object CacheBlockInfo: HardwareObject {
 
 /*
  * CpuCapabilities 表示 CPU 集合的能力事实视图。它是独立事实对象；
- * CorePreparePhase 只编排其 Setup，不拥有该对象。
+ * BootInitFlow.Setup 直接编排其 Setup，不拥有该对象。
  * 当前最小模型对应 Linux 6.12 的 riscv_fill_hwcap()：
  * 从 DeviceTree CPU nodes 收集 per-hart ISA facts，结合 CpuGroup 形成
  * all-harts common capability facts，并用 CacheBlockInfo 校验 Zicbom/Zicboz。
@@ -1135,7 +1135,7 @@ object CpuHotplugState: HardwareObject {
 }
 
 /*
- * BootParam 表示普通内核启动参数解析。它不同于 EntrySuccessor 中的 EarlyParam。
+ * BootParam 表示普通内核启动参数解析。它不同于 BootInitFlow.Setup 中的 EarlyParam。
  */
 object BootParam: KernelObject {
     initial_state: State::Base;
@@ -1356,7 +1356,7 @@ object ExceptionTable: ResourceObject {
 }
 
 /*
- * CorePreparePhase 表示从 paging_init() 完成后到 trap_init() 完成的核心准备子阶段。
+ * CorePreparePhase 表示从 setup_arch() 返回后到 trap_init() 完成的核心准备子阶段。
  * 它补齐正式异常分发之前的核心机制准备，并以 CurrentCPU.trap.exception.Setup 作为阶段末尾边界。
  */
 object CorePreparePhase: PhaseObject {
@@ -1369,11 +1369,11 @@ object CorePreparePhase: PhaseObject {
     state State::Base {
         transitions {
             /*
-             * Preset 按 paging_init() 后到 trap_init() 的核心路径编排对象推进。
+             * Preset 按 setup_arch() 返回后到 trap_init() 的核心路径编排对象推进。
              */
             on Transition::Preset -> State::Prepared {
                 depends_on {
-                    EntrySuccessorPhase.state == State::Online;
+                    BootInitFlow.state == State::Prepared;
                     Vm.state == State::Online;
                     SwapperVm.state == State::Ready;
                     KernelAddrSpace.state == State::Online;
@@ -1385,19 +1385,18 @@ object CorePreparePhase: PhaseObject {
                     CurrentCPU.trap.interrupt.state == State::Ready;
                     PrintkBuffer.state == State::Prepared;
                     CurrentCPU.trap.exception.state == State::Prepared;
+                    DeviceTree.state == State::Ready;
+                    Zones.state == State::Ready;
+                    PageMetadataMap.state == State::Ready;
+                    ResourceLock.state == State::Ready;
+                    ResourceTree.state == State::Ready;
+                    CpuGroup.state == State::Ready;
+                    CacheBlockInfo.state == State::Ready;
+                    CpuCapabilities.state == State::Ready;
+                    DmaCachePolicy.state == State::Ready;
                 }
 
                 drives {
-                    DeviceTree.Transition::Setup;
-                    Zones.Transition::Setup;
-                    PageMetadataMap.Transition::Setup;
-                    ResourceLock.Transition::Preset;
-                    ResourceLock.Transition::Setup;
-                    ResourceTree.Transition::Setup;
-                    CpuGroup.Transition::Setup;
-                    CacheBlockInfo.Transition::Setup;
-                    CpuCapabilities.Transition::Setup;
-                    DmaCachePolicy.Transition::Setup;
                     PerCpuStorage.Transition::Preset;
                     CpuHotplugLock.Transition::Preset;
                     CpuHotplugLock.Transition::Setup;
@@ -1423,18 +1422,6 @@ object CorePreparePhase: PhaseObject {
                     smp_concurrency_closed();
                     context_is(SystemExclusive);
                     early_boot_irqs_disabled_true();
-                    core_prepare_acpi_boot_tables_trimmed(CorePreparePhase);
-                    core_prepare_early_memtest_input_trimmed(CorePreparePhase);
-                    core_prepare_sparse_init_trimmed(CorePreparePhase);
-                    core_prepare_vmemmap_tlb_flush_trimmed(CorePreparePhase);
-                    core_prepare_crashkernel_trimmed(CorePreparePhase);
-                    core_prepare_kasan_trimmed(CorePreparePhase);
-                    core_prepare_acpi_rintc_trimmed(CorePreparePhase);
-                    core_prepare_acpi_cpu_numa_trimmed(CorePreparePhase);
-                    core_prepare_cbop_block_size_deferred(CorePreparePhase);
-                    core_prepare_boot_alternatives_deferred(CorePreparePhase);
-                    core_prepare_rt_signal_env_deferred(CorePreparePhase);
-                    core_prepare_user_isa_deferred(CorePreparePhase);
                     core_prepare_static_call_trimmed(CorePreparePhase);
                     core_prepare_early_security_deferred(CorePreparePhase);
                     core_prepare_boot_config_trimmed(CorePreparePhase);
@@ -1443,78 +1430,6 @@ object CorePreparePhase: PhaseObject {
                     core_prepare_vfs_caches_early_deferred(CorePreparePhase);
                 }
 
-                trimmed core_prepare.001 {
-                    category: TrimmedCategory::BuildConfig;
-                    summary: "acpi_boot_table_init is absent because CONFIG_ACPI=n.";
-                    evidence { core_prepare_acpi_boot_tables_trimmed(CorePreparePhase); }
-                    revisit_when: "The reference configuration enables CONFIG_ACPI.";
-                }
-                trimmed core_prepare.002 {
-                    category: TrimmedCategory::ReferenceInput;
-                    summary: "early_memtest has no work because the fixed reference command line has no memtest request.";
-                    evidence { core_prepare_early_memtest_input_trimmed(CorePreparePhase); }
-                    revisit_when: "The reference boot arguments request an early memory test.";
-                }
-                trimmed core_prepare.003 {
-                    category: TrimmedCategory::BuildConfig;
-                    summary: "sparse_init is a no-op under CONFIG_FLATMEM=y and CONFIG_SPARSEMEM=n.";
-                    evidence { core_prepare_sparse_init_trimmed(CorePreparePhase); }
-                    revisit_when: "The reference configuration selects sparse memory.";
-                }
-                trimmed core_prepare.004 {
-                    category: TrimmedCategory::BuildConfig;
-                    summary: "The VMEMMAP kernel-range TLB flush path is unreachable without SPARSEMEM_VMEMMAP.";
-                    evidence { core_prepare_vmemmap_tlb_flush_trimmed(CorePreparePhase); }
-                    revisit_when: "The reference configuration selects SPARSEMEM_VMEMMAP.";
-                }
-                trimmed core_prepare.005 {
-                    category: TrimmedCategory::BuildConfig;
-                    summary: "Crashkernel reservation is absent with KEXEC/crash support disabled.";
-                    evidence { core_prepare_crashkernel_trimmed(CorePreparePhase); }
-                    revisit_when: "The reference configuration enables crashkernel support.";
-                }
-                trimmed core_prepare.006 {
-                    category: TrimmedCategory::BuildConfig;
-                    summary: "kasan_init is absent because CONFIG_KASAN=n.";
-                    evidence { core_prepare_kasan_trimmed(CorePreparePhase); }
-                    revisit_when: "The reference configuration enables CONFIG_KASAN.";
-                }
-                trimmed core_prepare.007 {
-                    category: TrimmedCategory::BuildConfig;
-                    summary: "ACPI RINTC mapping is absent because CONFIG_ACPI=n.";
-                    evidence { core_prepare_acpi_rintc_trimmed(CorePreparePhase); }
-                    revisit_when: "The reference configuration enables CONFIG_ACPI.";
-                }
-                trimmed core_prepare.008 {
-                    category: TrimmedCategory::BuildConfig;
-                    summary: "ACPI CPU-to-NUMA mapping is absent because ACPI and NUMA are disabled.";
-                    evidence { core_prepare_acpi_cpu_numa_trimmed(CorePreparePhase); }
-                    revisit_when: "The reference configuration enables ACPI or NUMA CPU topology.";
-                }
-                deferred core_prepare.009 {
-                    category: DeferredCategory::ModelDetail;
-                    summary: "Publish and validate the RISC-V CBOP block-size binding.";
-                    evidence { core_prepare_cbop_block_size_deferred(CorePreparePhase); }
-                    close_when: "CBOP discovery, validation and implementation tests cover supported platform data.";
-                }
-                deferred core_prepare.010 {
-                    category: DeferredCategory::Protocol;
-                    summary: "Model and implement the generic boot alternatives text-patch protocol.";
-                    evidence { core_prepare_boot_alternatives_deferred(CorePreparePhase); }
-                    close_when: "Alternative patch selection, ordering and synchronization match the reference path.";
-                }
-                deferred core_prepare.011 {
-                    category: DeferredCategory::Feature;
-                    summary: "Initialize the user real-time signal environment.";
-                    evidence { core_prepare_rt_signal_env_deferred(CorePreparePhase); }
-                    close_when: "RT signal environment state and user-visible tests pass.";
-                }
-                deferred core_prepare.012 {
-                    category: DeferredCategory::Feature;
-                    summary: "Expose the supported RISC-V user ISA capabilities.";
-                    evidence { core_prepare_user_isa_deferred(CorePreparePhase); }
-                    close_when: "User ISA exposure is modeled and validated against the reference capability set.";
-                }
                 trimmed core_prepare.013 {
                     category: TrimmedCategory::CompileTimeNoOp;
                     summary: "static_call_init compiles to a no-op without static-call support.";
@@ -1568,7 +1483,7 @@ object CorePreparePhase: PhaseObject {
                     smp_concurrency_closed();
                     context_is(SystemExclusive);
                     early_boot_irqs_disabled_true();
-                    EntrySuccessorPhase.state == State::Online;
+                    BootInitFlow.state == State::Prepared;
                     DeviceTree.state == State::Ready;
                     Zones.state == State::Ready;
                     PageMetadataMap.state == State::Ready;
@@ -1620,7 +1535,7 @@ object CorePreparePhase: PhaseObject {
             smp_concurrency_closed();
             context_is(SystemExclusive);
             early_boot_irqs_disabled_true();
-            EntrySuccessorPhase.state == State::Online;
+            BootInitFlow.state == State::Prepared;
             DeviceTree.state == State::Ready;
             Zones.state == State::Ready;
             PageMetadataMap.state == State::Ready;
@@ -1663,7 +1578,7 @@ object CorePreparePhase: PhaseObject {
                     smp_concurrency_closed();
                     context_is(SystemExclusive);
                     early_boot_irqs_disabled_true();
-                    EntrySuccessorPhase.state == State::Online;
+                    BootInitFlow.state == State::Prepared;
                     DeviceTree.state == State::Ready;
                     Zones.state == State::Ready;
                     PageMetadataMap.state == State::Ready;

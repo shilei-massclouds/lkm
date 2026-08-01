@@ -9,8 +9,8 @@ from pathlib import Path
 
 MARKERS = [
     "checkpoint: BootInitFlow.Prepared",
-    "checkpoint: EntrySuccessorPhase.Started",
-    "checkpoint: EntrySuccessorPhase.Online",
+    "checkpoint: DmaCachePolicy.Ready",
+    "checkpoint: CorePreparePhase.Started",
     "checkpoint: CorePreparePhase.Online",
     "checkpoint: MmCoreInitPhase.Online",
     "checkpoint: SchedInitPhase.Online",
@@ -46,8 +46,8 @@ def main() -> int:
         )
         raise SystemExit(f"BootInitFlow runtime markers are out of order:\n{observed}")
     print(
-        "BootInitFlow runtime order verified: Prepared precedes EntrySuccessor, "
-        "all Setup/Enable leaves, and Kernel.Online; early order is PhysicalDirect -> Started -> InterruptType"
+        "BootInitFlow runtime order verified: Prepared precedes direct setup_arch systems, "
+        "CorePrepare and all later leaves, and Kernel.Online; early order is PhysicalDirect -> Started -> InterruptType"
     )
     return 0
 

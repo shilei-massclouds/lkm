@@ -72,7 +72,6 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertEqual(
             result.model.children["BootInitFlow"],
             [
-                "EntrySuccessorPhase",
                 "CorePreparePhase",
                 "MmCoreInitPhase",
                 "SchedInitPhase",
@@ -85,6 +84,7 @@ class ModelBuilderTests(unittest.TestCase):
                 "BootInitScheduleHandoffPhase",
             ],
         )
+        self.assertNotIn("EntrySuccessorPhase", result.model.objects)
         self.assertEqual(result.model.objects["BootTask"].initial_state, "OnCpu")
 
     def test_builds_object_view(self) -> None:
@@ -148,7 +148,7 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("  -> CurrentTask.Action.BindTask [drives_action]", text)
         self.assertIn("Kernel.Setup", text)
         self.assertNotIn("\nEntryPreludePhase.", text)
-        self.assertIn("EntrySuccessorPhase.Setup", text)
+        self.assertIn("BootInitFlow.Setup", text)
         self.assertIn("CorePreparePhase.Setup", text)
         self.assertIn("MmCoreInitPhase.Setup", text)
         self.assertIn("PayloadPreparePhase.Setup", text)
@@ -171,7 +171,8 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn('"Kernel.Enable" -> "KernelInitFlow.Setup"', dot)
         self.assertIn('"Kernel.Enable" -> "KernelInitFlow.Enable"', dot)
         self.assertNotIn('"BootInitFlow.Preset" -> "BootInitFlow.Setup"', dot)
-        self.assertIn('"BootInitFlow.Setup" -> "EntrySuccessorPhase.Preset"', dot)
+        self.assertIn('"BootInitFlow.Setup" -> "EarlyDtb.Preset"', dot)
+        self.assertIn('"BootInitFlow.Setup" -> "CorePreparePhase.Preset"', dot)
 
     def test_builds_timeline_view(self) -> None:
         spec = Path(__file__).resolve().parents[3] / "spec" / "model" / "main.spec"
@@ -186,7 +187,7 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertNotIn("BootCPU.State::", text)
         self.assertIn("  - PhysicalMemory.State::Online", text)
         self.assertNotIn("\nEntryPreludePhase:", text)
-        self.assertIn("EntrySuccessorPhase: ready (State::Ready)", text)
+        self.assertNotIn("EntrySuccessorPhase", text)
         self.assertIn("CorePreparePhase: ready (State::Ready)", text)
         self.assertIn("MmCoreInitPhase: ready (State::Ready)", text)
         self.assertIn("  - BootInitFlow.State::Online", text)
@@ -204,7 +205,7 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("PayloadHandoffPreparePhase: online (State::Online)", text)
         self.assertIn("<svg", svg)
         self.assertNotIn(">EntryPreludePhase<", svg)
-        self.assertIn("EntrySuccessorPhase", svg)
+        self.assertNotIn("EntrySuccessorPhase", svg)
         self.assertIn("CorePreparePhase", svg)
         self.assertIn("MmCoreInitPhase", svg)
         self.assertIn("PayloadPreparePhase", svg)

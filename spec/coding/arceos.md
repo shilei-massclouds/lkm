@@ -31,7 +31,7 @@
 - SBI：参考 ArceOS 的 SBI 调用封装，形成规格中的 `SBI` 能力视图。
 - FDT：参考 ArceOS 的设备树解析入口，但保持 `RawDtb` 与 `EarlyDtb` 的阶段边界。
 - 输出：参考 ArceOS early console 或 logging 机制，落实 `PrintkBuffer` 与 `EarlyCon` 的对象级区别。对象级编码阶段先建立启动期内部 `printk`/`println-like` 前端到 `PrintkBuffer.write(...) -> ring buffer -> EarlyCon.drain(...)` 的路径；应用侧 `axstd::println!` 是另一个前端入口，也应汇聚到同一 `PrintkBuffer` 后端路径。两类 `println!` 入口不应混同；`axlog` 这类上层日志 facade 属于组合封装阶段，不作为当前模型要求的核心对象。
-- 内存管理：参考 ArceOS 早期内存区段经验，落实 `MemBlock` 的候选区段、保留区段和 enable 边界。第一轮对象级实现默认采用 no-alloc 路径；除非模型规格显式引入 `KernelHeap` / `Allocator` 一类对象并定义其生命周期，否则不得把全局分配器初始化作为当前入口后继期的核心步骤。
+- 内存管理：参考 ArceOS 早期内存区段经验，落实 `MemBlock` 的候选区段、保留区段和 enable 边界。第一轮对象级实现默认采用 no-alloc 路径；除非模型规格显式引入 `KernelHeap` / `Allocator` 一类对象并定义其生命周期，否则不得把全局分配器初始化作为当前 BootInitFlow.Setup 直接编排的核心步骤。
 
 ## arceos_ex 第一轮形态
 
@@ -40,8 +40,8 @@
 
 在 `arceos_ex` 中，`ax-hal-ex` 与 `ax-runtime-ex` 的引导责任应按阶段边界划分。`ax-hal-ex` 负责 `_start` 到
 BootInitFlow.Preset 完成前的最低层入口前导路径；`BootInitFlow.Prepared` 之后由 `ax-runtime-ex` 接管。
-`EntrySuccessorPhase` 是 `ax-runtime-ex` 引导过程的第一部分，之后逐步增加的内核初始化过程也属于
-`ax-runtime-ex` 主引导链：BootInitFlow 直接完成 boot/interrupt/rest-init，首次 PID 1 dispatch 后
+`start_kernel()` 到 `setup_arch()` 返回由 `ax-runtime-ex` 中的 BootInitFlow 私有 Setup helper 直接
+编排，之后的内核初始化也属于 `ax-runtime-ex` 主引导链：BootInitFlow 直接完成 boot/interrupt/rest-init，首次 PID 1 dispatch 后
 KernelInitFlow 直接完成 SMP/runtime 与 payload prepare，再由 commit action 移交 selected payload。
 
 这里的 Unikernel app 是内核形态的引领入口。`helloworld` 是默认最小 payload，许多测试也可以作为 payload 运行。

@@ -382,13 +382,13 @@ class DeriveToolTests(unittest.TestCase):
 
             self.assertTrue(
                 any(
-                    transition["object"] == "EntrySuccessorPhase"
+                    transition["object"] == "BootInitFlow"
                     and transition["transition"] == "Setup"
                     for transition in data["transitions"]
                 )
             )
             self.assertNotIn("EntryPreludePhase", data["states"])
-            self.assertEqual(data["states"]["EntrySuccessorPhase"], "Online")
+            self.assertNotIn("EntrySuccessorPhase", data["states"])
             self.assertEqual(data["states"]["CorePreparePhase"], "Online")
             self.assertEqual(data["states"]["MmCoreInitPhase"], "Online")
             self.assertEqual(data["states"]["KernelAddrSpace"], "Online")
@@ -868,35 +868,8 @@ class DeriveToolTests(unittest.TestCase):
                     for record in obligations
                 )
             )
-            self.assertTrue(
-                any(
-                    record["predicate"] == "context_is"
-                    and record["object"] == "EntrySuccessorPhase"
-                    and record["source_kind"] == "depends_on"
-                    and record["proof_class"] == "derived_fact"
-                    and record["proof_provider"] == "prior_derivation_facts"
-                    for record in proved
-                )
-            )
-            self.assertTrue(
-                any(
-                    record["predicate"] == "interrupt_concurrency_closed"
-                    and record["object"] == "EntrySuccessorPhase"
-                    and record["source_kind"] == "depends_on"
-                    and record["proof_class"] == "derived_fact"
-                    and record["proof_provider"] == "prior_derivation_facts"
-                    for record in proved
-                )
-            )
-            self.assertTrue(
-                any(
-                    record["predicate"] == "task_concurrency_closed"
-                    and record["object"] == "EntrySuccessorPhase"
-                    and record["source_kind"] == "depends_on"
-                    and record["proof_class"] == "derived_fact"
-                    and record["proof_provider"] == "prior_derivation_facts"
-                    for record in proved
-                )
+            self.assertFalse(
+                any(record.get("object") == "EntrySuccessorPhase" for record in proved)
             )
             self.assertTrue(
                 any(

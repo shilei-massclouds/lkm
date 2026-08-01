@@ -909,14 +909,6 @@ def default_mapping_rules() -> dict[str, MappingRule]:
                 "failed candidates."
             ),
         ),
-        "CorePreparePhase.Started": MappingRule(
-            mapping_kind="exact",
-            linux_file="init/main.c",
-            linux_symbol="start_kernel",
-            anchor_pattern=r"\bsetup_arch\s*\(",
-            confidence="medium",
-            notes="Linux start_kernel() architecture setup call; RISC-V paging_init is inside setup_arch().",
-        ),
         "CorePreparePhase.Ready": MappingRule(
             mapping_kind="exact",
             linux_file="init/main.c",
