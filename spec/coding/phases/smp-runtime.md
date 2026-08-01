@@ -15,8 +15,9 @@ KernelInitFlow 的直接编排为：
 Kernel owner；它不自行发送 payload handoff。Kernel 在验证应用环境准备闭包后提交 Online，随后才
 作为唯一 sender 发出 `KernelInitFlow.Action::CommitPayloadHandoff`。
 
-每个叶阶段的 Online continuation 只能返回 KernelInitFlow 当前 transition。所有入口和 continuation
-都必须即时验证 KernelInitTask OnCpu、`CurrentTask` 解析为 KernelInitTask，并验证当前 SP 位于
+每个叶阶段的 Online continuation 只能返回 KernelInitFlow 当前 transition。首次入口允许
+initial-startup-pending CurrentTask binding；KernelInitFlow Enable 提交 active binding。所有入口和
+continuation 都必须即时验证 KernelInitTask OnCpu、`CurrentTask` 解析为 KernelInitTask，并验证当前 SP 位于
 PID 1 的 vmalloc stack。首次叶阶段不得由 scheduler 的 BootTask 调用栈同步预执行。
 
 SmpBringup 的 BP 协调属于 KernelInitFlow；AP Entry/Callin/OnlineIdle 不属于 PID 1 Flow 的执行

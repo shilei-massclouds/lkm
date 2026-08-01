@@ -10,8 +10,8 @@
 - Enable 驱动 `PayloadHandoffPreparePhase` 并提交 `KernelInitFlow.Online`。Preset/Setup/Enable 全部
   运行在 Kernel Ready 的 Enable 执行上下文中，不错误要求 Kernel 已 Online。
 
-首次真实 dispatch 先同步驱动 BootTask.Suspend；完成栈切换后，`KernelInitTask.Continue` 在 PID 1
-真实获得 CPU 的入口提交 OnCpu 并严格启动 `KernelInitFlow.Preset`。runtime lowering 必须在
+首次真实 dispatch 先同步驱动 BootTask.Suspend；完成栈切换后，Scheduler 在 PID 1 真实获得 CPU 的
+入口同步驱动 `KernelInitTask.Activate` 提交 OnCpu，再直接向 `KernelInitFlow` 发出 Startup。runtime lowering 必须在
 `kernel_init_entry()` 验证 PID 1 vmalloc stack 后执行 Preset body 和所有
 叶子代码；不得在 BootTask 栈上预执行。
 
@@ -24,6 +24,9 @@ SmpBringup 的 BP 协调属于 `KernelInitFlow` continuation。`ApEntryPreludePh
 `OnCpu/Reserved/Invalid`，其 Flow 为 Base；BP 只发布 Linux `{task_ptr, stack_ptr}` boot data 并异步
 发出 keyed HSM Startup。AP 架构入口验证 boot data、建立 `tp/sp`、激活 Live authority 后启动同 key
 Flow；BP 仅通过 cpu_running/done_up wait/barrier 观察完成。
+
+BootTask 与 AP idle 的架构首次入口都不伪造 Online/Activate；它们首次切出后进入 Suspended，以后只
+通过 Scheduler drives Continue 恢复。
 
 stopped AP 的 `active_translation_controller` association 必须 absent，并且没有 live SATP；BP 发布的
 boot data 只保存 AP 入口预期 SATP，不代表 AP 已执行 CSR 写入或激活任何 controller。真实

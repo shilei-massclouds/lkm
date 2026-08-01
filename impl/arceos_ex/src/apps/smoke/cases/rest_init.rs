@@ -49,7 +49,7 @@ pub fn run() -> SmokeResult {
         || !ctx.boot_task.idle_role_bound()
         || ctx.boot_init_flow.cpu_ref() != Some(boot_cpu.cpu_ref())
         || !ctx.boot_task.switch_context().initialized()
-        || ctx.boot_idle_flow.state() != State::Ready
+        || ctx.boot_idle_flow.state() != State::Online
         || !ctx.boot_idle_flow.active()
         || ctx.boot_idle_flow.owner() != TaskRef::BOOT
         || ctx.boot_idle_flow.flow_ref() != TaskFlowRef::BOOT_IDLE
@@ -263,7 +263,7 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
-    if ctx.boot_idle_flow.state() != State::Ready
+    if ctx.boot_idle_flow.state() != State::Online
         || ctx.boot_idle_flow.first_schedule_committed()
         || ctx.boot_idle_flow.idle_entry_prepared()
         || ctx.boot_idle_flow.cpu_startup_entry_ready()

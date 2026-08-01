@@ -1219,18 +1219,19 @@ fn dispatch_trap_occurrence(
         matches!(entry.trap_state, State::Ready | State::Online),
     )?;
     let root_ref = record.root.flow_ref();
-    let Some(root_binding_created) =
-        crate::context::context().bind_task_root_trap_flow(entry.task_ref, root_ref)
-    else {
-        return Err(
+    let root_binding_created = crate::context::context()
+        .bind_task_root_trap_flow(entry.task_ref, root_ref)
+        .map_err(|first_failed| {
             trap_return_condition_error().with_diagnostic(FailureDiagnostic::new(
                 "TrapOccurrence",
                 "bind_root",
                 "TaskThreadContext",
                 "root TrapFlowRef binding",
-                "new root rejected or installed root stale",
-            )),
-        );
+                first_failed,
+            ))
+        });
+    let Ok(root_binding_created) = root_binding_created else {
+        return Err(root_binding_created.expect_err("failed root binding must carry a diagnostic"));
     };
     let cause_class = if frame.scause & SCAUSE_INTERRUPT_BIT != 0 {
         TrapCauseClass::Interrupt

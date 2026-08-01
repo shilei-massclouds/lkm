@@ -7,9 +7,11 @@ the entry and saves its return checkpoint;
 `Setup` creates and records one child FlowRef; `Enable` creates one return token; `Disable` and `Cleanup` synchronously
 destroy child then root. Assembly consumes the token only after Cleanup.
 
-`Task.active_flow` remains the persistent TaskFlow and is paused beneath this chain. `CurrentTask`, `CurrentTaskRef`
-and `CurrentCPU` continue to resolve through that TaskFlow. `TaskThreadContext.root_trap_flow_ref` carries the optional
-root reference across a legal scheduling point; the root's active-child links locate the leaf.
+The effective persistent TaskFlow is paused beneath this chain: normally it is `Task.active_flow`; during the
+explicit `initial-startup-pending` window it is the generation-checked initial Flow fixed by the scheduler switch
+commit. `CurrentTask`, `CurrentTaskRef` and `CurrentCPU` continue to resolve through that same effective TaskFlow.
+`TaskThreadContext.root_trap_flow_ref` carries the optional root reference across a legal scheduling point; the
+root's active-child links locate the leaf.
 
 Entry capture records the effective `TaskRef`, `TaskFlowRef`, CPU and exec-transaction commit count. Return accepts the
 same Task/TaskFlow pair, a scheduler-committed terminal Task switch, or a same-Task successful-exec handoff. The exec

@@ -1427,6 +1427,7 @@ class _Deriver:
     ) -> bool:
         alternatives = [candidate.strip() for candidate in entry.split("||")]
         if len(alternatives) > 1:
+            alternative_failures: list[str] = []
             for candidate in alternatives:
                 snapshot = self._execution_snapshot()
                 if self._drive_entry(
@@ -1440,10 +1441,26 @@ class _Deriver:
                     statement=statement,
                 ):
                     return True
+                failed_records = self.records[int(snapshot["records_len"]) :]
+                diagnostic_messages = [
+                    record.message
+                    for record in failed_records
+                    if record.status
+                    in {
+                        DerivationStatus.BLOCKED,
+                        DerivationStatus.CONTRADICTION,
+                        DerivationStatus.OBLIGATION,
+                    }
+                ]
+                failure = " -> ".join(diagnostic_messages[-4:]) or (
+                    "candidate returned false without a diagnostic"
+                )
+                alternative_failures.append(f"{candidate}: {failure}")
                 self._restore_execution_snapshot(snapshot)
+            detail = "; ".join(alternative_failures)
             self._record(
                 DerivationStatus.BLOCKED,
-                f"no drives alternative accepted: {entry}",
+                f"no drives alternative accepted: {entry}; {detail}",
                 entry_span,
                 object_name=transition.object_name,
                 transition_name=transition.name,
@@ -3070,9 +3087,13 @@ class _Deriver:
                 default_receiver=transition.object_name,
                 bindings=bindings,
             )
-            value = bindings.get(value_expression, {}).get(
-                "value", value_expression
-            )
+            value = bindings.get(value_expression, {}).get("value")
+            if value is None:
+                value = self._resolve_entity_path(
+                    value_expression,
+                    default_receiver=transition.object_name,
+                    bindings=bindings,
+                ) or value_expression
             if receiver is None:
                 self._record(
                     DerivationStatus.CONTRADICTION,
@@ -3671,6 +3692,28 @@ class _Deriver:
         state: StateDef | None,
     ) -> bool:
         stripped = expression.strip()
+        if "||" in stripped:
+            context_object = _context_object(transition, state)
+            for alternative in (item.strip() for item in stripped.split("||")):
+                parsed_alternative = _predicate_args(alternative)
+                if parsed_alternative is None:
+                    continue
+                predicate, raw_args = parsed_alternative
+                args = tuple(
+                    self._resolve_predicate_entity(arg, context_object)
+                    for arg in raw_args
+                )
+                if self._structural_relation_holds(predicate, args):
+                    self._record_builtin_proof(
+                        expression,
+                        span,
+                        kind,
+                        transition,
+                        state,
+                        proof_class="structural_disjunction",
+                        proof_provider="model_associations",
+                    )
+                    return True
         parsed = _predicate_args(stripped)
         if parsed is not None:
             predicate, raw_args = parsed
@@ -3775,6 +3818,90 @@ class _Deriver:
             }
         if predicate == "task_ref_targets" and len(args) == 2:
             return self._dereference_entity(args[0]) == args[1]
+        if predicate in {
+            "task_ref_targets_online_task",
+            "task_ref_targets_suspended_task",
+        } and len(args) == 1:
+            target = self._dereference_entity(args[0])
+            expected = (
+                "Online"
+                if predicate == "task_ref_targets_online_task"
+                else "Suspended"
+            )
+            return target is not None and self.states.get(target) == expected
+        if predicate == "task_active_flow_invalid" and len(args) == 1:
+            return self._entity_association_value(args[0], "active_flow") is None
+        if predicate == "task_online_initial_flow_base" and len(args) == 1:
+            initial = self._entity_association_value(args[0], "initial_flow")
+            return initial is not None and self.states.get(initial) == "Base"
+        if predicate in {
+            "task_initial_startup_pending",
+            "task_on_cpu_initial_startup_pending_or_active",
+        } and len(args) == 1:
+            task = args[0]
+            initial = self._entity_association_value(task, "initial_flow")
+            active = self._entity_association_value(task, "active_flow")
+            return self.states.get(task) == "OnCpu" and (
+                active is not None
+                or (
+                    initial is not None
+                    and self.states.get(initial) in {"Base", "Prepared", "Ready"}
+                )
+            )
+        if predicate == "task_initial_startup_pending_for_flow" and len(args) == 2:
+            task, flow = args
+            return (
+                self.states.get(task) == "OnCpu"
+                and self._entity_association_value(task, "active_flow") is None
+                and self._entity_association_value(task, "initial_flow") == flow
+                and self.states.get(flow) in {"Base", "Prepared", "Ready"}
+            )
+        if predicate == "task_suspended_has_recoverable_active_context" and len(args) == 1:
+            return (
+                self.states.get(args[0]) == "Suspended"
+                and self._entity_association_value(args[0], "active_flow") is not None
+            )
+        if predicate == "scheduler_activate_initial_preflight_valid" and len(args) == 3:
+            _scheduler, task_ref, flow = args
+            task = self._dereference_entity(task_ref)
+            return (
+                task is not None
+                and self.states.get(task) == "Online"
+                and self._entity_association_value(task, "initial_flow") == flow
+                and self._entity_association_value(task, "active_flow") is None
+                and self.states.get(flow) == "Base"
+            )
+        if predicate == "scheduler_continue_active_preflight_valid" and len(args) == 3:
+            _scheduler, task_ref, flow = args
+            task = self._dereference_entity(task_ref)
+            return (
+                task is not None
+                and self.states.get(task) == "Suspended"
+                and self._entity_association_value(task, "active_flow") == flow
+                and self.states.get(flow) == "Online"
+            )
+        if predicate == "scheduler_dispatch_signal_capacity_ready" and len(args) == 2:
+            return self.states.get(args[1]) in {"Base", "Online"}
+        if predicate == "scheduler_preflight_dispatch_flow_is" and len(args) == 2:
+            task = self._dereference_entity(args[0])
+            if task is None:
+                return False
+            expected = (
+                self._entity_association_value(task, "initial_flow")
+                if self.states.get(task) == "Online"
+                else self._entity_association_value(task, "active_flow")
+            )
+            return expected == args[1]
+        if predicate == "current_task_bind_scheduler_commit_boundary_valid" and len(args) == 3:
+            task = self._dereference_entity(args[1])
+            if task is None or self.states.get(task) not in {"Online", "Suspended"}:
+                return False
+            expected = (
+                self._entity_association_value(task, "initial_flow")
+                if self.states.get(task) == "Online"
+                else self._entity_association_value(task, "active_flow")
+            )
+            return expected == args[2]
         if predicate in {"task_initial_flow_is", "task_owns_flow"} and len(args) == 2:
             initial = self._entity_association_value(args[0], "initial_flow")
             if predicate == "task_initial_flow_is":

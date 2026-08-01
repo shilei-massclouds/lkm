@@ -61,7 +61,8 @@ lifecycle 或 checkpoint。
 
 - `Kernel.Enable` 同步驱动 BootInitFlow 三段 lifecycle；BootInitFlow Online 后，当前 BootTask 的 active
   `BootIdleFlow` 向 CPU0 Scheduler `emits Schedule()`。非 identity switch 通过
-  Scheduler→next Task→next TaskFlow continuation 承载 KernelInitFlow 的后续执行；Kernel 不是 Schedule sender。
+  Scheduler drives next Task Activate/Continue、再直接向预检 TaskFlow emits Startup/Continue，承载
+  KernelInitFlow 的后续执行；Kernel 不是 Schedule sender，Task 也不转发 Flow continuation。
 - `BootInitFlow.Preset` 直接驱动入口对象并提交 Prepared；Setup 直接驱动 boot/interrupt 叶子以及
   `BootInitRestInitPhase`；Enable 只驱动 `BootInitScheduleHandoffPhase`。
 - `KernelInitFlow.Preset` 直接驱动 PreSMP/SMP bringup；Setup 直接驱动 runtime、initcall、rootfs、

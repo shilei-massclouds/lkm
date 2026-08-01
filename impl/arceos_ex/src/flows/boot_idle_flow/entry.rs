@@ -225,7 +225,7 @@ fn phase_ready(ctx: &Context) -> bool {
     restore_ready(ctx)
         && ctx.scheduler().boot_idle_preemption().state() == State::Ready
         && ctx.scheduler().boot_idle_preemption().disabled()
-        && ctx.boot_idle_flow.state() == State::Ready
+        && ctx.boot_idle_flow.state() == State::Online
         && ctx.boot_idle_flow.first_schedule_committed()
         && ctx.boot_idle_flow.idle_entry_prepared()
         && ctx.boot_idle_flow.cpu_startup_entry_ready()
@@ -261,7 +261,7 @@ fn restore_ready(ctx: &Context) -> bool {
         && ctx
             .current_task_ref()
             .is_ok_and(|task_ref| task_ref.same_identity(ctx.boot_task.task_ref()))
-        && ctx.boot_idle_flow.state() == State::Ready
+        && ctx.boot_idle_flow.state() == State::Online
         && ctx.boot_idle_flow.active()
         && ctx.boot_idle_flow.owner() == ctx.boot_task.task_ref()
         && ctx.boot_task.task().active_flow() == ctx.boot_idle_flow.flow_ref()

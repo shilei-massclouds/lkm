@@ -668,25 +668,25 @@ def _check_task_only_lifecycle(
     diagnostics: list[dict[str, Any]],
     owner_span: dict[str, Any],
 ) -> None:
-    if initial_state == "OnCpu" and not task_lifecycle:
+    if initial_state in {"OnCpu", "Suspended"} and not task_lifecycle:
         _diagnostic(
             diagnostics,
             "error",
-            f"Task-only lifecycle state on non-Task: {owner}.initial_state State::OnCpu",
+            f"Task-only lifecycle state on non-Task: {owner}.initial_state State::{initial_state}",
             owner_span,
         )
     for state in states:
-        if state["name"] == "OnCpu" and not task_lifecycle:
+        if state["name"] in {"OnCpu", "Suspended"} and not task_lifecycle:
             _diagnostic(
                 diagnostics,
                 "error",
-                f"Task-only lifecycle state on non-Task: {owner}.State::OnCpu",
+                f"Task-only lifecycle state on non-Task: {owner}.State::{state['name']}",
                 state["span"],
             )
         for handler in state.get("handlers", []):
             if (
                 handler.get("kind") == "Transition"
-                and handler.get("name") in {"Continue", "Suspend"}
+                and handler.get("name") in {"Activate", "Continue", "Suspend"}
                 and not task_lifecycle
             ):
                 _diagnostic(

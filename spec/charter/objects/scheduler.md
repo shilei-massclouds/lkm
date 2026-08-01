@@ -25,9 +25,10 @@ Deferred。参考配置未启用的 SCX 保持 Trimmed。
 ## Task lifecycle 与调度资格
 
 Task lifecycle 与 runnable/on-rq/blocked 资格正交。`OnCpu` 只表示 Task 当前拥有 CPU 执行权；`Online`
-只表示 Task 拥有有效、可恢复的 continuation，并不保证它仍在 runnable queue。Scheduler 的 class queue
-membership 与一次 Schedule 的 prev disposition 共同决定 runnable/on-rq/blocked。blocked Task 可以保持
-`Online/None/Valid`，但在 wake/enqueue 恢复资格前不得被选中。
+只表示 Task 已发布但从未获得 CPU，`Suspended` 表示 Task 曾执行且拥有有效、可恢复的 active
+continuation。两者都不保证它在 runnable queue。Scheduler 的 class queue membership 与一次
+Schedule 的 prev disposition 共同决定 runnable/on-rq/blocked。blocked Task 可以保持
+`Suspended/None/Valid`，但在 wake/enqueue 恢复资格前不得被选中。
 
 ## Schedule 信号与 sender 解析
 
@@ -46,7 +47,7 @@ stale Flow、非 active Flow 或错误 CurrentTask binding 必须在任何调度
 
 发出 Schedule 和 PreparePrev 都不改变 Task lifecycle。BootTask 在 `schedule_preempt_disabled()` 对应路径
 为 Runnable；它在请求发送、PreparePrev 和 PickNextTask 期间始终保持 `OnCpu/Live/Invalid`。只有实际
-选择 `next != prev` 并执行 SwitchTo 时，它才 Suspend 为 Online。
+选择 `next != prev` 并执行 SwitchTo 时，它才 Suspend 为 Suspended。
 
 ## PreparePrev
 
@@ -75,20 +76,30 @@ PutPrevTask 放回。identity 选择是否执行 put/set 记账由所走 Linux c
 ## SwitchTo 与 continuation
 
 identity path 不进入 SwitchTo，也不产生 Task lifecycle、context、CurrentTask/CurrentStack binding 或
-Task.Continue。非 identity SwitchTo 必须先完整预检双方 TaskRef、状态、Flow/context generation、
-CPU-local binding、stack 和后续 Signal 容量；任一失败不得留下部分提交。预检成功后严格执行：
+Task Activate/Suspend/Continue。非 identity SwitchTo 必须先完整预检双方 TaskRef、状态、Flow/context
+generation、CPU-local binding、stack 和后续 Signal 容量，并一次性保存稳定 TaskRef、TaskFlowRef、Flow
+generation 与 `NextDispatchKind::{ActivateInitial,ContinueActive}`；任一失败不得留下部分提交。
+
+- next=Online 时只允许 ActivateInitial：initial Flow 必须 Base、owned、generation 有效，active Flow
+  必须无效且 Startup 容量可接受；
+- next=Suspended 时只允许 ContinueActive：active Flow 必须唯一、Online、owned、generation 有效且
+  Continue 容量可接受；
+- 状态与 Flow 事实不一致、两条路径同时成立或均不成立时，都必须在物理切换前拒绝。
+
+预检成功后严格执行：
 
 1. `drives prev.SaveCoreContext`；
-2. `drives prev.Suspend`，使 prev `OnCpu -> Online`，同时保持 PreparePrev 已确定的 Runnable/Blocked
+2. `drives prev.Suspend`，使 prev `OnCpu -> Suspended`，同时保持 PreparePrev 已确定的 Runnable/Blocked
    资格；
 3. `drives next.RestoreCoreContext`，提交寄存器、stack 与 CPU-local CurrentTask/CurrentStack binding；
 4. 在 next stack 上完成 Linux finish-task-switch 对应清理；
-5. Scheduler 向 next Task `emits Continue`。
+5. Online next：Scheduler `drives next.Activate`，随后直接向预检 initial Flow `emits Startup`；
+6. Suspended next：Scheduler `drives next.Continue`，随后直接向预检 active Flow `emits Continue`。
 
-next Task 接受 Continue 后提交 `Online/None/Valid -> OnCpu/Live/Invalid`，再向仍为 Base 的 initial Flow
-`emits Startup`，或向唯一 active Flow `emits Continue`。这两条候选必须恰有一条可接受。跨执行主体的
-TaskFlow→Scheduler、Scheduler→Task、Task→TaskFlow 都使用 `emits`；Scheduler 内的状态检查、选择、
-put/set、保存与恢复使用 `drives`。
+next Task 接受 Activate/Continue 后分别提交 `Online/None/Valid -> OnCpu/Live/Invalid` 或
+`Suspended/None/Valid -> OnCpu/Live/Invalid`。Task 不产生 TaskFlow Startup/Continue；跨执行主体的
+TaskFlow→Scheduler 与 Scheduler→TaskFlow 使用 `emits`，Scheduler 对 Task lifecycle 及内部状态检查、
+选择、put/set、保存与恢复使用 `drives`。
 
 ## 当前能力边界
 

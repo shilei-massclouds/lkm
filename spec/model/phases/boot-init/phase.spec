@@ -233,11 +233,12 @@ object BootInitFlow: TaskFlow {
 
                 drives {
                     BootInitScheduleHandoffPhase.Transition::Preset;
+                    BootIdleFlow.Transition::Enable;
                 }
 
                 ensures {
                     BootInitScheduleHandoffPhase.state == State::Online;
-                    BootIdleFlow.state == State::Ready;
+                    BootIdleFlow.state == State::Online;
                     task_owns_flow(BootTask, BootIdleFlow);
                     task_flow_owner_is(BootIdleFlow, BootTask);
                     task_flow_parent_is(BootIdleFlow, BootTask);
@@ -275,7 +276,7 @@ object BootInitFlow: TaskFlow {
             ProcessPreparePhase.state == State::Online;
             BootInitRestInitPhase.state == State::Online;
             BootInitScheduleHandoffPhase.state == State::Online;
-            BootIdleFlow.state == State::Ready;
+            BootIdleFlow.state == State::Online;
             task_active_flow_is(BootTask, BootIdleFlow);
             boot_init_flow_switch_precommit_ready(
                 BootInitFlow,

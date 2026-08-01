@@ -676,23 +676,31 @@ impl Context {
         &mut self,
         task_ref: TaskRef,
         root_ref: crate::objects::trap_flow_type::TrapFlowRef,
-    ) -> Option<bool> {
-        let cpu_ref = self.current_task_candidate(task_ref)?.flow.cpu_ref()?;
+    ) -> Result<bool, &'static str> {
+        let candidate = self
+            .current_task_candidate(task_ref)
+            .ok_or("current_task_candidate_missing")?;
+        let effective_flow_ref = candidate.flow.flow_ref();
+        let cpu_ref = candidate
+            .flow
+            .cpu_ref()
+            .ok_or("current_task_flow_cpu_missing")?;
         let task_identity = crate::arch::riscv64::csr::read_tp();
         let installed = self
             .task_mut_for_ref(task_ref)
-            .map(|task| task.bind_root_trap_flow(root_ref))
-            .unwrap_or(None)?;
+            .ok_or("mutable_task_ref_missing")?
+            .bind_root_trap_flow(effective_flow_ref, root_ref)?;
         if installed
             && !self
                 .cpu_group
-                .cpu_mut(cpu_ref.logical_id())?
+                .cpu_mut(cpu_ref.logical_id())
+                .ok_or("current_cpu_missing")?
                 .trap_mut()
                 .refresh_entry_task_root(task_identity, root_ref)
         {
-            return None;
+            return Err("trap_entry_task_root_refresh_failed");
         }
-        Some(installed)
+        Ok(installed)
     }
 
     pub(crate) fn task_root_trap_flow_resolves(&mut self, task_ref: TaskRef) -> Option<bool> {
@@ -835,14 +843,21 @@ impl Context {
             self.boot_current_task_candidate()
         } else if task_ref.same_identity(TaskRef::KERNEL_INIT) {
             let task = self.kernel_init_task.task();
-            let flow = self.flow_for_kernel_init_task(task.active_flow())?;
+            let effective_flow = if task.active_flow().is_valid() {
+                task.active_flow()
+            } else {
+                task.initial_flow()
+            };
+            let flow = self.flow_for_kernel_init_task(effective_flow)?;
             Some(CurrentTaskCandidate { task, flow })
         } else if task_ref.same_identity(TaskRef::KTHREADD) {
             let task = self.kthreadd_task.task();
-            if !task
-                .active_flow()
-                .same_identity(self.kthreadd_flow.flow_ref())
-            {
+            let effective_flow = if task.active_flow().is_valid() {
+                task.active_flow()
+            } else {
+                task.initial_flow()
+            };
+            if !effective_flow.same_identity(self.kthreadd_flow.flow_ref()) {
                 return None;
             }
             Some(CurrentTaskCandidate {
@@ -1202,7 +1217,7 @@ impl Context {
 
     /// Commits a terminal user-task switch using the selector proof captured
     /// synchronously before the exiting Flow was retired. The old Task is not
-    /// reclaimed until `continue_task_after_switch` has established `next`.
+    /// reclaimed until `dispatch_task_after_switch` has established `next`.
     #[cfg_attr(not(any(app_smoke, app_user_boot)), allow(dead_code))]
     pub fn replace_terminal_user_task(
         &mut self,
@@ -1300,7 +1315,7 @@ impl Context {
             user_task_set,
             scheduler_test_tasks,
         );
-        scheduler.continue_task_after_switch(next, &mut task_access)?;
+        scheduler.dispatch_task_after_switch(next, &mut task_access)?;
         self.refresh_current_cpu_trap_entry_task(next)?;
         let current_task = self
             .resolve_current_task_identity(crate::arch::riscv64::csr::read_tp(), next)

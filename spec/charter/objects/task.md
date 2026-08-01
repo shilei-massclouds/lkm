@@ -33,7 +33,7 @@ PID 1、child Task 以及各自 Flow 的临时具名见证不再是正式静态�
 
 ```text
 Base --Preset--> Prepared --Setup--> Ready --Enable(initial Flow breakpoint)--> Online
-Online --Continue--> OnCpu --Suspend--> Online
+Online --Activate--> OnCpu --Suspend--> Suspended --Continue--> OnCpu
 OnCpu --Disable(terminal)--> Offline --Cleanup--> Destroyed
 ```
 
@@ -42,19 +42,23 @@ OnCpu --Disable(terminal)--> Offline --Cleanup--> Destroyed
 运行期实例进入继承状态时都必须检查同一类型 invariant，其中 `self` 绑定到实际 instance identity，
 而不是类型名或 declaration site。
 
-`Online` 是普通 Task 唯一持有有效、可恢复 TaskFlow 断点的状态；它不表示 runnable、on-rq 或必然可被
-Scheduler 派发。idle task 可以是 Scheduler 的 `idle` / `curr` 而不属于普通 runnable class queue；
-普通 Task 也可以因 blocking 而保持 Online/Valid 但不在任何 class queue。`OnCpu` 表示该 Task 是 CPU
+`Online` 专指已发布但从未获得 CPU 的普通 Task：authority 为 None、breakpoint 为 Valid、
+`initial_flow` 有效且仍为 Base，`active_flow` 无效。`Suspended` 专指曾执行、已保存 active Flow
+context、当前不在 CPU 的 Task：authority 为 None、breakpoint 为 Valid，且 `active_flow` 有效并与
+保存 context 的 FlowRef 一致。两者都不表示 runnable、on-rq 或必然可被 Scheduler 派发。idle task
+可以是 Scheduler 的 `idle` / `curr` 而不属于普通 runnable class queue；普通 Task 也可以因 blocking
+而保持 Suspended/Valid 但不在任何 class queue。`OnCpu` 表示该 Task 是 CPU
 唯一 current/执行权
 carrier；它是 Task 专属扩展状态，不得扩展为 `Object`、`PhaseObject` 或其它类型的通用生命周期状态。
 
 Task lifecycle 之外必须保存两组正交状态：
 
-- `TaskExecutionAuthority::{None, Reserved, Live}`：普通 Online Task 为 None，真实执行的普通 Task 为
+- `TaskExecutionAuthority::{None, Reserved, Live}`：普通 Online/Suspended Task 为 None，真实执行的普通 Task 为
   Live；Reserved 只用于已经成为某 CPU `rq->idle/rq->curr` 但尚未收到 HSM 执行权的 AP idle Task。
 - `TaskBreakpointState::{Invalid, Prepared, Valid}`：Setup 只建立 Prepared context；Enable 把它绑定到
-  `initial_flow` 并发布 Valid；Continue 校验并消费 Valid context，OnCpu 期间为 Invalid；Suspend 保存
-  active Flow context 并再次发布 Valid。
+  `initial_flow` 并发布 Valid；Activate 只从 Online 校验并消费 initial Flow context，Continue 只从
+  Suspended 校验并消费 active Flow context，OnCpu 期间为 Invalid；Suspend 保存 active Flow context并
+  再次发布 Valid。Online 接收 Continue、Suspended 接收 Activate 都必须失败且不改变状态。
 
 `TaskThreadContext` 固定物理保存长期 Task continuation 的核心寄存器集合、breakpoint state、经
 slot/generation 校验的 `TaskFlowRef`、可选且同样校验 generation 的 root `TrapFlowRef`，以及真实
@@ -66,7 +70,7 @@ TaskFlow 解析的 CPU identity 都不属于可恢复寄存器现场。Valid con
 FlowRef；Prepared/Invalid context 不得被 Scheduler 恢复。
 
 `BootTask` 是允许的静态 Task lifecycle override。它没有 Preset、Setup 或 Enable，初始状态为
-`OnCpu/Live/Invalid`，并保留 `OnCpu --Suspend--> Online --Continue--> OnCpu`
+`OnCpu/Live/Invalid`，并保留 `OnCpu --Suspend--> Suspended --Continue--> OnCpu`
 往返。入口初态表示固件/架构入口已把 boot CPU 执行权直接交给该 Task；它不由 Scheduler Continue
 建立，也不依赖尚未 Ready 的 CPU0 Scheduler。该状态同时保证静态 `init_task` storage、
 固定 PID 0、`TaskRef::BOOT`、静态 `stack` 属性和 canonical identity；`BootTask.stack` 对应 Linux
@@ -81,7 +85,7 @@ queue。对应 `ApIdleFlow[logical_id]` 已完成 owner/parent/initial binding�
 只验证 Linux `{task_ptr, stack_ptr}` boot data、原子建立匹配的 CurrentTask/CurrentStack 并加载对应
 `tp/sp`，再把 authority 从 Reserved 激活为
 Live；它不改变 Task lifecycle，也不发送 Task Enable/Continue。随后 keyed HSM Startup 严格启动同一
-logical-id 的 initial idle Flow。AP 首次 Suspend 才产生第一个可恢复的 Online/Valid 断点，后续切换
+logical-id 的 initial idle Flow。AP 首次 Suspend 才产生第一个可恢复的 Suspended/Valid 断点，后续切换
 完全使用普通 Suspend/Continue。
 
 BootTask 与其 stack 属性的物理/虚拟执行绑定不使用通用 `BindTask`。BootInitFlow 在
@@ -107,28 +111,36 @@ FlowRef 并原子发布 `Online/None/Valid`；它不启动 Flow。`BootInitRestI
 flags、provider
 与 schedule-loop 等角色事实属于创建它们的 Phase，不得成为 `Task` 类型 invariant。
 
-Scheduler 是普通 `Task.Continue` 与 `Task.Suspend` 的唯一发送者。发出 Schedule、PreparePrev 与
+Scheduler 是普通 `Task.Activate`、`Task.Continue` 与 `Task.Suspend` 的唯一驱动者。发出 Schedule、PreparePrev 与
 PickNextTask 都不改变 Task lifecycle；PreparePrev 只确定 Runnable/Blocked，并在需要 blocking 时先从
 class queue 移除 prev。一次 `next != prev` 的真实切换分为 prepare、物理 switch、next-stack finish：
-先完整预检双方引用、状态、上下文与后续信号容量，再依次保存 prev、Suspend prev 为
-`Online/None/Valid`、恢复 next 的 `ra/sp/s0..s11` 并提交 CPU-local CurrentTask/CurrentStack，完成
-next-stack finish，最后向 next Task emits Continue。prev Suspend 不改变 PreparePrev 已确定的 runnable
-或 blocked 资格。next Task 接受 Continue 后才提交 `Online/None/Valid -> OnCpu/Live/Invalid`，再严格
-Startup/Continue next Flow。若 prev 是
+先完整预检双方引用、状态、上下文与后续信号容量，并把 next dispatch 固定为携带稳定 TaskRef、
+TaskFlowRef 和 Flow generation 的 `ActivateInitial` 或 `ContinueActive`。随后依次保存 prev、Suspend prev 为
+`Suspended/None/Valid`、恢复 next 的 `ra/sp/s0..s11` 并提交 CPU-local CurrentTask/CurrentStack，完成
+next-stack finish。若 next 为 Online，Scheduler 同步 drives `next.Activate`，然后直接向预检的 initial
+Flow `emits Startup`；若 next 为 Suspended，Scheduler 同步 drives `next.Continue`，然后直接向预检的
+active Flow `emits Continue`。prev Suspend 不改变 PreparePrev 已确定的 runnable 或 blocked 资格。
+Task 不转发任何 TaskFlow Startup/Continue。若 prev 是
 终止 Task，finish 提交 `OnCpu --Disable--> Offline`，context 保持 Invalid，并在 next 侧 Cleanup，
-不得先制造不可恢复的 Online。`prev == next` 不进入 SwitchTo：不发送 Task Suspend/Continue，不保存/
+不得先制造不可恢复的 Suspended。`prev == next` 不进入 SwitchTo：不驱动 Task Activate/Suspend/Continue，不保存/
 恢复 context，也不改变 lifecycle、authority、Flow binding、CurrentTask 选择结果或计数；Scheduler
 只向原 active TaskFlow emits Continue，表达 schedule 返回。class callback 路径允许完成自身 put/set
 记账。
 
 调度 switch commit 必须保证 prev 已失去执行权且 CurrentTask/CurrentStack 已完整换绑到 next，之后才
-允许 next Task 接收 Continue 并获得 `OnCpu/Live`。普通 Signal 不得观察半绑定 task/stack pair。除同一
+允许 next Task 接收 Activate/Continue 并获得 `OnCpu/Live`。Online next 尚无 active Flow 时，
+CurrentTask/CurrentStack commit 必须使用预检固定的 initial FlowRef、CpuRef 与 TaskRef 建立 CPU-local
+binding；在 initial Flow Enable 提交 active binding 前，该 binding 只可用于本次
+initial-startup-pending continuation，不得被误认为已存在 active Flow。普通 Signal 不得观察半绑定
+task/stack pair。除同一
 Task/Stack pair 的地址表示刷新外，不同目标换绑只能发生在这一正式 commit 边界。terminal switch 必须在回收 prev 前
 先使 next 的 CurrentTask 与 CurrentStack 可解析；identity switch 不改变两种解析结果。
 
-Task 接受 Continue 并提交 OnCpu 后必须严格启动恰好一个 execution continuation：若 initial Flow 仍为
-Base，则向它发出 Startup（canonical Preset）；否则向唯一 active Flow 发出 Continue。发送前两条候选
-必须恰有一条可接受；缺失、歧义或处理失败都使当前 Signal 根执行失败，不排队重试，也不静默忽略。
+Task 的 Activate/Continue 只提交自身 lifecycle、authority 与 breakpoint，不发送 TaskFlow Signal。
+首次 Activate 后允许短暂的 initial-startup-pending：initial Flow 仍为 Base、active binding 仍无效；
+Scheduler 发出的 Startup 推进 initial Flow，并由该 Flow 的 Enable 提交唯一 active binding。恢复
+Continue 则必须已有唯一 Online active Flow，Scheduler 随后直接向该 Flow 发出 Continue。预检时两条
+候选必须恰有一条成立；缺失、歧义或处理失败都使当前根执行失败，不排队重试，也不静默忽略。
 
 ## CopyProcess 的源执行权
 

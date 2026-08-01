@@ -116,8 +116,8 @@ Linux 6.12 `Documentation/arch/riscv/boot.rst` 与当前 RV64 Image contract 提
   `PhysicalDirect.Action::ActivateOnCpu(BootCPURef)`，以 `InitialActivation` 原子建立启动 CPU 的首个
   translation controller。只有这三项均成功后，同一个 Enable handler 才顺序驱动 BootInitFlow 的
   Preset/Setup/Enable。BootInitFlow Online 后，当前 BootTask 的 active `BootIdleFlow` 向 CPU0
-  Scheduler 异步发送无 payload 的 Schedule；首次非 identity switch 由 Scheduler→next Task→next
-  TaskFlow 的 continuation 启动 KernelInitFlow 的 Preset/Setup/Enable。该跨栈 continuation 仍承载同一个
+  Scheduler 异步发送无 payload 的 Schedule；首次 non-identity switch 由 Scheduler drives next
+  Task.Activate、再由 Scheduler emits next TaskFlow.Startup，启动 KernelInitFlow 的 Preset/Setup/Enable。该跨栈 continuation 仍承载同一个
   Kernel.Enable 响应的后续执行，但 Kernel 不是 Schedule 的 sender。`PayloadHandoffPreparePhase.Online` 证明 selected payload
   的可逆预提交与应用运行环境准备完成；随后 Kernel.Enable 才提交 Kernel.Online。
 

@@ -36,9 +36,9 @@ CPU assignment 不属于 Task carrier。`Task` 不得保存 `cpu_id`、`CpuRef` 
 
 ## Task 类型级 lifecycle lowering
 
-普通 Task 的 `Base/Prepared/Ready/Online/OnCpu/Offline/Destroyed` 状态、
+普通 Task 的 `Base/Prepared/Ready/Online/OnCpu/Suspended/Offline/Destroyed` 状态、
 `TaskExecutionAuthority::{None,Reserved,Live}`、`TaskBreakpointState::{Invalid,Prepared,Valid}` 和
-`preset/setup/enable/continue_on_cpu/suspend_from_cpu/disable/cleanup` 必须只实现于统一 Rust `Task` core。静态
+`preset/setup/enable/activate_on_cpu/continue_on_cpu/suspend_from_cpu/disable/cleanup` 必须只实现于统一 Rust `Task` core。静态
 `KernelInitTask`、`KthreaddTask` 与 `UserTaskSet` 创建的 child 都通过 core 的同一组方法推进；角色
 结构不得定义同名 lifecycle-driving API，也不得保留转发 alias。它们只可暴露角色 metadata、只读
 查询、受控的 `Task` core 访问，以及不推进 lifecycle 的 metadata commit helper。
@@ -48,11 +48,12 @@ CPU assignment 不属于 Task carrier。`Task` 不得保存 `cpu_id`、`CpuRef` 
 copy-process 结果，建立 PID、stack/thread context 的初始寄存器字节、Prepared breakpoint、scheduler
 entity 和 New/not-enqueued 状态；`Task::enable` 只在调用者已完成 running、Scheduler publication 与
 初始 Flow structural binding 后把 context 绑定 initial FlowRef 并原子提交 Online/None/Valid；它不启动
-Flow。Task 进入 Online 只证明存在可恢复上下文，不证明 runnable/on-rq；后者只由所属 CPU
-Scheduler 的类队列成员关系和 prev disposition 决定。Scheduler switch 预检必须验证 prev
-OnCpu/Live/Invalid/active-flow 和 next Online/None/Valid/FlowRef。switch 按 SaveCoreContext(prev)、Suspend(prev)、
-RestoreCoreContext(next)、next-stack finish 和 Task.Continue 排序；Task 接收 Continue 时才原子提交 next
-OnCpu/Live/Invalid，随后严格选择 Base initial Flow 的 `Preset` 或 Online active Flow 的 `Continue`。
+Flow。Online 必须保持 initial Flow Base、active FlowRef 无效；它只证明首次可恢复上下文，不证明
+runnable/on-rq。Suspended 必须保持唯一 active Flow 和绑定该 FlowRef 的 Valid context；两者的调度
+资格只由所属 CPU Scheduler 的类队列成员关系和 prev disposition 决定。Scheduler switch 预检必须
+验证 prev OnCpu/Live/Invalid/active-flow，并把 next 固定为 Online 的 ActivateInitial 或 Suspended 的
+ContinueActive。switch 按 SaveCoreContext(prev)、Suspend(prev)、RestoreCoreContext(next)、next-stack
+finish、Task Activate/Continue 排序；Scheduler 随后直接发送预检 Flow 的 Startup/Continue，Task 不转发。
 stale generation、无效 context、Reserved authority 或候选歧义必须无状态变化失败。
 terminal task 使用 OnCpu 直接 Disable，context 保持 Invalid；identity switch 完全不调用上述方法。
 `disable/cleanup` 必须继续检查 owned Flow 的 inactive/Destroyed 顺序。角色专用 flag、入口、
@@ -114,7 +115,8 @@ Flow 或把 initial ref 当作 active ref。
 `BootInitRestInitPhase` 必须对 `KernelInitTask` 与 `KthreaddTask` 分别完整执行
 Preset/Setup/Enable：Preset lower 为 `copy_process`，Setup 当前无业务动作，Enable lower 为
 `wake_up_new_task`。Enable 后 initial Flow 保持 Base；只有 Scheduler 真实切入相应 Task 后才发送严格
-continuation Signal，启动 `KernelInitFlow` 或 `KthreaddFlow`。
+continuation Signal：Scheduler drives Task.Activate 后直接发送 Startup，启动 `KernelInitFlow` 或
+`KthreaddFlow`；initial Flow Enable 才提交 active FlowRef。
 
 fork 的 Task 侧提交顺序固定为 `fresh Task -> fresh fork UserAppFlow -> publish TaskRef ->
 owner/active bind`。child exit/exit_group 与 `KernelInitTask` shutdown 只有在当前及 prior owned Flow
@@ -140,7 +142,7 @@ AP idle Task 使用专用 const/prepare 构造器直接建立 OnCpu/Reserved/Inv
 reservation 与 initial Flow binding；不得经过普通 Task Enable，也不得保留 `adopt_ap_entry_on_cpu()`。
 真实 secondary entry 验证 boot-data/`tp` 后只把 authority 从 Reserved 激活为 Live，并通过
 `task_ptr.initial_flow` 校验/启动 keyed `ApIdleFlow`；Task lifecycle 保持 OnCpu。后续首次 Suspend 才
-发布首个 Online/Valid breakpoint，之后 Suspend/Continue 仍只允许 Scheduler 驱动。
+发布首个 Suspended/Valid breakpoint，之后 Suspend/Continue 仍只允许 Scheduler 驱动。
 
 `TaskThreadContext` wrapper 必须位于统一 Task core，内部含 `TaskSwitchContext`、breakpoint state、绑定
 FlowRef 与真实 save/restore 计数。scheduler/role wrapper 不得保存测试专用第二套 context carrier。

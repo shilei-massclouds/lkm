@@ -3654,8 +3654,41 @@ impl UserTaskSet {
     }
 
     pub fn continue_task(&mut self, task_ref: TaskRef, cpu_ref: super::cpu::CpuRef) -> EventResult {
-        self.accept_task_continue(task_ref)?;
-        self.continue_task_flow(task_ref, cpu_ref)
+        let initial = self
+            .slot_for_ref(task_ref)
+            .is_some_and(|slot| slot.task.state() == State::Online);
+        if initial {
+            self.accept_task_activate(task_ref)?;
+            let flow_ref = self
+                .slot_for_ref(task_ref)
+                .map(|slot| slot.task.initial_flow())
+                .unwrap_or(TaskFlowRef::NONE);
+            self.emit_initial_startup(task_ref, flow_ref, cpu_ref)
+        } else {
+            self.accept_task_continue(task_ref)?;
+            self.continue_active_flow(task_ref)
+        }
+    }
+
+    pub(crate) fn accept_task_activate(&mut self, task_ref: TaskRef) -> EventResult {
+        let Some(index) = task_ref.user_slot() else {
+            return failed_condition(
+                LifecycleEvent::Activate,
+                State::Destroyed,
+                State::Online,
+                State::OnCpu,
+            );
+        };
+        let slot = &mut self.task_slots[index];
+        if !slot.occupied || !slot.task_ref().same_identity(task_ref) {
+            return failed_condition(
+                LifecycleEvent::Activate,
+                slot.state(),
+                State::Online,
+                State::OnCpu,
+            );
+        }
+        slot.task.activate_on_cpu()
     }
 
     pub(crate) fn accept_task_continue(&mut self, task_ref: TaskRef) -> EventResult {
@@ -3663,7 +3696,7 @@ impl UserTaskSet {
             return failed_condition(
                 LifecycleEvent::Continue,
                 State::Destroyed,
-                State::Online,
+                State::Suspended,
                 State::OnCpu,
             );
         };
@@ -3672,62 +3705,59 @@ impl UserTaskSet {
             return failed_condition(
                 LifecycleEvent::Continue,
                 slot.state(),
-                State::Online,
+                State::Suspended,
                 State::OnCpu,
             );
         }
         slot.task.continue_on_cpu()
     }
 
-    pub(crate) fn continue_task_flow(
+    pub(crate) fn emit_initial_startup(
         &mut self,
         task_ref: TaskRef,
+        flow_ref: TaskFlowRef,
         cpu_ref: super::cpu::CpuRef,
     ) -> EventResult {
         let Some(index) = task_ref.user_slot() else {
             return failed_condition(
-                LifecycleEvent::Continue,
+                LifecycleEvent::Preset,
                 State::Destroyed,
-                State::Online,
-                State::OnCpu,
+                State::Base,
+                State::Prepared,
             );
         };
         let slot = &mut self.task_slots[index];
         if !slot.occupied || !slot.task_ref().same_identity(task_ref) {
             return failed_condition(
-                LifecycleEvent::Continue,
+                LifecycleEvent::Preset,
                 slot.state(),
-                State::Online,
-                State::OnCpu,
+                State::Base,
+                State::Prepared,
             );
         }
         let UserTaskStorageSlot { task, flows, .. } = slot;
         let flow_index = slot.active_flow_slot;
-        if !task.active_flow().is_valid() && flows[flow_index].state() == State::Base {
-            if !flows[flow_index].bind_cpu_ref(cpu_ref) {
-                return failed_condition(
-                    LifecycleEvent::Continue,
-                    flows[flow_index].state(),
-                    State::Base,
-                    State::Base,
-                );
-            }
-            flows[flow_index].start_initial(task, None, None)
-        } else if task
-            .active_flow()
-            .same_identity(flows[flow_index].flow_ref())
-            && flows[flow_index].state() == State::Online
-            && flows[flow_index].active()
+        if task.active_flow().is_valid()
+            || !task.initial_flow().same_identity(flow_ref)
+            || !flows[flow_index].flow_ref().same_identity(flow_ref)
+            || flows[flow_index].state() != State::Base
         {
-            Ok(())
-        } else {
-            failed_condition(
-                LifecycleEvent::Continue,
+            return failed_condition(
+                LifecycleEvent::Preset,
                 flows[flow_index].state(),
-                State::Online,
-                State::Online,
-            )
+                State::Base,
+                State::Prepared,
+            );
         }
+        if !flows[flow_index].bind_cpu_ref(cpu_ref) {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                flows[flow_index].state(),
+                State::Base,
+                State::Base,
+            );
+        }
+        flows[flow_index].start_initial(task, None, None)
     }
 
     pub(crate) fn suspend_task(&mut self, task_ref: TaskRef) -> EventResult {
@@ -3926,7 +3956,7 @@ impl UserTaskSet {
             let slot = &mut self.task_slots[index];
             let flow_index = slot.active_flow_slot;
             let UserTaskStorageSlot { task, flows, .. } = slot;
-            if task.continue_on_cpu().is_err()
+            if task.activate_on_cpu().is_err()
                 || !flows[flow_index].bind_cpu_ref(super::cpu::CpuRef::new(0))
                 || flows[flow_index].start_initial(task, None, None).is_err()
                 || flows[flow_index].cleanup_active_for_exit(task).is_err()

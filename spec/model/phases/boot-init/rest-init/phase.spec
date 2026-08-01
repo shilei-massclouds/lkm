@@ -1467,7 +1467,7 @@ object BootInitScheduleHandoffPhase: PhaseObject {
         invariant {
             BootInitRestInitPhase.state == State::Online;
             boot_init_schedule_handoff_ready(BootInitScheduleHandoffPhase);
-            BootIdleFlow.state == State::Ready;
+            BootIdleFlow.state == State::Ready || BootIdleFlow.state == State::Online;
             task_active_flow_is(BootTask, BootIdleFlow);
             task_concurrency_open();
             smp_concurrency_closed();
@@ -1491,7 +1491,7 @@ object BootIdleEntryPhase: PhaseObject {
                     BootInitScheduleHandoffPhase.state == State::Online;
                     scheduler_first_schedule_committed(Cpu0Scheduler);
                     BootIdleSetup.state == State::Ready;
-                    BootIdleFlow.state == State::Ready;
+                    BootIdleFlow.state == State::Online;
                     task_active_flow_is(BootTask, BootIdleFlow);
                     CpuGroup.state == State::Ready;
                     task_concurrency_open();
@@ -1614,7 +1614,7 @@ object BootIdleEntryPhase: PhaseObject {
             on Transition::Setup -> State::Ready {
                 ensures {
                     BootInitScheduleHandoffPhase.state == State::Online;
-                    BootIdleFlow.state == State::Ready;
+                    BootIdleFlow.state == State::Online;
                     boot_idle_entry_phase_ready(BootIdleEntryPhase);
                     boot_idle_runtime_ready(BootIdleFlow, BootTask);
                     boot_idle_cpu_startup_entry_ready(BootIdleFlow, CpuGroup.cpus[0]);
@@ -1653,7 +1653,7 @@ object BootIdleEntryPhase: PhaseObject {
     state State::Ready {
         invariant {
             BootInitScheduleHandoffPhase.state == State::Online;
-            BootIdleFlow.state == State::Ready;
+            BootIdleFlow.state == State::Online;
             boot_idle_entry_phase_ready(BootIdleEntryPhase);
             boot_idle_runtime_ready(BootIdleFlow, BootTask);
             boot_idle_cpu_startup_entry_ready(BootIdleFlow, CpuGroup.cpus[0]);
@@ -1678,7 +1678,7 @@ object BootIdleEntryPhase: PhaseObject {
             on Transition::Enable -> State::Online {
                 ensures {
                     BootInitScheduleHandoffPhase.state == State::Online;
-                    BootIdleFlow.state == State::Ready;
+                    BootIdleFlow.state == State::Online;
                     boot_idle_entry_phase_ready(BootIdleEntryPhase);
                     boot_idle_runtime_ready(BootIdleFlow, BootTask);
                     boot_idle_cpu_startup_entry_ready(BootIdleFlow, CpuGroup.cpus[0]);

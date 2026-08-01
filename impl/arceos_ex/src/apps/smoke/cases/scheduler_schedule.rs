@@ -98,7 +98,7 @@ impl SmokeScenario for CooperativeSwitchScenario {
                 .boot_cpu_owned_scheduler_view(&ctx.cpu_group)
                 .map(|view| !view.runqueue_contains_task_id(ctx.smoke_scheduler_task().task_id()))
                 .unwrap_or(false)
-                && ctx.smoke_scheduler_task().state() == State::Online
+                && ctx.smoke_scheduler_task().state() == State::Suspended
                 && ctx.smoke_scheduler_task().scheduler_sleep_declared()
                 && !ctx.smoke_scheduler_task().pending_wake_signal()
                 && ctx.scheduler().last_prev_disposition()
@@ -167,6 +167,7 @@ impl SmokeScenario for CooperativeSwitchScenario {
                     < ctx.scheduler().set_next_task_sequence()
                 && ctx.scheduler().last_picked_class()
                     == Some(crate::objects::scheduler::SchedClassRef::Fair)
+                && ctx.scheduler().task_activate_signal_passes() != 0
                 && ctx.scheduler().task_continue_signal_passes() != 0,
         );
         assertions.assert(
@@ -185,9 +186,10 @@ impl SmokeScenario for CooperativeSwitchScenario {
                     < ctx.scheduler().flow_signal_sequence()
                 && ctx.scheduler().flow_startup_signal_passes() != 0
                 && ctx.scheduler().flow_continue_signal_passes() != 0
-                && ctx.scheduler().task_continue_signal_passes()
+                && ctx.scheduler().task_activate_signal_passes()
                     == ctx.scheduler().flow_startup_signal_passes()
-                        + ctx.scheduler().flow_continue_signal_passes(),
+                && ctx.scheduler().task_continue_signal_passes()
+                    == ctx.scheduler().flow_continue_signal_passes(),
         );
 
         let before_state = ctx.kernel_init_task.state();
@@ -417,7 +419,7 @@ fn task_breakpoint_contract_smoke() -> bool {
         || !task.breakpoint_matches(initial_ref)
         || task.breakpoint_matches(stale_initial)
         || !task.switch_in_ready()
-        || task.continue_on_cpu().is_err()
+        || task.activate_on_cpu().is_err()
         || task.switch_in_ready()
         || initial.start_initial(&mut task, None, None).is_err()
         || task.declare_scheduler_sleep().is_err()

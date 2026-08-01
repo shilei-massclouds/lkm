@@ -36,9 +36,12 @@ carrier and its independently-lived `TaskFlow` instances.
 - Execution-boundary coverage must prove that a Flow process proceeds only
   when its parent Task is OnCpu/Live. Reserved authority, stale Flow generation or another mismatch must fail without changing Flow
   lifecycle state. CurrentTask must first read the CPU-local binding and resolve
-  only when parent/owner, active Flow, same-CPU OnCpu/Live authority and the
-  unique TaskRef generation all agree. CurrentCPU must still resolve from
+  only when parent/owner, the preflight initial Flow or active Flow, same-CPU OnCpu/Live authority and the
+  unique TaskRef generation all agree. Online first dispatch must use the preflight initial
+  FlowRef/CpuRef/TaskRef until Flow Enable commits active binding. CurrentCPU must still resolve from
   BootInitFlow.cpu_ref before the first binding.
+- Trap binding during OnCpu initial-startup-pending must use that same preflight initial FlowRef to install and clear
+  the Task root TrapFlow binding; it must not require an active Flow to be committed early.
 - CopyProcess coverage must accept an OnCpu/Live source whose validated TaskRef
   is the derived `CurrentTaskRef`, and reject Online, Reserved, non-current and mismatched
   TaskRef sources without changing TaskCreationCore or destination state.
@@ -74,8 +77,9 @@ carrier and its independently-lived `TaskFlow` instances.
   successor can be enabled.
 - KernelInitTask, KthreaddTask and clone-child Setup must leave a Prepared context and their initial
   Flow in Base. Enable binds the context to the exact initial FlowRef and publishes Online/Valid without
-  sending Startup. The first real switch must validate/consume it and start the initial Flow.
-- Repeated switches to an already-started Task must select the active Flow's
+  sending Startup. The first real switch must validate/consume it through Task.Activate; Scheduler then
+  sends Startup directly, and Flow Enable commits active binding.
+- Repeated switches to an already-started Suspended Task must select the active Flow's
   strict Continue handler without resending initial-flow Startup; BootTask must
   resume BootIdleFlow without restarting BootInitFlow.
 - PID 1 tests must keep `KernelInitTask` online across exec while observing
@@ -86,11 +90,11 @@ carrier and its independently-lived `TaskFlow` instances.
   binding changes, the new flow is Ready at commit, and at most one owned flow
   is Online afterward. A post-Kernel.Online emitted handoff failure must fail
   the root result without rolling Kernel back or submitting Online again.
-- Identity schedule must not emit Task Suspend/Continue, change lifecycle/authority/breakpoint, or increment
+- Identity schedule must not drive Task Activate/Suspend/Continue, change lifecycle/authority/breakpoint, or increment
   physical context save/restore counts; it emits Continue only to the original active TaskFlow. Terminal switch must take OnCpu directly to Offline and cleanup
   on the next stack without publishing an Online breakpoint.
-- BootTask begins OnCpu/Live/Invalid; its first Suspend binds BootIdleFlow and publishes its first Valid
-  breakpoint. Each AP begins OnCpu/Reserved/Invalid with Base ApIdleFlow; HSM preserves TaskRef/FlowRef,
+- BootTask begins OnCpu/Live/Invalid; its first Suspend binds BootIdleFlow and publishes its first
+  Suspended/Valid breakpoint. Each AP begins OnCpu/Reserved/Invalid with Base ApIdleFlow; HSM preserves TaskRef/FlowRef,
   activates Live authority and starts the matching logical-id Flow without Task Enable/Continue.
 - RISC-V sentinel coverage must save/restore `ra/sp/s0..s11` and prove formal switch commit writes `tp/x4`
   from next Task identity rather than from `TaskSwitchContext`.

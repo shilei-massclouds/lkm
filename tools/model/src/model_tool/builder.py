@@ -98,6 +98,7 @@ _ALLOWED_STATE_NAMES = frozenset(
         "Ready",
         "Online",
         "OnCpu",
+        "Suspended",
         "Offline",
         "Destroyed",
     }
@@ -111,6 +112,7 @@ _ALLOWED_TRANSITION_NAMES = frozenset(
         "Cleanup",
         "Continue",
         "Suspend",
+        "Activate",
     }
 )
 _ALLOWED_TRANSITIONS = frozenset(
@@ -124,8 +126,9 @@ _ALLOWED_TRANSITIONS = frozenset(
         ("Ready", "Cleanup", "Destroyed"),
         ("Online", "Disable", "Offline"),
         ("Online", "Cleanup", "Destroyed"),
-        ("Online", "Continue", "OnCpu"),
-        ("OnCpu", "Suspend", "Online"),
+        ("Online", "Activate", "OnCpu"),
+        ("OnCpu", "Suspend", "Suspended"),
+        ("Suspended", "Continue", "OnCpu"),
         ("OnCpu", "Disable", "Offline"),
         ("Offline", "Cleanup", "Destroyed"),
     }
@@ -1270,11 +1273,11 @@ def _check_lifecycle_names(
                 owner_span,
             )
         )
-    if initial_state == "OnCpu" and not task_lifecycle:
+    if initial_state in {"OnCpu", "Suspended"} and not task_lifecycle:
         diagnostics.append(
             Diagnostic(
                 Severity.ERROR,
-                f"Task-only lifecycle state on non-Task: {owner_name}.initial_state State::OnCpu",
+                f"Task-only lifecycle state on non-Task: {owner_name}.initial_state State::{initial_state}",
                 owner_span,
             )
         )
@@ -1288,11 +1291,11 @@ def _check_lifecycle_names(
                     state_decl.span,
                 )
             )
-        if state_decl.name == "OnCpu" and not task_lifecycle:
+        if state_decl.name in {"OnCpu", "Suspended"} and not task_lifecycle:
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,
-                    f"Task-only lifecycle state on non-Task: {owner_name}.State::OnCpu",
+                    f"Task-only lifecycle state on non-Task: {owner_name}.State::{state_decl.name}",
                     state_decl.span,
                 )
             )
@@ -1305,7 +1308,7 @@ def _check_lifecycle_names(
                         transition_decl.span,
                     )
                 )
-            if transition_decl.name in {"Continue", "Suspend"} and not task_lifecycle:
+            if transition_decl.name in {"Activate", "Continue", "Suspend"} and not task_lifecycle:
                 diagnostics.append(
                     Diagnostic(
                         Severity.ERROR,

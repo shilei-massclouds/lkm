@@ -65,11 +65,13 @@ Task.active_flow、该 CPU 上的 OnCpu/Live authority 与唯一 TaskRef generat
 `CurrentCPU` 必须仍可从 BootInitFlow.cpu_ref 独立解析。
 
 Scheduler 切换按 `SaveCoreContext(prev) -> Suspend(prev) -> RestoreCoreContext(next) ->
-next-stack finish -> next.Continue` 排序。入口先完整预检双方 TaskRef、lifecycle、authority、context、
-FlowRef 和 continuation 容量；架构切换从 next context 恢复 `sp`并提交 CPU-local CurrentTask/
-CurrentStack。finish 在 next stack 上发布 prev breakpoint、消费 next breakpoint并完成清理，然后才能一次性
-投递 `next.Continue`。Task 接受后提交 `Online/None/Valid -> OnCpu/Live/Invalid`，再 emits initial
-Flow Startup 或 active Flow Continue。identity path 不执行上述任何 lifecycle/context/binding 操作，只在
+next-stack finish -> next.Activate/Continue -> Flow.Startup/Continue` 排序。入口先完整预检双方 TaskRef、
+lifecycle、authority、context、FlowRef 和 continuation 容量，并保存一次性的 dispatch enum、稳定
+TaskRef/TaskFlowRef/generation；架构切换从 next context 恢复 `sp`并提交 CPU-local CurrentTask/
+CurrentStack。Online next 尚无 active Flow 时，binding 使用预检 initial FlowRef/CpuRef/TaskRef。
+finish 在 next stack 上发布 prev Suspended breakpoint、消费 next breakpoint并完成清理，然后由
+Scheduler drives Task Activate/Continue，并直接投递 Flow Startup/Continue。Task 不转发 Flow Signal。
+identity path 不执行上述任何 lifecycle/context/binding 操作，只在
 Scheduler 处理结束后向原 active Flow 投递 Continue。
 
 入口与 scheduler commit 是 `cpu_ref` 的仅有写边界。迁移提交在激活新 Flow 前写入目标 CpuRef；
@@ -98,11 +100,12 @@ CurrentTask/CurrentStack 的 Rust/C 调用、可失败分支、checkpoint 或独
 后的第一次解析必须同时得到同一 pair，随后才允许驱动 `Soc.Preset`。该路径不创建 Task、Stack、Flow、
 slot 或 lifecycle，不改变 preempt count，也不增加或替换 binding identity。
 
-Task 收到严格 Continue 后按当前快照选择：initial Flow 为 Base 时只发送 `Preset`；否则只向 Online
-active Flow 发送 `Continue`。两个候选都可接受或都不可接受均为终止错误；不得丢弃、排队重试或降级。
+Scheduler 预检按 Task state 选择：Online 只允许 Base initial Flow 的 `Preset`，Suspended 只允许唯一
+Online active Flow 的 `Continue`。两个候选都可接受或都不可接受均为终止错误；不得丢弃、排队重试或降级。
 
 KernelInitTask 首次 switch 的 Signal acceptance 与 Flow body lowering 必须分开：物理 switch 后的
-PID 1 入口验证 CurrentTask/OnCpu/active-flow 一致并接受 KernelInitFlow Startup；叶阶段代码只能在
+PID 1 入口验证 CurrentTask/OnCpu/initial-startup-pending 一致并接受 KernelInitFlow Startup；
+KernelInitFlow Enable 提交 active binding；叶阶段代码只能在
 `kernel_init_entry()` 验证实际 SP 属于 PID 1 vmalloc stack 后运行。任何通用
 continuation helper 都不得让 scheduler 在 BootTask 调用栈上同步跑完整 KernelInitFlow。
 

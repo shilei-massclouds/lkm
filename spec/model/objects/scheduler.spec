@@ -5,6 +5,11 @@ enum PrevDisposition {
     Blocked,
 }
 
+enum NextDispatchKind {
+    ActivateInitial,
+    ContinueActive,
+}
+
 enum SchedulerQueueRuntimeState {
     None,
     Some,
@@ -80,7 +85,7 @@ predicate scheduler_schedule_identity_emits_original_flow_continue<S, T: TaskRef
     scheduler: S,
     task_ref: T
 ) -> bool;
-predicate scheduler_schedule_nonidentity_emits_next_task_continue<S, T: TaskRef>(
+predicate scheduler_schedule_nonidentity_dispatches_next_task<S, T: TaskRef>(
     scheduler: S,
     task_ref: T
 ) -> bool;
@@ -111,6 +116,24 @@ predicate scheduler_switch_preflight_complete<S, T: TaskRef, U: TaskRef>(
     prev_ref: T,
     next_ref: U
 ) -> bool;
+predicate scheduler_next_dispatch_preflight_complete<S, T: TaskRef, F: TaskFlow>(
+    scheduler: S,
+    task_ref: T,
+    flow: F
+) -> bool;
+predicate scheduler_next_dispatch_kind_is<S, T: TaskRef>(
+    scheduler: S,
+    task_ref: T,
+    kind: NextDispatchKind
+) -> bool;
+predicate scheduler_preflight_dispatch_flow_is<T: TaskRef, F: TaskFlow>(task_ref: T, flow: F) -> bool;
+predicate scheduler_preflight_dispatch_refs_stable<S, T: TaskRef, F: TaskFlow>(scheduler: S, task_ref: T, flow: F) -> bool;
+predicate scheduler_activate_initial_preflight_valid<S, T: TaskRef, F: TaskFlow>(scheduler: S, task_ref: T, flow: F) -> bool;
+predicate scheduler_continue_active_preflight_valid<S, T: TaskRef, F: TaskFlow>(scheduler: S, task_ref: T, flow: F) -> bool;
+predicate scheduler_dispatch_paths_exclusive<S, T: TaskRef>(scheduler: S, task_ref: T) -> bool;
+predicate scheduler_dispatch_flow_generation_valid<S, F: TaskFlow>(scheduler: S, flow: F) -> bool;
+predicate scheduler_dispatch_signal_capacity_ready<S, F: TaskFlow>(scheduler: S, flow: F) -> bool;
+predicate scheduler_task_does_not_forward_flow_dispatch<T: TaskRef>(task_ref: T) -> bool;
 predicate scheduler_switch_signal_capacity_preflight_complete<S, T: TaskRef>(scheduler: S, next_ref: T) -> bool;
 predicate scheduler_switch_order_save_suspend_restore_finish<S, T: TaskRef, U: TaskRef>(
     scheduler: S,
@@ -133,6 +156,7 @@ type Scheduler: ResourceObject {
         mutable idle: TaskRef;
         mutable stop: TaskRef;
         mutable selected_next: TaskRef;
+        mutable selected_dispatch_flow: TaskFlow;
         mutable canonical_ref: SchedulerRef;
     }
 
@@ -354,6 +378,123 @@ type Scheduler: ResourceObject {
             }
         }
 
+        Action::PreflightNextDispatch(next_ref: TaskRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                task_ref_ready(next_ref);
+            }
+            drives {
+                self.Action::PreflightActivateInitial(next_ref) ||
+                    self.Action::PreflightContinueActive(next_ref);
+            }
+            ensures {
+                scheduler_next_dispatch_preflight_complete(
+                    self,
+                    next_ref,
+                    self.selected_dispatch_flow
+                );
+                scheduler_preflight_dispatch_flow_is(next_ref, self.selected_dispatch_flow);
+                scheduler_preflight_dispatch_refs_stable(self, next_ref, self.selected_dispatch_flow);
+                scheduler_dispatch_flow_generation_valid(self, self.selected_dispatch_flow);
+                scheduler_dispatch_paths_exclusive(self, next_ref);
+            }
+        }
+
+        Action::PreflightActivateInitial(next_ref: TaskRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                task_ref_targets_online_task(next_ref);
+                scheduler_activate_initial_preflight_valid(self, next_ref, next_ref.initial_flow);
+                scheduler_dispatch_signal_capacity_ready(self, next_ref.initial_flow);
+            }
+            ensures {
+                scheduler_next_dispatch_kind_is(
+                    self,
+                    next_ref,
+                    NextDispatchKind::ActivateInitial
+                );
+                scheduler_preflight_dispatch_flow_is(next_ref, next_ref.initial_flow);
+            }
+            updates {
+                self.selected_dispatch_flow = next_ref.initial_flow;
+            }
+        }
+
+        Action::PreflightContinueActive(next_ref: TaskRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                task_ref_targets_suspended_task(next_ref);
+                scheduler_continue_active_preflight_valid(self, next_ref, next_ref.active_flow);
+                scheduler_dispatch_signal_capacity_ready(self, next_ref.active_flow);
+            }
+            ensures {
+                scheduler_next_dispatch_kind_is(
+                    self,
+                    next_ref,
+                    NextDispatchKind::ContinueActive
+                );
+                scheduler_preflight_dispatch_flow_is(next_ref, next_ref.active_flow);
+            }
+            updates {
+                self.selected_dispatch_flow = next_ref.active_flow;
+            }
+        }
+
+        Action::DispatchNext(next_ref: TaskRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                scheduler_next_dispatch_preflight_complete(
+                    self,
+                    next_ref,
+                    self.selected_dispatch_flow
+                );
+            }
+            drives {
+                self.Action::DispatchActivateInitial(next_ref) ||
+                    self.Action::DispatchContinueActive(next_ref);
+            }
+        }
+
+        Action::DispatchActivateInitial(next_ref: TaskRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                scheduler_next_dispatch_kind_is(
+                    self,
+                    next_ref,
+                    NextDispatchKind::ActivateInitial
+                );
+            }
+            drives {
+                next_ref.Transition::Activate;
+            }
+            emits {
+                self.selected_dispatch_flow.Transition::Preset;
+            }
+            ensures {
+                scheduler_task_does_not_forward_flow_dispatch(next_ref);
+            }
+        }
+
+        Action::DispatchContinueActive(next_ref: TaskRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                scheduler_next_dispatch_kind_is(
+                    self,
+                    next_ref,
+                    NextDispatchKind::ContinueActive
+                );
+            }
+            drives {
+                next_ref.Transition::Continue;
+            }
+            emits {
+                self.selected_dispatch_flow.Action::Continue;
+            }
+            ensures {
+                scheduler_task_does_not_forward_flow_dispatch(next_ref);
+            }
+        }
+
         Action::SwitchTo(prev_ref: TaskRef, next_ref: TaskRef) {
             state_effect: StateEffect::None;
             depends_on {
@@ -365,20 +506,19 @@ type Scheduler: ResourceObject {
                 scheduler_switch_signal_capacity_preflight_complete(self, next_ref);
             }
             drives {
+                self.Action::PreflightNextDispatch(next_ref);
                 prev_ref.Action::SaveCoreContext;
                 prev_ref.Transition::Suspend;
                 next_ref.Action::RestoreCoreContext;
-                CurrentTask.Action::BindTask(next_ref);
+                CurrentTask.Action::BindTask(next_ref, self.selected_dispatch_flow);
                 self.Action::FinishTaskSwitch(prev_ref, next_ref);
-            }
-            emits {
-                next_ref.Transition::Continue;
+                self.Action::DispatchNext(next_ref);
             }
             ensures {
                 scheduler_switch_order_save_suspend_restore_finish(self, prev_ref, next_ref);
                 scheduler_switch_preserves_prev_disposition(self, prev_ref);
                 scheduler_switch_current_bindings_committed_before_continue(self, next_ref);
-                scheduler_schedule_nonidentity_emits_next_task_continue(self, next_ref);
+                scheduler_schedule_nonidentity_dispatches_next_task(self, next_ref);
             }
         }
 

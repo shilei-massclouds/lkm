@@ -20,16 +20,18 @@ type TaskFlow: PhaseObject {
          * 通用任务切换动作只执行 BindCurrentTask(task)。架构 switch 在同一个
          * scheduler commit 中另行恢复 next sp；BindTask 本身不绑定 stack。
          */
-        Action::BindTask(task_ref: TaskRef) {
+        Action::BindTask(task_ref: TaskRef, dispatch_flow: TaskFlow) {
             state_effect: StateEffect::None;
             depends_on {
-                current_task_bind_scheduler_commit_boundary_valid(self, task_ref);
+                current_task_bind_scheduler_commit_boundary_valid(self, task_ref, dispatch_flow);
                 task_ref_ready(task_ref);
-                task_ref_targets_online_task(task_ref);
-                cpu_translation_controller_matches_live_satp_for_ref(self.cpu_ref);
+                task_ref_targets_online_task(task_ref) ||
+                    task_ref_targets_suspended_task(task_ref);
+                scheduler_preflight_dispatch_flow_is(task_ref, dispatch_flow);
+                cpu_translation_controller_matches_live_satp_for_ref(dispatch_flow.cpu_ref);
             }
             ensures {
-                current_task_binding_committed(CurrentCPU, task_ref, task_ref.active_flow);
+                current_task_binding_committed(CurrentCPU, task_ref, dispatch_flow);
                 current_task_binding_address_refreshed(CurrentCPU, task_ref);
                 current_task_binding_is_cpu_local(CurrentCPU);
                 current_task_binding_replaced_at_scheduler_commit(CurrentCPU, task_ref);
@@ -48,7 +50,8 @@ type TaskFlow: PhaseObject {
                 boot_task_stack_argument_matches_task(task, stack);
                 task.state == State::OnCpu;
                 task_execution_authority_is(task, TaskExecutionAuthority::Live);
-                task_active_flow_is(task, self);
+                task_active_flow_is(task, self) ||
+                    task_initial_startup_pending_for_flow(task, self);
                 task_flow_owner_is(self, task);
                 task_flow_parent_is(self, task);
                 current_task_bind_task_has_unique_valid_ref(task);
@@ -90,7 +93,8 @@ type TaskFlow: PhaseObject {
                 boot_task_stack_argument_matches_task(task, stack);
                 task.state == State::OnCpu;
                 task_execution_authority_is(task, TaskExecutionAuthority::Live);
-                task_active_flow_is(task, self);
+                task_active_flow_is(task, self) ||
+                    task_initial_startup_pending_for_flow(task, self);
                 task_flow_owner_is(self, task);
                 task_flow_parent_is(self, task);
                 current_task_bind_task_has_unique_valid_ref(task);
@@ -142,7 +146,8 @@ type TaskFlow: PhaseObject {
                 self.state == State::Online;
                 self.parent.state == State::OnCpu;
                 task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
-                task_active_flow_is(self.parent, self);
+                task_active_flow_is(self.parent, self) ||
+                    task_initial_startup_pending_for_flow(self.parent, self);
             }
             ensures {
                 task_flow_resume_active_continuation(self);
@@ -202,8 +207,12 @@ type TaskFlow: PhaseObject {
             }
             ensures {
                 task_flow_active_binding_committed(self);
+                task_active_flow_is(self.parent, self);
                 task_flow_online_on_cpu(self);
                 task_has_unique_active_flow(self.parent);
+            }
+            updates {
+                self.parent.active_flow = self;
             }
         }
     }
@@ -561,6 +570,9 @@ object KernelInitFlow: TaskFlow {
                     task_flow_active_binding_committed(self);
                     task_flow_online_on_cpu(self);
                     task_has_unique_active_flow(self.parent);
+                }
+                updates {
+                    self.parent.active_flow = self;
                 }
             }
         }
@@ -924,7 +936,7 @@ type BootIdleFlowType: TaskFlow {
         Action::RequestSchedule {
             state_effect: StateEffect::None;
             depends_on {
-                self.state == State::Ready;
+                self.state == State::Online;
                 self.parent.state == State::OnCpu;
                 task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
                 task_active_flow_is(self.parent, self);
@@ -952,7 +964,7 @@ type BootIdleFlowType: TaskFlow {
         Action::PrepareIdleEntry {
             state_effect: StateEffect::None;
             depends_on {
-                self.state == State::Ready;
+                self.state == State::Online;
                 scheduler_first_schedule_committed(Cpu0Scheduler);
                 self.parent.state == State::OnCpu;
                 task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
@@ -1146,13 +1158,37 @@ object BootIdleFlow: BootIdleFlowType {
             task_has_unique_active_flow(BootTask);
             secondary_cpus_not_started(CpuGroup);
         }
+
+        transitions {
+            on Transition::Enable -> State::Online {
+                ensures {
+                    boot_idle_runtime_ready(BootIdleFlow, BootTask);
+                    task_active_flow_is(BootTask, BootIdleFlow);
+                    task_has_unique_active_flow(BootTask);
+                }
+            }
+        }
+    }
+
+    state State::Online {
+        invariant {
+            boot_idle_runtime_ready(BootIdleFlow, BootTask);
+            boot_idle_cpu_startup_entry_ready(BootIdleFlow, CpuGroup.cpus[0]);
+            task_owns_flow(BootTask, BootIdleFlow);
+            task_flow_owner_is(BootIdleFlow, BootTask);
+            task_flow_parent_is(BootIdleFlow, BootTask);
+            task_flow_owner_exclusive(BootIdleFlow);
+            task_active_flow_is(BootTask, BootIdleFlow);
+            task_has_unique_active_flow(BootTask);
+            secondary_cpus_not_started(CpuGroup);
+        }
     }
 
     actions {
         Action::Continue {
             state_effect: StateEffect::None;
             depends_on {
-                self.state == State::Ready;
+                self.state == State::Online;
                 self.parent.state == State::OnCpu;
                 task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
                 task_active_flow_is(BootTask, self);

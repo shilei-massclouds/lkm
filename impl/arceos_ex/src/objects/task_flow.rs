@@ -380,22 +380,6 @@ impl TaskFlow {
         Ok(())
     }
 
-    /// Binds an initial Flow as the effective execution context at the
-    /// scheduler commit boundary, before that Flow's own lifecycle children
-    /// advance it from Base. Only the owning Task can request this binding.
-    pub(super) fn commit_initial_execution_binding(&mut self, owner: TaskRef) -> EventResult {
-        if self.lifecycle.state() != State::Base || self.owner != owner || self.active {
-            return failed_condition(
-                LifecycleEvent::Continue,
-                self.lifecycle.state(),
-                State::Base,
-                State::Base,
-            );
-        }
-        self.active = true;
-        Ok(())
-    }
-
     pub(super) fn relinquish_active_binding(&mut self, owner: TaskRef) -> EventResult {
         if self.owner != owner || !self.active {
             return failed_condition(

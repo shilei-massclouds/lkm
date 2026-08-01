@@ -13,9 +13,12 @@ pub enum State {
     Online,
     Offline,
     Destroyed,
-    /// Task-only execution projection. Generic object lifecycles never enter
-    /// this state; `Task` derives it from its scheduler-owned execution bit.
+    /// Task-only live execution state. Generic object lifecycles never enter
+    /// this state.
     OnCpu,
+    /// Task-only recoverable execution state. The Task has run before, owns
+    /// an active Flow and is not currently executing on a CPU.
+    Suspended,
 }
 
 #[allow(dead_code)]
@@ -29,6 +32,7 @@ pub enum LifecycleEvent {
     Cleanup,
     Continue,
     Suspend,
+    Activate,
 }
 
 impl LifecycleEvent {
@@ -45,6 +49,7 @@ impl LifecycleEvent {
             Self::Cleanup => b'C',
             Self::Continue => b'R',
             Self::Suspend => b'U',
+            Self::Activate => b'A',
         }
     }
 }
@@ -217,6 +222,7 @@ impl State {
             Self::Offline => b'F',
             Self::Destroyed => b'D',
             Self::OnCpu => b'C',
+            Self::Suspended => b'S',
         }
     }
 }
@@ -355,6 +361,40 @@ impl Lifecycle {
         self.seen_events |= event.bit();
         Ok(())
     }
+
+    /// Task scheduler transitions may repeat as the same Task is switched
+    /// out and back in. Their legality remains checked, but they are not
+    /// rejected merely because an earlier scheduling cycle used the event.
+    pub fn adopt_repeating_transition(
+        &mut self,
+        event: LifecycleEvent,
+        expected: State,
+        target: State,
+    ) -> EventResult {
+        if self.state != expected {
+            return Err(EventError::blocked(
+                EventErrorCode::UnexpectedState,
+                event,
+                self.state,
+                expected,
+                target,
+            ));
+        }
+
+        if !is_allowed_lifecycle_transition(expected, event, target) {
+            return Err(EventError::failed(
+                EventErrorCode::InvalidTransition,
+                event,
+                self.state,
+                expected,
+                target,
+            ));
+        }
+
+        self.state = target;
+        self.seen_events |= event.bit();
+        Ok(())
+    }
 }
 
 // Lifecycle is the object model's always-on guardrail: it is used from the
@@ -398,6 +438,14 @@ arceos_ex_is_allowed_lifecycle_transition:
     li   t1, 0x345
     beq  t0, t1, 1f
     li   t1, 0x445
+    beq  t0, t1, 1f
+    li   t1, 0x376
+    beq  t0, t1, 1f
+    li   t1, 0x667
+    beq  t0, t1, 1f
+    li   t1, 0x756
+    beq  t0, t1, 1f
+    li   t1, 0x634
     beq  t0, t1, 1f
 
     li   a0, 0
@@ -446,6 +494,10 @@ const fn is_allowed_lifecycle_transition_rust(
         || key == transition_key(State::Online, LifecycleEvent::Disable, State::Offline)
         || key == transition_key(State::Online, LifecycleEvent::Cleanup, State::Destroyed)
         || key == transition_key(State::Offline, LifecycleEvent::Cleanup, State::Destroyed)
+        || key == transition_key(State::Online, LifecycleEvent::Activate, State::OnCpu)
+        || key == transition_key(State::OnCpu, LifecycleEvent::Suspend, State::Suspended)
+        || key == transition_key(State::Suspended, LifecycleEvent::Continue, State::OnCpu)
+        || key == transition_key(State::OnCpu, LifecycleEvent::Disable, State::Offline)
 }
 
 #[cfg(not(target_arch = "riscv64"))]

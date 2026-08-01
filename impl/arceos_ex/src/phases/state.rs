@@ -12,6 +12,7 @@ const ONLINE: u8 = 3;
 const OFFLINE: u8 = 4;
 const DESTROYED: u8 = 5;
 const ON_CPU: u8 = 6;
+const SUSPENDED: u8 = 7;
 
 pub const fn encode(state: State) -> u8 {
     match state {
@@ -22,6 +23,7 @@ pub const fn encode(state: State) -> u8 {
         State::Offline => OFFLINE,
         State::Destroyed => DESTROYED,
         State::OnCpu => ON_CPU,
+        State::Suspended => SUSPENDED,
     }
 }
 
@@ -34,6 +36,7 @@ pub const fn decode(value: u8) -> State {
         OFFLINE => State::Offline,
         DESTROYED => State::Destroyed,
         ON_CPU => State::OnCpu,
+        SUSPENDED => State::Suspended,
         _ => State::Destroyed,
     }
 }

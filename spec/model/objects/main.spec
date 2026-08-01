@@ -452,7 +452,7 @@ predicate printk_deferred_section_exited<T>(section: T) -> bool;
 predicate current_task_resolved_target_is<F, R, T>(flow: F, task_ref: R, task: T) -> bool;
 predicate current_task_ref_derived_from_selector<R, T>(task_ref: R, task: T) -> bool;
 predicate current_task_selector_validates_execution<F, T>(flow: F, task: T) -> bool;
-predicate current_task_bind_scheduler_commit_boundary_valid<F: TaskFlow, T: Task>(flow: F, task: T) -> bool;
+predicate current_task_bind_scheduler_commit_boundary_valid<F: TaskFlow, T: Task, D: TaskFlow>(flow: F, task: T, dispatch_flow: D) -> bool;
 predicate boot_task_bind_task_stack_boundary_valid<F: TaskFlow, T: Task, S: Stack>(flow: F, task: T, stack: S) -> bool;
 predicate boot_task_refresh_task_stack_boundary_valid<F: TaskFlow, T: Task, S: Stack>(flow: F, task: T, stack: S) -> bool;
 predicate boot_task_stack_argument_matches_task<T: Task, S: Stack>(task: T, stack: S) -> bool;

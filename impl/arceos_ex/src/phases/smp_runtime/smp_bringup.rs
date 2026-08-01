@@ -5,7 +5,7 @@ use crate::{
         cpu::MAX_CPUS,
         cpu_group::CpuGroup,
         smp_bringup::smp_bringup_runtime_ready,
-        state::{EventResult, LifecycleEvent, State, failed_condition},
+        state::{EventResult, FailureDiagnostic, LifecycleEvent, State, failed_condition},
     },
 };
 use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
@@ -41,26 +41,47 @@ fn preset_start() -> EventResult {
 }
 
 fn preset_objects(ctx: &mut Context) -> EventResult {
-    ctx.secondary_idle_tasks.preset(
-        &ctx.pre_smp_boundary,
-        &mut ctx.cpu_group,
-        &ctx.per_cpu_storage,
+    preset_step(
+        ctx.secondary_idle_tasks.preset(
+            &ctx.pre_smp_boundary,
+            &mut ctx.cpu_group,
+            &ctx.per_cpu_storage,
+        ),
+        "secondary_idle_tasks.preset",
     )?;
-    ctx.smpboot_threads_lock.preset_static()?;
-    ctx.smpboot_threads_lock.setup()?;
-    ctx.cpu_hotplug_sync.preset(
-        &mut ctx.cpu_group,
-        &ctx.boot_idle_flow,
-        &ctx.kthreadd_task,
-        &mut ctx.cpu_hotplug_lock,
-        &mut ctx.smpboot_threads_lock,
+    preset_step(
+        ctx.smpboot_threads_lock.preset_static(),
+        "smpboot_threads_lock.preset",
     )?;
-    ctx.cpu_add_remove_lock.preset_static()?;
-    ctx.cpu_add_remove_lock.setup()?;
-    ctx.cpu_running_wait_lock
-        .setup_with_checkpoint(Checkpoint::CpuRunningWaitLockReady)?;
-    ctx.done_up_wait_lock
-        .setup_with_checkpoint(Checkpoint::CpuDoneUpWaitLockReady)?;
+    preset_step(
+        ctx.smpboot_threads_lock.setup(),
+        "smpboot_threads_lock.setup",
+    )?;
+    preset_step(
+        ctx.cpu_hotplug_sync.preset(
+            &mut ctx.cpu_group,
+            &ctx.boot_idle_flow,
+            &ctx.kthreadd_task,
+            &mut ctx.cpu_hotplug_lock,
+            &mut ctx.smpboot_threads_lock,
+        ),
+        "cpu_hotplug_sync.preset",
+    )?;
+    preset_step(
+        ctx.cpu_add_remove_lock.preset_static(),
+        "cpu_add_remove_lock.preset",
+    )?;
+    preset_step(ctx.cpu_add_remove_lock.setup(), "cpu_add_remove_lock.setup")?;
+    preset_step(
+        ctx.cpu_running_wait_lock
+            .setup_with_checkpoint(Checkpoint::CpuRunningWaitLockReady),
+        "cpu_running_wait_lock.setup",
+    )?;
+    preset_step(
+        ctx.done_up_wait_lock
+            .setup_with_checkpoint(Checkpoint::CpuDoneUpWaitLockReady),
+        "done_up_wait_lock.setup",
+    )?;
     reset_ap_phase_families(&ctx.cpu_group);
     publish_ap_prerequisites(ctx)?;
     ctx.cpu_start_provider.setup(
@@ -99,6 +120,18 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
     )?;
     ctx.smp_bringup_boundary
         .setup(&ctx.secondary_cpu_online_ack, &ctx.cpu_group)
+}
+
+fn preset_step(result: EventResult, step: &'static str) -> EventResult {
+    result.map_err(|error| {
+        error.with_diagnostic_if_absent(FailureDiagnostic::new(
+            "SmpBringupPhase",
+            "preset_objects",
+            "SmpBringupPhase",
+            "preset object step",
+            step,
+        ))
+    })
 }
 
 fn adopt_prepared(ctx: &Context) -> EventResult {

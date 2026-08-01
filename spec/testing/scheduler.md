@@ -26,16 +26,17 @@
 
 ## Signal 与 lifecycle 因果
 
-- Schedule before-send snapshot 必须观察 `BootInitFlow.Online`、`BootTask.OnCpu`，且尚无 Schedule
+- Schedule before-send snapshot 必须观察 `BootInitFlow.Online`、`BootIdleFlow.Online`、`BootTask.OnCpu`，且尚无 Schedule
   Signal、PreparePrev、PickNextTask 或 SwitchTo occurrence。发出 Schedule 及 PreparePrev 均不得改变
   BootTask lifecycle。
 - 非 identity 顺序必须观察：current active TaskFlow emits `Scheduler.Schedule`；Scheduler drives
   PreparePrev/PickNextTask；随后 SaveCoreContext → Suspend prev → RestoreCoreContext/CurrentTask binding
-  → next-stack finish；Scheduler emits `next Task.Continue`；next Task 接受后才 emits initial Flow.Startup
-  或 active Flow.Continue。Scheduler 不直接 emits next TaskFlow Startup/Continue。
+  → next-stack finish；Online next 由 Scheduler drives Task.Activate 后直接 emits initial Flow.Startup，
+  Suspended next 由 Scheduler drives Task.Continue 后直接 emits active Flow.Continue。Task 不产生
+  TaskFlow Startup/Continue。
 - identity 必须保持 current Task OnCpu，并只由 Scheduler 向原 sender TaskFlow emits Continue；不得发送
   Task.Continue 或伪造一次 Suspend/Restore。
-- blocked prev 切出后可保持 `Online/None/Valid`，但在 wake/enqueue 恢复 class membership 前不可被选中。
+- blocked prev 切出后可保持 `Suspended/None/Valid`，但在 wake/enqueue 恢复 class membership 前不可被选中。
 - cross-CPU、stale/non-active Flow 与错误 CurrentTask binding 必须在首个状态修改前失败，并保持 Scheduler、
   Task、Flow、context 与后续信号容量的精确 before snapshot。
 
@@ -47,4 +48,4 @@ PreparePrev exit 的 signal-recovery/block 结果和 on-rq；PickNext exit 的 p
 [`checkpoint-cross-reference.md`](checkpoint-cross-reference.md) 所属 inventory/mapping，不进入 Coding。
 
 Boot 首次 `schedule_preempt_disabled()` 的差分必须证明 BootTask 在 pick 前仍为 running/runnable，且只有
-`next != prev` 的 SwitchTo 才令其 OnCpu→Online。最终实现变更门禁为从仓库根直接运行 `make test`。
+`next != prev` 的 SwitchTo 才令其 OnCpu→Suspended。最终实现变更门禁为从仓库根直接运行 `make test`。

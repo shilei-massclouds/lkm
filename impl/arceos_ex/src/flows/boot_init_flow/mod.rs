@@ -112,7 +112,8 @@ impl BootInitFlow {
         checkpoint: Checkpoint,
     ) -> EventResult {
         self.flow
-            .enable_after_successor_handoff(owner, successor, checkpoint)
+            .enable_after_successor_handoff(owner, successor, checkpoint)?;
+        successor.enable(owner, None)
     }
 }
 

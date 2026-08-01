@@ -1,6 +1,6 @@
 use super::{
     boot_task::BootTask,
-    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
+    state::{EventResult, FailureDiagnostic, Lifecycle, LifecycleEvent, State, failed_condition},
 };
 
 #[allow(dead_code)]
@@ -121,15 +121,29 @@ impl Mutex {
     }
 
     pub fn preset_static(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Base
-            || self.init_kind != MutexInitKind::StaticInitializer
-        {
+        let first_failed = if self.lifecycle.state() != State::Base {
+            Some("lifecycle_base")
+        } else if self.init_kind != MutexInitKind::StaticInitializer {
+            Some("static_initializer")
+        } else {
+            None
+        };
+        if let Some(first_failed) = first_failed {
             return failed_condition(
                 LifecycleEvent::Preset,
                 self.lifecycle.state(),
                 State::Base,
                 State::Prepared,
-            );
+            )
+            .map_err(|error| {
+                error.with_diagnostic(FailureDiagnostic::new(
+                    "MutexLifecycle",
+                    "preset_static",
+                    "Mutex",
+                    "static mutex preset prerequisites",
+                    first_failed,
+                ))
+            });
         }
 
         self.storage_bound = true;

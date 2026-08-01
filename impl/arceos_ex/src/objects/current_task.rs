@@ -125,16 +125,22 @@ pub(crate) fn validate_candidate(
             diagnostic,
         ));
     }
-    if !candidate.task.active_flow().is_valid() {
+    let active = candidate.task.active_flow().same_identity(flow_ref) && candidate.flow.active();
+    let initial_startup_pending = !candidate.task.active_flow().is_valid()
+        && candidate.task.initial_flow().same_identity(flow_ref)
+        && matches!(
+            candidate.flow.state(),
+            State::Base | State::Prepared | State::Ready
+        )
+        && !candidate.flow.active();
+    if !active && !initial_startup_pending {
         return Err(CurrentTaskError::new(
             CurrentTaskErrorCode::MissingActiveFlow,
             diagnostic,
         ));
     }
-    if !candidate.task.active_flow().same_identity(flow_ref)
-        || !candidate.task.owns_flow(flow_ref)
+    if !candidate.task.owns_flow(flow_ref)
         || !candidate.flow.declared()
-        || !candidate.flow.active()
         || !candidate.flow.owner().same_identity(task_ref)
     {
         return Err(CurrentTaskError::new(

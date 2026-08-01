@@ -124,9 +124,6 @@ impl KernelInitFlow {
                 State::Prepared,
             );
         }
-        owner
-            .task_mut()
-            .activate_initial_execution_context(&mut self.flow)?;
         self.initial_start_accepted = true;
         Ok(())
     }
@@ -171,11 +168,8 @@ impl KernelInitFlow {
 
     pub fn commit_enable_after_children(&mut self, owner: &mut KernelInitTask) -> EventResult {
         if self.flow.state() != State::Ready
-            || !owner
-                .task()
-                .active_flow()
-                .same_identity(self.flow.flow_ref())
-            || !self.flow.active()
+            || owner.task().active_flow().is_valid()
+            || self.flow.active()
         {
             return failed_condition(
                 LifecycleEvent::Enable,
@@ -184,6 +178,7 @@ impl KernelInitFlow {
                 State::Online,
             );
         }
+        owner.task_mut().activate_initial_flow(&mut self.flow)?;
         self.flow.enable(owner.task(), None)
     }
 

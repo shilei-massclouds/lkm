@@ -1049,7 +1049,7 @@ object SmpBringupPhase: PhaseObject {
                         TaskExecutionAuthority::Live
                     );
                     BootIdleSetup.state == State::Ready;
-                    BootIdleFlow.state == State::Ready;
+                    BootIdleFlow.state == State::Online;
                     KthreaddTask.state == State::Online;
                     CpuGroup.state == State::Ready;
                     PerCpuStorage.state == State::Ready;

@@ -881,6 +881,7 @@ class Engine:
         else:
             raise DerivationProblem(f"unresolved system/reference path {path}")
         for field in parts[1:]:
+            value = self._deref(value)
             if field == "parent" and value in self.systems:
                 parent = self.systems[value].get("parent")
                 if parent is None:
@@ -1003,7 +1004,13 @@ class Engine:
         if live_fact not in self.current["facts"]:
             raise DerivationProblem(f"CurrentTask target Task {task} is not Live")
         active_flow = self.current["references"].get(f"{task}.active_flow")
-        if active_flow != flow:
+        initial_flow = self.current["references"].get(f"{task}.initial_flow")
+        initial_pending = (
+            active_flow is None
+            and initial_flow == flow
+            and self.current["states"].get(flow) in {"Base", "Prepared", "Ready"}
+        )
+        if active_flow != flow and not initial_pending:
             raise DerivationProblem(
                 f"CurrentTask target Task {task} active Flow {active_flow} does not match effective Flow {flow}"
             )
@@ -1020,6 +1027,10 @@ class Engine:
             ):
                 continue
             candidate_flow = self.current["references"].get(f"{candidate}.active_flow")
+            if candidate_flow is None:
+                initial = self.current["references"].get(f"{candidate}.initial_flow")
+                if self.current["states"].get(str(initial)) in {"Base", "Prepared", "Ready"}:
+                    candidate_flow = initial
             candidate_cpu_ref = self.current["references"].get(
                 f"{candidate_flow}.cpu_ref"
             )
@@ -1116,7 +1127,13 @@ class Engine:
             return False
         if self.current["references"].get(f"{task}.initial_flow") != context_flow:
             return False
-        if self.current["references"].get(f"{task}.active_flow") != context_flow:
+        active_flow = self.current["references"].get(f"{task}.active_flow")
+        initial_pending = (
+            active_flow is None
+            and self.current["references"].get(f"{task}.initial_flow") == context_flow
+            and self.current["states"].get(context_flow) in {"Base", "Prepared", "Ready"}
+        )
+        if active_flow != context_flow and not initial_pending:
             return False
         cpu, _ = self._current_cpu_context(context_flow)
         contextual = self.current.get("contextual_bindings", {})
@@ -1179,20 +1196,50 @@ class Engine:
             raise DerivationProblem(f"CurrentTask.{action} target {task} is not a Task")
         cpu, cpu_ref = self._current_cpu_context(context_flow)
         active_flow = self.current["references"].get(f"{task}.active_flow")
-        if active_flow is None:
-            raise DerivationProblem(
-                f"CurrentTask.{action} target Task {task} has no active Flow"
+        if action == "BindTask":
+            dispatch_flow = bindings.get("dispatch_flow")
+            if dispatch_flow is None:
+                raise DerivationProblem(
+                    "CurrentTask.BindTask requires the preflight dispatch Flow"
+                )
+            effective_flow = str(dispatch_flow)
+        else:
+            effective_flow = str(
+                active_flow
+                or self.current["references"].get(f"{task}.initial_flow")
+                or ""
             )
-        parents = self._fact_targets("task_flow_parent_is", str(active_flow))
-        owners = self._fact_targets("task_flow_owner_is", str(active_flow))
+        if not effective_flow:
+            raise DerivationProblem(
+                f"CurrentTask.{action} target Task {task} has no dispatch Flow"
+            )
+        parents = self._fact_targets("task_flow_parent_is", effective_flow)
+        owners = self._fact_targets("task_flow_owner_is", effective_flow)
         if parents != [task] or owners != [task]:
             raise DerivationProblem(
-                f"CurrentTask.{action} target Flow {active_flow} parent/owner does not uniquely match {task}"
+                f"CurrentTask.{action} target Flow {effective_flow} parent/owner does not uniquely match {task}"
             )
         if action == "BindTask":
-            if self.current["states"].get(task) != "Online":
+            task_state = self.current["states"].get(task)
+            if task_state not in {"Online", "Suspended"}:
                 raise DerivationProblem(
-                    f"CurrentTask.BindTask target Task {task} is not Online"
+                    f"CurrentTask.BindTask target Task {task} is neither Online nor Suspended"
+                )
+            initial_flow = self.current["references"].get(f"{task}.initial_flow")
+            if task_state == "Online" and (
+                active_flow is not None
+                or initial_flow != effective_flow
+                or self.current["states"].get(effective_flow) != "Base"
+            ):
+                raise DerivationProblem(
+                    "CurrentTask.BindTask Online target does not match its Base initial Flow"
+                )
+            if task_state == "Suspended" and (
+                active_flow != effective_flow
+                or self.current["states"].get(effective_flow) != "Online"
+            ):
+                raise DerivationProblem(
+                    "CurrentTask.BindTask Suspended target does not match its Online active Flow"
                 )
             if (
                 f"task_execution_authority_is({task},TaskExecutionAuthority::None)"
@@ -1216,10 +1263,10 @@ class Engine:
                 not in self.current["facts"]
             ):
                 raise DerivationProblem(f"CurrentTask.{action} target Task {task} is not Live")
-        target_cpu_ref = self.current["references"].get(f"{active_flow}.cpu_ref")
+        target_cpu_ref = self.current["references"].get(f"{effective_flow}.cpu_ref")
         if target_cpu_ref is None or self._deref(target_cpu_ref) != cpu:
             raise DerivationProblem(
-                f"CurrentTask.{action} target Flow {active_flow} does not belong to CPU {cpu}"
+                f"CurrentTask.{action} target Flow {effective_flow} does not belong to CPU {cpu}"
             )
         task_ref = self._unique_live_task_ref(task)
         stack = str(bindings.get("stack")) if "stack" in bindings else None
@@ -1263,7 +1310,7 @@ class Engine:
         current_task_bindings[cpu] = {
             "task": task,
             "task_ref": task_ref,
-            "source_flow": str(active_flow),
+            "source_flow": effective_flow,
             "source_cpu_ref": cpu_ref,
             "address_view": address_view,
             "revision": revision,
@@ -1282,7 +1329,7 @@ class Engine:
             current_stack_bindings[cpu] = {
                 "task": task,
                 "stack": stack,
-                "source_flow": str(active_flow),
+                "source_flow": effective_flow,
                 "source_cpu_ref": cpu_ref,
                 "address_view": address_view,
                 "revision": stack_revision,
@@ -1303,7 +1350,7 @@ class Engine:
             [
                 _fact(
                     "current_task_binding_committed",
-                    [cpu, task, active_flow],
+                    [cpu, task, effective_flow],
                 ),
                 _fact("current_task_binding_ref_is", [cpu, task_ref]),
                 _fact(
@@ -1979,7 +2026,7 @@ class Engine:
             return reference is not None and self._deref(reference) == values[1]
         if name == "task_flow_cpu_ref_read_only_while_executing" and len(values) == 1:
             return self.current["references"].get(f"{values[0]}.cpu_ref") is not None
-        if name == "current_task_bind_scheduler_commit_boundary_valid" and len(values) == 2:
+        if name == "current_task_bind_scheduler_commit_boundary_valid" and len(values) == 3:
             return signal is not None and self._current_task_bind_boundary_valid(
                 signal, str(values[0]), str(values[1])
             )
@@ -2070,6 +2117,66 @@ class Engine:
             return self.current["references"].get(f"{values[0]}.initial_flow") == values[1]
         if name == "task_active_flow_is" and len(values) == 2:
             return self.current["references"].get(f"{values[0]}.active_flow") == values[1]
+        if name == "task_active_flow_invalid" and len(values) == 1:
+            return self.current["references"].get(f"{values[0]}.active_flow") is None
+        if name == "task_online_initial_flow_base" and len(values) == 1:
+            flow = self.current["references"].get(f"{values[0]}.initial_flow")
+            return flow is not None and self.current["states"].get(flow) == "Base"
+        if name in {
+            "task_initial_startup_pending",
+            "task_on_cpu_initial_startup_pending_or_active",
+        } and len(values) == 1:
+            task = str(self._deref(values[0]))
+            active = self.current["references"].get(f"{task}.active_flow")
+            initial = self.current["references"].get(f"{task}.initial_flow")
+            pending = (
+                self.current["states"].get(task) == "OnCpu"
+                and active is None
+                and initial is not None
+                and self.current["states"].get(initial) in {"Base", "Prepared", "Ready"}
+            )
+            return pending or (
+                name == "task_on_cpu_initial_startup_pending_or_active"
+                and active is not None
+            )
+        if name == "task_initial_startup_pending_for_flow" and len(values) == 2:
+            task = str(self._deref(values[0]))
+            return (
+                self.current["states"].get(task) == "OnCpu"
+                and self.current["references"].get(f"{task}.active_flow") is None
+                and self.current["references"].get(f"{task}.initial_flow") == values[1]
+                and self.current["states"].get(str(values[1])) in {"Base", "Prepared", "Ready"}
+            )
+        if name in {"task_ref_targets_online_task", "task_ref_targets_suspended_task"} and len(values) == 1:
+            task = str(self._deref(values[0]))
+            expected = "Online" if name.endswith("online_task") else "Suspended"
+            return self.current["states"].get(task) == expected
+        if name == "scheduler_preflight_dispatch_flow_is" and len(values) == 2:
+            task = str(self._deref(values[0]))
+            state = self.current["states"].get(task)
+            expected = self.current["references"].get(
+                f"{task}.{'initial_flow' if state == 'Online' else 'active_flow'}"
+            )
+            return expected == values[1]
+        if name == "scheduler_activate_initial_preflight_valid" and len(values) == 3:
+            task = str(self._deref(values[1]))
+            flow = str(values[2])
+            return (
+                self.current["states"].get(task) == "Online"
+                and self.current["references"].get(f"{task}.initial_flow") == flow
+                and self.current["references"].get(f"{task}.active_flow") is None
+                and self.current["states"].get(flow) == "Base"
+            )
+        if name == "scheduler_continue_active_preflight_valid" and len(values) == 3:
+            task = str(self._deref(values[1]))
+            flow = str(values[2])
+            return (
+                self.current["states"].get(task) == "Suspended"
+                and self.current["references"].get(f"{task}.active_flow") == flow
+                and self.current["states"].get(flow) == "Online"
+            )
+        if name == "scheduler_dispatch_signal_capacity_ready" and len(values) == 2:
+            return self.current["states"].get(str(values[1])) in {"Base", "Online"}
         if name in {"task_owns_flow", "task_flow_owner_is", "task_flow_parent_is"} and len(values) == 2:
             task, flow = (values[0], values[1]) if name == "task_owns_flow" else (values[1], values[0])
             return (
@@ -2103,6 +2210,7 @@ class Engine:
         parts = path.strip().split(".")
         value: Any = bindings.get(parts[0], parts[0])
         for field in parts[1:]:
+            value = self._deref(value)
             if field == "parent" and value in self.systems:
                 value = self.systems[value].get("parent")
                 continue
@@ -2296,12 +2404,12 @@ class Engine:
             return
         if kind == "reference_assignment":
             parts = expression["reference"].split(".")
-            if parts[0] == "self":
-                key = ".".join([str(self.self_value(signal)), *parts[1:]])
-            elif parts[0] in bindings:
-                key = ".".join([str(bindings[parts[0]]), *parts[1:]])
-            else:
-                key = expression["reference"]
+            owner_path = ".".join(parts[:-1])
+            field_name = parts[-1]
+            owner_value = self.resolve_path(
+                owner_path, signal=signal, bindings=bindings
+            )
+            key = f"{owner_value}.{field_name}"
             owner, field = key.split(".", 1)
             if owner not in self.systems or field not in self.systems[owner]["reference_types"]:
                 raise DerivationProblem(f"unknown reference update {key}")

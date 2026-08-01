@@ -2981,7 +2981,7 @@ class SignalPipelineTests(unittest.TestCase):
                     associations {{ cpu_ref: CpuRef; }}
                     processes {{
                         Action::BindTaskStack(task: Task, stack: Stack) {{ state_effect: StateEffect::None; }}
-                        Action::BindTask(task: Task) {{ state_effect: StateEffect::None; }}
+                        Action::BindTask(task: Task, dispatch_flow: TaskFlow) {{ state_effect: StateEffect::None; }}
                     }}
                 }}
                 external Human {{
@@ -3011,7 +3011,7 @@ class SignalPipelineTests(unittest.TestCase):
                     }}
                 }}
                 object OtherTask: Task {{
-                    associations {{ initial_flow = OtherFlow; active_flow = OtherFlow; }}
+                    associations {{ initial_flow = OtherFlow; }}
                     initial_state: State::Online;
                     state State::Online {{
                         invariant {{
@@ -3038,7 +3038,7 @@ class SignalPipelineTests(unittest.TestCase):
                                 drives {{ CurrentTask.Action::BindTaskStack(BootTask, BootTask.stack); }}
                             }}
                             on Action::BindOther {{
-                                drives {{ CurrentTask.Action::BindTask(OtherTask); }}
+                                drives {{ CurrentTask.Action::BindTask(OtherTask, OtherFlow); }}
                             }}
                         }}
                     }}
@@ -3125,7 +3125,7 @@ class SignalPipelineTests(unittest.TestCase):
                 )
 
         scheduler_source = rebind_source(other_cpu_ref="BootCPURef").replace(
-            "drives { CurrentTask.Action::BindTask(OtherTask); }",
+            "drives { CurrentTask.Action::BindTask(OtherTask, OtherFlow); }",
             "drives { Scheduler.Action::SwitchTo; }",
             1,
         )
@@ -3137,7 +3137,7 @@ class SignalPipelineTests(unittest.TestCase):
                     state State::Base {
                         actions {
                             on Action::SwitchTo {
-                                drives { CurrentTask.Action::BindTask(OtherTask); }
+                                drives { CurrentTask.Action::BindTask(OtherTask, OtherFlow); }
                             }
                         }
                     }
@@ -4388,8 +4388,17 @@ class SignalPipelineTests(unittest.TestCase):
             first_schedule_index = signal_index(
                 "BootIdleFlow", "Cpu0Scheduler", "Schedule"
             )
+            kernel_init_restore_index = signal_index(
+                "Cpu0Scheduler", "KernelInitTask", "RestoreCoreContext"
+            )
+            kernel_init_finish_index = signal_index(
+                "Cpu0Scheduler", "Cpu0Scheduler", "FinishTaskSwitch"
+            )
+            kernel_init_activate_index = signal_index(
+                "Cpu0Scheduler", "KernelInitTask", "Activate"
+            )
             kernel_init_started_index = signal_index(
-                "KernelInitTask", "KernelInitFlow", "Preset"
+                "Cpu0Scheduler", "KernelInitFlow", "Preset"
             )
             kernel_init_ready_index = signal_index(
                 "Kernel", "KernelInitFlow", "Setup"
@@ -4413,6 +4422,9 @@ class SignalPipelineTests(unittest.TestCase):
                     boot_ready_index,
                     boot_online_index,
                     first_schedule_index,
+                    kernel_init_restore_index,
+                    kernel_init_finish_index,
+                    kernel_init_activate_index,
                     kernel_init_started_index,
                     kernel_init_ready_index,
                     kernel_init_online_index,
@@ -4427,6 +4439,9 @@ class SignalPipelineTests(unittest.TestCase):
                         boot_ready_index,
                         boot_online_index,
                         first_schedule_index,
+                        kernel_init_restore_index,
+                        kernel_init_finish_index,
+                        kernel_init_activate_index,
                         kernel_init_started_index,
                         kernel_init_ready_index,
                         kernel_init_online_index,
@@ -4434,6 +4449,20 @@ class SignalPipelineTests(unittest.TestCase):
                         payload_commit_index,
                     ]
                 ),
+            )
+            self.assertEqual(
+                (
+                    signals[kernel_init_activate_index]["delivery"],
+                    signals[kernel_init_started_index]["delivery"],
+                ),
+                ("drives", "emits"),
+            )
+            self.assertFalse(
+                any(
+                    (item["source"], item["target"], item["name"])
+                    == ("KernelInitTask", "KernelInitFlow", "Preset")
+                    for item in signals
+                )
             )
             kernel_enable_signal = signals[kernel_enable_index]
             self.assertEqual(
@@ -5512,14 +5541,14 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(snapshot.read_bytes(), BOOT_INIT_SETUP_SCENARIO.read_bytes())
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "1f0327b33e1de1a493ccb78c89a3ee2781b8799a07229ca6341864072d8c6906",
+                "9b3d2741eacfb7729fc784ee46850952368abd0bb7894c9d5e4ac2f3e3f6dc9f",
             )
             self.assertEqual(
                 {
                     derivation["model_fingerprint"], model["model_fingerprint"],
                     view["model_fingerprint"], saved["model_fingerprint"],
                 },
-                {"sha256:36108bcafb76b847a0da2a05abc5fe6214033dbbbb9c0346f7906f798d196a05"},
+                {"sha256:19093e0c075b6768dc74709487ef3f128ae395adb3367c187890036437070ebe"},
             )
             with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
                 compact_text = render_text(view)
@@ -5651,13 +5680,13 @@ class SignalPipelineTests(unittest.TestCase):
                 derivation["summary"],
                 {
                     "boundary_occurrences": 118,
-                    "completed": 341,
+                    "completed": 342,
                     "failed": 0,
                     "inventory_deferred": 138,
                     "inventory_trimmed": 53,
                     "pending": 0,
                     "rejected": 0,
-                    "signals": 342,
+                    "signals": 343,
                     "stopped": 1,
                     "truncated": 0,
                     "unresolved_obligations": 0,
@@ -5683,7 +5712,7 @@ class SignalPipelineTests(unittest.TestCase):
             states = boundary["snapshot"]["states"]
             self.assertEqual(
                 (states["BootInitFlow"], states["BootTask"], states["BootIdleFlow"]),
-                ("Online", "OnCpu", "Ready"),
+                ("Online", "OnCpu", "Online"),
             )
             references = boundary["snapshot"]["references"]
             for index in range(8):
@@ -5715,7 +5744,7 @@ class SignalPipelineTests(unittest.TestCase):
             )
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "acf73a92956b48045009d3c4334b702ed515506daab5b31c8b482b85efa131f7",
+                "7573a6770d790b0feda0a43fde48f86805575d4f47846836b38fe51e8faf7e6c",
             )
             model = read_json(work / "model.json")
             view = read_json(work / "view.json")
@@ -5727,7 +5756,7 @@ class SignalPipelineTests(unittest.TestCase):
                     view["model_fingerprint"],
                     saved["model_fingerprint"],
                 },
-                {"sha256:36108bcafb76b847a0da2a05abc5fe6214033dbbbb9c0346f7906f798d196a05"},
+                {"sha256:19093e0c075b6768dc74709487ef3f128ae395adb3367c187890036437070ebe"},
             )
 
     def test_main_model_boot_init_entry_stops_at_first_missing_guard(self) -> None:

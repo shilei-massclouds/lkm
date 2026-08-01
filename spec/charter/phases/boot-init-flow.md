@@ -2,7 +2,7 @@
 
 `BootInitFlow` 是静态 `BootTask.initial_flow` 指向的 TaskFlow 实例。由于 TaskFlow 继承
 PhaseObject，它从 `_start` 开始承载并编排启动执行片段，同时拥有独立 FlowRef、lifecycle 与 owner
-关系。`BootTask` 从模型入口起已经 OnCpu，并在后续真实调度中通过 Suspend/Continue 与 Online 往返；
+关系。`BootTask` 从模型入口起已经 OnCpu，并在后续真实调度中通过 Suspend/Continue 与 Suspended 往返；
 它始终是 PID 0 的同一静态 carrier。
 
 ## 边界与职责
@@ -45,7 +45,7 @@ PhaseObject，它从 `_start` 开始承载并编排启动执行片段，同时�
   `BootInitFlow.Ready`；不建立 `BootPhase` 或 `InterruptPhase` 包装 lifecycle。
 - `BootInitRestInitPhase` 完整驱动 `KernelInitTask` 与 `KthreaddTask` 的 Preset/Setup/Enable。
   Task Enable 对应 `wake_up_new_task()` 并只发布 Online；initial Flow 必须等 Task 首次真实获得 CPU、
-  接受 Scheduler 发出的 Continue 并提交 OnCpu 后严格启动。
+  接受 Scheduler 同步驱动的 Activate 并提交 OnCpu 后，由 Scheduler 严格发出 Startup。
 - Enable 只驱动 `BootInitScheduleHandoffPhase`，由该叶子建立首次调度的可逆预检与
   `BootIdleFlow` owner/active binding。
 - 不可逆切换前必须完整建立 `BootIdleFlow` 的 owner/active binding 并使其到达 Ready；随后提交

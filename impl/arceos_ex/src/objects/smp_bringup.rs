@@ -824,7 +824,7 @@ impl CpuHotplugSyncSet {
             || cpu_group.state() != State::Ready
             || cpu_group.boot_cpu_state() != State::Online
             || !cpu_group.secondary_cpus_present_not_online()
-            || boot_idle_flow.state() != State::Ready
+            || boot_idle_flow.state() != State::Online
             || kthreadd_task.state() != State::Online
             || !cpu_hotplug_lock.ready()
             || !smpboot_threads_lock.ready()

@@ -21,8 +21,9 @@ Task。需要同时修改 prev/next 时，必须先拒绝 alias，再通过 spli
 
 `sched_init` 为全部 possible CPU 构造并准备 Scheduler。CPU0 在 boot CPU scheduling handoff 中
 Ready→Online；AP 只在对应 CPU online handoff 时转为 Online。Task lifecycle 与调度资格正交：
-Online 只意味着有效可恢复 context，`on_rq`/runnable/blocked 由 Scheduler 的 class membership 及
-PreparePrev 结果表示。wake/select/enqueue 始终定位目标 CPU 所属 Scheduler。
+Online 只意味着从未运行的 initial context，Suspended 才表示已保存的 active context；两者均与
+`on_rq`/runnable/blocked 正交，资格由 Scheduler 的 class membership 及 PreparePrev 结果表示。
+wake/select/enqueue 始终定位目标 CPU 所属 Scheduler。
 
 ## Schedule 处理
 
@@ -51,16 +52,18 @@ Linux callback 所需的 put/set 记账，但不得伪造 context switch。
 ## SwitchTo 与 continuation
 
 非 identity 路径在任何写操作前完整预检双方引用、lifecycle/authority、context/stack、
-FlowRef 与后续一次性信号容量，然后严格按以下顺序实现：
+FlowRef 与后续一次性信号容量，并保存 `NextDispatchKind`、稳定 TaskRef/TaskFlowRef/generation，然后
+严格按以下顺序实现：
 
 1. `prev.SaveCoreContext`；
-2. `prev.Suspend`，仅使 OnCpu→Online/Live→None/Invalid→Valid，保持 PreparePrev 的资格决定；
+2. `prev.Suspend`，仅使 OnCpu→Suspended/Live→None/Invalid→Valid，保持 PreparePrev 的资格决定；
 3. `next.RestoreCoreContext`，切换架构寄存器/stack 并提交 CPU-local CurrentTask/CurrentStack；
 4. 在 next stack 上完成 finish-task-switch 清理；
-5. 一次性投递 `next Task.Continue`。
+5. Online next 同步 `Task.Activate`，Suspended next 同步 `Task.Continue`；
+6. Scheduler 直接向预检 initial/active Flow 一次性投递 Startup/Continue。
 
-next Task 接受 Continue 时才提交 `Online/None/Valid -> OnCpu/Live/Invalid`，然后只向 Base
-initial Flow emits Startup，或只向 Online active Flow emits Continue。identity path 不保存/恢复 context，
+Task 只提交自身 state/authority/breakpoint，不转发 Flow Signal。Online 只接受 Activate，Suspended 只
+接受 Continue。identity path 不保存/恢复 context，
 不改 Task lifecycle/authority/breakpoint/CurrentTask/CurrentStack，也不发 `Task.Continue`；Scheduler 处理完成后
 只向原 sender Flow 投递 Continue，表示 Linux `schedule()` 返回。
 

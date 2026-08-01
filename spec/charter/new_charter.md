@@ -287,8 +287,9 @@ initial Flow；`BootIdleFlow` 是后继 active continuation，
 
 ### KernelInitFlow 直接叶子
 
-首次 dispatch 必须先同步提交 `BootTask.Suspend`，在真实栈切换后才由 `KernelInitTask.Continue`
-提交 OnCpu；PID 1 的真实入口直接启动 `KernelInitFlow.Preset`。实际 body 必须在 `kernel_init_entry()` 验证 PID 1
+首次 dispatch 必须先同步提交 `BootTask.Suspend`，在真实栈切换后才由 Scheduler drives
+`KernelInitTask.Activate` 提交 OnCpu；PID 1 的真实入口由 Scheduler 直接向 `KernelInitFlow` emits
+Startup。实际 body 必须在 `kernel_init_entry()` 验证 PID 1
 vmalloc stack 后执行。Preset 驱动 `PreSmpInitPhase` 和
 `SmpBringupPhase`，Setup 驱动 runtime/rootfs/finalize 与 `PayloadPreparePhase`，Enable 只驱动
 `PayloadHandoffPreparePhase`。

@@ -118,7 +118,7 @@ impl BootIdleFlow {
     }
 
     pub fn continue_active(&self, boot_task: &Task) -> EventResult {
-        if self.flow.state() != State::Ready
+        if self.flow.state() != State::Online
             || !self.flow.active()
             || !boot_task.active_flow().same_identity(self.flow.flow_ref())
             || !crate::objects::task_flow::task_flow_execution_guard_satisfied(
@@ -128,8 +128,8 @@ impl BootIdleFlow {
             return failed_condition(
                 LifecycleEvent::Continue,
                 self.flow.state(),
-                State::Ready,
-                State::Ready,
+                State::Online,
+                State::Online,
             );
         }
         Ok(())
@@ -437,7 +437,7 @@ impl BootIdleFlow {
         scheduler: &Scheduler,
         cpu_group: &CpuGroup,
     ) -> EventResult {
-        if self.flow.state() != State::Ready
+        if self.flow.state() != State::Online
             || !crate::objects::task_flow::task_flow_execution_guard_satisfied(
                 &self.flow,
                 boot_task.task(),
@@ -478,7 +478,7 @@ impl BootIdleFlow {
         boot_task: &BootTask,
         local_interrupt: &mut InterruptType,
     ) -> EventResult {
-        if self.flow.state() != State::Ready
+        if self.flow.state() != State::Online
             || !self.idle_entry_prepared
             || scheduler.state() != State::Online
             || !crate::objects::task_flow::task_flow_execution_guard_satisfied(
@@ -524,7 +524,7 @@ impl BootIdleFlow {
         boot_task: &BootTask,
         local_interrupt: &mut InterruptType,
     ) -> EventResult {
-        if self.flow.state() != State::Ready
+        if self.flow.state() != State::Online
             || !self.idle_entry_prepared
             || scheduler.state() != State::Online
             || !crate::objects::task_flow::task_flow_execution_guard_satisfied(
@@ -563,7 +563,7 @@ impl BootIdleFlow {
         boot_task: &BootTask,
         local_interrupt: &mut InterruptType,
     ) -> EventResult {
-        if self.flow.state() != State::Ready
+        if self.flow.state() != State::Online
             || !self.idle_entry_prepared
             || local_interrupt.local_state() != State::Ready
             || !crate::objects::task_flow::task_flow_execution_guard_satisfied(
@@ -604,7 +604,7 @@ impl BootIdleFlow {
     }
 
     fn observe_need_resched(&mut self, boot_task: &BootTask) -> EventResult {
-        if self.flow.state() != State::Ready
+        if self.flow.state() != State::Online
             || !self.idle_entry_prepared
             || !self.idle_wait_committed
             || !self.need_resched_clear_before_wait
@@ -642,7 +642,7 @@ impl BootIdleFlow {
         boot_task: &BootTask,
         local_interrupt: &mut InterruptType,
     ) -> EventResult {
-        if self.flow.state() != State::Ready
+        if self.flow.state() != State::Online
             || !self.idle_entry_prepared
             || !self.need_resched_set_for_schedule
             || !self.observed_need_resched
@@ -696,8 +696,8 @@ impl BootIdleFlow {
         failed_condition(
             LifecycleEvent::Setup,
             self.flow.state(),
-            State::Ready,
-            State::Ready,
+            State::Online,
+            State::Online,
         )
     }
 }

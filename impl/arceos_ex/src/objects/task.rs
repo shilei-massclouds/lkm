@@ -242,17 +242,21 @@ impl TaskThreadContext {
 
     /// Returns `Some(true)` when this occurrence installed the Task root and
     /// `Some(false)` when it is nested beneath an already-live root.
-    fn bind_root_trap_flow(&mut self, root_ref: TrapFlowRef) -> Option<bool> {
+    fn bind_root_trap_flow(&mut self, root_ref: TrapFlowRef) -> Result<bool, &'static str> {
         if !root_ref.is_valid() {
-            return None;
+            return Err("root_ref_invalid");
         }
         if self.root_trap_flow_ref().is_valid() {
-            return (!self.root_trap_flow_ref().same_identity(root_ref)
-                && self.root_trap_flow_resolves())
-            .then_some(false);
+            if self.root_trap_flow_ref().same_identity(root_ref) {
+                return Err("root_ref_already_installed");
+            }
+            if !self.root_trap_flow_resolves() {
+                return Err("installed_root_stale");
+            }
+            return Ok(false);
         }
         self.arch.set_root_trap_flow_ref(root_ref);
-        Some(true)
+        Ok(true)
     }
 
     fn clear_root_trap_flow(&mut self, root_ref: TrapFlowRef) -> bool {
@@ -323,7 +327,7 @@ impl Task {
     /// Preset/Setup/Enable.
     pub(crate) const fn new_boot_on_cpu() -> Self {
         Self {
-            lifecycle: Lifecycle::new(State::Online),
+            lifecycle: Lifecycle::new(State::OnCpu),
             on_cpu: true,
             execution_authority: TaskExecutionAuthority::Live,
             task_ref: TaskRef::BOOT,
@@ -357,7 +361,7 @@ impl Task {
         _logical_id: usize,
     ) -> Self {
         Self {
-            lifecycle: Lifecycle::new(State::Online),
+            lifecycle: Lifecycle::new(State::OnCpu),
             on_cpu: true,
             execution_authority: TaskExecutionAuthority::Reserved,
             task_ref,
@@ -384,17 +388,16 @@ impl Task {
     }
 
     pub const fn state(&self) -> State {
-        if self.on_cpu {
-            State::OnCpu
-        } else {
-            self.lifecycle.state()
-        }
+        self.lifecycle.state()
     }
 
-    /// True for the persistent scheduler-visible lifecycle, including while
-    /// the Task owns a CPU through the Task-only OnCpu projection.
+    /// True while the Task remains scheduler-published, independently of its
+    /// current execution ownership.
     pub const fn online(&self) -> bool {
-        matches!(self.lifecycle.state(), State::Online)
+        matches!(
+            self.lifecycle.state(),
+            State::Online | State::OnCpu | State::Suspended
+        )
     }
 
     pub const fn execution_authority(&self) -> TaskExecutionAuthority {
@@ -424,15 +427,32 @@ impl Task {
         self.thread_context.root_trap_flow_ref()
     }
 
-    pub(crate) fn bind_root_trap_flow(&mut self, root_ref: TrapFlowRef) -> Option<bool> {
-        if self.lifecycle.state() != State::Online
-            || !self.on_cpu
-            || self.execution_authority != TaskExecutionAuthority::Live
-            || self.thread_context.breakpoint_state() != TaskBreakpointState::Invalid
-            || !self.active_flow.is_valid()
-            || !self.owns_flow(self.active_flow)
-        {
-            return None;
+    pub(crate) fn bind_root_trap_flow(
+        &mut self,
+        effective_flow_ref: TaskFlowRef,
+        root_ref: TrapFlowRef,
+    ) -> Result<bool, &'static str> {
+        if self.lifecycle.state() != State::OnCpu {
+            return Err("task_not_on_cpu");
+        }
+        if !self.on_cpu {
+            return Err("task_on_cpu_flag_false");
+        }
+        if self.execution_authority != TaskExecutionAuthority::Live {
+            return Err("task_authority_not_live");
+        }
+        if self.thread_context.breakpoint_state() != TaskBreakpointState::Invalid {
+            return Err("task_breakpoint_not_invalid");
+        }
+        if !effective_flow_ref.is_valid() || !self.owns_flow(effective_flow_ref) {
+            return Err("task_effective_flow_invalid_or_not_owned");
+        }
+        if self.active_flow.is_valid() {
+            if !self.active_flow.same_identity(effective_flow_ref) {
+                return Err("task_effective_flow_not_active");
+            }
+        } else if !self.initial_flow.same_identity(effective_flow_ref) {
+            return Err("task_effective_flow_not_initial_pending");
         }
         self.thread_context.bind_root_trap_flow(root_ref)
     }
@@ -496,12 +516,12 @@ impl Task {
     /// Record a matching wake signal. `PreparePrev` consumes it exactly once.
     #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub(crate) fn post_pending_wake_signal(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Online || self.pending_wake_signal {
+        if self.lifecycle.state() != State::OnCpu || self.pending_wake_signal {
             return failed_condition(
                 LifecycleEvent::Continue,
                 self.state(),
-                State::Online,
-                State::Online,
+                State::OnCpu,
+                State::OnCpu,
             );
         }
         self.pending_wake_signal = true;
@@ -537,12 +557,12 @@ impl Task {
 
     #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub(crate) fn wake_for_scheduler_enqueue(&mut self) -> EventResult {
-        if self.state() != State::Online || self.on_cpu || !self.scheduler_sleep_declared {
+        if self.state() != State::Suspended || self.on_cpu || !self.scheduler_sleep_declared {
             return failed_condition(
                 LifecycleEvent::Continue,
                 self.state(),
-                State::Online,
-                State::Online,
+                State::Suspended,
+                State::Suspended,
             );
         }
         self.scheduler_sleep_declared = false;
@@ -715,7 +735,7 @@ impl Task {
     /// Accept the keyed SBI HSM Startup delivery. Task lifecycle and identity
     /// do not change; only the reserved execution authority becomes Live.
     pub(crate) fn activate_hsm_authority(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Online
+        if self.lifecycle.state() != State::OnCpu
             || !self.on_cpu
             || self.entry != TaskEntry::ApIdle
             || self.kind != TaskKind::Idle
@@ -727,9 +747,9 @@ impl Task {
             || self.thread_context.breakpoint_state() != TaskBreakpointState::Invalid
         {
             return failed_condition(
-                LifecycleEvent::Continue,
+                LifecycleEvent::Activate,
                 self.state(),
-                State::Online,
+                State::OnCpu,
                 State::OnCpu,
             );
         }
@@ -737,15 +757,9 @@ impl Task {
         Ok(())
     }
 
-    /// Scheduler-only acceptance of `Task.Continue`. The caller must invoke
-    /// this from the new task's real entry/resume point, after the physical
-    /// context switch has transferred execution.
-    pub(crate) fn continue_on_cpu(&mut self) -> EventResult {
-        let expected_flow = if self.active_flow.is_valid() {
-            self.active_flow
-        } else {
-            self.initial_flow
-        };
+    /// Scheduler-only acceptance of the first `Task.Activate` delivery.
+    pub(crate) fn activate_on_cpu(&mut self) -> EventResult {
+        let expected_flow = self.initial_flow;
         let first_failed = if self.lifecycle.state() != State::Online {
             Some("lifecycle_online")
         } else if self.on_cpu {
@@ -756,6 +770,8 @@ impl Task {
             Some("core_save_not_pending")
         } else if self.thread_context.breakpoint_state() != TaskBreakpointState::Valid {
             Some("breakpoint_valid")
+        } else if self.active_flow.is_valid() {
+            Some("active_flow_invalid")
         } else if !expected_flow.is_valid() {
             Some("expected_flow_valid")
         } else if !self.owns_flow(expected_flow) {
@@ -767,9 +783,56 @@ impl Task {
         };
         if let Some(first_failed) = first_failed {
             return failed_condition(
-                LifecycleEvent::Continue,
+                LifecycleEvent::Activate,
                 self.state(),
                 State::Online,
+                State::OnCpu,
+            )
+            .map_err(|error| {
+                error.with_diagnostic(FailureDiagnostic::new(
+                    "SchedulerTaskSwitch",
+                    "activate_task_after_switch",
+                    "Task",
+                    "Task.Activate prerequisites",
+                    first_failed,
+                ))
+            });
+        }
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Activate, State::Online, State::OnCpu)?;
+        self.on_cpu = true;
+        self.execution_authority = TaskExecutionAuthority::Live;
+        self.thread_context.consume();
+        Ok(())
+    }
+
+    /// Scheduler-only acceptance of a resumed `Task.Continue` delivery.
+    pub(crate) fn continue_on_cpu(&mut self) -> EventResult {
+        let expected_flow = self.active_flow;
+        let first_failed = if self.lifecycle.state() != State::Suspended {
+            Some("lifecycle_suspended")
+        } else if self.on_cpu {
+            Some("not_already_on_cpu")
+        } else if self.execution_authority != TaskExecutionAuthority::None {
+            Some("authority_none")
+        } else if self.core_save_pending_suspend {
+            Some("core_save_not_pending")
+        } else if self.thread_context.breakpoint_state() != TaskBreakpointState::Valid {
+            Some("breakpoint_valid")
+        } else if !expected_flow.is_valid() {
+            Some("active_flow_valid")
+        } else if !self.owns_flow(expected_flow) {
+            Some("owns_active_flow")
+        } else if !self.thread_context.flow_ref().same_identity(expected_flow) {
+            Some("breakpoint_flow_matches")
+        } else {
+            None
+        };
+        if let Some(first_failed) = first_failed {
+            return failed_condition(
+                LifecycleEvent::Continue,
+                self.state(),
+                State::Suspended,
                 State::OnCpu,
             )
             .map_err(|error| {
@@ -782,6 +845,11 @@ impl Task {
                 ))
             });
         }
+        self.lifecycle.adopt_repeating_transition(
+            LifecycleEvent::Continue,
+            State::Suspended,
+            State::OnCpu,
+        )?;
         self.on_cpu = true;
         self.execution_authority = TaskExecutionAuthority::Live;
         self.thread_context.consume();
@@ -804,7 +872,7 @@ impl Task {
                 LifecycleEvent::Suspend,
                 self.state(),
                 State::OnCpu,
-                State::Online,
+                State::Suspended,
             );
         }
         self.thread_context.record_save();
@@ -815,7 +883,7 @@ impl Task {
     /// Second half of the Scheduler SaveCoreContext -> Suspend protocol.
     pub(crate) fn suspend_after_core_context_save(&mut self) -> EventResult {
         let flow_ref = self.active_flow;
-        if self.lifecycle.state() != State::Online
+        if self.lifecycle.state() != State::OnCpu
             || !self.on_cpu
             || self.execution_authority != TaskExecutionAuthority::Live
             || !self.core_save_pending_suspend
@@ -827,9 +895,14 @@ impl Task {
                 LifecycleEvent::Suspend,
                 self.state(),
                 State::OnCpu,
-                State::Online,
+                State::Suspended,
             );
         }
+        self.lifecycle.adopt_repeating_transition(
+            LifecycleEvent::Suspend,
+            State::OnCpu,
+            State::Suspended,
+        )?;
         self.on_cpu = false;
         self.execution_authority = TaskExecutionAuthority::None;
         self.core_save_pending_suspend = false;
@@ -847,7 +920,7 @@ impl Task {
             return failed_condition(
                 LifecycleEvent::Disable,
                 self.lifecycle.state(),
-                State::Online,
+                State::OnCpu,
                 State::Offline,
             );
         }
@@ -857,7 +930,7 @@ impl Task {
         self.running = false;
         self.runqueue_published = false;
         self.lifecycle
-            .adopt_transition(LifecycleEvent::Disable, State::Online, State::Offline)
+            .adopt_transition(LifecycleEvent::Disable, State::OnCpu, State::Offline)
     }
 
     pub fn cleanup(&mut self) -> EventResult {
@@ -917,7 +990,7 @@ impl Task {
     }
 
     pub fn pin_to_cpu(&mut self, cpu_id: usize) -> EventResult {
-        if self.lifecycle.state() != State::Online || cpu_id == usize::MAX {
+        if !self.online() || cpu_id == usize::MAX {
             return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
@@ -931,10 +1004,7 @@ impl Task {
     }
 
     pub fn clear_cpu_pin(&mut self) -> bool {
-        if self.lifecycle.state() != State::Online
-            || !self.affinity_pinned()
-            || !self.no_setaffinity
-        {
+        if !self.online() || !self.affinity_pinned() || !self.no_setaffinity {
             return false;
         }
         self.affinity_cpu_id = usize::MAX;
@@ -993,12 +1063,12 @@ impl Task {
     }
 
     pub fn switch_in_ready(&self) -> bool {
-        let expected_flow = if self.active_flow.is_valid() {
-            self.active_flow
-        } else {
-            self.initial_flow
+        let expected_flow = match self.lifecycle.state() {
+            State::Online => self.initial_flow,
+            State::Suspended => self.active_flow,
+            _ => TaskFlowRef::NONE,
         };
-        self.lifecycle.state() == State::Online
+        matches!(self.lifecycle.state(), State::Online | State::Suspended)
             && !self.on_cpu
             && self.execution_authority == TaskExecutionAuthority::None
             && self.thread_context.breakpoint_state() == TaskBreakpointState::Valid
@@ -1009,7 +1079,7 @@ impl Task {
     }
 
     pub fn switch_out_ready(&self) -> bool {
-        self.lifecycle.state() == State::Online
+        self.lifecycle.state() == State::OnCpu
             && self.on_cpu
             && self.execution_authority == TaskExecutionAuthority::Live
             && !self.core_save_pending_suspend
@@ -1019,7 +1089,7 @@ impl Task {
     }
 
     pub fn terminal_switch_out_ready(&self) -> bool {
-        self.lifecycle.state() == State::Online
+        self.lifecycle.state() == State::OnCpu
             && self.on_cpu
             && self.execution_authority == TaskExecutionAuthority::Live
             && !self.core_save_pending_suspend
@@ -1098,29 +1168,6 @@ impl Task {
         }
         self.active_flow = flow.flow_ref();
         flow.commit_active_binding(self.task_ref)
-    }
-
-    pub(super) fn activate_initial_execution_context(
-        &mut self,
-        flow: &mut TaskFlow,
-    ) -> EventResult {
-        if self.state() != State::OnCpu
-            || self.execution_authority != TaskExecutionAuthority::Live
-            || self.active_flow.is_valid()
-            || self.initial_flow != flow.flow_ref()
-            || flow.owner() != self.task_ref
-            || flow.state() != State::Base
-            || !self.owns_flow(flow.flow_ref())
-        {
-            return failed_condition(
-                LifecycleEvent::Continue,
-                self.state(),
-                State::OnCpu,
-                State::OnCpu,
-            );
-        }
-        self.active_flow = flow.flow_ref();
-        flow.commit_initial_execution_binding(self.task_ref)
     }
 
     pub fn commit_flow_handoff(&mut self, old: &TaskFlow, new: &mut TaskFlow) -> EventResult {

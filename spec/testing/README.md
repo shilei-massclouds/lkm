@@ -127,16 +127,16 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
 - 提交的 `tools2/scenarios/BootInitFlow.Setup.snapshot.json` 必须与从模型初态执行
   `tools2/bin/pyveri -u BootInitFlow.Setup --snapshot-out /tmp/boot-init-flow-setup-presend.snapshot.json`
   得到的 canonical bytes 逐字节一致，并从仓库根与其它 cwd 重建出相同结果。当前正式模型下其
-  SHA-256 固定为 `1f0327b33e1de1a493ccb78c89a3ee2781b8799a07229ca6341864072d8c6906`，model
-  fingerprint 固定为 `sha256:36108bcafb76b847a0da2a05abc5fe6214033dbbbb9c0346f7906f798d196a05`。
+  SHA-256 固定为 `9b3d2741eacfb7729fc784ee46850952368abd0bb7894c9d5e4ac2f3e3f6dc9f`，model
+  fingerprint 固定为 `sha256:19093e0c075b6768dc74709487ef3f128ae395adb3367c187890036437070ebe`。
   `tools2/bin/pyveri -t BootInitFlow.Setup` 必须自动采用该第 3 组入口 scenario；显式 `-s` 仍优先，
   其它模型必须因 stale fingerprint 拒绝，缺失 canonical scenario 必须在 derive 前返回 2。
 - 提交的 `tools2/scenarios/Cpu0Scheduler.Schedule.snapshot.json` 必须与从模型初态执行
   `tools2/bin/pyveri -u Cpu0Scheduler.Schedule` 得到的 canonical bytes 逐字节一致；SHA-256 固定为
-  `acf73a92956b48045009d3c4334b702ed515506daab5b31c8b482b85efa131f7`，model fingerprint 与上述
+  `7573a6770d790b0feda0a43fde48f86805575d4f47846836b38fe51e8faf7e6c`，model fingerprint 与上述
   Setup scenario 相同。该 before-send 边界的真实 sender 必须是 `BootIdleFlow`，上一个已完成 Signal
   必须是 `BootInitFlow -> BootIdleFlow.RequestSchedule`；边界处 BootInitFlow=Online、BootTask=OnCpu、
-  BootIdleFlow=Ready，Cpu0Scheduler=Online、Cpu1Scheduler..Cpu7Scheduler=Ready，且 8 个
+  BootIdleFlow=Online，Cpu0Scheduler=Online、Cpu1Scheduler..Cpu7Scheduler=Ready，且 8 个
   `CpuGroup.cpus[i].scheduler` reference 分别指向唯一的 `Cpu{i}Scheduler` lifecycle identity。推导中
   不得已经存在 Cpu0Scheduler.Schedule Signal、PreparePrev 或 context switch occurrence。
 - `-u BootInitFlow.Setup` 的真实上游推导必须精确包含 52 个 Signal，并逐项固定
