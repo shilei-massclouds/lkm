@@ -75,6 +75,7 @@
 | `P2` | 待办 | arceos_ex/console | 用户态标准输入输出机制 | `irq_time.011` | [user boot coding](../spec/coding/objects/user-boot.md) |
 | `P1` | 待办 | trace/view | 收口 trace/SVG 输出体验 | 改善 depends_on 长线、图高、标签、事实展示和 action 展开深度。 | [pyveri DEVELOPMENT](../tools/pyveri/DEVELOPMENT.md#step-c1-收口-trace-输出和注释数据流) |
 | `P1` | 进行中 | charter/model/tools2/signal | tools2 启动语义校准 | 独立工具链的 v9 JSON/text 与 animation v3 已闭合；六组启动校准中第 1 组上游构造与 OpenSBI->Kernel 交接、第 2 组 Kernel 与 BootInit 入口均已完成，当前下一批次为第 3 组 `BootInitFlow.Setup`。显式 DSL、handler 命名、continuation 和老工具迁移仍需独立决策，老 tools/ 与静态 trace/SVG 保持默认责任。 | [专题](roadmap/signal-driven-tools2.md) |
+| `P2` | 延期 | charter/model/tools2/scheduler/smp | tools2 确定性 TaskFlow/CpuLane 与 SMP schedule replay | 未来按 charter-first 建立 Schedule-return TaskFlow lane、确定性 GlobalArbiter/CpuLane、cross-CPU mailbox、迁移事务和可重放 schedule artifact；不扩大当前 P1 tools2 启动语义校准边界，通用 Signal pending/timeout/cancel 仍属独立后续语义。 | [专题](roadmap/deterministic-smp-lanes.md) |
 | `P1` | 待办 | trace/view | 优化 trace context 框显示 | 优化 context 高度、文本锚定、跨行标签和视觉层级。 | [pyveri DEVELOPMENT](../tools/pyveri/DEVELOPMENT.md#view) |
 | `P2` | 待办 | validation/stress/arceos_ex | `stress-mem` 共享内存后端 | 先用 host-backed shared memory 与 FDT 描述固定 ABI；doorbell/IRQ/专用设备后置。 | 本文档 |
 | `P2` | 待办 | arceos_ex/checkpoint | 清除 `LOG=trace` 兼容入口 | README、脚本、stress case 与历史命令迁完后删除 alias，把 trace 名称留给 Linux-like trace。 | [checkpoint mapping](../spec/coding/mapping.md) |
@@ -82,7 +83,7 @@
 | `P1` | 待办 | pyveri | 默认 target 与 rule-only 检查 | 增加规格默认 target 和只执行 parse/model/rule 的 formal rule-only 模式。 | [pyveri DEVELOPMENT](../tools/pyveri/DEVELOPMENT.md#工具链架构目标) |
 | `P1` | 待办 | pyveri | 注释数据流下沉 | 由 parse 保留注释，model/view 建立关联，render 只消费结构化输入。 | [pyveri DEVELOPMENT](../tools/pyveri/DEVELOPMENT.md#step-c1-收口-trace-输出和注释数据流) |
 | `P1` | 进行中 | model/semantics | 正式规格化上下文和嵌套检查 | 补系统天然独占来源证明、RCU 读侧、handle_level 与更多 guard kind。 | [model semantics](../spec/model/SEMANTICS.md#sem-context-nesting-001-context-effects-compose-monotonically) |
-| `P2` | 延期 | model/derive | 多链独立推导语义 | 为 task/interrupt flow 建立独立推导链，并保持跨链状态交互显式。 | [model semantics](../spec/model/SEMANTICS.md#sem-transition-emits-001-completion-events-are-post-commit-events) |
+| `P2` | 延期 | model/derive/interrupt | interrupt-flow 独立推导语义 | 只为 interrupt flow 建立独立推导链，并保持它与当前任务执行路径的跨链状态交互显式；不包含独立确定性调度专题的 lane 责任。 | [model semantics](../spec/model/SEMANTICS.md#sem-transition-emits-001-completion-events-are-post-commit-events)；[确定性调度专题](roadmap/deterministic-smp-lanes.md) |
 | `P1` | 待办 | model/arceos_ex | 抽取 wake_up_new_task 复用模型 | 统一 task wake-up context、runtime state、runqueue selection 与 nested enqueue 约束。 | [model semantics](../spec/model/SEMANTICS.md#sem-exclusive-context-001-guard-and-resource-exclusive-context-are-distinct) |
 | `P1` | 已完成 | model/arceos_ex | TrapType per-CPU 归属 | 每个 live CPU 拥有独立 Trap/Interrupt/Exception 资源；AP 在 secondary entry 前安装正式入口上下文。 | [model semantics](../spec/model/SEMANTICS.md#sem-current-cpu-model-001-currentcpu-is-the-per-cpu-self-identity-entry) |
 | `P1` | 进行中 | arceos_ex | 整理对象级源码结构 | 继续按 phase/object mapping 拆分源码，并把资源对象收敛到 Context；目录主题化另列 P2。 | [object coverage](../spec/coding/objects/README.md) |

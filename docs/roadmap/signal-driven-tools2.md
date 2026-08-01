@@ -95,8 +95,11 @@ canonical snapshot；Model 区分全局 inventory 与动态 occurrence，并要�
    停止依赖调用表达式的隐式规范化。首期不得提前接受该语法。
 3. handler 命名：评审兼容 handler 从同名 Transition/Action 迁移到 `OnPreset` 等显式响应过程的规则，
    包括歧义、重载和迁移诊断。
-4. pending 与 continuation：定义接受后等待未来 Signal、保存/恢复 continuation、队列所有权、超时、
-   取消和 snapshot 可续跑语义；首期条件失败必须保持 rejected。
+4. 通用 Signal pending 与 continuation：定义接受后等待任意未来 Signal、保存/恢复 continuation、队列
+   所有权、timeout、cancel 和 snapshot 可续跑语义；首期条件失败必须保持 rejected。Scheduler 的
+   Schedule-return TaskFlow lane、SMP CpuLane 仲裁、cross-CPU mailbox、迁移和 schedule replay 不属于
+   本里程碑，由独立的
+   [`deterministic-smp-lanes.md`](deterministic-smp-lanes.md) 统一规划。
 5. 交互 HTML（已完成）：独立 animate 阶段共同消费 tools2 v9 `model.json` 和 `view.json`，生成内嵌
    `lkm.spec.signal-animation` v3 因果时刻的自包含 HTML；按 request/feedback/settle/terminal moment
    前进/后退，不重新求值 v9 view 的 boundary/obligation 投影，也不把浏览器变成推导器。首轮 v1 计划见
