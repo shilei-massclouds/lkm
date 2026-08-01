@@ -8,7 +8,6 @@ LOG ?= info
 REPORT ?= text
 VERBOSE ?= 0
 SPEC ?= spec/model/main.spec
-TRACE_HIDE_CONTEXTS ?= SingleTaskContext,SingleTaskInterruptTypeContext,BootIdleStartupContext
 APP ?= hello
 PLIC_PROVIDER ?= native
 PROBE ?=
@@ -32,16 +31,12 @@ BASIC_TEST_EXPLICIT_TEST := $(or $(findstring command line,$(origin TEST)),$(fin
 BASIC_TEST_EXPLICIT_APP := $(or $(findstring command line,$(origin APP)),$(findstring environment,$(origin APP)))
 BASIC_TEST_SELECTION_CONFLICT := $(and $(BASIC_TEST_EXPLICIT_TEST),$(BASIC_TEST_EXPLICIT_APP))
 BASIC_TEST_REQUEST := $(if $(BASIC_TEST_EXPLICIT_APP),$(APP),$(TEST))
-PYVERI ?= tools/pyveri/bin/pyveri
+PYVERI ?= tools2/bin/pyveri
 STRESS_RUNNER ?= impl/arceos_ex/tests/stress/runner.py
 PROBE_FILE_ARG := $(if $(PROBE_FILE),PROBE_FILE="$(abspath $(PROBE_FILE))",)
 STRESS_BASELINE_ARG := $(if $(STRESS_BASELINE),--baseline "$(STRESS_BASELINE)",)
 
-ifeq ($(VERBOSE),1)
-VERIFY_TEXT_ARGS := --derive --strict
-else
-VERIFY_TEXT_ARGS := --strict
-endif
+VERIFY_ARGS := -f $(SPEC) --max-depth all --max-breadth all -o /dev/null
 
 .PHONY: build run disk disk-clean fmt fmt-check clippy-check coding-spec-check charter-lock-check verify checkpoints-inventory checkpoints-map-linux checkpoints-coverage checkpoints-instrumentation-plan checkpoints checkpoints-linux-check test test-charter-lock test-basic test-composite test-verify test-checkpoints test-vm-activation-order test-trap-setup-order test-boot-init-flow-entry test-kunit test-smoke test-stress stress-test difftest-preflight difftest clean
 
@@ -102,9 +97,9 @@ charter-lock-check:
 
 verify:
 ifeq ($(REPORT),graph)
-	$(PYVERI) $(SPEC) -T --trace-annotations state,transition --trace-hide-contexts "$(TRACE_HIDE_CONTEXTS)"
+	$(PYVERI) $(VERIFY_ARGS) --html-out /tmp/lkm-spec-animation.html
 else
-	$(PYVERI) $(SPEC) $(VERIFY_TEXT_ARGS)
+	$(PYVERI) $(VERIFY_ARGS)
 endif
 
 checkpoints-inventory:

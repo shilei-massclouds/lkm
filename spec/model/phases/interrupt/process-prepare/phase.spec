@@ -345,7 +345,7 @@ object TaskCreationCore: KernelObject {
                     scheduler.state == State::Online;
                     task_creation_flow_contract_ready(TaskCreationCore);
                     task_clone_args_ready(dst_task);
-                    task_owns_flow(dst_task, flow);
+                    task_fixed_flow_is(dst_task, flow);
                 }
 
                 ensures {
@@ -381,14 +381,14 @@ object TaskCreationCore: KernelObject {
              * CopyUserProcess is the Task/TaskRef-parameterized user fork/clone
              * creation boundary. Each invocation receives a fresh destination
              * Task with an independent PID and lifecycle and binds the fresh
-             * fork-continuation UserAppFlow supplied by the caller.
+             * lifetime UserTaskFlow supplied by the caller.
              */
             Action::CopyUserProcess(
                 src_process: Task,
                 src_ref: TaskRef,
                 dst_process: Task,
                 dst_ref: TaskRef,
-                flow: UserAppFlow,
+                flow: UserTaskFlow,
                 pid_ns: RootPidNamespace,
                 scheduler: Scheduler,
                 fs: FsStruct,
@@ -412,7 +412,7 @@ object TaskCreationCore: KernelObject {
                     boundaries.state == State::Ready;
                     task_clone_args_ready(dst_process);
                     flow.state == State::Ready;
-                    task_owns_flow(dst_process, flow);
+                    task_fixed_flow_is(dst_process, flow);
                     task_flow_owner_is(flow, dst_process);
                     task_flow_owner_exclusive(flow);
                     user_clone_plain_fork_first_slice_bound(boundaries);
@@ -456,7 +456,7 @@ object TaskCreationCore: KernelObject {
                     user_child_process_tls_inherited(dst_process);
                     user_child_process_enqueued(dst_process, Cpu0Scheduler);
                     task_enqueued_on_scheduler(dst_ref, Cpu0Scheduler);
-                    task_owns_flow(dst_process, flow);
+                    task_fixed_flow_is(dst_process, flow);
                     task_flow_owner_is(flow, dst_process);
                     task_flow_owner_exclusive(flow);
                     user_task_set_contains(UserTaskSet, dst_process);

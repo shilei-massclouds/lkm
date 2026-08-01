@@ -18,12 +18,9 @@ use crate::{
 /// Entered only from `kernel_init_entry()` after its actual stack check.
 pub fn start_kernel_init_flow() -> ! {
     let ctx = crate::context::context_ref();
-    if ctx.kernel_init_flow.state() != State::Base
-        || !ctx.kernel_init_flow.initial_start_accepted()
-        || !mainline_ready(ctx)
-    {
+    if ctx.kernel_init_flow.state() != State::Online || !mainline_ready(ctx) {
         crate::phases::shutdown_on_error(
-            flow_failure(LifecycleEvent::Preset, State::Base, State::Prepared),
+            flow_failure(LifecycleEvent::Continue, State::Online, State::Online),
             "arceos_ex kernel init flow preset start failed\n",
         );
     }
@@ -34,31 +31,30 @@ pub fn preset_after_pre_smp_init() -> ! {
     require_flow_continuation(
         pre_smp_init::is_online(),
         LifecycleEvent::Preset,
-        State::Base,
-        State::Prepared,
+        State::Online,
+        State::Online,
         "arceos_ex kernel init flow after pre-smp init failed\n",
     );
     smp_bringup::preset(crate::context::context())
 }
 
 pub fn preset_after_smp_bringup() -> ! {
-    let ctx = crate::context::context();
+    let ctx = crate::context::context_ref();
     let result = if pre_smp_init::is_online() && smp_bringup::is_online() && mainline_ready(ctx) {
-        ctx.kernel_init_flow
-            .commit_preset_after_children(&ctx.kernel_init_task)
+        Ok(())
     } else {
-        flow_failure(LifecycleEvent::Preset, State::Base, State::Prepared)
+        flow_failure(LifecycleEvent::Continue, State::Online, State::Online)
     };
     crate::phases::shutdown_on_error(result, "arceos_ex kernel init flow preset failed\n");
-    runtime_core::preset(ctx)
+    runtime_core::preset(crate::context::context())
 }
 
 pub fn setup_after_runtime_core() -> ! {
     require_flow_continuation(
         runtime_core::is_online(),
         LifecycleEvent::Setup,
-        State::Prepared,
-        State::Ready,
+        State::Online,
+        State::Online,
         "arceos_ex kernel init flow after runtime core failed\n",
     );
     initcall::preset(crate::context::context())
@@ -68,8 +64,8 @@ pub fn setup_after_initcall() -> ! {
     require_flow_continuation(
         initcall::is_online(),
         LifecycleEvent::Setup,
-        State::Prepared,
-        State::Ready,
+        State::Online,
+        State::Online,
         "arceos_ex kernel init flow after initcall failed\n",
     );
     rootfs::preset(crate::context::context())
@@ -79,8 +75,8 @@ pub fn setup_after_rootfs() -> ! {
     require_flow_continuation(
         rootfs::is_online(),
         LifecycleEvent::Setup,
-        State::Prepared,
-        State::Ready,
+        State::Online,
+        State::Online,
         "arceos_ex kernel init flow after rootfs failed\n",
     );
     finalize::preset(crate::context::context())
@@ -90,32 +86,30 @@ pub fn setup_after_finalize() -> ! {
     require_flow_continuation(
         finalize::is_online(),
         LifecycleEvent::Setup,
-        State::Prepared,
-        State::Ready,
+        State::Online,
+        State::Online,
         "arceos_ex kernel init flow after finalize failed\n",
     );
     crate::phases::payload::prepare::preset()
 }
 
 pub fn setup_after_payload_prepare() -> ! {
-    let ctx = crate::context::context();
+    let ctx = crate::context::context_ref();
     let result = if setup_children_online() && mainline_ready(ctx) {
-        ctx.kernel_init_flow
-            .commit_setup_after_children(&ctx.kernel_init_task)
+        Ok(())
     } else {
-        flow_failure(LifecycleEvent::Setup, State::Prepared, State::Ready)
+        flow_failure(LifecycleEvent::Continue, State::Online, State::Online)
     };
     crate::phases::shutdown_on_error(result, "arceos_ex kernel init flow setup failed\n");
     crate::phases::payload::handoff_prepare::preset()
 }
 
 pub fn enable_after_payload_handoff_prepare() -> ! {
-    let ctx = crate::context::context();
+    let ctx = crate::context::context_ref();
     let result = if crate::phases::payload::handoff_prepare::is_online() && mainline_ready(ctx) {
-        ctx.kernel_init_flow
-            .commit_enable_after_children(&mut ctx.kernel_init_task)
+        Ok(())
     } else {
-        flow_failure(LifecycleEvent::Enable, State::Ready, State::Online)
+        flow_failure(LifecycleEvent::Continue, State::Online, State::Online)
     };
     crate::phases::shutdown_on_error(result, "arceos_ex kernel init flow enable failed\n");
     crate::phases::shutdown_on_error(

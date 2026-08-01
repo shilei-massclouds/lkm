@@ -197,6 +197,12 @@
     if (moment.kind === 'request') {
       return `请求到达：${moment.delivery} · event ${moment.event_sequence}`;
     }
+    if (moment.kind === 'yield') {
+      return `source lane 已挂起：${moment.control?.token_id} · ${moment.control?.lane || 'unbound lane'}`;
+    }
+    if (moment.kind === 'resume') {
+      return `source lane 已精确一次恢复：${moment.control?.token_id}`;
+    }
     if (moment.kind === 'terminal') return `终止：${moment.outcome}，状态保持不变。`;
     const prefix = moment.kind === 'settle' ? '目标内部处理完成' : '反馈';
     if (moment.handler.kind === 'Transition') {

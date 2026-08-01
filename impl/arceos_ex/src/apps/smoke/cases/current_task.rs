@@ -50,7 +50,7 @@ impl SmokeScenario for ResolutionScenario {
                 error.code() == CurrentTaskErrorCode::StaleTaskRef
                     && diagnostic.tp() == kernel_identity
                     && diagnostic.task_ref() == TaskRef::KERNEL_INIT
-                    && diagnostic.flow_ref() == ctx.kernel_init_task.task().active_flow()
+                    && diagnostic.flow_ref() == ctx.kernel_init_task.task().flow()
                     && Some(diagnostic.cpu_ref()) == ctx.cpu_group.boot_cpu_ref()
             }),
         );
@@ -64,7 +64,7 @@ impl SmokeScenario for ResolutionScenario {
                 error.code() == CurrentTaskErrorCode::UnknownIdentity
                     && diagnostic.tp() == unknown_identity
                     && diagnostic.task_ref() == TaskRef::KERNEL_INIT
-                    && diagnostic.flow_ref() == ctx.kernel_init_task.task().active_flow()
+                    && diagnostic.flow_ref() == ctx.kernel_init_task.task().flow()
                     && Some(diagnostic.cpu_ref()) == ctx.cpu_group.boot_cpu_ref()
             }),
         );

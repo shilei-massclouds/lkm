@@ -247,9 +247,9 @@ context ScheduleRunQueueContext: ResourceExclusiveContext {
  * Scheduler 的生命周期由 boot/sched-init/phase.spec 中的 Scheduler object
  * 建立：Preset/Setup/Enable 使其进入 Online。rest_init 三子阶段不再推进
  * Scheduler 生命周期，只消费 Cpu0Scheduler.state == Online，并在
- * BootInitScheduleHandoffPhase 只关闭首次切换的可逆预检与 BootIdleFlow
+ * BootInitScheduleHandoffPhase 只关闭首次切换的可逆预检与 BootInitFlow
  * binding；真正的首次 handoff 在 BootInitFlow 提交 Online 后，由当前 BootTask 的
- * active BootIdleFlow 异步 emits Cpu0Scheduler.Action::Schedule。Kernel.Enable 不是 sender，
+ * active BootInitFlow 异步 emits Cpu0Scheduler.Action::Schedule。Kernel.Enable 不是 sender，
  * 也不直接驱动 Scheduler 内部步骤。该 action 自身通过嵌套 within 进入
  * SchedulePreemptionContext -> ScheduleLocalInterruptContext ->
  * ScheduleRunQueueContext，分别覆盖 schedule-owned preempt-disabled guard、
@@ -293,7 +293,7 @@ context BootIdleStartupContext: Context {
 
     obj_refs {
         BootTask;
-        BootIdleFlow;
+        BootInitFlow;
         Cpu0Scheduler;
     }
 }
@@ -318,7 +318,7 @@ context BootIdleWaitLocalInterruptContext: Context {
 
     obj_refs {
         BootTask;
-        BootIdleFlow;
+        BootInitFlow;
         CurrentCPU.trap.interrupt;
     }
 }
@@ -670,14 +670,14 @@ object KthreaddReadyGate: Completion {
 }
 
 /*
- * BootIdleFlow（定义集中在 task_flow.spec）表示分叉点之后
+ * BootInitFlow（定义集中在 task_flow.spec）表示分叉点之后
  * cpu_startup_entry() 确认 boot CPU idle
  * runtime 入口。它复用 SchedInitPhase 已建立的 BootTask，并抽象 Linux
  * cpu_startup_entry() -> do_idle() -> schedule_idle() 的循环主线：boot CPU
  * 先执行 current->flags |= PF_IDLE、arch_cpu_idle_prepare() 和
  * cpuhp_online_idle(CPUHP_ONLINE)，然后进入 while (1) do_idle()；当本 CPU
  * 在 do_idle() 中观察到 need_resched 时，驱动 idle 专用调度。当前实现可先
- * 在不可逆切换前建立首个 owner/active binding；若 KernelInitTask 后续
+ * 在不可逆切换前建立固定 Task/Flow binding；若 KernelInitTask 后续
  * 切回，BootTask 才从该 continuation 继续并启动 BootIdleEntryPhase。
  */
 
@@ -718,8 +718,9 @@ object BootInitRestInitPhase: PhaseObject {
                     KernelInitTask.Transition::Preset(
                         parent_task: BootTask,
                         task_ref: KernelInitTaskRef,
-                        initial_flow: KernelInitFlow
+                        flow: KernelInitFlow
                     );
+                    KernelInitFlow.Transition::Preset;
                     TaskCreationCore.Action::CopyProcess(
                         src_task: BootTask,
                         src_task_ref: BootTaskRef,
@@ -737,8 +738,10 @@ object BootInitRestInitPhase: PhaseObject {
                         parent_task: BootTask,
                         pid_ns: RootPidNamespace,
                         scheduler: Cpu0Scheduler,
-                        initial_flow: KernelInitFlow
+                        flow: KernelInitFlow
                     );
+                    KernelInitFlow.Transition::Setup;
+                    KernelInitFlow.Transition::Enable;
                 }
 
                 within WakeUpNewTaskContext {
@@ -834,10 +837,10 @@ object BootInitRestInitPhase: PhaseObject {
                         task_wakeup_new_task_woken_hook_deferred(KernelInitTask);
                         task_state_running(KernelInitTask);
                         task_scheduler_publication_committed(KernelInitTask);
-                        task_at_most_one_flow_online(KernelInitTask);
-                        task_initial_flow_is(KernelInitTask, KernelInitFlow);
-                        task_initial_flow_binding_consistent(KernelInitTask);
-                        KernelInitFlow.state == State::Base;
+                        task_fixed_flow_binding_consistent(KernelInitTask);
+                        task_fixed_flow_is(KernelInitTask, KernelInitFlow);
+                        task_fixed_flow_binding_consistent(KernelInitTask);
+                        KernelInitFlow.state == State::Online;
                     }
                 }
 
@@ -871,8 +874,9 @@ object BootInitRestInitPhase: PhaseObject {
                     KthreaddTask.Transition::Preset(
                         parent_task: BootTask,
                         task_ref: KthreaddTaskRef,
-                        initial_flow: KthreaddFlow
+                        flow: KthreaddFlow
                     );
+                    KthreaddFlow.Transition::Preset;
                     TaskCreationCore.Action::CopyProcess(
                         src_task: BootTask,
                         src_task_ref: BootTaskRef,
@@ -890,8 +894,10 @@ object BootInitRestInitPhase: PhaseObject {
                         parent_task: BootTask,
                         pid_ns: RootPidNamespace,
                         scheduler: Cpu0Scheduler,
-                        initial_flow: KthreaddFlow
+                        flow: KthreaddFlow
                     );
+                    KthreaddFlow.Transition::Setup;
+                    KthreaddFlow.Transition::Enable;
                 }
 
                 within WakeUpKthreaddTaskContext {
@@ -984,10 +990,10 @@ object BootInitRestInitPhase: PhaseObject {
                         task_wakeup_new_task_woken_hook_deferred(KthreaddTask);
                         task_state_running(KthreaddTask);
                         task_scheduler_publication_committed(KthreaddTask);
-                        task_at_most_one_flow_online(KthreaddTask);
-                        task_initial_flow_is(KthreaddTask, KthreaddFlow);
-                        task_initial_flow_binding_consistent(KthreaddTask);
-                        KthreaddFlow.state == State::Base;
+                        task_fixed_flow_binding_consistent(KthreaddTask);
+                        task_fixed_flow_is(KthreaddTask, KthreaddFlow);
+                        task_fixed_flow_binding_consistent(KthreaddTask);
+                        KthreaddFlow.state == State::Online;
                     }
                 }
 
@@ -1071,7 +1077,7 @@ object BootInitRestInitPhase: PhaseObject {
                     kernel_init_waits_for_kthreadd_done(KernelInitTask);
                     kernel_init_task_online(KernelInitTask);
                     kernel_init_task_enqueued(KernelInitTask, Cpu0Scheduler);
-                    task_owns_flow(KernelInitTask, KernelInitFlow);
+                    task_fixed_flow_is(KernelInitTask, KernelInitFlow);
                     kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
                     kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
                     kernel_init_still_waiting_for_kthreadd_done(KernelInitTask);
@@ -1092,8 +1098,8 @@ object BootInitRestInitPhase: PhaseObject {
                     kthreadd_sched_entity_ready(KthreaddTask, Cpu0Scheduler);
                     kthreadd_task_online(KthreaddTask);
                     kthreadd_task_enqueued(KthreaddTask, Cpu0Scheduler);
-                    task_owns_flow(KthreaddTask, KthreaddFlow);
-                    KthreaddFlow.state == State::Base;
+                    task_fixed_flow_is(KthreaddTask, KthreaddFlow);
+                    KthreaddFlow.state == State::Online;
                     kthreadd_schedule_loop_deferred_until_on_cpu(
                         KthreaddTask,
                         KthreaddFlow
@@ -1155,7 +1161,7 @@ object BootInitRestInitPhase: PhaseObject {
                     kernel_init_waits_for_kthreadd_done(KernelInitTask);
                     kernel_init_task_online(KernelInitTask);
                     kernel_init_task_enqueued(KernelInitTask, Cpu0Scheduler);
-                    task_owns_flow(KernelInitTask, KernelInitFlow);
+                    task_fixed_flow_is(KernelInitTask, KernelInitFlow);
                     kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
                     kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
                     kernel_init_pf_no_setaffinity(KernelInitTask);
@@ -1174,8 +1180,8 @@ object BootInitRestInitPhase: PhaseObject {
                     kthreadd_sched_entity_ready(KthreaddTask, Cpu0Scheduler);
                     kthreadd_task_online(KthreaddTask);
                     kthreadd_task_enqueued(KthreaddTask, Cpu0Scheduler);
-                    task_owns_flow(KthreaddTask, KthreaddFlow);
-                    KthreaddFlow.state == State::Base;
+                    task_fixed_flow_is(KthreaddTask, KthreaddFlow);
+                    KthreaddFlow.state == State::Online;
                     kthreadd_schedule_loop_deferred_until_on_cpu(
                         KthreaddTask,
                         KthreaddFlow
@@ -1230,7 +1236,7 @@ object BootInitRestInitPhase: PhaseObject {
             kernel_init_still_waiting_for_kthreadd_done(KernelInitTask);
             kernel_init_task_online(KernelInitTask);
             kernel_init_task_enqueued(KernelInitTask, Cpu0Scheduler);
-            task_owns_flow(KernelInitTask, KernelInitFlow);
+            task_fixed_flow_is(KernelInitTask, KernelInitFlow);
             kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
             kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
             kernel_init_pf_no_setaffinity(KernelInitTask);
@@ -1249,8 +1255,8 @@ object BootInitRestInitPhase: PhaseObject {
             kthreadd_sched_entity_ready(KthreaddTask, Cpu0Scheduler);
             kthreadd_task_online(KthreaddTask);
             kthreadd_task_enqueued(KthreaddTask, Cpu0Scheduler);
-            task_owns_flow(KthreaddTask, KthreaddFlow);
-            KthreaddFlow.state == State::Base;
+            task_fixed_flow_is(KthreaddTask, KthreaddFlow);
+            KthreaddFlow.state == State::Online;
             kthreadd_schedule_loop_deferred_until_on_cpu(
                 KthreaddTask,
                 KthreaddFlow
@@ -1288,14 +1294,14 @@ object BootInitRestInitPhase: PhaseObject {
                     boot_init_rest_init_ready(BootInitRestInitPhase);
                     rest_init_dispatch_ready(BootInitRestInitPhase);
                     KernelInitTask.state == State::Online;
-                    task_owns_flow(KernelInitTask, KernelInitFlow);
+                    task_fixed_flow_is(KernelInitTask, KernelInitFlow);
                     kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
                     kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
                     kernel_init_pf_no_setaffinity(KernelInitTask);
                     kernel_init_pinned_to_boot_cpu(KernelInitTask, CpuGroup.cpus[0]);
                     KthreaddTask.state == State::Online;
-                    task_owns_flow(KthreaddTask, KthreaddFlow);
-                    KthreaddFlow.state == State::Base;
+                    task_fixed_flow_is(KthreaddTask, KthreaddFlow);
+                    KthreaddFlow.state == State::Online;
                     kthreadd_schedule_loop_deferred_until_on_cpu(
                         KthreaddTask,
                         KthreaddFlow
@@ -1332,7 +1338,7 @@ object BootInitRestInitPhase: PhaseObject {
 /*
  * BootInitScheduleHandoffPhase 仍由 BootTask 执行。它只表示
  * schedule_preempt_disabled() 中退出 inherited preempt-disabled guard、建立
- * BootIdleFlow owner/active binding 并完成首次 scheduler handoff 的可逆预检。
+ * BootInitFlow 固定 binding 并完成 scheduler handoff 的可逆预检。
  * 真正的 task stack switch 不属于本阶段。
  */
 object BootInitScheduleHandoffPhase: PhaseObject {
@@ -1357,24 +1363,22 @@ object BootInitScheduleHandoffPhase: PhaseObject {
 
                 drives {
                     BootIdlePreemption.Transition::EnableNoResched;
-                    BootIdleFlow.Action::AssignCpuRef(BootCPURef);
-                    BootIdleFlow.Transition::Setup;
+                    BootInitFlow.Action::AssignCpuRef(BootCPURef);
                 }
 
                 ensures {
                     boot_init_schedule_handoff_ready(BootInitScheduleHandoffPhase);
-                    BootIdleFlow.state == State::Ready;
-                    task_owns_flow(BootTask, BootIdleFlow);
-                    task_flow_owner_is(BootIdleFlow, BootTask);
-                    task_flow_owner_exclusive(BootIdleFlow);
-                    task_flow_cpu_ref_is(BootIdleFlow, BootCPURef);
-                    task_flow_cpu_ref_targets(BootIdleFlow, CpuGroup.cpus[0]);
-                    task_flow_handoff_inherits_cpu_ref(BootInitFlow, BootIdleFlow);
-                    task_active_flow_is(BootTask, BootIdleFlow);
-                    task_owns_flow(KernelInitTask, KernelInitFlow);
+                    BootInitFlow.state == State::Ready;
+                    task_fixed_flow_is(BootTask, BootInitFlow);
+                    task_flow_owner_is(BootInitFlow, BootTask);
+                    task_flow_owner_exclusive(BootInitFlow);
+                    task_flow_cpu_ref_is(BootInitFlow, BootCPURef);
+                    task_flow_cpu_ref_targets(BootInitFlow, CpuGroup.cpus[0]);
+                    task_fixed_flow_is(BootTask, BootInitFlow);
+                    task_fixed_flow_is(KernelInitTask, KernelInitFlow);
                     kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
                     kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
-                    scheduler_switch_prepare_validates_prev_live_active_flow(
+                    scheduler_switch_prepare_validates_prev_live_fixed_flow(
                         Cpu0Scheduler,
                         BootTaskRef
                     );
@@ -1412,9 +1416,9 @@ object BootInitScheduleHandoffPhase: PhaseObject {
                 ensures {
                     BootInitRestInitPhase.state == State::Online;
                     boot_init_schedule_handoff_ready(BootInitScheduleHandoffPhase);
-                    BootIdleFlow.state == State::Ready;
-                    task_active_flow_is(BootTask, BootIdleFlow);
-                    task_owns_flow(KernelInitTask, KernelInitFlow);
+                    BootInitFlow.state == State::Ready;
+                    task_fixed_flow_is(BootTask, BootInitFlow);
+                    task_fixed_flow_is(KernelInitTask, KernelInitFlow);
                     kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
                     kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
                     task_concurrency_open();
@@ -1432,9 +1436,9 @@ object BootInitScheduleHandoffPhase: PhaseObject {
         invariant {
             BootInitRestInitPhase.state == State::Online;
             boot_init_schedule_handoff_ready(BootInitScheduleHandoffPhase);
-            BootIdleFlow.state == State::Ready;
-            task_active_flow_is(BootTask, BootIdleFlow);
-            scheduler_switch_prepare_validates_prev_live_active_flow(
+            BootInitFlow.state == State::Ready;
+            task_fixed_flow_is(BootTask, BootInitFlow);
+            scheduler_switch_prepare_validates_prev_live_fixed_flow(
                 Cpu0Scheduler,
                 BootTaskRef
             );
@@ -1451,9 +1455,9 @@ object BootInitScheduleHandoffPhase: PhaseObject {
                 ensures {
                     BootInitRestInitPhase.state == State::Online;
                     boot_init_schedule_handoff_ready(BootInitScheduleHandoffPhase);
-                    BootIdleFlow.state == State::Ready;
-                    task_active_flow_is(BootTask, BootIdleFlow);
-                    task_owns_flow(KernelInitTask, KernelInitFlow);
+                    BootInitFlow.state == State::Ready;
+                    task_fixed_flow_is(BootTask, BootInitFlow);
+                    task_fixed_flow_is(KernelInitTask, KernelInitFlow);
                     kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
                     kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
                     task_concurrency_open();
@@ -1467,8 +1471,8 @@ object BootInitScheduleHandoffPhase: PhaseObject {
         invariant {
             BootInitRestInitPhase.state == State::Online;
             boot_init_schedule_handoff_ready(BootInitScheduleHandoffPhase);
-            BootIdleFlow.state == State::Ready || BootIdleFlow.state == State::Online;
-            task_active_flow_is(BootTask, BootIdleFlow);
+            BootInitFlow.state == State::Ready || BootInitFlow.state == State::Online;
+            task_fixed_flow_is(BootTask, BootInitFlow);
             task_concurrency_open();
             smp_concurrency_closed();
         }
@@ -1482,7 +1486,7 @@ object BootInitScheduleHandoffPhase: PhaseObject {
  */
 object BootIdleEntryPhase: PhaseObject {
     initial_state: State::Base;
-    parent: BootIdleFlow;
+    parent: BootInitFlow;
 
     state State::Base {
         transitions {
@@ -1491,78 +1495,78 @@ object BootIdleEntryPhase: PhaseObject {
                     BootInitScheduleHandoffPhase.state == State::Online;
                     scheduler_first_schedule_committed(Cpu0Scheduler);
                     BootIdleSetup.state == State::Ready;
-                    BootIdleFlow.state == State::Online;
-                    task_active_flow_is(BootTask, BootIdleFlow);
+                    BootInitFlow.state == State::Online;
+                    task_fixed_flow_is(BootTask, BootInitFlow);
                     CpuGroup.state == State::Ready;
                     task_concurrency_open();
                 }
 
                 within BootIdleStartupContext {
                     drives {
-                        BootIdleFlow.Action::PrepareIdleEntry;
-                        BootIdleFlow.Action::RunIdleLoop;
+                        BootInitFlow.Action::PrepareIdleEntry;
+                        BootInitFlow.Action::RunIdleLoop;
                     }
 
                     ensures {
                         task_preemption_disabled(BootTask);
-                        boot_idle_runtime_ready(BootIdleFlow, BootTask);
-                        boot_idle_cpu_startup_entry_ready(BootIdleFlow, CpuGroup.cpus[0]);
-                        boot_idle_entry_prepared(BootIdleFlow, BootTask);
-                        boot_task_idle_flow_entered(BootTask, BootIdleFlow);
+                        boot_idle_runtime_ready(BootInitFlow, BootTask);
+                        boot_idle_cpu_startup_entry_ready(BootInitFlow, CpuGroup.cpus[0]);
+                        boot_idle_entry_prepared(BootInitFlow, BootTask);
+                        boot_task_idle_flow_entered(BootTask, BootInitFlow);
                         boot_idle_task_pf_idle(BootTask);
-                        boot_idle_runtime_loop_entered(BootIdleFlow, BootTask);
-                        boot_idle_nohz_run_idle_balance_done(BootIdleFlow, CpuGroup.cpus[0]);
+                        boot_idle_runtime_loop_entered(BootInitFlow, BootTask);
+                        boot_idle_nohz_run_idle_balance_done(BootInitFlow, CpuGroup.cpus[0]);
                         boot_idle_polling_rmb_before_sleep_check(BootTask);
                         boot_idle_local_irq_disabled_for_sleep(
-                            BootIdleFlow,
+                            BootInitFlow,
                             CurrentCPU.trap.interrupt
                         );
-                        boot_idle_arch_cpu_idle_enter_done(BootIdleFlow, CpuGroup.cpus[0]);
-                        boot_idle_rcu_nocb_deferred_wakeup_flushed(BootIdleFlow);
-                        boot_idle_cpu_offline_dead_path_not_taken(BootIdleFlow, CpuGroup.cpus[0]);
-                        boot_idle_poll_or_cpuidle_path_deferred(BootIdleFlow);
-                        boot_idle_arch_cpu_idle_exit_done(BootIdleFlow, CpuGroup.cpus[0]);
+                        boot_idle_arch_cpu_idle_enter_done(BootInitFlow, CpuGroup.cpus[0]);
+                        boot_idle_rcu_nocb_deferred_wakeup_flushed(BootInitFlow);
+                        boot_idle_cpu_offline_dead_path_not_taken(BootInitFlow, CpuGroup.cpus[0]);
+                        boot_idle_poll_or_cpuidle_path_deferred(BootInitFlow);
+                        boot_idle_arch_cpu_idle_exit_done(BootInitFlow, CpuGroup.cpus[0]);
                         boot_idle_preempt_need_resched_set(BootTask);
                         boot_idle_polling_clear_mb_before_flush(BootTask);
-                        boot_idle_smp_call_function_queue_flushed(BootIdleFlow);
-                        boot_idle_loop_cycle_committed(BootIdleFlow);
-                        boot_idle_loop_continues(BootIdleFlow);
+                        boot_idle_smp_call_function_queue_flushed(BootInitFlow);
+                        boot_idle_loop_cycle_committed(BootInitFlow);
+                        boot_idle_loop_continues(BootInitFlow);
                     }
                 }
 
                 ensures {
                     boot_idle_entry_phase_ready(BootIdleEntryPhase);
-                    task_owns_flow(KernelInitTask, KernelInitFlow);
+                    task_fixed_flow_is(KernelInitTask, KernelInitFlow);
                     kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
                     kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
                     kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
                     scheduler_first_schedule_committed(Cpu0Scheduler);
-                    boot_idle_runtime_ready(BootIdleFlow, BootTask);
-                    boot_idle_cpu_startup_entry_ready(BootIdleFlow, CpuGroup.cpus[0]);
-                    boot_idle_entry_prepared(BootIdleFlow, BootTask);
-                    boot_task_idle_flow_entered(BootTask, BootIdleFlow);
+                    boot_idle_runtime_ready(BootInitFlow, BootTask);
+                    boot_idle_cpu_startup_entry_ready(BootInitFlow, CpuGroup.cpus[0]);
+                    boot_idle_entry_prepared(BootInitFlow, BootTask);
+                    boot_task_idle_flow_entered(BootTask, BootInitFlow);
                     boot_idle_task_pf_idle(BootTask);
-                    boot_idle_runtime_loop_entered(BootIdleFlow, BootTask);
-                    boot_idle_nohz_run_idle_balance_done(BootIdleFlow, CpuGroup.cpus[0]);
+                    boot_idle_runtime_loop_entered(BootInitFlow, BootTask);
+                    boot_idle_nohz_run_idle_balance_done(BootInitFlow, CpuGroup.cpus[0]);
                     boot_idle_polling_rmb_before_sleep_check(BootTask);
                     boot_idle_local_irq_disabled_for_sleep(
-                        BootIdleFlow,
+                        BootInitFlow,
                         CurrentCPU.trap.interrupt
                     );
-                    boot_idle_arch_cpu_idle_enter_done(BootIdleFlow, CpuGroup.cpus[0]);
-                    boot_idle_rcu_nocb_deferred_wakeup_flushed(BootIdleFlow);
-                    boot_idle_cpu_offline_dead_path_not_taken(BootIdleFlow, CpuGroup.cpus[0]);
-                    boot_idle_poll_or_cpuidle_path_deferred(BootIdleFlow);
-                    boot_idle_full_tick_runtime_deferred(BootIdleFlow);
-                    boot_idle_full_rcu_runtime_deferred(BootIdleFlow);
-                    boot_idle_full_irq_idle_deferred(BootIdleFlow);
-                    boot_idle_arch_cpu_idle_exit_done(BootIdleFlow, CpuGroup.cpus[0]);
+                    boot_idle_arch_cpu_idle_enter_done(BootInitFlow, CpuGroup.cpus[0]);
+                    boot_idle_rcu_nocb_deferred_wakeup_flushed(BootInitFlow);
+                    boot_idle_cpu_offline_dead_path_not_taken(BootInitFlow, CpuGroup.cpus[0]);
+                    boot_idle_poll_or_cpuidle_path_deferred(BootInitFlow);
+                    boot_idle_full_tick_runtime_deferred(BootInitFlow);
+                    boot_idle_full_rcu_runtime_deferred(BootInitFlow);
+                    boot_idle_full_irq_idle_deferred(BootInitFlow);
+                    boot_idle_arch_cpu_idle_exit_done(BootInitFlow, CpuGroup.cpus[0]);
                     boot_idle_preempt_need_resched_set(BootTask);
                     boot_idle_polling_clear_mb_before_flush(BootTask);
-                    boot_idle_smp_call_function_queue_flushed(BootIdleFlow);
-                    boot_idle_loop_cycle_committed(BootIdleFlow);
-                    boot_idle_loop_continues(BootIdleFlow);
-                    boot_cpu_idle_runtime_entered(BootIdleFlow);
+                    boot_idle_smp_call_function_queue_flushed(BootInitFlow);
+                    boot_idle_loop_cycle_committed(BootInitFlow);
+                    boot_idle_loop_continues(BootInitFlow);
+                    boot_cpu_idle_runtime_entered(BootInitFlow);
                     secondary_cpus_not_started(CpuGroup);
                     kernel_init_task_stack_switch_committed(
                         Cpu0Scheduler,
@@ -1574,31 +1578,31 @@ object BootIdleEntryPhase: PhaseObject {
                 deferred boot_idle.001 {
                     category: DeferredCategory::ModelDetail;
                     summary: "Represent the unbounded boot idle-loop continuation beyond one finite derivation cycle.";
-                    evidence { boot_idle_loop_continues(BootIdleFlow); }
+                    evidence { boot_idle_loop_continues(BootInitFlow); }
                     close_when: "The model represents repeated idle/schedule cycles without a finite unrolling assumption.";
                 }
                 deferred boot_idle.002 {
                     category: DeferredCategory::Feature;
                     summary: "Complete periodic tick behavior while the boot CPU is idle.";
-                    evidence { boot_idle_full_tick_runtime_deferred(BootIdleFlow); }
+                    evidence { boot_idle_full_tick_runtime_deferred(BootInitFlow); }
                     close_when: "Idle tick/nohz transitions and accounting tests pass.";
                 }
                 deferred boot_idle.003 {
                     category: DeferredCategory::Protocol;
                     summary: "Complete RCU idle/EQS behavior in the idle loop.";
-                    evidence { boot_idle_full_rcu_runtime_deferred(BootIdleFlow); }
+                    evidence { boot_idle_full_rcu_runtime_deferred(BootInitFlow); }
                     close_when: "RCU idle entry/exit, deferred wake and grace-period tests pass.";
                 }
                 deferred boot_idle.004 {
                     category: DeferredCategory::Feature;
                     summary: "Complete cpuidle polling and low-power state selection.";
-                    evidence { boot_idle_poll_or_cpuidle_path_deferred(BootIdleFlow); }
+                    evidence { boot_idle_poll_or_cpuidle_path_deferred(BootInitFlow); }
                     close_when: "Polling and cpuidle state selection/exit tests pass.";
                 }
                 deferred boot_idle.005 {
                     category: DeferredCategory::Protocol;
                     summary: "Complete interrupt entry and exit behavior while idle.";
-                    evidence { boot_idle_full_irq_idle_deferred(BootIdleFlow); }
+                    evidence { boot_idle_full_irq_idle_deferred(BootInitFlow); }
                     close_when: "Idle interrupt wake, nested entry and resume tests pass.";
                 }
 
@@ -1614,22 +1618,22 @@ object BootIdleEntryPhase: PhaseObject {
             on Transition::Setup -> State::Ready {
                 ensures {
                     BootInitScheduleHandoffPhase.state == State::Online;
-                    BootIdleFlow.state == State::Online;
+                    BootInitFlow.state == State::Online;
                     boot_idle_entry_phase_ready(BootIdleEntryPhase);
-                    boot_idle_runtime_ready(BootIdleFlow, BootTask);
-                    boot_idle_cpu_startup_entry_ready(BootIdleFlow, CpuGroup.cpus[0]);
-                    boot_idle_entry_prepared(BootIdleFlow, BootTask);
-                    boot_task_idle_flow_entered(BootTask, BootIdleFlow);
-                    boot_idle_runtime_loop_entered(BootIdleFlow, BootTask);
-                    boot_idle_nohz_run_idle_balance_done(BootIdleFlow, CpuGroup.cpus[0]);
+                    boot_idle_runtime_ready(BootInitFlow, BootTask);
+                    boot_idle_cpu_startup_entry_ready(BootInitFlow, CpuGroup.cpus[0]);
+                    boot_idle_entry_prepared(BootInitFlow, BootTask);
+                    boot_task_idle_flow_entered(BootTask, BootInitFlow);
+                    boot_idle_runtime_loop_entered(BootInitFlow, BootTask);
+                    boot_idle_nohz_run_idle_balance_done(BootInitFlow, CpuGroup.cpus[0]);
                     boot_idle_local_irq_disabled_for_sleep(
-                        BootIdleFlow,
+                        BootInitFlow,
                         CurrentCPU.trap.interrupt
                     );
                     boot_idle_preempt_need_resched_set(BootTask);
-                    boot_idle_smp_call_function_queue_flushed(BootIdleFlow);
-                    boot_idle_loop_continues(BootIdleFlow);
-                    task_owns_flow(KernelInitTask, KernelInitFlow);
+                    boot_idle_smp_call_function_queue_flushed(BootInitFlow);
+                    boot_idle_loop_continues(BootInitFlow);
+                    task_fixed_flow_is(KernelInitTask, KernelInitFlow);
                     kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
                     kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
                     kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
@@ -1653,18 +1657,18 @@ object BootIdleEntryPhase: PhaseObject {
     state State::Ready {
         invariant {
             BootInitScheduleHandoffPhase.state == State::Online;
-            BootIdleFlow.state == State::Online;
+            BootInitFlow.state == State::Online;
             boot_idle_entry_phase_ready(BootIdleEntryPhase);
-            boot_idle_runtime_ready(BootIdleFlow, BootTask);
-            boot_idle_cpu_startup_entry_ready(BootIdleFlow, CpuGroup.cpus[0]);
-            boot_idle_entry_prepared(BootIdleFlow, BootTask);
-            boot_task_idle_flow_entered(BootTask, BootIdleFlow);
-            boot_idle_runtime_loop_entered(BootIdleFlow, BootTask);
-            boot_idle_nohz_run_idle_balance_done(BootIdleFlow, CpuGroup.cpus[0]);
-            boot_idle_local_irq_disabled_for_sleep(BootIdleFlow, CurrentCPU.trap.interrupt);
+            boot_idle_runtime_ready(BootInitFlow, BootTask);
+            boot_idle_cpu_startup_entry_ready(BootInitFlow, CpuGroup.cpus[0]);
+            boot_idle_entry_prepared(BootInitFlow, BootTask);
+            boot_task_idle_flow_entered(BootTask, BootInitFlow);
+            boot_idle_runtime_loop_entered(BootInitFlow, BootTask);
+            boot_idle_nohz_run_idle_balance_done(BootInitFlow, CpuGroup.cpus[0]);
+            boot_idle_local_irq_disabled_for_sleep(BootInitFlow, CurrentCPU.trap.interrupt);
             boot_idle_preempt_need_resched_set(BootTask);
-            boot_idle_smp_call_function_queue_flushed(BootIdleFlow);
-            boot_idle_loop_continues(BootIdleFlow);
+            boot_idle_smp_call_function_queue_flushed(BootInitFlow);
+            boot_idle_loop_continues(BootInitFlow);
             kernel_init_task_stack_switch_committed(
                 Cpu0Scheduler,
                 BootTask,
@@ -1678,22 +1682,22 @@ object BootIdleEntryPhase: PhaseObject {
             on Transition::Enable -> State::Online {
                 ensures {
                     BootInitScheduleHandoffPhase.state == State::Online;
-                    BootIdleFlow.state == State::Online;
+                    BootInitFlow.state == State::Online;
                     boot_idle_entry_phase_ready(BootIdleEntryPhase);
-                    boot_idle_runtime_ready(BootIdleFlow, BootTask);
-                    boot_idle_cpu_startup_entry_ready(BootIdleFlow, CpuGroup.cpus[0]);
-                    boot_idle_entry_prepared(BootIdleFlow, BootTask);
-                    boot_task_idle_flow_entered(BootTask, BootIdleFlow);
-                    boot_idle_runtime_loop_entered(BootIdleFlow, BootTask);
-                    boot_idle_nohz_run_idle_balance_done(BootIdleFlow, CpuGroup.cpus[0]);
+                    boot_idle_runtime_ready(BootInitFlow, BootTask);
+                    boot_idle_cpu_startup_entry_ready(BootInitFlow, CpuGroup.cpus[0]);
+                    boot_idle_entry_prepared(BootInitFlow, BootTask);
+                    boot_task_idle_flow_entered(BootTask, BootInitFlow);
+                    boot_idle_runtime_loop_entered(BootInitFlow, BootTask);
+                    boot_idle_nohz_run_idle_balance_done(BootInitFlow, CpuGroup.cpus[0]);
                     boot_idle_local_irq_disabled_for_sleep(
-                        BootIdleFlow,
+                        BootInitFlow,
                         CurrentCPU.trap.interrupt
                     );
                     boot_idle_preempt_need_resched_set(BootTask);
-                    boot_idle_smp_call_function_queue_flushed(BootIdleFlow);
-                    boot_idle_loop_continues(BootIdleFlow);
-                    task_owns_flow(KernelInitTask, KernelInitFlow);
+                    boot_idle_smp_call_function_queue_flushed(BootInitFlow);
+                    boot_idle_loop_continues(BootInitFlow);
+                    task_fixed_flow_is(KernelInitTask, KernelInitFlow);
                     kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
                     kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
                     kernel_init_dispatched_to_pre_smp_init(KernelInitTask);

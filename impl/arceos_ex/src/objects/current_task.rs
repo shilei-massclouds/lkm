@@ -125,15 +125,12 @@ pub(crate) fn validate_candidate(
             diagnostic,
         ));
     }
-    let active = candidate.task.active_flow().same_identity(flow_ref) && candidate.flow.active();
-    let initial_startup_pending = !candidate.task.active_flow().is_valid()
-        && candidate.task.initial_flow().same_identity(flow_ref)
+    let fixed_flow_matches = candidate.task.flow().same_identity(flow_ref)
         && matches!(
             candidate.flow.state(),
-            State::Base | State::Prepared | State::Ready
-        )
-        && !candidate.flow.active();
-    if !active && !initial_startup_pending {
+            State::Base | State::Prepared | State::Ready | State::Online
+        );
+    if !fixed_flow_matches {
         return Err(CurrentTaskError::new(
             CurrentTaskErrorCode::MissingActiveFlow,
             diagnostic,

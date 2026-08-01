@@ -644,7 +644,7 @@ predicate tty_n_tty_blocking_read_deferred<T>(buffer: T) -> bool;
 
 context UserModeTrapReturnContext: Context {
     /*
-     * UserAppFlow.Enable is the final architecture trap-return handoff. The
+     * Runtime application commit is the final architecture trap-return handoff. The
      * kernel binds the user-trap entry context and prepared return context,
      * switches to the user execution context and does not return. The user
      * application beyond this boundary is intentionally opaque. Register
@@ -652,7 +652,7 @@ context UserModeTrapReturnContext: Context {
      */
     guard {
         entered_by {
-            UserAppFlow.Transition::Enable;
+            KernelInitFlow.Action::CommitPayloadHandoff;
         }
 
         exited_by {
@@ -2782,8 +2782,7 @@ object SyscallTable: ResourceObject {
             on Action::Clone -> TaskRef {
                 /*
                  * Linux clone/fork declares a fresh Task identity, TaskRef and
-                 * fork-continuation UserAppFlow on every execution. No Task,
-                 * Ref or Flow identity is recycled for a later child.
+                 * lifetime UserTaskFlow and private UserAppRuntime on every execution.
                  *
                  * BusyBox command sequencing and other application behavior
                  * are historical test evidence only. Clone ABI validation,
@@ -2808,16 +2807,15 @@ object SyscallTable: ResourceObject {
                 drives {
                     declare child of Task;
                     declare child_ref of TaskRef;
-                    declare fork_flow of UserAppFlow;
+                    declare child_flow of UserTaskFlow;
+                    declare child_runtime of UserAppRuntime;
                     child_ref.Action::Bind(task: child);
-                    fork_flow.Action::Bind(
-                        owner_task: child,
-                        entry_source: UserAppFlowEntrySource::ForkContinuation
-                    );
+                    child_flow.Action::Bind(owner_task: child, runtime: child_runtime);
+                    child_runtime.Action::Bind(flow: child_flow);
                     child.Transition::Preset(
                         parent_task: KernelInitTask,
                         task_ref: child_ref,
-                        initial_flow: fork_flow
+                        flow: child_flow
                     );
                     UserTaskSet.Action::Insert(task: child, task_ref: child_ref);
                     TaskCreationCore.Action::CopyUserProcess(
@@ -2825,7 +2823,7 @@ object SyscallTable: ResourceObject {
                         src_ref: KernelInitTaskRef,
                         dst_process: child,
                         dst_ref: child_ref,
-                        flow: fork_flow,
+                        flow: child_flow,
                         pid_ns: RootPidNamespace,
                         scheduler: Cpu0Scheduler,
                         fs: FsStruct,
@@ -2839,8 +2837,14 @@ object SyscallTable: ResourceObject {
                         parent_task: KernelInitTask,
                         pid_ns: RootPidNamespace,
                         scheduler: Cpu0Scheduler,
-                        initial_flow: fork_flow
+                        flow: child_flow
                     );
+                    child_flow.Transition::Preset;
+                    child_flow.Transition::Setup;
+                    child_runtime.Transition::Preset;
+                    child_runtime.Transition::Setup;
+                    child_runtime.Transition::Enable;
+                    child_flow.Transition::Enable;
                     child.Transition::Enable;
                 }
 
@@ -2868,16 +2872,19 @@ object SyscallTable: ResourceObject {
                     user_task_set_ref_targets_member(UserTaskSet, child_ref, child);
                     user_task_instance_fresh(child);
                     user_task_pid_and_lifecycle_independent(child);
-                    task_owns_flow(child, fork_flow);
-                    task_flow_owner_is(fork_flow, child);
-                    task_flow_parent_is(fork_flow, child);
-                    task_flow_owner_exclusive(fork_flow);
-                    task_initial_flow_is(child, fork_flow);
-                    task_initial_flow_binding_complete(child);
-                    task_initial_flow_binding_consistent(child);
-                    task_at_most_one_flow_online(child);
+                    task_fixed_flow_is(child, child_flow);
+                    task_flow_owner_is(child_flow, child);
+                    task_flow_parent_is(child_flow, child);
+                    task_flow_owner_exclusive(child_flow);
+                    user_app_runtime_owned_by_flow(child_runtime, child_flow);
+                    user_app_runtime_unique_for_flow(child_runtime, child_flow);
+                    user_app_runtime_not_shared(child_runtime);
+                    task_fixed_flow_binding_complete(child);
+                    task_fixed_flow_binding_consistent(child);
+                    task_fixed_flow_binding_consistent(child);
                     child.state == State::Online;
-                    fork_flow.state == State::Base;
+                    child_flow.state == State::Online;
+                    child_runtime.state == State::Online;
                     syscall_clone_returns_task_ref(self, child_ref, child);
                     syscall_table_clone_observed(self);
                 }
@@ -2887,24 +2894,21 @@ object SyscallTable: ResourceObject {
                 }
             }
 
-            on Action::Execve(task: Task, old_flow: UserAppFlow) {
-                /*
-                 * A successful exec keeps the current Task identity and creates
-                 * a fresh UserAppFlow instance. It stages the new Flow, disables
-                 * the caller-supplied active Flow, commits the active binding
-                 * handoff, enables the new Flow and then cleans up the replaced
-                 * Flow. ELF, address-space, stack, trap-frame,
-                 * files and rollback behavior remain kernel-object contracts.
-                 * Executable-specific application behavior is opaque.
-                 */
+            on Action::Execve(
+                task: Task,
+                flow: UserTaskFlow,
+                runtime: UserAppRuntime
+            ) {
                 depends_on {
                     CurrentCPU.trap.exception.syscall.state == State::Online;
                     UserBootPayload.state == State::Online;
-                    task.state == State::Online;
-                    old_flow.state == State::Online;
+                    task.state == State::OnCpu;
+                    flow.state == State::Online;
+                    runtime.state == State::Online;
                     user_task_set_contains(UserTaskSet, task);
-                    task_owns_flow(task, old_flow);
-                    task_active_flow_is(task, old_flow);
+                    task_fixed_flow_is(task, flow);
+                    user_app_runtime_owned_by_flow(runtime, flow);
+                    user_app_runtime_unique_for_flow(runtime, flow);
                     UserAddressSpace.state == State::Online;
                     UserTrapFrame.state == State::Ready;
                     FilesStruct.state == State::Ready;
@@ -2913,12 +2917,7 @@ object SyscallTable: ResourceObject {
                 }
 
                 drives {
-                    declare exec_flow of UserAppFlow;
-                    exec_flow.Action::Bind(
-                        owner_task: task,
-                        entry_source: UserAppFlowEntrySource::ChildExec
-                    );
-                    exec_flow.Transition::Preset;
+                    declare next_application of ApplicationInstance;
                     UserBootPayload.Action::TryDefaultInitSequence;
                     ElfObject.Transition::Preset;
                     ElfObject.Transition::Setup;
@@ -2926,14 +2925,7 @@ object SyscallTable: ResourceObject {
                     UserAddressSpace.Transition::Setup;
                     UserAddressSpace.Transition::Enable;
                     UserTrapFrame.Transition::Setup;
-                    old_flow.Transition::Disable;
-                    task.Action::CommitFlowHandoff(
-                        from_flow: old_flow,
-                        to_flow: exec_flow
-                    );
-                    exec_flow.Transition::Enable;
-                    old_flow.Transition::Cleanup;
-                    task.Action::RecordRetiredFlowDestroyed(flow: old_flow);
+                    runtime.Action::ReplaceApplication(next: next_application);
                 }
 
                 ensures {
@@ -2958,20 +2950,12 @@ object SyscallTable: ResourceObject {
                     syscall_execve_old_user_backing_reclaimed_first_slice(self);
                     syscall_execve_old_mm_reclaim_deferred(self);
                     syscall_execve_full_linux_model_deferred(self);
-                    exec_flow.state == State::Online;
-                    old_flow.state == State::Destroyed;
-                    task_owns_flow(task, old_flow);
-                    task_owns_flow(task, exec_flow);
-                    task_flow_owner_is(exec_flow, task);
-                    task_flow_owner_exclusive(exec_flow);
-                    task_flow_handoff(task, old_flow, exec_flow);
-                    task_flow_handoff_old_inactive(task, old_flow);
-                    task_flow_handoff_new_active(task, exec_flow);
-                    task_active_flow_is(task, exec_flow);
-                    task_at_most_one_flow_online(task);
-                    task_flow_instances_distinct(old_flow, exec_flow);
-                    task_retired_flow_destroyed(task, old_flow);
-                    task_all_prior_owned_flows_destroyed(task);
+                    task_fixed_flow_is(task, flow);
+                    task_flow_owner_is(flow, task);
+                    user_app_runtime_identity_preserved(runtime);
+                    user_app_runtime_application_replaced(runtime, next_application);
+                    user_app_runtime_exec_committed(runtime, next_application);
+                    task_fixed_flow_binding_consistent(task);
                     syscall_table_execve_observed(self);
                 }
             }
@@ -2982,7 +2966,7 @@ object SyscallTable: ResourceObject {
                  * their exit/reap records. The explicit Task parameter preserves the
                  * existing Linux argument, status-copyout and wake/sleep
                  * contracts; it does not encode a reusable child slot or make
-                 * application control flow part of UserAppFlow.
+                 * application control flow part of the lifetime TaskFlow.
                  */
                 depends_on {
                     CurrentCPU.trap.exception.syscall.state == State::Online;
@@ -3025,24 +3009,19 @@ object SyscallTable: ResourceObject {
                 }
             }
 
-            on Action::Exit(current_flow: UserAppFlow) {
+            on Action::Exit(current_flow: TaskFlow) {
                 depends_on {
                     CurrentCPU.trap.exception.syscall.state == State::Online;
-                    KernelInitTask.state == State::Online;
-                    KernelInitFlow.state == State::Destroyed;
+                    KernelInitTask.state == State::OnCpu;
+                    KernelInitFlow.state == State::Online;
                     current_flow.state == State::Online;
-                    task_owns_flow(KernelInitTask, current_flow);
-                    task_active_flow_is(KernelInitTask, current_flow);
-                    task_all_prior_owned_flows_destroyed(KernelInitTask);
+                    task_fixed_flow_is(KernelInitTask, current_flow);
                 }
 
                 drives {
                     current_flow.Transition::Disable;
-                    current_flow.Transition::Cleanup;
-                    KernelInitTask.Action::ConfirmOwnedFlowSetDestroyed(
-                        current_flow: current_flow
-                    );
                     KernelInitTask.Transition::Disable;
+                    current_flow.Transition::Cleanup;
                     KernelInitTask.Transition::Cleanup;
                 }
 
@@ -3050,9 +3029,7 @@ object SyscallTable: ResourceObject {
                     syscall_exit_records_status(self);
                     current_flow.state == State::Destroyed;
                     KernelInitTask.state == State::Destroyed;
-                    task_flow_not_active_after_cleanup(current_flow);
-                    task_all_owned_flows_destroyed(KernelInitTask);
-                    task_no_owned_flow_online(KernelInitTask);
+                    task_fixed_flow_destroyed(KernelInitTask);
                     task_destroyed_only_after_flow_cleanup(KernelInitTask);
                     syscall_table_exit_observed(self);
                 }
@@ -3079,24 +3056,19 @@ object SyscallTable: ResourceObject {
                 }
             }
 
-            on Action::ExitGroup(child: Task, current_flow: UserAppFlow) {
+            on Action::ExitGroup(child: Task, current_flow: TaskFlow) {
                 depends_on {
                     CurrentCPU.trap.exception.syscall.state == State::Online;
-                    child.state == State::Online;
+                    child.state == State::OnCpu;
                     current_flow.state == State::Online;
                     user_task_set_contains(UserTaskSet, child);
-                    task_owns_flow(child, current_flow);
-                    task_active_flow_is(child, current_flow);
-                    task_all_prior_owned_flows_destroyed(child);
+                    task_fixed_flow_is(child, current_flow);
                 }
 
                 drives {
                     current_flow.Transition::Disable;
-                    current_flow.Transition::Cleanup;
-                    child.Action::ConfirmOwnedFlowSetDestroyed(
-                        current_flow: current_flow
-                    );
                     child.Transition::Disable;
+                    current_flow.Transition::Cleanup;
                     child.Transition::Cleanup;
                 }
 
@@ -3116,9 +3088,7 @@ object SyscallTable: ResourceObject {
                     user_child_process_completed_record_archived(child);
                     current_flow.state == State::Destroyed;
                     child.state == State::Destroyed;
-                    task_flow_not_active_after_cleanup(current_flow);
-                    task_all_owned_flows_destroyed(child);
-                    task_no_owned_flow_online(child);
+                    task_fixed_flow_destroyed(child);
                     task_destroyed_only_after_flow_cleanup(child);
                     syscall_table_exit_observed(self);
                 }
@@ -3130,8 +3100,8 @@ object SyscallTable: ResourceObject {
 
 /*
  * PID 1 has no persona wrapper. Its user-mode resources and role remain
- * attached directly to KernelInitTask, while a declared UserAppFlow owns each
- * exec lifecycle and the application body remains a black box.
+ * attached directly to KernelInitTask and its stable Flow-owned Runtime; exec
+ * replaces only the Runtime's ApplicationInstance.
  */
 
 object UserBootPayload: ResourceObject {
@@ -3217,15 +3187,12 @@ object UserBootPayload: ResourceObject {
 
         actions {
             /*
-             * Reversible precommit preparation. KernelInitFlow is still
-             * Ready and active resources are not replaced here. The fresh
-             * PID 1 UserAppFlow reaches Ready only after its image, address
-             * space, trap frame, syscall context and structural owner binding
-             * have all been prepared.
+             * Reversible precommit preparation. The lifetime Flow and Runtime
+             * remain Online; the ApplicationInstance is not replaced here.
              */
             on Action::PrepareHandoff {
                 depends_on {
-                    KernelInitFlow.state == State::Ready;
+                    KernelInitFlow.state == State::Online;
                     KernelInitTask.state == State::OnCpu;
                     CurrentCPU.trap.exception.state == State::Ready;
                     CurrentCPU.trap.exception.syscall.state == State::Prepared;
@@ -3253,11 +3220,6 @@ object UserBootPayload: ResourceObject {
                     FilesStruct.Action::ClearStdinReadyData;
                     FilesStruct.Action::PrepareDefaultStdinReadyData;
                     FilesStruct.Action::EnableStdinBlockingWait;
-                    Pid1UserAppFlow.Action::Bind(
-                        owner_task: KernelInitTask,
-                        entry_source: UserAppFlowEntrySource::Pid1Exec
-                    );
-                    Pid1UserAppFlow.Transition::Preset;
                 }
 
                 ensures {
@@ -3268,9 +3230,9 @@ object UserBootPayload: ResourceObject {
                     CurrentCPU.trap.exception.syscall.state == State::Online;
                     CurrentCPU.trap.exception.state == State::Online;
                     CurrentCPU.trap.state == State::Online;
-                    Pid1UserAppFlow.state == State::Ready;
-                    user_app_flow_instance_fresh(Pid1UserAppFlow);
-                    task_active_flow_is(KernelInitTask, KernelInitFlow);
+                    KernelInitUserAppRuntime.state == State::Online;
+                    application_instance_fresh(KernelInitApplicationInstance);
+                    task_fixed_flow_is(KernelInitTask, KernelInitFlow);
                     kernel_init_flow_survives_payload_precommit(KernelInitFlow);
                 }
             }
@@ -3396,19 +3358,12 @@ object UserBootPayload: ResourceObject {
                     CurrentCPU.trap.state == State::Online;
                     ExecSyncBoundaries.state == State::Ready;
                     KernelInitFlow.state == State::Online;
-                    Pid1UserAppFlow.state == State::Ready;
+                    KernelInitUserAppRuntime.state == State::Online;
                 }
 
                 drives {
-                    KernelInitFlow.Transition::Disable;
-                    KernelInitTask.Action::CommitFlowHandoff(
-                        from_flow: KernelInitFlow,
-                        to_flow: Pid1UserAppFlow
-                    );
-                    Pid1UserAppFlow.Transition::Enable;
-                    KernelInitFlow.Transition::Cleanup;
-                    KernelInitTask.Action::RecordRetiredFlowDestroyed(
-                        flow: KernelInitFlow
+                    KernelInitUserAppRuntime.Action::ReplaceApplication(
+                        next: KernelInitApplicationInstance
                     );
                 }
 
@@ -3423,21 +3378,21 @@ object UserBootPayload: ResourceObject {
                         KernelInitTask,
                         TaskExecutionAuthority::Live
                     );
-                    Pid1UserAppFlow.state == State::Online;
-                    KernelInitFlow.state == State::Destroyed;
-                    task_owns_flow(KernelInitTask, KernelInitFlow);
-                    task_owns_flow(KernelInitTask, Pid1UserAppFlow);
-                    task_flow_owner_is(Pid1UserAppFlow, KernelInitTask);
-                    task_flow_owner_exclusive(Pid1UserAppFlow);
-                    task_flow_handoff(KernelInitTask, KernelInitFlow, Pid1UserAppFlow);
-                    task_flow_handoff_old_inactive(KernelInitTask, KernelInitFlow);
-                    task_flow_handoff_new_active(KernelInitTask, Pid1UserAppFlow);
-                    task_active_flow_is(KernelInitTask, Pid1UserAppFlow);
-                    task_at_most_one_flow_online(KernelInitTask);
-                    task_flow_instances_distinct(KernelInitFlow, Pid1UserAppFlow);
-                    task_retired_flow_destroyed(KernelInitTask, KernelInitFlow);
-                    task_all_prior_owned_flows_destroyed(KernelInitTask);
-                    kernel_init_task_execve_to_pid1_user_app(KernelInitTask, Pid1UserAppFlow);
+                    KernelInitUserAppRuntime.state == State::Online;
+                    KernelInitFlow.state == State::Online;
+                    task_fixed_flow_is(KernelInitTask, KernelInitFlow);
+                    task_flow_owner_is(KernelInitFlow, KernelInitTask);
+                    user_app_runtime_owned_by_flow(KernelInitUserAppRuntime, KernelInitFlow);
+                    user_app_runtime_identity_preserved(KernelInitUserAppRuntime);
+                    user_app_runtime_application_replaced(
+                        KernelInitUserAppRuntime,
+                        KernelInitApplicationInstance
+                    );
+                    task_fixed_flow_binding_consistent(KernelInitTask);
+                    kernel_init_task_execve_to_pid1_user_app(
+                        KernelInitTask,
+                        KernelInitApplicationInstance
+                    );
                     kernel_init_task_pid1_identity_preserved(KernelInitTask);
                     kernel_init_task_user_app_flow_online(KernelInitTask);
                     kernel_init_task_pid1_exec_flow_handoff_complete(KernelInitTask);
@@ -3475,11 +3430,11 @@ object UserBootPayload: ResourceObject {
                 KernelInitTask,
                 TaskExecutionAuthority::Live
             );
-            KernelInitFlow.state == State::Destroyed;
-            task_owns_flow(KernelInitTask, KernelInitFlow);
-            task_at_most_one_flow_online(KernelInitTask);
-            task_retired_flow_destroyed(KernelInitTask, KernelInitFlow);
-            task_all_prior_owned_flows_destroyed(KernelInitTask);
+            KernelInitFlow.state == State::Online;
+            task_fixed_flow_is(KernelInitTask, KernelInitFlow);
+            task_fixed_flow_binding_consistent(KernelInitTask);
+            KernelInitUserAppRuntime.state == State::Online;
+            user_app_runtime_owned_by_flow(KernelInitUserAppRuntime, KernelInitFlow);
             kernel_init_task_pid1_identity_preserved(KernelInitTask);
             kernel_init_task_user_app_flow_online(KernelInitTask);
             kernel_init_task_pid1_exec_flow_handoff_complete(KernelInitTask);

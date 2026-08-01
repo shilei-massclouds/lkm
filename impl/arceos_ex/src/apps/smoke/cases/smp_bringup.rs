@@ -31,8 +31,8 @@ pub fn run() -> SmokeResult {
         printk::write_str("secondary idle task facts invalid\n");
         return SmokeResult::Failed;
     }
-    if !reserved_ap_flow_action_rejected() {
-        printk::write_str("reserved AP authority accepted Flow action\n");
+    if !reserved_ap_fixed_flow_is_online() {
+        printk::write_str("reserved AP fixed Flow is not Online\n");
         return SmokeResult::Failed;
     }
 
@@ -175,10 +175,17 @@ pub fn run() -> SmokeResult {
     SmokeResult::Passed
 }
 
-fn reserved_ap_flow_action_rejected() -> bool {
+fn reserved_ap_fixed_flow_is_online() -> bool {
     let task_ref = TaskRef::ap_idle(1);
     let flow_ref = TaskFlowRef::ap_idle(1);
     let task = Task::new_ap_idle_reserved(task_ref, flow_ref, 1);
     let mut flow = TaskFlow::new_static_bound(flow_ref, task_ref);
-    flow.preset(&task, None).is_err()
+    flow.bind_cpu_ref(crate::objects::cpu::CpuRef::new(1))
+        && flow.preset(&task, None).is_ok()
+        && flow.setup(&task, None).is_ok()
+        && flow.enable(&task, None).is_ok()
+        && task.state() == State::OnCpu
+        && task.flow() == flow.flow_ref()
+        && flow.owner() == task.task_ref()
+        && flow.state() == State::Online
 }

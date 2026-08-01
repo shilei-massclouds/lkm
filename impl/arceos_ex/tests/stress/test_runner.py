@@ -323,7 +323,7 @@ class EventAndDiffTests(unittest.TestCase):
             "checkpoint: PayloadHandoffPreparePhase.Online task=KernelInitTask\n"
             "checkpoint: Kernel.Online task=KernelInitTask\n"
             "checkpoint: KernelInitFlow.PayloadHandoffCommitted task=KernelInitTask\n"
-            "checkpoint: UserAppFlow.EnterUserMode task=KernelInitTask\n"
+            "checkpoint: UserAppRuntime.EnterUserMode task=KernelInitTask\n"
         )
         names = [event["name"] for event in events]
         ordered = [
@@ -334,7 +334,7 @@ class EventAndDiffTests(unittest.TestCase):
             "PayloadHandoffPreparePhase.Online",
             "Kernel.Online",
             "KernelInitFlow.PayloadHandoffCommitted",
-            "UserAppFlow.EnterUserMode",
+            "UserAppRuntime.EnterUserMode",
         ]
         self.assertEqual([name for name in names if name in ordered], ordered)
         self.assertEqual(names.count("Kernel.Online"), 1)

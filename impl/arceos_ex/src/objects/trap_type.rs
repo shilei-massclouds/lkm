@@ -1114,7 +1114,6 @@ struct TrapEntryAuthority {
     task_ref: TaskRef,
     task_flow_ref: TaskFlowRef,
     cpu_ref: CpuRef,
-    exec_commit_count: usize,
     generation: u32,
     trap_state: State,
     interrupt_state: State,
@@ -1194,7 +1193,6 @@ fn capture_entry_authority(frame: &TrapFrame, record: &TrapExecutionRecord) -> T
         task_ref,
         task_flow_ref,
         cpu_ref,
-        exec_commit_count: ctx.exec_transaction.commit_count(),
         generation: trap.allocate_occurrence_generation(),
         trap_state: trap.state(),
         interrupt_state: trap.interrupt().state(),
@@ -1470,16 +1468,7 @@ fn capture_return_cpu(
         && ctx.scheduler().switch_to_exit_next_ref() == task_ref
         && ctx.scheduler().switch_to_exit_current_ref() == task_ref
         && ctx.scheduler().switch_to_exit_count() != 0;
-    let committed_exec_flow_handoff = migration_allowed
-        && task_ref.same_identity(entry.task_ref)
-        && !task_flow_ref.same_identity(entry.task_flow_ref)
-        && ctx.committed_exec_flow_handoff_matches(
-            task_ref,
-            entry.task_flow_ref,
-            task_flow_ref,
-            entry.exec_commit_count,
-        );
-    if (!same_continuation && !committed_terminal_switch && !committed_exec_flow_handoff)
+    if (!same_continuation && !committed_terminal_switch)
         || !return_cpu.is_valid()
         || (!migration_allowed && return_cpu != entry.cpu_ref)
     {

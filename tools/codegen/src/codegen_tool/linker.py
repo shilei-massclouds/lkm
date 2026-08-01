@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-
-from common.model_types import ObjectModel
-
+from typing import Any
 
 @dataclass(frozen=True)
 class LinkerProfile:
@@ -55,41 +53,72 @@ _REQUIRED_LDS_INVARIANTS = {
 }
 
 
-def generate_riscv64_linker_script(model: ObjectModel, profile: LinkerProfile) -> str:
+def generate_riscv64_linker_script(model: dict[str, Any], profile: LinkerProfile) -> str:
     """Generate the current arceos_ex RISC-V64 linker script."""
 
     _validate_model_contract(model)
     return _render(profile)
 
 
-def _validate_model_contract(model: ObjectModel) -> None:
-    config = model.objects.get("Config")
-    if config is None:
+def _validate_model_contract(model: dict[str, Any]) -> None:
+    _validate_tools2_model_contract(model)
+
+
+def _validate_tools2_model_contract(envelope: dict[str, Any]) -> None:
+    if envelope.get("schema") != "lkm.spec.model" or envelope.get("version") != 10:
+        raise ValueError("linker codegen requires tools2 model protocol v10")
+    if envelope.get("producer") != "tools2":
+        raise ValueError("linker codegen requires producer=tools2")
+    model = envelope.get("model")
+    if not isinstance(model, dict):
+        raise ValueError("tools2 model envelope is missing model")
+    systems = model.get("systems")
+    if not isinstance(systems, dict):
+        raise ValueError("tools2 model is missing systems")
+
+    config = systems.get("Config")
+    if not isinstance(config, dict):
         raise ValueError("model does not define Config")
-    missing_config = sorted(_REQUIRED_CONFIG_ATTRS.difference(config.attrs))
+    config_attrs = _tools2_attr_names(config)
+    missing_config = sorted(_REQUIRED_CONFIG_ATTRS.difference(config_attrs))
     if missing_config:
         raise ValueError(f"Config is missing attrs: {', '.join(missing_config)}")
 
-    lds = model.objects.get("Lds")
-    if lds is None:
+    lds = systems.get("Lds")
+    if not isinstance(lds, dict):
         raise ValueError("model does not define Lds")
-    missing_lds = sorted(_REQUIRED_LDS_ATTRS.difference(lds.attrs))
+    lds_attrs = _tools2_attr_names(lds)
+    missing_lds = sorted(_REQUIRED_LDS_ATTRS.difference(lds_attrs))
     if missing_lds:
         raise ValueError(f"Lds is missing attrs: {', '.join(missing_lds)}")
 
-    online = lds.states.get("Online")
-    if online is None:
+    states = lds.get("states")
+    online = states.get("Online") if isinstance(states, dict) else None
+    if not isinstance(online, dict):
         raise ValueError("Lds does not define State::Online")
-    invariants = {
-        entry
-        for block in online.decl.invariants
-        for entry in block.entries
-    }
-    missing_invariants = sorted(_REQUIRED_LDS_INVARIANTS.difference(invariants))
+    invariants = online.get("invariant")
+    invariant_text = {
+        item.get("text")
+        for item in invariants
+        if isinstance(invariants, list) and isinstance(item, dict)
+    } if isinstance(invariants, list) else set()
+    missing_invariants = sorted(_REQUIRED_LDS_INVARIANTS.difference(invariant_text))
     if missing_invariants:
         raise ValueError(
             "Lds.Online is missing invariants: " + ", ".join(missing_invariants)
         )
+
+
+def _tools2_attr_names(system: dict[str, Any]) -> set[str]:
+    fields = system.get("fields")
+    attrs = fields.get("attrs") if isinstance(fields, dict) else None
+    if not isinstance(attrs, list):
+        return set()
+    return {
+        item["name"]
+        for item in attrs
+        if isinstance(item, dict) and isinstance(item.get("name"), str)
+    }
 
 
 def _render(profile: LinkerProfile) -> str:

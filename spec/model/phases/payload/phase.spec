@@ -57,7 +57,7 @@ object SelectedPayloadHandoff: ResourceObject {
         actions {
             on Action::PrepareSelectedVariant {
                 depends_on {
-                    KernelInitFlow.state == State::Ready;
+                    KernelInitFlow.state == State::Online;
                     KernelInitTask.state == State::OnCpu;
                 }
 
@@ -70,7 +70,7 @@ object SelectedPayloadHandoff: ResourceObject {
                     selected_payload_no_return_entry_bound(self);
                     selected_payload_replacement_precheck_complete(self, Config);
                     selected_payload_user_flow_preset_setup_ready(self, Config, KernelInitTask);
-                    Pid1UserAppFlow.state == State::Ready;
+                    KernelInitUserAppRuntime.state == State::Online;
                     kernel_init_flow_survives_payload_precommit(KernelInitFlow);
                 }
             }
@@ -238,7 +238,7 @@ object PayloadHandoffPreparePhase: PhaseObject {
             on Transition::Preset -> State::Prepared {
                 depends_on {
                     PayloadPreparePhase.state == State::Online;
-                    KernelInitFlow.state == State::Ready;
+                    KernelInitFlow.state == State::Online;
                     KernelInitTask.state == State::OnCpu;
                 }
 
@@ -269,7 +269,7 @@ object PayloadHandoffPreparePhase: PhaseObject {
                     KernelInitTask.state == State::OnCpu;
                 }
                 ensures {
-                    KernelInitFlow.state == State::Ready;
+                    KernelInitFlow.state == State::Online;
                     kernel_init_flow_survives_payload_precommit(KernelInitFlow);
                 }
                 emits {
@@ -286,7 +286,7 @@ object PayloadHandoffPreparePhase: PhaseObject {
                     KernelInitTask.state == State::OnCpu;
                 }
                 ensures {
-                    KernelInitFlow.state == State::Ready;
+                    KernelInitFlow.state == State::Online;
                     SelectedPayloadHandoff.state == State::Online;
                     kernel_init_flow_survives_payload_precommit(KernelInitFlow);
                 }

@@ -66,7 +66,7 @@
 
 ### 已完成专题：RISC-V VMAP trap 栈 early overflow
 
-boot CPU 上 `KernelInitTask/UserAppFlow` 的首个 VMAP kernel trap stack 现已完成 Linux 6.12 对齐的 early
+boot CPU 上 `KernelInitTask/KernelInitFlow/UserAppRuntime` 的首个 VMAP kernel trap stack 现已完成 Linux 6.12 对齐的 early
 overflow 闭环。`APP=user-boot` 的 `formal_event_entry` 在用户来源时继续从 `sscratch` 取得安全的
 kernel stack top 并绕过 bit-test；内核来源时在保存任何通用寄存器前只使用 `sp`/`sscratch`，按
 `((sp - 288) >> 14) & 1` 分类 prospective frame。正常分支恢复原 `sp`、清零 `sscratch` 后进入
@@ -76,7 +76,7 @@ SBI 输出 task/overflow stack 范围和 CSR 诊断并终止系统。普通 app 
 per-CPU overflow stack 与 IRQ hardirq `call_on_irq_stack()` 仍是活跃后续责任。
 
 验证覆盖 `make verify`、共享 object smoke 55/55、真实 user-smoke callee-saved sentinel `ecall`、
-随机用户栈顶下 `KernelInitTask/UserAppFlow.EnterUserMode` checkpoint facts、DF-0002 ordinary 30/30、完整默认
+随机用户栈顶下 `UserAppRuntime.EnterUserMode` checkpoint facts、DF-0002 ordinary 30/30、完整默认
 stress 的 DF-0001/0002/0003 各 10/10、默认 rc.local 与 Linux exact baseline difftest 各 1/1，
 以及仓库根直接 `make test`。不可恢复分支没有测试专用 syscall/boot 参数/checkpoint；端点分类、
 frame 构造和普通 trap 往返由共享契约验证。

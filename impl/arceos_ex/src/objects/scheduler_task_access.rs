@@ -6,37 +6,22 @@ use super::{
     state::{EventResult, State},
     task::{Task, TaskExecutionAuthority, TaskRef},
     task_flow::TaskFlowRef,
-    user_boot::{UserAppFlow, UserTaskSet},
+    user_boot::UserTaskSet,
 };
-use crate::{arch::riscv64::task_switch::TaskSwitchContext, flows::boot_idle_flow::BootIdleFlow};
-
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub enum NextDispatchKind {
-    ActivateInitial,
-    ContinueActive,
-}
+use crate::arch::riscv64::task_switch::TaskSwitchContext;
 
 /// Stable, generation-carrying result of the next-task preflight. Scheduler
 /// stores this value across the physical stack switch and must dispatch the
 /// exact Task/Flow pair recorded here.
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub struct NextDispatch {
-    kind: NextDispatchKind,
     task_ref: TaskRef,
     flow_ref: TaskFlowRef,
 }
 
 impl NextDispatch {
-    const fn new(kind: NextDispatchKind, task_ref: TaskRef, flow_ref: TaskFlowRef) -> Self {
-        Self {
-            kind,
-            task_ref,
-            flow_ref,
-        }
-    }
-
-    pub const fn kind(self) -> NextDispatchKind {
-        self.kind
+    const fn new(task_ref: TaskRef, flow_ref: TaskFlowRef) -> Self {
+        Self { task_ref, flow_ref }
     }
 
     pub const fn task_ref(self) -> TaskRef {
@@ -53,10 +38,9 @@ impl NextDispatch {
 pub struct SchedulerTaskAccess<'a> {
     kernel_init_task: &'a mut KernelInitTask,
     kernel_init_flow: &'a mut KernelInitFlow,
-    user_app_flow: &'a UserAppFlow,
     kthreadd_task: &'a mut KthreaddTask,
     kthreadd_flow: &'a mut KthreaddFlow,
-    boot_idle_flow: &'a BootIdleFlow,
+    boot_flow: &'a super::task_flow::TaskFlow,
     user_task_set: &'a mut UserTaskSet,
     test_tasks: &'a mut SchedulerTestTasks,
 }
@@ -66,20 +50,18 @@ impl<'a> SchedulerTaskAccess<'a> {
     pub fn new(
         kernel_init_task: &'a mut KernelInitTask,
         kernel_init_flow: &'a mut KernelInitFlow,
-        user_app_flow: &'a UserAppFlow,
         kthreadd_task: &'a mut KthreaddTask,
         kthreadd_flow: &'a mut KthreaddFlow,
-        boot_idle_flow: &'a BootIdleFlow,
+        boot_flow: &'a super::task_flow::TaskFlow,
         user_task_set: &'a mut UserTaskSet,
         test_tasks: &'a mut SchedulerTestTasks,
     ) -> Self {
         Self {
             kernel_init_task,
             kernel_init_flow,
-            user_app_flow,
             kthreadd_task,
             kthreadd_flow,
-            boot_idle_flow,
+            boot_flow,
             user_task_set,
             test_tasks,
         }
@@ -87,11 +69,8 @@ impl<'a> SchedulerTaskAccess<'a> {
 
     pub fn effective_cpu_ref(&self, task_ref: TaskRef) -> Option<CpuRef> {
         match task_ref {
-            TaskRef::BOOT => self.boot_idle_flow.cpu_ref(),
-            TaskRef::KERNEL_INIT => self
-                .user_app_flow
-                .cpu_ref()
-                .or_else(|| self.kernel_init_flow.cpu_ref()),
+            TaskRef::BOOT => self.boot_flow.cpu_ref(),
+            TaskRef::KERNEL_INIT => self.kernel_init_flow.cpu_ref(),
             TaskRef::KTHREADD => self.kthreadd_flow.cpu_ref(),
             TaskRef::SMOKE_SCHEDULER => self.test_tasks.smoke_scheduler_task().cpu_ref(),
             TaskRef::SMOKE_MUTEX => self.test_tasks.smoke_mutex_task().cpu_ref(),
@@ -104,7 +83,7 @@ impl<'a> SchedulerTaskAccess<'a> {
 
     /// Resolves the exact Schedule sender without copying Task or Flow facts.
     /// The caller supplies the CPU-local CurrentTask binding separately; this
-    /// bridge proves that the signal source is that Task's unique active Flow
+    /// bridge proves that the signal source is that Task's unique fixed Flow
     /// on the Scheduler-owning CPU.
     pub fn schedule_sender_matches(
         &self,
@@ -118,11 +97,10 @@ impl<'a> SchedulerTaskAccess<'a> {
         candidate.task.task_ref().same_identity(task_ref)
             && candidate.task.state() == State::OnCpu
             && candidate.task.execution_authority() == TaskExecutionAuthority::Live
-            && candidate.task.active_flow().same_identity(sender_flow_ref)
+            && candidate.task.flow().same_identity(sender_flow_ref)
             && candidate.task.owns_flow(sender_flow_ref)
             && candidate.flow.flow_ref().same_identity(sender_flow_ref)
             && candidate.flow.declared()
-            && candidate.flow.active()
             && candidate.flow.owner().same_identity(task_ref)
             && candidate.flow.cpu_ref() == Some(cpu_ref)
     }
@@ -134,22 +112,12 @@ impl<'a> SchedulerTaskAccess<'a> {
         match task_ref {
             TaskRef::BOOT => Some(super::current_task::CurrentTaskCandidate {
                 task: BootTask::canonical_task(),
-                flow: self.boot_idle_flow.core(),
+                flow: self.boot_flow,
             }),
-            TaskRef::KERNEL_INIT => {
-                let task = self.kernel_init_task.task();
-                let active_flow = task.active_flow();
-                let flow = if !active_flow.is_valid()
-                    || active_flow.same_identity(self.kernel_init_flow.flow_ref())
-                {
-                    self.kernel_init_flow.core()
-                } else if active_flow.same_identity(self.user_app_flow.flow_ref()) {
-                    self.user_app_flow.current_core()
-                } else {
-                    return None;
-                };
-                Some(super::current_task::CurrentTaskCandidate { task, flow })
-            }
+            TaskRef::KERNEL_INIT => Some(super::current_task::CurrentTaskCandidate {
+                task: self.kernel_init_task.task(),
+                flow: self.kernel_init_flow.core(),
+            }),
             TaskRef::KTHREADD => Some(super::current_task::CurrentTaskCandidate {
                 task: self.kthreadd_task.task(),
                 flow: self.kthreadd_flow.core(),
@@ -282,8 +250,7 @@ impl<'a> SchedulerTaskAccess<'a> {
         }
     }
 
-    /// Classifies the next dispatch exactly once before any context is saved.
-    /// State selects the protocol; Flow facts may only validate it.
+    /// Resolves the one fixed Task/Flow pair before any context is saved.
     pub fn preflight_next_dispatch(
         &self,
         task_ref: TaskRef,
@@ -301,46 +268,21 @@ impl<'a> SchedulerTaskAccess<'a> {
             return None;
         }
 
-        match task.state() {
-            State::Online => {
-                let flow_ref = task.initial_flow();
-                let cpu_matches = flow.cpu_ref() == Some(cpu_ref)
-                    || (task_ref.is_user() && flow.cpu_ref().is_none());
-                (flow_ref.is_valid()
-                    && flow_ref.same_identity(flow.flow_ref())
-                    && !task.active_flow().is_valid()
-                    && task.breakpoint_matches(flow_ref)
-                    && flow.state() == State::Base
-                    && !flow.active()
-                    && cpu_matches)
-                    .then_some(NextDispatch::new(
-                        NextDispatchKind::ActivateInitial,
-                        task_ref,
-                        flow_ref,
-                    ))
-            }
-            State::Suspended => {
-                let flow_ref = task.active_flow();
-                (flow_ref.is_valid()
-                    && flow_ref.same_identity(flow.flow_ref())
-                    && task.breakpoint_matches(flow_ref)
-                    && flow.state() == State::Online
-                    && flow.active()
-                    && flow.cpu_ref() == Some(cpu_ref))
-                .then_some(NextDispatch::new(
-                    NextDispatchKind::ContinueActive,
-                    task_ref,
-                    flow_ref,
-                ))
-            }
-            _ => None,
-        }
+        let flow_ref = task.flow();
+        let cpu_matches =
+            flow.cpu_ref() == Some(cpu_ref) || (task_ref.is_user() && flow.cpu_ref().is_none());
+        (task.state() == State::Online
+            && flow_ref.is_valid()
+            && flow_ref.same_identity(flow.flow_ref())
+            && task.breakpoint_matches(flow_ref)
+            && flow.state() == State::Online
+            && cpu_matches)
+            .then_some(NextDispatch::new(task_ref, flow_ref))
     }
 
     pub fn first_boot_handoff_preflight_ready(&self, dispatch: NextDispatch) -> bool {
         BootTask::canonical_task().switch_out_ready()
             && self.kernel_init_task.task().switch_in_ready()
-            && dispatch.kind() == NextDispatchKind::ActivateInitial
             && dispatch.task_ref().same_identity(TaskRef::KERNEL_INIT)
             && dispatch
                 .flow_ref()
@@ -372,18 +314,8 @@ impl<'a> SchedulerTaskAccess<'a> {
     pub fn suspend(&mut self, task_ref: TaskRef) -> Option<EventResult> {
         match task_ref {
             TaskRef::BOOT => Some(BootTask::suspend_canonical()),
-            TaskRef::KERNEL_INIT => {
-                Some(if self.kernel_init_task.task().active_flow().is_valid() {
-                    self.kernel_init_task.suspend_from_cpu()
-                } else {
-                    self.kernel_init_task.task_mut().disable()
-                })
-            }
-            TaskRef::KTHREADD => Some(if self.kthreadd_task.task().active_flow().is_valid() {
-                self.kthreadd_task.suspend_from_cpu()
-            } else {
-                self.kthreadd_task.task_mut().disable()
-            }),
+            TaskRef::KERNEL_INIT => Some(self.kernel_init_task.suspend_from_cpu()),
+            TaskRef::KTHREADD => Some(self.kthreadd_task.suspend_from_cpu()),
             TaskRef::SMOKE_SCHEDULER => Some(
                 self.test_tasks
                     .smoke_scheduler_task_mut()
@@ -491,44 +423,7 @@ impl<'a> SchedulerTaskAccess<'a> {
         }
     }
 
-    pub fn accept_task_activate(&mut self, dispatch: NextDispatch) -> Option<EventResult> {
-        if dispatch.kind() != NextDispatchKind::ActivateInitial {
-            return None;
-        }
-        match dispatch.task_ref() {
-            TaskRef::KERNEL_INIT => Some(self.kernel_init_task.task_mut().activate_on_cpu()),
-            TaskRef::KTHREADD => Some(self.kthreadd_task.task_mut().activate_on_cpu()),
-            TaskRef::SMOKE_SCHEDULER => Some(
-                self.test_tasks
-                    .smoke_scheduler_task_mut()
-                    .accept_task_activate(),
-            ),
-            TaskRef::SMOKE_MUTEX => Some(
-                self.test_tasks
-                    .smoke_mutex_task_mut()
-                    .accept_task_activate(),
-            ),
-            TaskRef::SMOKE_RWSEM => Some(
-                self.test_tasks
-                    .smoke_rwsem_task_mut()
-                    .accept_task_activate(),
-            ),
-            TaskRef::SMOKE_RWLOCK => Some(
-                self.test_tasks
-                    .smoke_rwlock_task_mut()
-                    .accept_task_activate(),
-            ),
-            task_ref if task_ref.is_user() => {
-                Some(self.user_task_set.accept_task_activate(task_ref))
-            }
-            _ => None,
-        }
-    }
-
     pub fn accept_task_continue(&mut self, dispatch: NextDispatch) -> Option<EventResult> {
-        if dispatch.kind() != NextDispatchKind::ContinueActive {
-            return None;
-        }
         let task_ref = dispatch.task_ref();
         match task_ref {
             TaskRef::BOOT => Some(BootTask::continue_canonical()),
@@ -559,132 +454,50 @@ impl<'a> SchedulerTaskAccess<'a> {
         }
     }
 
-    pub fn emit_initial_startup(
-        &mut self,
-        dispatch: NextDispatch,
-        cpu_ref: CpuRef,
-    ) -> Option<EventResult> {
-        if dispatch.kind() != NextDispatchKind::ActivateInitial {
-            return None;
-        }
+    pub fn emit_flow_continue(&self, dispatch: NextDispatch) -> Option<EventResult> {
         let task_ref = dispatch.task_ref();
         let flow_ref = dispatch.flow_ref();
         match task_ref {
-            TaskRef::KERNEL_INIT if flow_ref.same_identity(self.kernel_init_flow.flow_ref()) => {
-                Some(self.kernel_init_flow.start_initial(self.kernel_init_task))
-            }
-            TaskRef::KTHREADD if flow_ref.same_identity(self.kthreadd_flow.flow_ref()) => {
-                Some(self.kthreadd_flow.start_initial(self.kthreadd_task))
-            }
-            TaskRef::SMOKE_SCHEDULER => Some(
-                self.test_tasks
-                    .smoke_scheduler_task_mut()
-                    .emit_initial_startup(flow_ref),
-            ),
-            TaskRef::SMOKE_MUTEX => Some(
-                self.test_tasks
-                    .smoke_mutex_task_mut()
-                    .emit_initial_startup(flow_ref),
-            ),
-            TaskRef::SMOKE_RWSEM => Some(
-                self.test_tasks
-                    .smoke_rwsem_task_mut()
-                    .emit_initial_startup(flow_ref),
-            ),
-            TaskRef::SMOKE_RWLOCK => Some(
-                self.test_tasks
-                    .smoke_rwlock_task_mut()
-                    .emit_initial_startup(flow_ref),
-            ),
-            _ if task_ref.is_user() => Some(
-                self.user_task_set
-                    .emit_initial_startup(task_ref, flow_ref, cpu_ref),
-            ),
-            _ => None,
-        }
-    }
-
-    pub fn emit_active_continue(&self, dispatch: NextDispatch) -> Option<EventResult> {
-        if dispatch.kind() != NextDispatchKind::ContinueActive {
-            return None;
-        }
-        let task_ref = dispatch.task_ref();
-        let flow_ref = dispatch.flow_ref();
-        match task_ref {
-            TaskRef::BOOT if flow_ref.same_identity(self.boot_idle_flow.flow_ref()) => Some(
-                self.boot_idle_flow
-                    .continue_active(BootTask::canonical_task()),
+            TaskRef::BOOT if flow_ref.same_identity(self.boot_flow.flow_ref()) => Some(
+                (BootTask::canonical_task().flow().same_identity(flow_ref))
+                    .then_some(())
+                    .ok_or_else(|| {
+                        super::state::EventError::failed(
+                            super::state::EventErrorCode::ConditionFailed,
+                            super::state::LifecycleEvent::Continue,
+                            self.boot_flow.state(),
+                            State::Online,
+                            State::Online,
+                        )
+                    }),
             ),
             TaskRef::KERNEL_INIT if flow_ref.same_identity(self.kernel_init_flow.flow_ref()) => {
-                Some(self.kernel_init_flow.continue_active(self.kernel_init_task))
-            }
-            TaskRef::KERNEL_INIT if flow_ref.same_identity(self.user_app_flow.flow_ref()) => {
-                Some(self.user_app_flow.continue_active(self.kernel_init_task))
+                Some(self.kernel_init_flow.continue_flow(self.kernel_init_task))
             }
             TaskRef::KTHREADD if flow_ref.same_identity(self.kthreadd_flow.flow_ref()) => {
-                Some(self.kthreadd_flow.continue_active(self.kthreadd_task))
+                Some(self.kthreadd_flow.continue_flow(self.kthreadd_task))
             }
             TaskRef::SMOKE_SCHEDULER
                 if flow_ref.same_identity(self.test_tasks.smoke_scheduler_task().flow_ref()) =>
             {
-                Some(self.test_tasks.smoke_scheduler_task().continue_active())
+                Some(self.test_tasks.smoke_scheduler_task().continue_flow())
             }
             TaskRef::SMOKE_MUTEX
                 if flow_ref.same_identity(self.test_tasks.smoke_mutex_task().flow_ref()) =>
             {
-                Some(self.test_tasks.smoke_mutex_task().continue_active())
+                Some(self.test_tasks.smoke_mutex_task().continue_flow())
             }
             TaskRef::SMOKE_RWSEM
                 if flow_ref.same_identity(self.test_tasks.smoke_rwsem_task().flow_ref()) =>
             {
-                Some(self.test_tasks.smoke_rwsem_task().continue_active())
+                Some(self.test_tasks.smoke_rwsem_task().continue_flow())
             }
             TaskRef::SMOKE_RWLOCK
                 if flow_ref.same_identity(self.test_tasks.smoke_rwlock_task().flow_ref()) =>
             {
-                Some(self.test_tasks.smoke_rwlock_task().continue_active())
+                Some(self.test_tasks.smoke_rwlock_task().continue_flow())
             }
-            _ if task_ref.is_user() => Some(self.user_task_set.continue_active_flow(task_ref)),
-            _ => None,
-        }
-    }
-
-    /// Delivers the identity-schedule return to the already-active Flow. This
-    /// deliberately does not invoke Task.Continue or change Task lifecycle.
-    pub fn continue_identity_flow(
-        &self,
-        sender_flow_ref: TaskFlowRef,
-        task_ref: TaskRef,
-        cpu_ref: CpuRef,
-    ) -> Option<EventResult> {
-        if !self.schedule_sender_matches(sender_flow_ref, task_ref, cpu_ref) {
-            return None;
-        }
-        match task_ref {
-            TaskRef::BOOT => Some(
-                self.boot_idle_flow
-                    .continue_active(BootTask::canonical_task()),
-            ),
-            TaskRef::KERNEL_INIT => Some(
-                if self
-                    .kernel_init_task
-                    .task()
-                    .active_flow()
-                    .same_identity(self.kernel_init_flow.flow_ref())
-                {
-                    self.kernel_init_flow.continue_active(self.kernel_init_task)
-                } else {
-                    self.user_app_flow.continue_active(self.kernel_init_task)
-                },
-            ),
-            TaskRef::KTHREADD => Some(self.kthreadd_flow.continue_active(self.kthreadd_task)),
-            TaskRef::SMOKE_SCHEDULER => {
-                Some(self.test_tasks.smoke_scheduler_task().continue_active())
-            }
-            TaskRef::SMOKE_MUTEX => Some(self.test_tasks.smoke_mutex_task().continue_active()),
-            TaskRef::SMOKE_RWSEM => Some(self.test_tasks.smoke_rwsem_task().continue_active()),
-            TaskRef::SMOKE_RWLOCK => Some(self.test_tasks.smoke_rwlock_task().continue_active()),
-            _ if task_ref.is_user() => Some(self.user_task_set.continue_active_flow(task_ref)),
+            _ if task_ref.is_user() => Some(self.user_task_set.continue_flow(task_ref)),
             _ => None,
         }
     }

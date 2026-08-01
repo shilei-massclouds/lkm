@@ -1,6 +1,6 @@
 # Linux Checkpoint Mapping Coverage
 
-- total checkpoints: 479
+- total checkpoints: 478
 
 ## Mapping Kind Counts
 
@@ -8,13 +8,13 @@
 | --- | ---: |
 | exact | 103 |
 | range | 21 |
-| unmapped | 355 |
+| unmapped | 354 |
 
 ## Confidence Counts
 
 | confidence | count |
 | --- | ---: |
-| none | 355 |
+| none | 354 |
 | high | 62 |
 | medium | 62 |
 
@@ -70,7 +70,7 @@
 | KernelInitTask | 3 |
 | PayloadPreparePhase | 3 |
 | SlubSubsystem | 3 |
-| UserAppFlow | 3 |
+| UserAppRuntime | 3 |
 | UserClone | 3 |
 | Vm | 3 |
 | ApEntryPreludePhase | 2 |
@@ -117,4 +117,4 @@
 | VirtioBus | 2 |
 | Workqueue | 2 |
 
-- singleton unmapped families: 170
+- singleton unmapped families: 169

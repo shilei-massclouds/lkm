@@ -27,6 +27,14 @@ class UntilReached(Exception):
     """Internal non-failure control flow for a matched pre-send boundary."""
 
 
+class YieldPending(Exception):
+    """A source response reached a serializable yields resume coordinate."""
+
+    def __init__(self, token_id: str):
+        super().__init__(token_id)
+        self.token_id = token_id
+
+
 def parse_budget(value: str) -> int | None:
     if value == "all":
         return None
@@ -56,6 +64,14 @@ def _snapshot(value: dict[str, Any]) -> dict[str, Any]:
         "instances": {
             key: deepcopy(item)
             for key, item in sorted(value.get("instances", {}).items())
+        },
+        "task_flow_lanes": {
+            key: deepcopy(item)
+            for key, item in sorted(value.get("task_flow_lanes", {}).items())
+        },
+        "yield_tokens": {
+            key: deepcopy(item)
+            for key, item in sorted(value.get("yield_tokens", {}).items())
         },
     }
 
@@ -162,6 +178,18 @@ def load_scenario(
         for kind, entries in contextual_bindings.items()
     ):
         raise ProtocolError("scenario contextual_bindings must map kinds and keys to objects")
+    task_flow_lanes = value.get("task_flow_lanes", {})
+    if not isinstance(task_flow_lanes, dict) or not all(
+        isinstance(key, str) and isinstance(item, dict)
+        for key, item in task_flow_lanes.items()
+    ):
+        raise ProtocolError("scenario task_flow_lanes must map lane identities to objects")
+    yield_tokens = value.get("yield_tokens", {})
+    if not isinstance(yield_tokens, dict) or not all(
+        isinstance(key, str) and isinstance(item, dict)
+        for key, item in yield_tokens.items()
+    ):
+        raise ProtocolError("scenario yield_tokens must map token identities to objects")
     for target, state in states.items():
         if target not in model["systems"] and target not in instances:
             raise ProtocolError(f"scenario has unknown system state target {target}")
@@ -233,6 +261,8 @@ def load_scenario(
     if trusted_snapshot:
         result["instances"] = deepcopy(instances)
     result["contextual_bindings"] = deepcopy(contextual_bindings)
+    result["task_flow_lanes"] = deepcopy(task_flow_lanes)
+    result["yield_tokens"] = deepcopy(yield_tokens)
     return _snapshot(result)
 
 
@@ -299,8 +329,17 @@ class Engine:
             ),
             default=0,
         )
+        self.next_yield_token = 1 + max(
+            (
+                int(key.rsplit("-", 1)[-1])
+                for key in self.current.get("yield_tokens", {})
+                if re.fullmatch(r"yield-[0-9]+", key)
+            ),
+            default=0,
+        )
         self.active_requests: set[tuple[str, str, bytes]] = set()
         self.active_predicates: set[tuple[str, tuple[str, ...]]] = set()
+        self.active_yield_tokens: set[str] = set()
         for fact in self.initial_snapshot["facts"]:
             self.event("initial_fact_established", fact=fact, source="initial_state_invariant")
         for identity in sorted(self.current["states"]):
@@ -974,23 +1013,16 @@ class Engine:
         task = str(binding.get("task"))
         reference = str(binding.get("task_ref"))
 
-        parents = self._fact_targets("task_flow_parent_is", flow)
-        owners = self._fact_targets("task_flow_owner_is", flow)
-        if len(parents) != 1:
+        parent = self.systems.get(flow, {}).get("parent")
+        parent_targets = self._fact_targets("task_flow_parent_is", flow)
+        owner_targets = self._fact_targets("task_flow_owner_is", flow)
+        if (
+            parent != task
+            or (parent_targets and parent_targets != [task])
+            or (owner_targets and owner_targets != [task])
+        ):
             raise DerivationProblem(
-                f"CurrentTask source Flow {flow} must have exactly one parent Task"
-            )
-        if len(owners) != 1:
-            raise DerivationProblem(
-                f"CurrentTask source Flow {flow} must have exactly one owner Task"
-            )
-        if parents[0] != task:
-            raise DerivationProblem(
-                f"CurrentTask CPU {cpu} bound Task {task} disagrees with source Flow {flow} parent {parents[0]}"
-            )
-        if owners[0] != task:
-            raise DerivationProblem(
-                f"CurrentTask source Flow {flow} parent {task} disagrees with owner {owners[0]}"
+                f"CurrentTask source Flow {flow} parent/owner does not uniquely match Task {task}"
             )
         if task not in self.systems or not _matches_system_type(self.model, task, "Task"):
             raise DerivationProblem(
@@ -1003,16 +1035,10 @@ class Engine:
         )
         if live_fact not in self.current["facts"]:
             raise DerivationProblem(f"CurrentTask target Task {task} is not Live")
-        active_flow = self.current["references"].get(f"{task}.active_flow")
-        initial_flow = self.current["references"].get(f"{task}.initial_flow")
-        initial_pending = (
-            active_flow is None
-            and initial_flow == flow
-            and self.current["states"].get(flow) in {"Base", "Prepared", "Ready"}
-        )
-        if active_flow != flow and not initial_pending:
+        fixed_flow = self.current["references"].get(f"{task}.flow")
+        if fixed_flow != flow:
             raise DerivationProblem(
-                f"CurrentTask target Task {task} active Flow {active_flow} does not match effective Flow {flow}"
+                f"CurrentTask target Task {task} fixed Flow {fixed_flow} does not match effective Flow {flow}"
             )
 
         live_tasks: list[str] = []
@@ -1026,11 +1052,7 @@ class Engine:
                 not in self.current["facts"]
             ):
                 continue
-            candidate_flow = self.current["references"].get(f"{candidate}.active_flow")
-            if candidate_flow is None:
-                initial = self.current["references"].get(f"{candidate}.initial_flow")
-                if self.current["states"].get(str(initial)) in {"Base", "Prepared", "Ready"}:
-                    candidate_flow = initial
+            candidate_flow = self.current["references"].get(f"{candidate}.flow")
             candidate_cpu_ref = self.current["references"].get(
                 f"{candidate_flow}.cpu_ref"
             )
@@ -1125,15 +1147,7 @@ class Engine:
             return False
         if stack != f"{task}.stack":
             return False
-        if self.current["references"].get(f"{task}.initial_flow") != context_flow:
-            return False
-        active_flow = self.current["references"].get(f"{task}.active_flow")
-        initial_pending = (
-            active_flow is None
-            and self.current["references"].get(f"{task}.initial_flow") == context_flow
-            and self.current["states"].get(context_flow) in {"Base", "Prepared", "Ready"}
-        )
-        if active_flow != context_flow and not initial_pending:
+        if self.current["references"].get(f"{task}.flow") != context_flow:
             return False
         cpu, _ = self._current_cpu_context(context_flow)
         contextual = self.current.get("contextual_bindings", {})
@@ -1195,7 +1209,6 @@ class Engine:
         ):
             raise DerivationProblem(f"CurrentTask.{action} target {task} is not a Task")
         cpu, cpu_ref = self._current_cpu_context(context_flow)
-        active_flow = self.current["references"].get(f"{task}.active_flow")
         if action == "BindTask":
             dispatch_flow = bindings.get("dispatch_flow")
             if dispatch_flow is None:
@@ -1204,42 +1217,34 @@ class Engine:
                 )
             effective_flow = str(dispatch_flow)
         else:
-            effective_flow = str(
-                active_flow
-                or self.current["references"].get(f"{task}.initial_flow")
-                or ""
-            )
+            effective_flow = str(self.current["references"].get(f"{task}.flow") or "")
         if not effective_flow:
             raise DerivationProblem(
                 f"CurrentTask.{action} target Task {task} has no dispatch Flow"
             )
-        parents = self._fact_targets("task_flow_parent_is", effective_flow)
-        owners = self._fact_targets("task_flow_owner_is", effective_flow)
-        if parents != [task] or owners != [task]:
+        parent = self.systems.get(effective_flow, {}).get("parent")
+        fixed_flow = self.current["references"].get(f"{task}.flow")
+        parent_targets = self._fact_targets("task_flow_parent_is", effective_flow)
+        owner_targets = self._fact_targets("task_flow_owner_is", effective_flow)
+        if (
+            parent != task
+            or fixed_flow != effective_flow
+            or (parent_targets and parent_targets != [task])
+            or (owner_targets and owner_targets != [task])
+        ):
             raise DerivationProblem(
-                f"CurrentTask.{action} target Flow {effective_flow} parent/owner does not uniquely match {task}"
+                f"CurrentTask.{action} target Flow {effective_flow} parent/owner does not uniquely match the fixed child of {task}"
             )
         if action == "BindTask":
             task_state = self.current["states"].get(task)
-            if task_state not in {"Online", "Suspended"}:
+            if task_state != "Online":
                 raise DerivationProblem(
-                    f"CurrentTask.BindTask target Task {task} is neither Online nor Suspended"
+                    f"CurrentTask.BindTask target Task {task} is not Online"
                 )
-            initial_flow = self.current["references"].get(f"{task}.initial_flow")
-            if task_state == "Online" and (
-                active_flow is not None
-                or initial_flow != effective_flow
-                or self.current["states"].get(effective_flow) != "Base"
-            ):
+            fixed_flow = self.current["references"].get(f"{task}.flow")
+            if fixed_flow != effective_flow or self.current["states"].get(effective_flow) != "Online":
                 raise DerivationProblem(
-                    "CurrentTask.BindTask Online target does not match its Base initial Flow"
-                )
-            if task_state == "Suspended" and (
-                active_flow != effective_flow
-                or self.current["states"].get(effective_flow) != "Online"
-            ):
-                raise DerivationProblem(
-                    "CurrentTask.BindTask Suspended target does not match its Online active Flow"
+                    "CurrentTask.BindTask target does not match its Online fixed Flow"
                 )
             if (
                 f"task_execution_authority_is({task},TaskExecutionAuthority::None)"
@@ -1271,6 +1276,8 @@ class Engine:
         task_ref = self._unique_live_task_ref(task)
         stack = str(bindings.get("stack")) if "stack" in bindings else None
         if action == "BindTask":
+            stack = f"{task}.stack"
+        if action == "BindTask":
             if not self._current_task_bind_boundary_valid(signal, context_flow, task):
                 raise DerivationProblem(
                     f"CurrentTask.BindTask cannot replace CPU {cpu} outside scheduler switch commit"
@@ -1292,8 +1299,15 @@ class Engine:
         current_task_bindings = candidate.setdefault(
             "contextual_bindings", {}
         ).setdefault("current_task", {})
+        current_stack_bindings = candidate.setdefault(
+            "contextual_bindings", {}
+        ).setdefault("current_stack", {})
         previous = current_task_bindings.get(cpu)
-        revision = int(previous.get("revision", 0)) + 1 if previous else 1
+        previous_stack = current_stack_bindings.get(cpu)
+        revision = max(
+            int(previous.get("revision", 0)) if previous else 0,
+            int(previous_stack.get("revision", 0)) if previous_stack else 0,
+        ) + 1
         address_view = self._current_task_address_view(cpu, cpu_ref)
         if action == "BindTaskStack":
             signal["handler"]["description"] = (
@@ -1316,23 +1330,14 @@ class Engine:
             "revision": revision,
         }
 
-        if action in {"BindTaskStack", "RefreshTaskStack"}:
-            current_stack_bindings = candidate.setdefault(
-                "contextual_bindings", {}
-            ).setdefault("current_stack", {})
-            previous_stack = current_stack_bindings.get(cpu)
-            stack_revision = (
-                int(previous_stack.get("revision", 0)) + 1
-                if previous_stack
-                else 1
-            )
+        if action in {"BindTask", "BindTaskStack", "RefreshTaskStack"}:
             current_stack_bindings[cpu] = {
                 "task": task,
                 "stack": stack,
                 "source_flow": effective_flow,
                 "source_cpu_ref": cpu_ref,
                 "address_view": address_view,
-                "revision": stack_revision,
+                "revision": revision,
             }
 
         binding_fact_prefixes = (
@@ -1361,7 +1366,7 @@ class Engine:
                 _fact("current_task_binding_is_cpu_local", [cpu]),
             ]
         )
-        if action in {"BindTaskStack", "RefreshTaskStack"}:
+        if action in {"BindTask", "BindTaskStack", "RefreshTaskStack"}:
             stack_fact_prefixes = (
                 f"current_stack_binding_committed({cpu},",
                 f"current_stack_binding_address_view_is({cpu},",
@@ -1502,45 +1507,19 @@ class Engine:
         stack_bindings = candidate.setdefault(
             "contextual_bindings", {}
         ).setdefault("current_stack", {})
-        previous = stack_bindings.get(cpu)
-        revision = int(previous.get("revision", 0)) + 1 if previous else 1
+        current_stack = stack_bindings.get(cpu)
         address_view = str(task_binding.get("address_view"))
-        stack_bindings[cpu] = {
-            "task": task,
-            "stack": stack,
-            "source_flow": flow,
-            "source_cpu_ref": cpu_ref,
-            "address_view": address_view,
-            "revision": revision,
-        }
-        stack_fact_prefixes = (
-            f"current_stack_binding_committed({cpu},",
-            f"current_stack_binding_address_view_is({cpu},",
-            f"current_stack_binding_revision_is({cpu},",
-            f"current_stack_binding_matches_task({cpu},",
-            f"current_task_stack_binding_pair_consistent({cpu},",
-        )
-        candidate["facts"] = [
-            fact for fact in candidate["facts"]
-            if not fact.startswith(stack_fact_prefixes)
-        ]
-        candidate["facts"].extend(
-            [
-                _fact("current_stack_binding_committed", [cpu, task, stack]),
-                _fact(
-                    "current_stack_binding_address_view_is",
-                    [cpu, stack, address_view],
-                ),
-                _fact("current_stack_binding_revision_is", [cpu, revision]),
-                _fact("current_stack_binding_is_cpu_local", [cpu]),
-                _fact("current_stack_binding_matches_task", [cpu, task, stack]),
-                _fact(
-                    "current_task_stack_binding_pair_consistent",
-                    [cpu, task, stack],
-                ),
-            ]
-        )
-        candidate["facts"] = sorted(set(candidate["facts"]))
+        if current_stack is None or (
+            current_stack.get("task") != task
+            or current_stack.get("stack") != stack
+            or current_stack.get("source_flow") != flow
+            or current_stack.get("source_cpu_ref") != cpu_ref
+            or current_stack.get("address_view") != address_view
+            or current_stack.get("revision") != task_binding.get("revision")
+        ):
+            raise DerivationProblem(
+                "scheduler switch commit requires an atomic matching CurrentTask/CurrentStack pair"
+            )
 
     def _deref(self, value: Any) -> Any:
         if value in self.systems:
@@ -2113,83 +2092,154 @@ class Engine:
                 or _fact("task_runtime_state_is", [task, "TaskRuntimeState::Running"])
                 in self.current["facts"]
             )
-        if name == "task_initial_flow_is" and len(values) == 2:
-            return self.current["references"].get(f"{values[0]}.initial_flow") == values[1]
-        if name == "task_active_flow_is" and len(values) == 2:
-            return self.current["references"].get(f"{values[0]}.active_flow") == values[1]
-        if name == "task_active_flow_invalid" and len(values) == 1:
-            return self.current["references"].get(f"{values[0]}.active_flow") is None
-        if name == "task_online_initial_flow_base" and len(values) == 1:
-            flow = self.current["references"].get(f"{values[0]}.initial_flow")
-            return flow is not None and self.current["states"].get(flow) == "Base"
+        if name in {"task_fixed_flow_is", "task_context_flow_ref_is_fixed"} and len(values) == 2:
+            task = str(self._deref(values[0]))
+            return self.current["references"].get(f"{task}.flow") == values[1]
+        if name == "kernel_init_entry_stack_verified" and len(values) == 1:
+            task = str(self._deref(values[0]))
+            context = self.current["references"].get(f"{task}.thread_context")
+            return _fact("task_thread_context_core_restored", [context]) in self.current["facts"]
+        if name == "user_app_runtime_exec_precommit_valid" and len(values) == 2:
+            runtime, application = map(str, values)
+            return bool(
+                self.current["states"].get(runtime) == "Online"
+                and _fact("application_instance_fresh", [application]) in self.current["facts"]
+            )
+        if name == "task_flow_ref_generation_valid" and len(values) == 1:
+            flow = str(values[0])
+            metadata = self.current.get("instances", {}).get(flow)
+            return flow in self.systems or bool(
+                metadata is not None and metadata.get("alive", True)
+            )
+        if name == "task_flow_context_epoch_matches_dispatch" and len(values) == 1:
+            flow = str(values[0])
+            task = self.systems.get(flow, {}).get("parent")
+            return bool(
+                task in self.systems
+                and self.current["states"].get(task) == "OnCpu"
+                and self.current["references"].get(f"{task}.flow") == flow
+            )
+        if name == "task_flow_effective_execution_guard" and len(values) == 1:
+            flow = str(values[0])
+            task = self.systems.get(flow, {}).get("parent")
+            cpu_ref = self.current["references"].get(f"{flow}.cpu_ref")
+            if task not in self.systems or cpu_ref is None:
+                return False
+            cpu = self._deref(cpu_ref)
+            binding = (
+                self.current.get("contextual_bindings", {})
+                .get("current_task", {})
+                .get(cpu)
+            )
+            stack_binding = (
+                self.current.get("contextual_bindings", {})
+                .get("current_stack", {})
+                .get(cpu)
+            )
+            ap_preinit = bool(
+                task == "ApIdleTask"
+                and _fact(
+                    "task_execution_authority_is",
+                    [task, "TaskExecutionAuthority::Live"],
+                ) in self.current["facts"]
+            )
+            return bool(
+                self.current["states"].get(flow) == "Online"
+                and self.current["states"].get(task) == "OnCpu"
+                and self.current["references"].get(f"{task}.flow") == flow
+                and (
+                    ap_preinit
+                    or (
+                        binding is not None
+                        and binding.get("task") == task
+                        and binding.get("source_flow") == flow
+                        and stack_binding is not None
+                        and stack_binding.get("task") == task
+                        and stack_binding.get("source_flow") == flow
+                    )
+                )
+            )
         if name in {
-            "task_initial_startup_pending",
-            "task_on_cpu_initial_startup_pending_or_active",
-        } and len(values) == 1:
-            task = str(self._deref(values[0]))
-            active = self.current["references"].get(f"{task}.active_flow")
-            initial = self.current["references"].get(f"{task}.initial_flow")
-            pending = (
-                self.current["states"].get(task) == "OnCpu"
-                and active is None
-                and initial is not None
-                and self.current["states"].get(initial) in {"Base", "Prepared", "Ready"}
+            "scheduler_schedule_sender_is_current_fixed_flow",
+            "scheduler_schedule_sender_cpu_ref_matches_owner",
+        } and len(values) == 1 and signal is not None:
+            scheduler = str(values[0])
+            flow = self._effective_flow(signal)
+            source = str(signal.get("source", ""))
+            if flow is None and source in self.systems and _matches_system_type(self.model, source, "TaskFlow"):
+                flow = source
+            if flow is None:
+                return False
+            task = self.systems.get(flow, {}).get("parent")
+            cpu_ref = self.current["references"].get(f"{flow}.cpu_ref")
+            cpu = self._deref(cpu_ref) if cpu_ref is not None else None
+            return bool(
+                task in self.systems
+                and self.current["references"].get(f"{task}.flow") == flow
+                and self.systems.get(scheduler, {}).get("parent") == cpu
             )
-            return pending or (
-                name == "task_on_cpu_initial_startup_pending_or_active"
-                and active is not None
+        if name == "scheduler_schedule_prev_derived_from_sender_and_current_binding" and len(values) == 2 and signal is not None:
+            flow = self._effective_flow(signal)
+            source = str(signal.get("source", ""))
+            if flow is None and source in self.systems and _matches_system_type(self.model, source, "TaskFlow"):
+                flow = source
+            if flow is None:
+                return False
+            cpu_ref = self.current["references"].get(f"{flow}.cpu_ref")
+            cpu = self._deref(cpu_ref) if cpu_ref is not None else None
+            binding = (
+                self.current.get("contextual_bindings", {})
+                .get("current_task", {})
+                .get(cpu)
             )
-        if name == "task_initial_startup_pending_for_flow" and len(values) == 2:
+            return bool(binding is not None and binding.get("task_ref") == values[1])
+        if name in {"task_fixed_flow_binding_complete", "task_fixed_flow_binding_consistent"} and len(values) == 1:
             task = str(self._deref(values[0]))
-            return (
-                self.current["states"].get(task) == "OnCpu"
-                and self.current["references"].get(f"{task}.active_flow") is None
-                and self.current["references"].get(f"{task}.initial_flow") == values[1]
-                and self.current["states"].get(str(values[1])) in {"Base", "Prepared", "Ready"}
+            flow = self.current["references"].get(f"{task}.flow")
+            return bool(
+                flow in self.systems
+                and self.systems[flow].get("parent") == task
             )
-        if name in {"task_ref_targets_online_task", "task_ref_targets_suspended_task"} and len(values) == 1:
+        if name == "task_ref_targets_online_task" and len(values) == 1:
             task = str(self._deref(values[0]))
-            expected = "Online" if name.endswith("online_task") else "Suspended"
-            return self.current["states"].get(task) == expected
+            return self.current["states"].get(task) == "Online"
         if name == "scheduler_preflight_dispatch_flow_is" and len(values) == 2:
             task = str(self._deref(values[0]))
-            state = self.current["states"].get(task)
-            expected = self.current["references"].get(
-                f"{task}.{'initial_flow' if state == 'Online' else 'active_flow'}"
-            )
-            return expected == values[1]
-        if name == "scheduler_activate_initial_preflight_valid" and len(values) == 3:
+            return self.current["references"].get(f"{task}.flow") == values[1]
+        if name == "scheduler_fixed_flow_preflight_valid" and len(values) == 3:
             task = str(self._deref(values[1]))
             flow = str(values[2])
-            return (
-                self.current["states"].get(task) == "Online"
-                and self.current["references"].get(f"{task}.initial_flow") == flow
-                and self.current["references"].get(f"{task}.active_flow") is None
-                and self.current["states"].get(flow) == "Base"
-            )
-        if name == "scheduler_continue_active_preflight_valid" and len(values) == 3:
-            task = str(self._deref(values[1]))
-            flow = str(values[2])
-            return (
-                self.current["states"].get(task) == "Suspended"
-                and self.current["references"].get(f"{task}.active_flow") == flow
+            return bool(
+                task in self.systems
+                and flow in self.systems
+                and self.current["states"].get(task) == "Online"
                 and self.current["states"].get(flow) == "Online"
+                and self.current["references"].get(f"{task}.flow") == flow
+                and self.systems[flow].get("parent") == task
+            )
+        if name == "scheduler_switch_preflight_complete" and len(values) == 3:
+            prev = str(self._deref(values[1]))
+            next_task = str(self._deref(values[2]))
+            return bool(
+                self.current["states"].get(prev) == "OnCpu"
+                and self.current["states"].get(next_task) == "Online"
+            )
+        if name == "scheduler_switch_signal_capacity_preflight_complete" and len(values) == 2:
+            next_task = str(self._deref(values[1]))
+            flow = self.current["references"].get(f"{next_task}.flow")
+            return bool(
+                self.current["states"].get(next_task) == "Online"
+                and self.current["states"].get(str(flow)) == "Online"
             )
         if name == "scheduler_dispatch_signal_capacity_ready" and len(values) == 2:
             return self.current["states"].get(str(values[1])) in {"Base", "Online"}
-        if name in {"task_owns_flow", "task_flow_owner_is", "task_flow_parent_is"} and len(values) == 2:
-            task, flow = (values[0], values[1]) if name == "task_owns_flow" else (values[1], values[0])
+        if name in {"task_flow_owner_is", "task_flow_parent_is"} and len(values) == 2:
+            task, flow = values[1], values[0]
             return (
                 flow in self.systems
                 and self.systems[flow].get("parent") == task
-                and self.current["references"].get(f"{task}.initial_flow") == flow
+                and self.current["references"].get(f"{task}.flow") == flow
             )
-        if name == "task_flow_initial_binding_consistent" and len(values) == 1:
-            flow = values[0]
-            if flow not in self.systems:
-                return False
-            task = self.systems[flow].get("parent")
-            return task in self.systems and self.current["references"].get(f"{task}.initial_flow") == flow
         if name == "task_flow_start_binding_consistent" and len(values) == 1:
             flow = values[0]
             if flow not in self.systems:
@@ -2197,13 +2247,7 @@ class Engine:
             task = self.systems[flow].get("parent")
             if task not in self.systems:
                 return False
-            if self.current["references"].get(f"{task}.initial_flow") == flow:
-                return True
-            return (
-                _fact("task_owns_flow", [task, flow]) in self.current["facts"]
-                and _fact("task_flow_owner_is", [flow, task]) in self.current["facts"]
-                and _fact("task_flow_parent_is", [flow, task]) in self.current["facts"]
-            )
+            return self.current["references"].get(f"{task}.flow") == flow
         return False
 
     def _predicate_path(self, path: str, bindings: dict[str, Any]) -> Any:
@@ -2701,6 +2745,270 @@ class Engine:
                 value=result["value"],
             )
 
+    def _yield_lane_identity(self, signal: dict[str, Any]) -> tuple[str, str, str, int]:
+        flow = self._effective_flow(signal) or str(self.self_value(signal))
+        cpu = "UnboundCPU"
+        try:
+            cpu, _ = self._current_cpu_context(flow)
+        except DerivationProblem:
+            pass
+        task = str(self.systems.get(flow, {}).get("parent") or flow)
+        binding = (
+            self.current.get("contextual_bindings", {})
+            .get("current_task", {})
+            .get(cpu, {})
+        )
+        if isinstance(binding.get("task"), str):
+            task = binding["task"]
+        epoch = binding.get("context_epoch", 0)
+        if not isinstance(epoch, int) or isinstance(epoch, bool) or epoch < 0:
+            raise DerivationProblem("current Task context_epoch must be a non-negative integer")
+        return f"{cpu}/{flow}", cpu, task, epoch
+
+    def _mark_yield_resumed(
+        self,
+        token_id: str,
+        *,
+        resume_signal_id: str,
+        identity: bool,
+    ) -> None:
+        token = self.current["yield_tokens"][token_id]
+        if token.get("status") != "awaiting-resume":
+            raise DerivationProblem(f"duplicate_yield_resume: {token_id}")
+        lane_id = token["lane"]
+        lane = self.current["task_flow_lanes"].get(lane_id)
+        if not isinstance(lane, dict) or lane.get("yield_token") != token_id:
+            raise DerivationProblem(f"stale_yield_lane: {lane_id}")
+        token["status"] = "resumed"
+        token["outcome"] = "resumed"
+        token["resume_signal_id"] = resume_signal_id
+        token["identity_return"] = identity
+        lane["state"] = "running"
+        lane["yield_token"] = None
+        self.current = _snapshot(self.current)
+        self.event(
+            "yield_token_resumed",
+            token_id=token_id,
+            lane=lane_id,
+            resume_signal_id=resume_signal_id,
+            identity=identity,
+            snapshot=_snapshot(self.current),
+        )
+
+    def _yield_default_resume_eligible(self, token: dict[str, Any]) -> tuple[bool, str]:
+        lane = self.current.get("task_flow_lanes", {}).get(token.get("lane"))
+        if not isinstance(lane, dict) or lane.get("yield_token") != token.get("id"):
+            return False, "lane_binding_changed"
+        if any(
+            lane.get(field) != token.get(field)
+            for field in ("cpu", "flow_ref", "task_ref", "context_epoch")
+        ):
+            return False, "lane_identity_changed"
+        source_target = token.get("source_target")
+        if self.current.get("states", {}).get(source_target) != token.get("source_state"):
+            return False, "source_state_changed"
+        task_ref = token.get("task_ref")
+        if self.current.get("states", {}).get(task_ref) != token.get("task_state"):
+            return False, "source_task_state_changed"
+        contextual = self.current.get("contextual_bindings", {})
+        cpu = token.get("cpu")
+        if contextual.get("current_task", {}).get(cpu) != token.get("current_task_binding"):
+            return False, "current_task_binding_changed"
+        if contextual.get("current_stack", {}).get(cpu) != token.get("current_stack_binding"):
+            return False, "current_stack_binding_changed"
+        return True, "source_lane_still_eligible"
+
+    def _consume_yield_token(self, token_id: str, *, completion_signal_id: str) -> None:
+        token = self.current.get("yield_tokens", {}).get(token_id)
+        if not isinstance(token, dict) or token.get("status") != "resumed":
+            raise DerivationProblem(f"yield token cannot be consumed: {token_id}")
+        lane = self.current.get("task_flow_lanes", {}).get(token.get("lane"))
+        if not isinstance(lane, dict) or lane.get("yield_token") is not None:
+            raise DerivationProblem(f"yield lane cannot consume token: {token_id}")
+        lane["last_consumed_token"] = token_id
+        lane["last_consumed_context_epoch"] = token["context_epoch"]
+        lane["last_resume_signal_id"] = token.get("resume_signal_id")
+        token_record = deepcopy(token)
+        del self.current["yield_tokens"][token_id]
+        self.current = _snapshot(self.current)
+        self.event(
+            "yield_token_consumed",
+            token_id=token_id,
+            completion_signal_id=completion_signal_id,
+            token=token_record,
+            snapshot=_snapshot(self.current),
+        )
+
+    def _yield_token_was_consumed(self, token_id: str) -> bool:
+        return any(
+            lane.get("last_consumed_token") == token_id
+            for lane in self.current.get("task_flow_lanes", {}).values()
+            if isinstance(lane, dict)
+        )
+
+    def _execute_yield_call(
+        self,
+        call: dict[str, Any],
+        *,
+        signal: dict[str, Any],
+        handler: dict[str, Any],
+        bindings: dict[str, Any],
+        pending_emits: list[dict[str, Any]],
+        pending_effects: list[dict[str, Any]],
+        context_stack: list[str],
+        resume_index: int,
+    ) -> None:
+        okay, reason = self._call_acceptable(call, signal=signal, bindings=bindings)
+        if not okay:
+            raise DerivationProblem(f"yield_preflight_rejected: {reason}")
+        target, receiver_value = self._resolve_call_receiver(
+            call, signal=signal, bindings=bindings
+        )
+        raw_arguments = self.materialize_arguments(
+            call["arguments"], signal=signal, bindings=bindings
+        )
+        coordinate = self.coordinate(signal["target"], target, signal["coordinate"])
+        child = self.new_signal(
+            source=signal["target"],
+            target=target,
+            name=call["name"],
+            raw_arguments=raw_arguments,
+            delivery="yields",
+            cause_id=signal["id"],
+            coordinate=coordinate,
+            compat_process_kind=call["process_kind"],
+            call_span=call.get("span"),
+        )
+        if receiver_value != target:
+            child["_receiver_value"] = receiver_value
+        effective_flow = self._effective_flow(signal)
+        if effective_flow is not None:
+            child["_effective_flow"] = effective_flow
+        lane_id, cpu, task_ref, context_epoch = self._yield_lane_identity(signal)
+        lane = self.current["task_flow_lanes"].get(lane_id)
+        if isinstance(lane, dict) and lane.get("state") == "awaiting-resume":
+            raise DerivationProblem(f"yield_lane_already_awaiting: {lane_id}")
+        token_id = f"yield-{self.next_yield_token:04d}"
+        self.next_yield_token += 1
+        flow_ref = effective_flow or str(self.self_value(signal))
+        generation = int(
+            self.current.get("instances", {}).get(flow_ref, {}).get("generation", 1)
+        )
+        token = {
+            "id": token_id,
+            "status": "awaiting-resume",
+            "outcome": "yielded",
+            "source_response_identity": signal["id"],
+            "source": signal["source"],
+            "source_target": signal["target"],
+            "source_name": signal["name"],
+            "source_handler": handler["id"],
+            "task_ref": task_ref,
+            "flow_ref": flow_ref,
+            "generation": generation,
+            "target_occurrence": child["id"],
+            "resume_coordinate": {
+                "handler": handler["id"],
+                "member_index": resume_index,
+                "context": list(context_stack),
+            },
+            "cpu": cpu,
+            "lane": lane_id,
+            "context_epoch": context_epoch,
+            "source_state": self.current.get("states", {}).get(signal["target"]),
+            "task_state": self.current.get("states", {}).get(task_ref),
+            "current_task_binding": deepcopy(
+                self.current.get("contextual_bindings", {})
+                .get("current_task", {})
+                .get(cpu)
+            ),
+            "current_stack_binding": deepcopy(
+                self.current.get("contextual_bindings", {})
+                .get("current_stack", {})
+                .get(cpu)
+            ),
+            "bindings": deepcopy(bindings),
+            "pending_effects": deepcopy(pending_effects),
+            "pending_emits": deepcopy(pending_emits),
+            "continue_occurrences": 0,
+        }
+        self.current["yield_tokens"][token_id] = token
+        self.current["task_flow_lanes"][lane_id] = {
+            "cpu": cpu,
+            "flow_ref": flow_ref,
+            "task_ref": task_ref,
+            "context_epoch": context_epoch,
+            "state": "awaiting-resume",
+            "yield_token": token_id,
+        }
+        self.current = _snapshot(self.current)
+        signal["yield_token_id"] = token_id
+        self.event(
+            "yield_token_created",
+            signal_id=signal["id"],
+            child_id=child["id"],
+            token_id=token_id,
+            lane=lane_id,
+            resume_coordinate=deepcopy(token["resume_coordinate"]),
+            snapshot=_snapshot(self.current),
+        )
+        self.event(
+            "yields_wait_started", signal_id=signal["id"], child_id=child["id"], token_id=token_id
+        )
+        self.active_yield_tokens.add(token_id)
+        try:
+            self.deliver(child)
+        finally:
+            self.active_yield_tokens.discard(token_id)
+        token = self.current.get("yield_tokens", {}).get(token_id)
+        if not isinstance(token, dict):
+            raise DerivationProblem(f"yield token disappeared before resume: {token_id}")
+        if child["outcome"] != "completed":
+            token["status"] = "terminal-failed"
+            token["outcome"] = "failed"
+            self.current["task_flow_lanes"][lane_id]["state"] = "terminal-failed"
+            self.current = _snapshot(self.current)
+            raise DerivationProblem(
+                f"post_commit_yield_failure: target {child['id']} outcome={child['outcome']}"
+            )
+        if token["status"] == "resumed":
+            self._consume_yield_token(
+                token_id, completion_signal_id=child["id"]
+            )
+            self.event(
+                "yields_wait_finished",
+                signal_id=signal["id"],
+                child_id=child["id"],
+                token_id=token_id,
+                resume="contextual-continue",
+            )
+            return
+        eligible, eligibility_reason = self._yield_default_resume_eligible(token)
+        self.event(
+            "yield_default_resume_attempt",
+            signal_id=signal["id"],
+            child_id=child["id"],
+            token_id=token_id,
+            eligible=eligible,
+            reason=eligibility_reason,
+        )
+        if eligible:
+            self._mark_yield_resumed(
+                token_id, resume_signal_id=child["id"], identity=True
+            )
+            self._consume_yield_token(
+                token_id, completion_signal_id=child["id"]
+            )
+            self.event(
+                "yields_wait_finished",
+                signal_id=signal["id"],
+                child_id=child["id"],
+                token_id=token_id,
+                resume="target-completion",
+            )
+            return
+        raise YieldPending(token_id)
+
     @staticmethod
     def _handler_property(handler: dict[str, Any], name: str) -> str | None:
         for member in handler.get("body", []):
@@ -2885,6 +3193,162 @@ class Engine:
             self.event("emits_dequeued", signal_id=queued["id"], remaining=len(self.queue))
             self.deliver(queued)
 
+    def _handler_by_id(self, handler_id: str) -> dict[str, Any]:
+        for system in self.systems.values():
+            for handlers in system.get("handlers_by_name", {}).values():
+                for handler in handlers:
+                    if handler.get("id") == handler_id:
+                        return handler
+        raise DerivationProblem(f"stale_yield_handler: {handler_id}")
+
+    def _complete_resumed_source(
+        self, token_id: str, *, resume_signal: dict[str, Any]
+    ) -> None:
+        token = deepcopy(self.current["yield_tokens"][token_id])
+        self._consume_yield_token(
+            token_id, completion_signal_id=resume_signal["id"]
+        )
+        handler = self._handler_by_id(token["source_handler"])
+        coordinate = token.get("resume_coordinate", {})
+        member_index = coordinate.get("member_index")
+        if not isinstance(member_index, int) or isinstance(member_index, bool):
+            raise DerivationProblem(f"invalid_yield_resume_coordinate: {token_id}")
+        source_target = token["source_target"]
+        synthetic = {
+            "id": token["source_response_identity"],
+            "source": token["source"],
+            "target": source_target,
+            "name": token["source_name"],
+            "coordinate": deepcopy(resume_signal["coordinate"]),
+            "cause_id": resume_signal["id"],
+            "_effective_flow": token["flow_ref"],
+        }
+        pending_emits = deepcopy(token.get("pending_emits", []))
+        pending_effects = deepcopy(token.get("pending_effects", []))
+        bindings = deepcopy(token.get("bindings", {}))
+        self._execute_members(
+            handler.get("body", []),
+            signal=synthetic,
+            handler=handler,
+            bindings=bindings,
+            pending_emits=pending_emits,
+            pending_effects=pending_effects,
+            context_stack=[],
+            start_index=member_index,
+        )
+        candidate = _snapshot(self.current)
+        for expression in pending_effects:
+            self.apply_effect(
+                expression,
+                signal=synthetic,
+                bindings=bindings,
+                candidate=candidate,
+                handler=handler,
+            )
+        self.current = _snapshot(candidate)
+        self.event(
+            "yielded_response_completed",
+            token_id=token_id,
+            source_response_identity=token["source_response_identity"],
+            resume_signal_id=resume_signal["id"],
+            snapshot=_snapshot(self.current),
+        )
+        for call in pending_emits:
+            if call.get("kind") != "call":
+                raise DerivationProblem(f"invalid resumed emits call: {call.get('text')}")
+            target = self.resolve_receiver(call["receiver"], signal=synthetic, bindings=bindings)
+            child = self.new_signal(
+                source=source_target,
+                target=target,
+                name=call["name"],
+                raw_arguments=self.materialize_arguments(
+                    call["arguments"], signal=synthetic, bindings=bindings
+                ),
+                delivery="emits",
+                cause_id=resume_signal["id"],
+                coordinate=self.coordinate(source_target, target, resume_signal["coordinate"]),
+                compat_process_kind=call["process_kind"],
+                call_span=call.get("span"),
+                fifo_position=len(self.queue) + 1,
+            )
+            self.queue.append(child)
+            self.event(
+                "emits_enqueued",
+                signal_id=resume_signal["id"],
+                child_id=child["id"],
+                fifo_position=len(self.queue),
+            )
+
+    def _resume_yield_for_continue(self, signal: dict[str, Any]) -> None:
+        if signal.get("name") != "Continue" or signal.get("outcome") in {
+            "failed",
+            "rejected",
+            "truncated",
+        }:
+            return
+        awaiting = [
+            token
+            for token in self.current.get("yield_tokens", {}).values()
+            if token.get("status") == "awaiting-resume"
+        ]
+        for token in awaiting:
+            lane = self.current.get("task_flow_lanes", {}).get(token.get("lane"))
+            if not isinstance(lane, dict) or any(
+                lane.get(field) != token.get(field)
+                for field in ("cpu", "flow_ref", "task_ref", "context_epoch")
+            ):
+                raise DerivationProblem(
+                    f"yield_token_lane_mismatch: {token.get('id')}"
+                )
+        for token in awaiting:
+            token["continue_occurrences"] = int(token.get("continue_occurrences", 0)) + 1
+        target_tokens = [token for token in awaiting if token.get("flow_ref") == signal["target"]]
+        if not target_tokens:
+            _lane_id, cpu, task_ref, context_epoch = self._yield_lane_identity(signal)
+            consumed = [
+                lane
+                for lane in self.current.get("task_flow_lanes", {}).values()
+                if isinstance(lane, dict)
+                and lane.get("flow_ref") == signal["target"]
+                and lane.get("cpu") == cpu
+                and lane.get("task_ref") == task_ref
+                and lane.get("last_consumed_context_epoch") == context_epoch
+                and lane.get("last_consumed_token") is not None
+            ]
+            if consumed:
+                raise DerivationProblem(
+                    f"duplicate_yield_resume: {consumed[-1].get('last_consumed_token')}"
+                )
+            self.current = _snapshot(self.current)
+            return
+        if len(target_tokens) != 1:
+            raise DerivationProblem("ambiguous_yield_resume_token")
+        token = target_tokens[0]
+        token_id = token["id"]
+        lane = self.current["task_flow_lanes"].get(token.get("lane"))
+        if not isinstance(lane, dict) or lane.get("yield_token") != token_id:
+            raise DerivationProblem(f"stale_yield_lane: {token.get('lane')}")
+        generation = int(
+            self.current.get("instances", {})
+            .get(signal["target"], {})
+            .get("generation", 1)
+        )
+        if generation != token.get("generation"):
+            raise DerivationProblem(f"stale_yield_generation: {token_id}")
+        _lane_id, cpu, task_ref, context_epoch = self._yield_lane_identity(signal)
+        if (
+            cpu != token.get("cpu")
+            or task_ref != token.get("task_ref")
+            or context_epoch != token.get("context_epoch")
+            or lane.get("flow_ref") != token.get("flow_ref")
+        ):
+            raise DerivationProblem(f"yield_resume_context_mismatch: {token_id}")
+        self._mark_yield_resumed(
+            token_id, resume_signal_id=signal["id"], identity=False
+        )
+        if token_id not in self.active_yield_tokens:
+            self._complete_resumed_source(token_id, resume_signal=signal)
+
     def _execute_members(
         self,
         members: list[dict[str, Any]],
@@ -2896,8 +3360,9 @@ class Engine:
         pending_effects: list[dict[str, Any]],
         context_stack: list[str],
         skip_outer_depends: bool = False,
+        start_index: int = 0,
     ) -> None:
-        for member in members:
+        for member_index, member in enumerate(members[start_index:], start=start_index):
             kind = member["kind"]
             if kind == "depends_on":
                 if skip_outer_depends:
@@ -2918,6 +3383,19 @@ class Engine:
                         bindings=bindings,
                         context_stack=context_stack,
                     )
+            elif kind == "yields":
+                if len(member.get("entries", [])) != 1:
+                    raise DerivationProblem("yields requires exactly one process call")
+                self._execute_yield_call(
+                    member["entries"][0],
+                    signal=signal,
+                    handler=handler,
+                    bindings=bindings,
+                    pending_emits=pending_emits,
+                    pending_effects=pending_effects,
+                    context_stack=context_stack,
+                    resume_index=member_index + 1,
+                )
             elif kind == "emits":
                 pending_emits.extend(member["entries"])
             elif kind in {"ensures", "updates"}:
@@ -3202,7 +3680,13 @@ class Engine:
                         bindings=bindings,
                         context_stack=[],
                     )
+            token_id = signal.get("yield_token_id")
+            if token_id is not None:
+                token = candidate.get("yield_tokens", {}).get(token_id)
+                if token is not None or not self._yield_token_was_consumed(token_id):
+                    raise DerivationProblem(f"yield token did not resume exactly once: {token_id}")
             self.current = _snapshot(candidate)
+            self._resume_yield_for_continue(signal)
             signal["after_snapshot"] = _snapshot(self.current)
             signal["outcome"] = "completed"
             self.event(
@@ -3237,6 +3721,17 @@ class Engine:
                     child_id=child["id"],
                     fifo_position=len(self.queue),
                 )
+        except YieldPending as suspended:
+            signal["outcome"] = "yielded"
+            signal["reason"] = "awaiting_contextual_continue"
+            signal["after_snapshot"] = _snapshot(self.current)
+            self.event(
+                "response_yielded",
+                signal_id=signal["id"],
+                token_id=suspended.token_id,
+                reason=signal["reason"],
+                snapshot=_snapshot(self.current),
+            )
         except UntilReached:
             if signal["outcome"] != "completed":
                 signal["outcome"] = "stopped"
@@ -3344,6 +3839,10 @@ class Engine:
                     self._drain_queue()
         except UntilReached:
             pass
+        awaiting_yields = sum(
+            token.get("status") == "awaiting-resume"
+            for token in self.current.get("yield_tokens", {}).values()
+        )
         if self.failed:
             verdict = "failed"
         elif self.was_bounded:
@@ -3352,6 +3851,8 @@ class Engine:
             verdict = "reached"
         elif self.until_target is not None:
             verdict = "until_signal_not_reached"
+        elif awaiting_yields:
+            verdict = "yielded"
         else:
             verdict = "complete"
         for signal in self.signals:
@@ -3404,7 +3905,8 @@ class Engine:
                 "failed": sum(item["outcome"] == "failed" for item in self.signals),
                 "truncated": sum(item["outcome"] == "truncated" for item in self.signals),
                 "stopped": sum(item["outcome"] == "stopped" for item in self.signals),
-                "pending": 0,
+                "yielded": sum(item["outcome"] == "yielded" for item in self.signals),
+                "pending": awaiting_yields,
                 "inventory_deferred": sum(
                     item["status"] == "deferred" for item in self.boundary_inventory
                 ),
@@ -3426,6 +3928,8 @@ def initial_snapshot(model: dict[str, Any]) -> dict[str, Any]:
         "references": {},
         "contextual_bindings": {},
         "instances": {},
+        "task_flow_lanes": {},
+        "yield_tokens": {},
     }
 
     def initial_value(item: dict[str, Any], owner: str) -> Any:

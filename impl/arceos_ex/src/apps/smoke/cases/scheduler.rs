@@ -165,7 +165,7 @@ pub fn run() -> SmokeResult {
         || ctx.scheduler().idle_schedule_returned_passes() != 0
         || ctx.scheduler().idle_schedule_identity_passes() != 0
         || ctx.scheduler().identity_switch_passes() != 0
-        || crate::flows::boot_idle_flow::entry_is_online()
+        || crate::flows::boot_init_flow::idle_entry_is_online()
         || ctx.scheduler().kernel_init_stack_switch_started_count() != 1
         || ctx.scheduler().kernel_init_stack_switch_returned_count() != 0
         || ctx.boot_cpu_local_interrupt().saved_and_disabled_count() == 0
@@ -207,7 +207,7 @@ pub fn run() -> SmokeResult {
             ctx.scheduler().idle_schedule_returned_passes(),
             ctx.scheduler().idle_schedule_identity_passes(),
             ctx.scheduler().identity_switch_passes(),
-            crate::flows::boot_idle_flow::entry_is_online(),
+            crate::flows::boot_init_flow::idle_entry_is_online(),
             ctx.scheduler().kernel_init_stack_switch_started_count(),
             ctx.scheduler().kernel_init_stack_switch_returned_count(),
             ctx.boot_cpu_local_interrupt().saved_and_disabled_count(),

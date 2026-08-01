@@ -622,9 +622,8 @@ fn bind_boot_task_entry(ctx: &Context, current_task_ref: TaskRef) -> EventResult
         || !ctx
             .boot_task
             .task()
-            .active_flow()
+            .flow()
             .same_identity(TaskFlowRef::BOOT_INIT)
-        || !ctx.boot_init_flow.core().active()
         || ctx.boot_task.task_ref() != TaskRef::BOOT
     {
         return bind_boot_task_entry_failed(3);
@@ -709,9 +708,8 @@ fn verify_boot_task_online_virtual(ctx: &Context) -> EventResult {
         || !ctx
             .boot_task
             .task()
-            .active_flow()
+            .flow()
             .same_identity(TaskFlowRef::BOOT_INIT)
-        || !ctx.boot_init_flow.core().active()
         || ctx.vm.state() != State::Ready
         || !ctx
             .cpu_group
@@ -806,9 +804,8 @@ pub(super) fn entry_objects_ready(ctx: &Context) -> bool {
         && ctx
             .boot_task
             .task()
-            .active_flow()
+            .flow()
             .same_identity(TaskFlowRef::BOOT_INIT)
-        && ctx.boot_init_flow.core().active()
         && csr::read_tp() == ctx.boot_task.carrier_address()
         && ctx.init_stack.state() == State::Ready
         && ctx.vm.state() == State::Ready

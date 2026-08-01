@@ -1,100 +1,67 @@
 # BootInitFlow
 
-`BootInitFlow` 是静态 `BootTask.initial_flow` 指向的 TaskFlow 实例。由于 TaskFlow 继承
-PhaseObject，它从 `_start` 开始承载并编排启动执行片段，同时拥有独立 FlowRef、lifecycle 与 owner
-关系。`BootTask` 从模型入口起已经 OnCpu，并在后续真实调度中通过 Suspend/Continue 与 Suspended 往返；
-它始终是 PID 0 的同一静态 carrier。
+`BootInitFlow` 是静态 `BootTask.flow` 指向的终身 TaskFlow。它从 `_start` 编排 boot execution，提交
+Online 后仍承载同一 PID 0 的 idle setup、首次 Schedule 返回、`BootIdleEntryPhase` 和 idle loop。
+不存在第二个 boot idle Flow；`BootTask` 首次真实切出时才保存 context并进入 Online，未来通过统一
+Continue 返回同一个 BootInitFlow continuation。
 
-## 边界与职责
+## 入口与 Preset
 
-- OpenSBI 发出 `Kernel.Enable` 后，Kernel 在保持 Ready 的同一个 Enable handler 中严格依次完成
-  `Kernel.Action::AcceptEnable`、通过 `BootInitFlow.Action::AssignCpuRef(BootCPURef)` 把
-  `ref(CpuGroup.cpus[0])` 绑定到 `BootInitFlow.cpu_ref`，以及
-  `PhysicalDirect.Action::ActivateOnCpu(BootCPURef)` 的 `InitialActivation`。只有这三项都已完整提交，
-  Kernel 才同步 drives canonical `BootInitFlow.Transition::Preset`；`BootInitFlow.Startup` 只是该 Preset
-  的显示名，不产生另一条 transition、action、signal identity 或 lifecycle。接受 Preset 时
-  BootInitFlow 必须仍为 Base、parent BootTask 必须为 OnCpu，并在第一个直接 child action 之前记录
-  `BootInitFlow.Started` checkpoint；全部入口事实成立后才提交 `BootInitFlow.Prepared`。任一前置失败、
-  重复启动或执行权不匹配都使根执行失败，且不得启动或部分提交 BootInitFlow.Preset。
-- `BootInitFlow.Preset` 的第一个直接 child 是 BootCPU 的 `InterruptType.Preset`。它先关闭 BootCPU 的
-  全部中断分路门控，再完成一次待决中断清除写；该 child 只保证写已经按序完成，不保证硬件驱动的
-  待决位随后保持为零。它不改变或判定中断总门控，也不提前建立 handler、fallback 或正式分派框架。
-- 建立相对 `gp` 寻址基准后，`BootInitFlow.Preset` 驱动 BootCPU 关闭浮点运算和向量运算能力，再为
-  内核映像的BSS段清零，让落到该段的全局变量初值为零。相关执行状态属于 BootCPU；BootInitFlow
-  只负责编排，不拥有这些状态。
-- 把内核启动时的第一个参数作为BootCPU的hartid记录下来，以备后续使用。
-- 初始 task/stack binding 建立后，Preset 单独驱动 BootCPU 的 `TrapType.Preset`，为所属 CPU 建立
-  临时保护入口，用于处理初始化过程中意外发生的异常或中断，便于测试和定位缺陷。
-- 随后 Preset 依次驱动 `Vm.Preset` 与 `Vm.Setup`。前者准备 `KernelAddrSpace`、`RawDtb`、`FixMap`、
-  `TrampolineVm` 和 `EarlyVm`，但不改变当前 CPU；后者使 BootCPU 按 PhysicalDirect → TrampolineVm
-  → EarlyVm 切换并提交 `Vm.Ready`。`Vm.Enable` 留给后续 SwapperVm 阶段，本入口前导期不触发。
-- `Vm.Setup` 完成后，Preset 驱动 BootCPU 的 `TrapType.Setup`，把异常/中断响应入口从临时保护入口
-  重置为正式的 `TrapFlowType` 响应流入口。该动作同时驱动 `ExceptionType.Preset`，后者继续驱动
-  page-fault、syscall、breakpoint 与 unexpected 四个异常子类型的 `Preset`；成功后 TrapType 为 Ready，
-  ExceptionType 及四个子类型为 Prepared，但中断仍未开放。
-- 正式响应入口重置完成后，Preset 才调用
-  `CurrentTask.RefreshTaskStack(BootTask, BootTask.stack)`，保持 task/stack binding identity 并原子刷新
-  EarlyVm 下的地址表示；TrapType.Setup 不承担这一执行绑定刷新，该动作完成前也不得开始
-  `Soc.Preset`。
-- `Soc.Preset` 成功且 `BootInitFlow.Prepared` 已提交后，Preset 的 completion 直接进入
-  `BootInitFlow.Setup` 的首个叶阶段起点，即 `start_kernel` / `EntrySuccessorPhase.Preset` 边界；该代码
-  入口不增加 Action、continuation、Kernel drive 或 lifecycle。
-- Setup 直接顺序驱动 `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、
-  `SchedInitPhase`、`IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、
-  `ProcessPreparePhase` 和 `BootInitRestInitPhase`。最后一个叶子 Online 后提交
-  `BootInitFlow.Ready`；不建立 `BootPhase` 或 `InterruptPhase` 包装 lifecycle。
-- `BootInitRestInitPhase` 完整驱动 `KernelInitTask` 与 `KthreaddTask` 的 Preset/Setup/Enable。
-  Task Enable 对应 `wake_up_new_task()` 并只发布 Online；initial Flow 必须等 Task 首次真实获得 CPU、
-  接受 Scheduler 同步驱动的 Activate 并提交 OnCpu 后，由 Scheduler 严格发出 Startup。
-- Enable 只驱动 `BootInitScheduleHandoffPhase`，由该叶子建立首次调度的可逆预检与
-  `BootIdleFlow` owner/active binding。
-- 不可逆切换前必须完整建立 `BootIdleFlow` 的 owner/active binding 并使其到达 Ready；随后提交
-  `BootInitFlow.Online`。此时 BootTask 的当前 active Flow 已是 `BootIdleFlow`。本轮 BootInitFlow 的可观察终点
-  固定在即将由 `BootIdleFlow` 向
-  `CpuGroup.cpus[0].scheduler` `emits Schedule()` 的 before-send 边界：Schedule Signal 尚未产生，
-  PreparePrev/PickNextTask/SwitchTo occurrence 均不存在，BootTask 仍为 `OnCpu/Live/Invalid`。发送 Schedule
-  本身也不改变 BootTask；只有 Scheduler 实际选择 `next != prev` 并执行 SwitchTo 后才 Suspend 它。
+OpenSBI 发出 `Kernel.Enable` 后，Kernel 在 Ready 的同一 handler 中依次完成：
 
-BootInitFlow 的每个 lifecycle transition 都在执行时重新检查 parent BootTask 必须为 OnCpu；不存在
-另一个 dispatch guard 字段、状态或镜像对象。
+1. `Kernel.Action::AcceptEnable`；
+2. `BootInitFlow.Action::AssignCpuRef(BootCPURef)`；
+3. `PhysicalDirect.Action::ActivateOnCpu(BootCPURef)` 的 InitialActivation；
+4. canonical `BootInitFlow.Transition::Preset`。
 
-Setup/Enable 的全部 boot execution 叶子都直接以 `BootInitFlow` 为 parent。叶子 Online 后只返回
-`BootInitFlow` 当前 transition 的 continuation，不直接启动 sibling。
+Preset 接受时 Flow 必须 Base、parent 必须是 OnCpu/Live BootTask；`Started` 只是在第一个 child 前记录的
+checkpoint。入口依次完成 BootCPU interrupt route mask/pending clear、浮点/向量关闭、BSS 清零、hartid
+记录、PhysicalDirect 下 boot-only `CurrentTask.BindTaskStack(BootTask, BootTask.stack)`、临时 trap、
+Vm.Preset/Setup、正式 TrapType.Setup、EarlyVm 下 `RefreshTaskStack`、Soc.Preset，最后提交 Prepared。
+失败不得部分提交 Flow、CurrentTask/CurrentStack 或 translation controller。
 
-## 直接叶阶段与物理 namespace
+## Setup 与发布
 
-`boot` 只允许作为文件组织 namespace，不表示 `Boot`、`BootPhase`、入口前导 wrapper 或任何其它
-拥有 lifecycle 的对象。`BootInitFlow.Preset` 先以单个
-`CurrentTask.BindTaskStack(BootTask, BootTask.stack)` 在 PhysicalDirect 下原子建立首次 task/stack binding，
-再在 EarlyVm 接管后以单个 `CurrentTask.RefreshTaskStack(BootTask, BootTask.stack)` 保持 identity 并
-原子刷新当前地址表示；该刷新严格位于 `TrapType.Setup` 之后、`Soc.Preset` 之前。不存在公开
-`BindStack` Signal。全部事实成立后提交 Prepared。
-`BootInitFlow.Setup` 再按以下顺序直接驱动四个 boot 叶阶段：
+Setup 顺序驱动 `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、`SchedInitPhase`、
+`IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、`ProcessPreparePhase` 和
+`BootInitRestInitPhase`，随后提交 Ready。所有叶子 parent 均直接是 BootInitFlow；物理目录中的 `boot`
+只是 namespace。
 
-1. `EntrySuccessorPhase`；
-2. `CorePreparePhase`；
-3. `MmCoreInitPhase`；
-4. `SchedInitPhase`。
+`BootInitRestInitPhase` 完整创建、发布 `KernelInitTask`/`KernelInitFlow` 和
+`KthreaddTask`/`KthreaddFlow`。Task 发布时已是 Online/None/Valid，固定 Flow 也已 Online；首次派发不再
+发送 Startup 或 Activate，而是恢复其首个 TaskThreadContext、提交 Task.Continue，再交付 contextual
+TaskFlow.Continue。
 
-四个叶阶段各自遵循标准四态，直接 parent 均为 `BootInitFlow`。每个叶阶段 Online 后只能返回
-`BootInitFlow.Setup` 的 continuation；不得直接启动下一 sibling，也不得提交不存在的 wrapper 状态或
-checkpoint。叶阶段的物理目录或 namespace 不改变 parent、执行 owner 或 signal 因果关系。
+Enable 驱动 `BootInitScheduleHandoffPhase`，只完成 CPU0 Scheduler idle/curr metadata、runqueue 与首次
+调度的可逆预检；不创建 Flow、active binding 或 dispatch kind。随后提交 BootInitFlow.Online。
 
-## 生命周期与执行主体边界
+## Online Actions、首次调度与 idle
+
+BootInitFlow.Online 后按固定顺序执行同一 Flow 的 Actions：
+
+1. 完成 boot idle setup 和退出 inherited preempt-disabled guard；
+2. `yields CpuGroup.cpus[0].scheduler.Action::Schedule()`；
+3. identity 时由目标完成后的通用 resume attempt 立即从 yields 后继续；
+4. non-identity 时 Scheduler 显式保存 BootTask context、Task.Suspend、恢复 next context、提交 bindings 和
+   next Task.Continue；BootInitFlow lane token 保持 pending；
+5. 未来 Scheduler 恢复 BootTask 后，contextual BootInitFlow.Continue 校验 context epoch/token，先回到
+   `schedule()` 返回 continuation，再驱动 `BootIdleEntryPhase` 和 idle loop。
+
+本轮 canonical before-send 边界固定在第 2 步 token/Signal 尚未创建的位置。发送 Schedule 本身不改变
+BootTask 或 Flow；只有 non-identity SwitchTo 的显式步骤改变 Task/CPU binding。`BootIdleEntryPhase`
+现在是 BootInitFlow 的 Online child，而不是另一个 Flow 的子对象。
+
+陷入期间 BootTask 保持 OnCpu、BootInitFlow 保持 Online；effective-flow 栈切到 Trap/Interrupt/
+Exception leaf。若陷入中调度切出，恢复先落到该 leaf，再回到 BootInitFlow continuation。
+
+## 生命周期与边界
 
 ```text
 Base --Preset--> Prepared --Setup--> Ready --Enable--> Online
 ```
 
-`Started` 只是 Preset 被接受时的 checkpoint：它位于 Kernel acceptance、CpuRef binding 和
-PhysicalDirect InitialActivation 之后、Preset 第一个直接 child action 之前，不是第五种状态，也不是
-Startup 的独立 signal identity。记录 Started 时 BootInitFlow 仍为 Base；只有全部 Preset 事实成立后
-才原子提交 Prepared。Prepared、Ready、Online 均使用标准 phase checkpoint；
-`BootInitFlow.Online` 必须紧邻首次 Schedule 的 before-send 边界，且位于任何 PreparePrev 或不可逆切换之前。
-
-`BootIdleEntryPhase` 不属于 `BootInitFlow`。它是 `BootIdleFlow` 的 PhaseObject 子对象，只在未来
-调度恢复 `BootTask`、真实 current/SP 已回到 PID 0 后才开始，随后进入 `cpu_startup_entry()` 和
-idle loop。KernelInitTask 的入口不得预执行、假定或等待 BootIdleEntry 完成。
+每个 transition/action 都重新校验固定 parent、FlowRef/generation、CpuRef 与 effective-flow guard。
+BootInitFlow 不退出，终身属于 BootTask。完整 SMP arbitration、迁移与 replay 保持 P2 延期。
 
 ## 引用
 

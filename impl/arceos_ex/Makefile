@@ -122,9 +122,11 @@ endif
 QEMU_DEVICES ?= -object rng-random,id=rng0,filename=/dev/urandom -device virtio-rng-device,rng=rng0 -drive file=$(VIRTIO_BLK_IMAGE),if=none,format=raw,id=blk0 -device virtio-blk-device,drive=blk0
 PYVERI ?= $(ROOT)/tools/pyveri/bin/pyveri
 CODEGEN_PYTHONPATH := $(ROOT)/tools/common/src:$(ROOT)/tools/codegen/src
+TOOLS2_PYTHONPATH := $(shell find $(ROOT)/tools2 -mindepth 2 -maxdepth 2 -type d -name src -printf '%p:')
+MODEL_AST := $(ROOT)/tools/out/codegen/main.ast.json
 MODEL_JSON := $(ROOT)/tools/out/codegen/main.model.json
 MODEL_SPECS := $(shell find $(ROOT)/spec/model -name '*.spec')
-CODEGEN_SOURCES := $(shell find $(ROOT)/tools/codegen/src $(ROOT)/tools/common/src -name '*.py')
+CODEGEN_SOURCES := $(shell find $(ROOT)/tools/codegen/src $(ROOT)/tools/common/src $(ROOT)/tools2/parse/src $(ROOT)/tools2/model/src $(ROOT)/tools2/common/src -name '*.py')
 EXTRA_RUSTFLAGS ?=
 APP_CFG := app_$(subst -,_,$(APP))
 PLIC_PROVIDER_CFG := --cfg $(if $(filter native,$(PLIC_PROVIDER)),plic_provider_native,$(PROVIDER_$(PLIC_PROVIDER)_CFG))
@@ -183,7 +185,8 @@ test-boot-init-flow-entry: $(KERNEL_ELF)
 
 $(LINKER): $(MODEL_SPECS) $(CODEGEN_SOURCES) Makefile
 	mkdir -p $(ROOT)/tools/out/codegen
-	$(PYVERI) $(ROOT)/spec/model/main.spec --derive --work-dir $(ROOT)/tools/out/codegen -o /dev/null
+	PYTHONPATH=$(TOOLS2_PYTHONPATH) $(PYTHON) -m parse_tool $(ROOT)/spec/model/main.spec -o $(MODEL_AST)
+	PYTHONPATH=$(TOOLS2_PYTHONPATH) $(PYTHON) -m model_tool $(MODEL_AST) -o $(MODEL_JSON)
 	PYTHONPATH=$(CODEGEN_PYTHONPATH) python -m codegen_tool linker-script $(MODEL_JSON) -o $(LINKER)
 
 $(KERNEL_ELF): $(SOURCES) $(LINKER)

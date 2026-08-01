@@ -73,9 +73,8 @@ pub fn accept_enable_at_entry(boot_args: &BootArgs) -> EventResult {
         || !ctx
             .boot_task
             .task()
-            .active_flow()
+            .flow()
             .same_identity(ctx.boot_init_flow.core().flow_ref())
-        || !ctx.boot_init_flow.core().active()
         || ctx.boot_init_flow.state() != State::Base
         || ctx.cpu_group.state() != State::Prepared
         || ctx.cpu_group.boot_cpu_state() != State::Prepared
@@ -116,8 +115,6 @@ pub fn commit_online_after_application_environment_ready() -> EventResult {
             .current_task_ref()
             .is_ok_and(|task_ref| task_ref.same_identity(ctx.kernel_init_task.task_ref()))
         || ctx.kernel_init_flow.state() != State::Online
-        || ctx.kernel_init_flow.released()
-        || !ctx.kernel_init_flow.active()
         || !crate::phases::payload::prepare::is_online()
         || !crate::phases::payload::handoff_prepare::is_online()
         || ctx.selected_payload_handoff.state() != State::Online

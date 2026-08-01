@@ -46,7 +46,8 @@ pub(crate) fn prepare_selected_payload(ctx: &mut Context) -> EventResult {
     user_boot::prepare_handoff(ctx)?;
     ctx.selected_payload_handoff.enable(
         &ctx.config,
-        ctx.user_boot_payload.state() == State::Ready && ctx.user_app_flow.state() == State::Ready,
+        ctx.user_boot_payload.state() == State::Ready
+            && ctx.kernel_init_user_runtime.state() == State::Ready,
     )
 }
 

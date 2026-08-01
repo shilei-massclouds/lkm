@@ -25,6 +25,34 @@ object BootInitFlow: TaskFlow {
             }
         }
 
+        Action::PrepareIdleEntry {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Online;
+                BootTask.state == State::OnCpu;
+                task_flow_effective_execution_guard(self);
+            }
+            ensures {
+                boot_idle_runtime_ready(self, BootTask);
+                boot_idle_cpu_startup_entry_ready(self, CpuGroup.cpus[0]);
+                boot_idle_entry_prepared(self, BootTask);
+            }
+        }
+
+        Action::RunIdleLoop {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Online;
+                BootTask.state == State::OnCpu;
+                boot_idle_entry_prepared(self, BootTask);
+            }
+            ensures {
+                boot_idle_runtime_loop_entered(self, BootTask);
+                boot_idle_loop_cycle_committed(self);
+                boot_idle_loop_continues(self);
+            }
+        }
+
     }
 
     state State::Base {
@@ -43,13 +71,12 @@ object BootInitFlow: TaskFlow {
                         BootTask,
                         TaskBreakpointState::Invalid
                     );
-                    task_initial_flow_is(BootTask, self);
+                    task_fixed_flow_is(BootTask, self);
                     self.parent.state == State::OnCpu;
                     task_execution_authority_is(
                         self.parent,
                         TaskExecutionAuthority::Live
                     );
-                    task_flow_start_binding_consistent(self);
                     task_concurrency_closed();
                     BootCpuRegisters.satp == 0;
                     cpu_active_translation_controller_for_ref_is(
@@ -128,13 +155,13 @@ object BootInitFlow: TaskFlow {
                     );
                     task_has_unique_stack_attribute(BootTask);
                     boot_task_task_stack_binding_diagnostic_clear();
-                    task_owns_flow(BootTask, self);
                     task_flow_owner_is(self, BootTask);
                     task_flow_parent_is(self, BootTask);
                     task_flow_cpu_ref_is(self, BootCPURef);
                     task_flow_cpu_ref_targets(self, CpuGroup.cpus[0]);
                     current_cpu_resolved_target_is(self, BootCPURef, CpuGroup.cpus[0]);
                     task_flow_started(self);
+                    task_flow_start_binding_consistent(self);
                 }
 
                 emits {
@@ -198,8 +225,8 @@ object BootInitFlow: TaskFlow {
                     IrqOpenPreparePhase.state == State::Online;
                     ProcessPreparePhase.state == State::Online;
                     BootInitRestInitPhase.state == State::Online;
-                    KernelInitFlow.state == State::Base;
-                    KthreaddFlow.state == State::Base;
+                    KernelInitFlow.state == State::Online;
+                    KthreaddFlow.state == State::Online;
                     BootTask.state == State::OnCpu;
                 }
 
@@ -214,8 +241,8 @@ object BootInitFlow: TaskFlow {
         invariant {
             ProcessPreparePhase.state == State::Online;
             BootInitRestInitPhase.state == State::Online;
-            KernelInitFlow.state == State::Base;
-            KthreaddFlow.state == State::Base;
+            KernelInitFlow.state == State::Online;
+            KthreaddFlow.state == State::Online;
             BootTask.state == State::OnCpu;
         }
 
@@ -233,20 +260,13 @@ object BootInitFlow: TaskFlow {
 
                 drives {
                     BootInitScheduleHandoffPhase.Transition::Preset;
-                    BootIdleFlow.Transition::Enable;
                 }
 
                 ensures {
                     BootInitScheduleHandoffPhase.state == State::Online;
-                    BootIdleFlow.state == State::Online;
-                    task_owns_flow(BootTask, BootIdleFlow);
-                    task_flow_owner_is(BootIdleFlow, BootTask);
-                    task_flow_parent_is(BootIdleFlow, BootTask);
-                    task_flow_owner_exclusive(BootIdleFlow);
-                    task_active_flow_is(BootTask, BootIdleFlow);
-                    task_owns_flow(KernelInitTask, KernelInitFlow);
+                    task_fixed_flow_is(BootTask, self);
+                    task_fixed_flow_is(KernelInitTask, KernelInitFlow);
                     kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
-                    kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
                     boot_init_flow_switch_precommit_ready(
                         BootInitFlow,
                         Cpu0Scheduler,
@@ -260,12 +280,10 @@ object BootInitFlow: TaskFlow {
                         KernelInitTaskRef
                     );
                     BootTask.state == State::OnCpu;
-                    task_flow_online_on_cpu(self);
-                    task_has_unique_active_flow(self.parent);
                 }
 
                 emits {
-                    BootIdleFlow.Action::RequestSchedule;
+                    self.Action::RequestSchedule;
                 }
             }
         }
@@ -276,8 +294,7 @@ object BootInitFlow: TaskFlow {
             ProcessPreparePhase.state == State::Online;
             BootInitRestInitPhase.state == State::Online;
             BootInitScheduleHandoffPhase.state == State::Online;
-            BootIdleFlow.state == State::Online;
-            task_active_flow_is(BootTask, BootIdleFlow);
+            task_fixed_flow_is(BootTask, self);
             boot_init_flow_switch_precommit_ready(
                 BootInitFlow,
                 Cpu0Scheduler,
@@ -290,9 +307,28 @@ object BootInitFlow: TaskFlow {
                 BootTaskRef,
                 KernelInitTaskRef
             );
-            BootTask.state == State::OnCpu;
             task_flow_started(self);
-            task_flow_online_on_cpu(self);
+        }
+
+        actions {
+            on Action::RequestSchedule {
+                state_effect: StateEffect::None;
+                depends_on {
+                    BootTask.state == State::OnCpu;
+                    Cpu0Scheduler.state == State::Online;
+                    task_flow_effective_execution_guard(self);
+                }
+                yields {
+                    Cpu0Scheduler.Action::Schedule;
+                }
+                drives {
+                    BootIdleEntryPhase.Transition::Preset;
+                }
+                ensures {
+                    boot_init_flow_schedule_returned(self, Cpu0Scheduler);
+                    BootIdleEntryPhase.state == State::Online;
+                }
+            }
         }
     }
 }
@@ -305,3 +341,5 @@ predicate boot_init_flow_switch_precommit_ready<B, S, T, K>(
     boot_task: T,
     kernel_init_task: K
 ) -> bool;
+
+predicate boot_init_flow_schedule_returned<B, S>(boot_init: B, scheduler: S) -> bool;

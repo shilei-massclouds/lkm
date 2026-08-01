@@ -1,3 +1,5 @@
+mod idle;
+mod idle_entry;
 mod preset;
 mod rest_init;
 mod schedule_handoff;
@@ -13,6 +15,10 @@ pub(crate) use preset::{
 use crate::{
     checkpoint::Checkpoint,
     objects::{
+        boot_task::BootTask,
+        cpu_group::CpuGroup,
+        rest_init::{KernelInitTask, KthreaddReadyGate, KthreaddTask},
+        scheduler::Scheduler,
         state::{EventResult, LifecycleEvent, State, failed_condition},
         task::{Task, TaskEntry, TaskKind, TaskRef},
         task_flow::{TaskFlow, TaskFlowRef, task_flow_execution_guard_satisfied},
@@ -42,21 +48,19 @@ unsafe extern "C" {
 /// the owning Task's Task-only OnCpu projection.
 pub struct BootInitFlow {
     flow: TaskFlow,
+    pub(crate) idle: idle::IdleRuntime,
 }
 
 impl BootInitFlow {
     pub const fn new() -> Self {
         Self {
-            flow: TaskFlow::new_static_bound_active(TaskFlowRef::BOOT_INIT, TaskRef::BOOT),
+            flow: TaskFlow::new_static_bound(TaskFlowRef::BOOT_INIT, TaskRef::BOOT),
+            idle: idle::IdleRuntime::new(),
         }
     }
 
     pub const fn state(&self) -> State {
         self.flow.state()
-    }
-
-    pub(crate) fn core_mut(&mut self) -> &mut TaskFlow {
-        &mut self.flow
     }
 
     pub(crate) const fn core(&self) -> &TaskFlow {
@@ -73,10 +77,8 @@ impl BootInitFlow {
 
     pub fn accept_initial_start_signal(&self, owner: &Task) -> EventResult {
         if self.flow.state() != State::Base
-            || !owner.initial_flow().same_identity(self.flow.flow_ref())
+            || !owner.flow().same_identity(self.flow.flow_ref())
             || !owner.owns_flow(self.flow.flow_ref())
-            || !owner.active_flow().same_identity(self.flow.flow_ref())
-            || !self.flow.active()
             || !task_flow_execution_guard_satisfied(&self.flow, owner)
         {
             return failed_condition(
@@ -93,27 +95,32 @@ impl BootInitFlow {
         self.flow.preset(owner, Some(checkpoint))
     }
 
-    pub fn setup_and_activate(&mut self, owner: &mut Task, checkpoint: Checkpoint) -> EventResult {
-        if !owner.active_flow().same_identity(self.flow.flow_ref()) || !self.flow.active() {
-            return failed_condition(
-                LifecycleEvent::Setup,
-                self.flow.state(),
-                State::Prepared,
-                State::Ready,
-            );
-        }
+    pub fn setup(&mut self, owner: &Task, checkpoint: Checkpoint) -> EventResult {
         self.flow.setup(owner, Some(checkpoint))
     }
 
-    pub fn enable_with_successor(
+    pub fn prepare_idle_runtime(
         &mut self,
-        owner: &mut Task,
-        successor: &mut TaskFlow,
-        checkpoint: Checkpoint,
+        boot_task: &BootTask,
+        scheduler: &Scheduler,
+        kernel_init_task: &KernelInitTask,
+        kthreadd_task: &KthreaddTask,
+        kthreadd_ready_gate: &KthreaddReadyGate,
+        cpu_group: &CpuGroup,
     ) -> EventResult {
-        self.flow
-            .enable_after_successor_handoff(owner, successor, checkpoint)?;
-        successor.enable(owner, None)
+        self.idle.setup(
+            &self.flow,
+            boot_task,
+            scheduler,
+            kernel_init_task,
+            kthreadd_task,
+            kthreadd_ready_gate,
+            cpu_group,
+        )
+    }
+
+    pub fn enable(&mut self, owner: &Task, checkpoint: Checkpoint) -> EventResult {
+        self.flow.enable(owner, Some(checkpoint))
     }
 }
 
@@ -130,9 +137,8 @@ pub fn adopt_head_preset_start() -> EventResult {
         || !ctx
             .boot_task
             .task()
-            .active_flow()
+            .flow()
             .same_identity(TaskFlowRef::BOOT_INIT)
-        || !ctx.boot_init_flow.core().active()
     {
         return failed_condition(LifecycleEvent::Preset, state, State::Base, State::Prepared);
     }
@@ -244,7 +250,7 @@ pub fn setup_after_boot_init_rest_init() -> ! {
     let ctx = crate::context::context();
     let result = if dependencies_ready {
         ctx.boot_init_flow
-            .setup_and_activate(ctx.boot_task.task_mut(), Checkpoint::BootInitFlowReady)
+            .setup(ctx.boot_task.task(), Checkpoint::BootInitFlowReady)
     } else {
         failed_condition(
             LifecycleEvent::Setup,
@@ -280,11 +286,36 @@ pub fn enable_after_boot_init_schedule_handoff() -> ! {
         && schedule_handoff::precommit_ready();
     let ctx = crate::context::context();
     let result = if dependencies_ready {
-        ctx.boot_init_flow.enable_with_successor(
-            ctx.boot_task.task_mut(),
-            ctx.boot_idle_flow.core_mut(),
-            Checkpoint::BootInitFlowOnline,
-        )
+        let crate::context::Context {
+            boot_init_flow,
+            boot_task,
+            cpu_group,
+            kernel_init_task,
+            kthreadd_task,
+            kthreadd_ready_gate,
+            ..
+        } = ctx;
+        if let Some(scheduler) = cpu_group.boot_scheduler() {
+            boot_init_flow
+                .prepare_idle_runtime(
+                    boot_task,
+                    scheduler,
+                    kernel_init_task,
+                    kthreadd_task,
+                    kthreadd_ready_gate,
+                    cpu_group,
+                )
+                .and_then(|()| {
+                    boot_init_flow.enable(boot_task.task(), Checkpoint::BootInitFlowOnline)
+                })
+        } else {
+            failed_condition(
+                LifecycleEvent::Enable,
+                State::Ready,
+                State::Ready,
+                State::Online,
+            )
+        }
     } else {
         failed_condition(
             LifecycleEvent::Enable,
@@ -297,7 +328,7 @@ pub fn enable_after_boot_init_schedule_handoff() -> ! {
     schedule()
 }
 
-/// Lowers the active BootIdleFlow's Schedule signal after BootInitFlow has
+/// Lowers BootInitFlow's internal idle Schedule signal after the Flow has
 /// committed Online. Kernel.Enable remains the enclosing continuation but is
 /// not the Scheduler signal sender. The call returns only after a later switch
 /// restores the original BootTask.
@@ -317,7 +348,7 @@ fn schedule() -> ! {
 
 /// Runs only if a later scheduler switch restores the original BootTask stack.
 pub fn boot_task_restored() -> ! {
-    crate::flows::boot_idle_flow::preset_entry(crate::context::context())
+    idle::preset_entry(crate::context::context())
 }
 
 pub fn is_online() -> bool {
@@ -335,6 +366,11 @@ pub(crate) fn rest_init_is_online() -> bool {
 #[cfg_attr(not(app_smoke), allow(dead_code))]
 pub(crate) fn schedule_handoff_is_online() -> bool {
     schedule_handoff::is_online()
+}
+
+#[cfg_attr(not(app_smoke), allow(dead_code))]
+pub(crate) fn idle_entry_is_online() -> bool {
+    idle::entry_is_online()
 }
 
 /// Reports the post-handoff boundary observed while KernelInitTask owns the CPU.
@@ -403,12 +439,7 @@ fn start_kernel_entry_guard_satisfied() -> bool {
     crate::systems::kernel::enable_in_progress()
         && ctx.boot_init_flow.state() == State::Prepared
         && boot_task_on_cpu_and_canonical()
-        && ctx
-            .boot_task
-            .task()
-            .active_flow()
-            .same_identity(flow.flow_ref())
-        && flow.active()
+        && ctx.boot_task.task().flow().same_identity(flow.flow_ref())
         && task_flow_execution_guard_satisfied(flow, ctx.boot_task.task())
         && cpu_ref.is_some()
         && cpu_ref == ctx.cpu_group.boot_cpu_ref()

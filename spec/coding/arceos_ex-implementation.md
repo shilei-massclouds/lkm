@@ -64,7 +64,7 @@ make clean
 
 实现位于 `impl/arceos_ex/src/phases/interrupt/process_prepare.rs`。当前路径在本地 IRQ 打开之后建立
 ProcessPrepare 的 runtime service facts、VFS 初始 ramfs root、FsStruct/FilesStruct 前置对象和
-BootInitFlow handoff；测试读取 checkpoint 时已有的事实，不在 handler 中推进对象。
+BootInitFlow schedule boundary；测试读取 checkpoint 时已有的事实，不在 handler 中推进对象。
 
 ### Completion
 

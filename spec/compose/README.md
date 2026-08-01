@@ -38,8 +38,8 @@ TaskFlow/scheduler/入口私有边界和 tools2 snapshot/derive 投影；RISC-V6
 
 本目录记录 `Composition Phase` 的补充约束。
 
-2026-07-27 tools2 Signal animation v3 复核：request/feedback/settle 因果时刻只改变独立 Python
-`animate` 投影、离线 HTML 协议和 Svelte 播放器；tools2 v7 derive 的同步响应、异步 FIFO、Signal
+2026-07-27 tools2 Signal animation（现行 v4）复核：request/feedback/settle/yield/resume 因果时刻只改变独立 Python
+`animate` 投影、离线 HTML 协议和 Svelte 播放器；tools2 v10 derive 的同步响应、异步 FIFO、Signal
 identity/cause、失败传播与 event sequence 不变，也不新增或
 调整内核 crate、Rust module、facade、feature、公开 API 或组件依赖。`spec/compose/main.spec` 已复核，
 组合语义无需修改。
@@ -130,7 +130,7 @@ action 仍位于既有 objects/runtime 内部边界。该调整不新增 crate�
 组件依赖，`spec/compose/main.spec` 无需改变。
 
 2026-07-24 启动 Flow 物理布局复核：crate 内新增私有 `flows` 代码层，按父 Flow 归组
-`BootInitFlow`、`BootIdleFlow` 及其直属子阶段；删除 `phases::boot_init` 旧路径且不提供兼容 re-export。
+`BootInitFlow` 及其直属子阶段；独立的 boot idle Flow 已并入该私有 module，且不提供兼容 re-export。
 该变化只调整 crate 内 canonical module ownership，不新增 crate、feature、facade、公开接口或组件依赖，
 因此 `spec/compose/main.spec` 的组合语义无需改变。
 

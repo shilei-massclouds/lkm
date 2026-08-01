@@ -11,10 +11,10 @@
 ```text
 drives {
     declare child of Task;
-    declare fork_flow of UserAppFlow;
+    declare child_flow of UserTaskFlow;
 
     child.Transition::Preset(...);
-    fork_flow.Transition::Preset(...);
+    child_flow.Transition::Preset(...);
 }
 ```
 

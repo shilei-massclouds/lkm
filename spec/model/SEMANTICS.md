@@ -257,7 +257,7 @@ on Action::CopyProcess<Src: Task, New: Task>(
         security.state == State::Ready;
         scheduler.state == State::Online;
         task_clone_args_ready(dst_task);
-        task_owns_flow(dst_task, flow);
+        task_fixed_flow_is(dst_task, flow);
     }
 
     ensures {
@@ -409,7 +409,7 @@ on Transition::Preset -> State::Prepared {
 
 - `emits` 条目可以写成 `Transition::Name`、`Action::Name` 或带 receiver 的相同形式。
 - receiver 也可以是具有静态类型的 association path，例如
-  `self.initial_flow.Transition::Preset`。当 association path 穿过 `TaskRef` 时，
+  `self.flow.Action::Continue`。当 association path 穿过 `TaskRef` 时，
   先按该引用当前绑定的 `Task` 解引用，再访问 Task association。每一级 association 和最终
   transition 都必须能由静态类型唯一解析；动态 receiver 不能绕过类型检查。
 - 被发出的 transition 必须存在。
@@ -424,6 +424,44 @@ on Transition::Preset -> State::Prepared {
   `emits` 表达当前迁移已经提交并通过目标状态 invariant 后的 completion event。
 - `emits` 覆盖 lifecycle transition、显式 state-changing runtime Transition 与 Action Signal；
   后两者不改变 `emits` 必须在 source commit 后才投递的规则。
+
+## SEM-SIGNAL-YIELDS-001: Yielded Delivery Suspends a Serializable Model Continuation
+
+`yields` 是第三种 Signal delivery，可投递任意静态可解析且当前可接受的 Signal；receiver、Signal 名称
+和 handler kind 都不是其语义成立的特判条件。v10 首片只允许在
+`state_effect: StateEffect::None` 的 Action handler 中使用，每个 handler occurrence 最多执行一个
+yield call。
+
+发送前必须原子完成 receiver、唯一 handler、typed payload、source state 与 depends_on 预检。预检
+失败不创建 occurrence、YieldToken、lane 或任何对象 delta。成功后的执行顺序为：
+
+1. 创建 delivery=`yields` 的 Signal occurrence；
+2. 创建模型 YieldToken，记录 source response identity、TaskRef/FlowRef/generation、目标 occurrence、
+   规范化 resume coordinate、CPU/TaskFlowLane、context epoch 和恢复所需的可序列化 binding；
+3. 把 source lane 标记为 awaiting-resume；
+4. 令目标 Signal 成为下一项强制执行工作；它不进入 emits FIFO；
+5. 目标正常完成后执行且只执行一次 default resume attempt；
+6. 若 token ownership、generation、lane binding 和 source execution eligibility 仍匹配，先精确一次消费
+   token，再从 yields 后的 coordinate 继续 source；若显式目标效果改变了执行 lane，则 token 保持
+   pending，source response outcome 为 yielded；
+7. 未来匹配的 contextual TaskFlow.Continue 可以校验 CPU、TaskRef、FlowRef、generation、dispatch
+   record 和 context epoch 后精确一次消费 token并恢复 source。
+
+default resume eligibility 只比较 token 与规范化 execution binding，不得根据目标是否包含 Continue、
+receiver 是否为 Scheduler 或 Signal 是否名为 Schedule 猜测 identity。嵌套 A yields B、B yields C 按
+C target completion → B resume/completion → A resume/completion 顺序展开。已消费 token 从活动 snapshot
+移除；lane 可以保存 last-consumed token/epoch 账本用于拒绝同 epoch 重复恢复。
+
+YieldToken 只保存模型控制数据，不保存 Python frame、宿主调用栈、客户机 PC、`ra/sp/s0..s11` 或
+TaskThreadContext。`yields` 的默认 state/fact/reference/context delta 必须为空；它不改变 Task、
+TaskFlow lifecycle、CurrentTask、CurrentStack、CpuRef、runqueue、锁或中断状态。任何此类变化只能
+来自目标 handler 中显式声明的 transition/action/update。架构 context save/restore 是
+Scheduler.Schedule/SwitchTo 的独立职责。
+
+目标在 token commit 后 rejected/failed、stale generation、错误 Flow/CPU/context epoch、错误 lane 或
+重复 resume 都使根执行 terminal failed，不回滚、不改选、不重试。立即完成的 trace 仍必须记录 token
+created、source yielded、target completed、default resume attempt、resumed、consumed 和 source tail；
+最终 snapshot 不得残留该 token。
 
 完整模型的默认推导入口是唯一的外部 `Human` 编排。Human 先同步 drives
 `Computer.Transition::Preset`，成功后同步 drives `Computer.Transition::Setup`；两者都完成后再异步
@@ -453,8 +491,9 @@ handler 不相互发送 Signal。后续运行启动固定为
 
 本节的完整 Signal envelope 语义只约束 `tools2/`；受支持的旧 `tools/` 路径必须用自身既有协议解析、
 建模、推导和展示同一 external 默认编排与显式单 Signal 边界，但不导入 tools2 实现。
-`tools2` 的 `lkm.spec.*` 中间协议统一使用 version `5` 并带 `producer: "tools2"`；每个阶段必须拒绝
-producer 或 version 不匹配的输入，不能把 tools2 version 1/2/3/4、老工具 JSON 或旧 snapshot 当成兼容输入。
+`tools2` 的 AST/Model/Derive/Check/View/Snapshot `lkm.spec.*` 协议统一使用 version `10` 并带
+`producer: "tools2"`；动画协议使用 version `4`。每个阶段必须严格拒绝 producer/version 不匹配的
+输入，尤其不得兼容读取 v9、老工具 JSON 或旧 snapshot。
 
 ### Normalization and handling
 
@@ -512,7 +551,12 @@ reference。初态 state invariant 建立带来源的初始事实；有 body 的
 `emits` 只有在源 handler 的 state/fact 提交并通过 invariant 后，才按 source order 追加到全局 FIFO。
 源响应完成后由调度器逐项取出；每次 enqueue/dequeue 和调度选择都必须写入 trace。emits 被拒绝或
 异步处理失败使根推导为 `failed`。条件不满足不得产生
-`pending`；当前工具不建立等待队列、continuation 或未来 Signal 恢复。
+`pending`。
+
+`yields` 在源 response commit 之前立即交付唯一目标，目标不进入 FIFO。source lane 从 token commit
+到 default/contextual resume 之间为 awaiting-resume；普通 emits 只能在 source 最终完成后入队，因此
+不得插入 target completed 与 default resume attempt 之间。目标正常完成时必须执行通用 resume attempt；
+绑定不匹配产生可快照 `yielded` verdict，而不是 emits queue 或通用等待队列。
 
 ### Pre-send until boundary
 
@@ -543,14 +587,14 @@ reference/association 和已证明 fact。结构化 deferred/trimmed 只保留 i
 evidence，不生成 `blocked`。无限预算下若相同因果请求在完全相同快照再次出现，derive 必须以带调用
 位置的 `causal_cycle_without_snapshot_progress` failed 结束。
 
-Signal/响应 outcome 使用：envelope 接收判定的 `rejected`、响应结束的
-`completed`、截至传播的 `stopped`、预算 frontier 的 `truncated` 和根推导的
-`complete`/`reached`/`until_signal_not_reached`/`failed`/`bounded`。`pending` 是
-保留词但当前工具不可产生。`blocked` 不属于 tools2 核心协议，只能出现在老工具兼容报告。
+Signal/响应 outcome 使用：envelope 接收判定的 `rejected`、响应结束的 `completed`、source lane 等待
+恢复的 `yielded`、截至传播的 `stopped`、预算 frontier 的 `truncated` 和根推导的
+`complete`/`yielded`/`reached`/`until_signal_not_reached`/`failed`/`bounded`。`pending` 只描述活动
+YieldToken，不作为 response outcome。`blocked` 不属于 tools2 核心协议。
 
 严格拒绝、类型/规格/invariant 错误必须保留根 Signal 到失败点的完整 `cause_id` 链。失败产物保存
 initial snapshot、每个成功响应边界和 last stable snapshot；已经提交的边界不回滚。derive 只要成功
-写出结构化诊断 JSON 就正常退出；check 对 `complete` 和 `reached` 返回成功，对
+写出结构化诊断 JSON 就正常退出；check 对 `complete`、`yielded` 和 `reached` 返回成功，对
 `until_signal_not_reached`、`failed` 和 `bounded` 返回失败。
 
 ### Hierarchical propagation budget
@@ -574,13 +618,15 @@ initial snapshot、每个成功响应边界和 last stable snapshot；已经提�
 ### Required derivation records and resumability
 
 `derive.json` 至少包含 root request、可选 until request/reached boundary、model fingerprint、initial snapshot、last stable snapshot、根 verdict、
-Signal envelopes、resolved handler、typed payload、`drives`/`emits` delivery、hierarchy coordinate、全局事件
-顺序、before/after snapshot、cause/response parent、outcome、拒绝/失败原因和 truncated frontier。Signal
+Signal envelopes、resolved handler、typed payload、`drives`/`emits`/`yields` delivery、hierarchy
+coordinate、全局事件顺序、before/after snapshot、cause/response parent、outcome、拒绝/失败原因、
+TaskFlowLane、pending YieldToken 和 truncated frontier。Signal
 ID 由根请求和稳定因果路径/同级 ordinal 生成，不使用临时目录、进程号或物理行号；同一输入重复运行
 必须得到相同 ID、顺序和 JSON。
 
-`complete` 和 `reached` 可由 driver 写出 `--snapshot-out`，其内容可作为后续 `--scenario` 的 snapshot
-基础；reached snapshot 必须携带 boundary provenance。`failed`、`bounded` 和
+`complete`、`yielded` 和 `reached` 可由 driver 写出 `--snapshot-out`，其内容可作为后续 `--scenario`
+的 snapshot 基础；yielded snapshot 必须只保存规范化 lane/token 控制数据，reached snapshot 必须携带
+boundary provenance。`failed`、`bounded` 和
 `until_signal_not_reached` 都不得导出可续跑 snapshot。`view.json` 只能整理 derive 的结构化字段，不能重新
 执行 guard、改变顺序或从 label 猜 outcome。默认 text renderer 按 Signal 创建顺序输出简化系统传播
 图，不得按 hierarchy depth 重排；每行使用 Signal 的 `coordinate.depth` 做两空格层级缩进，存在负
@@ -654,60 +700,39 @@ graph，并完全跳过传递类型贡献；局部 override 或通过缺省条�
 
 Completion 也说明了 transition/action factoring 的边界：`Completion.Setup` 可以调用 `SimpleWaitQueue.Setup`，`Completion.Complete` 可以调用 `SimpleWaitQueue.WakeOne` action，因为这些子动作本身不推进 Completion 的扩展状态；但 `Completion.Complete` 仍不能改成 action，因为它会把 `CompletionExtState::Pending` 推进到 `CompletionExtState::Completed`，或在其它扩展状态下按条件迁移表提交结果。
 
-`Task` 是唯一的 task_struct-like 载体类型；运行时可以同时存在多个彼此独立的 `Task` 实例。`BootTask`、`KernelInitTask` 与 `KthreaddTask` 是静态具名实例；每次 fork/clone 则通过 `declare` 创建 fresh 动态 `Task`。boot idle 只是 `BootTask` 的 Flow handoff，不产生第二个 Task。PID 1 的用户态身份、地址空间、文件、凭据、信号与 trap frame 直接关联稳定实例 `KernelInitTask`，不经过 persona wrapper。`UserTaskSet` 表示一般用户 Task 集合；每次 fork/clone 都向集合加入 fresh Task/TaskRef pair，该 Task 具有独立 PID 和 lifecycle。动态 child 不获得全局具名 alias。`Task.Online` 只表示该 carrier 已完成 wake-up/runqueue publication、可以参与调度；它不表示该 Task 此刻占有 CPU，也不表示其 initial Flow 已经启动。
+`Task` 是唯一的 task_struct-like carrier；BootTask、KernelInitTask、KthreaddTask、AP idle 与每次
+fork/clone 的动态 child 都是独立实例。每个 Task 在声明时原子绑定一个终身不可改写的
+`flow: TaskFlow` typed association；Flow 的 owner/parent 唯一指回该 Task。双方一对一，模型不保存
+Flow 历史集合、当前/初始双重 binding 或 successor chain。
 
-`Task` 保存调度身份并物理拥有 `TaskThreadContext`；每个 `TaskFlow` 实例只保存自己的
-lifecycle state 和 continuation 身份。`TaskThreadContext` 的架构寄存器区固定为
-`ra/sp/s0..s11`，同时保存正交的 breakpoint validity、所绑定的带 generation
-`TaskFlowRef` 以及真实 save/restore 计数。CPU-local CurrentTask binding 与由 effective TaskFlow
-解析的 CPU identity 不属于可恢复寄存器现场。`TaskFlow` 是 `PhaseObject` 的传递子类型，并用
-`parent: Task` 类型约束要求每个实例的 parent 都是其 owner Task。Task 声明
-`initial_flow: TaskFlow` typed association：它只记录创建该 Task 时绑定的 Flow，不随
-exec 或 idle handoff 改写。静态绑定是 `BootTask -> BootInitFlow`、
-`KernelInitTask -> KernelInitFlow`、`KthreaddTask -> KthreaddFlow`；动态 clone child
-在声明点绑定本次 fresh `fork_flow`。Flow parent、Task initial-flow association、
-`task_owns_flow` 与 `task_flow_owner_is` 必须指向同一 Task/Flow pair，否则模型不成立。
-`BootInitFlow` 与 `KernelInitFlow` 都是直接的具体 `TaskFlow` 实例，不引入
-`BootInitPhase`、`KernelInitPhase` 或 `KernelInitFlowType`。`KthreaddFlowType` 的实例是
-`KthreaddFlow`，`BootIdleFlowType` 的实例是 `BootIdleFlow`；所有用户应用映像共用
-`UserAppFlow` 类型，但每次 exec 或 fork continuation 都创建独立实例。
+静态 pair 是 BootTask→BootInitFlow、KernelInitTask→KernelInitFlow、KthreaddTask→KthreaddFlow；
+每个 fork/clone 创建 fresh Task→fresh UserTaskFlow，并由该 Flow 最多创建一个 fresh
+UserAppRuntime。PID 1 的 Runtime 属于 KernelInitFlow。exec 保持 Task、Flow、FlowRef 和 Runtime
+identity，只替换 Runtime 内部 ApplicationInstance；不同 Task/Flow 不共享 Runtime。
 
-Flow 关系分为四类，不能混用：`initial_flow` association 只记录创建时 Flow，`task_owns_flow(task, flow)` 记录 Task 曾经拥有的历史集合，`task_active_flow_is(task, flow)` 记录当前可恢复 continuation，`task_flow_handoff(task, from, to)` 记录 handoff 历史。每个 Flow 只有一个 owner；一个 Task 可以按 exec 顺序拥有多个 Flow，但任一时刻最多一个 Flow Online。`BootInitFlow` 是 BootTask 的 initial TaskFlow，`BootIdleFlow` 是其后继 idle TaskFlow；正式 replacement handoff 包括稳定 `KernelInitTask: KernelInitFlow -> fresh Pid1UserAppFlow`（首个 exec 的专用实例），以及每个动态 child 从 declared fork-continuation Flow 到每次 exec 新声明 Flow。不同 Task 绝不共享同一 `UserAppFlow` 实例。
+Task 物理拥有 TaskThreadContext，其寄存器区是 `ra/sp/s0..s11`，并保存 breakpoint validity、固定
+TaskFlowRef/generation、context epoch、dispatch record、可选 root TrapFlowRef 与 save/restore 计数。
+CPU-local CurrentTask/CurrentStack、CpuRef、runqueue、锁和中断状态不属于可恢复寄存器现场。普通 Task
+Setup 构造 Prepared context；Enable 把它绑定固定 Flow并发布 `Online/None/Valid`。Suspend 保存当前
+机器 continuation并提交 `OnCpu/Live/Invalid -> Online/None/Valid`；Continue 对首次与恢复统一消费
+Valid context并提交 `Online/None/Valid -> OnCpu/Live/Invalid`。
 
-`Task.Online` 只表示该 carrier 已发布且可由 Scheduler 派发，不承诺普通 runnable queue
-membership；idle task 可以只由 `rq->idle/rq->curr` 表达。对普通 Task，Online 是唯一允许
-`TaskBreakpointState::Valid` 的状态；该断点必须绑定一个通过 slot/generation 校验且属于该 Task
-的 `TaskFlowRef`。`Task.OnCpu` 表示 CPU 的唯一 current/执行权 carrier，但是否允许执行由正交的
-`TaskExecutionAuthority::{None, Reserved, Live}` 表达：普通可恢复执行必须是
-`OnCpu/Live/Invalid`，而不是仅凭 OnCpu。TaskFlow 的每个 lifecycle transition 和执行期 action
-都必须显式依赖 parent Task 为 OnCpu 且 authority 为 Live；仅有 Task.Online、OnCpu reservation
-或 runqueue membership 均不足以执行 Flow。`TaskFlow` 的类型继承只保证 parent 类型约束和已声明
-process 适用于其子类型，不引入另一套 guard。fresh dynamic Flow 在 Base 中建立
-owner/parent/entry-source 的 structural `Bind` 不是 lifecycle 推进或执行期 action，因此可以先于
-parent 首次 dispatch。
+Task.Online 只表示已发布且当前不在 CPU；runnable/on-rq/blocked 与 lifecycle 正交。Task.OnCpu 是 CPU
+唯一 current carrier，并需 authority Live。普通 TaskFlow 在 Task 发布前已经 Online；每次 dispatch
+只向固定 receiver 交付 contextual TaskFlow.Action::Continue，首个还是保存入口由已恢复的
+TaskThreadContext 决定。Signal 不携带机器入口或 first/resume kind。
 
-`BootTask` 的模型初态是 `OnCpu/Live/Invalid`，表示固件/架构入口已经交付 boot CPU；其首次执行
-不经过 Scheduler。Kernel 接受 OpenSBI Enable 后保持 Ready，并在同一 Enable 过程中直接驱动严格
-`BootInitFlow.Preset/Setup/Enable`。BootInitFlow 提交 Online 后，当前 BootTask 的 active
-`BootIdleFlow` 才向 CPU0 Scheduler 异步发出无 payload Schedule；Kernel 不是该 Signal 的 sender。
-首次非 identity switch 的 Task/TaskFlow continuation 承载 KernelInitFlow 的后续执行。只有应用环境
-准备完成并提交 Kernel Online 后，才异步发出 payload handoff action。
-普通 Task 的 Setup 只准备寄存器字节并把断点置为 Prepared；Enable 才把它绑定到 initial Flow，
-发布 `Online/None/Valid`。非 identity SwitchTo 在 next 栈 finish 后由 Scheduler 向 next Task
-`emits Continue`；next Task 接受后才消费断点并提交 `OnCpu/Live/Invalid`，再通过
-`DispatchContinuation` 向 Base initial Flow `emits Startup`，或向唯一 active Flow `emits Continue`。
-Suspend 把当前 active Flow 的现场保存回 Task 并重新发布
-`Online/None/Valid`。没有候选、候选歧义、stale generation 或处理失败都使根执行失败。
-Scheduler 是普通 Task Suspend 的唯一同步驱动者，也是普通 Task Continue 的唯一异步发送者。
+BootTask 初态为 OnCpu/Live/Invalid，不经 Scheduler 获得首次执行权；首次切出时才保存 context。
+BootInitFlow 经 Preset/Setup/Enable 到 Online 后，继续以 Online Action 承载 idle setup、
+`yields Scheduler.Schedule` 后的返回 coordinate 与 idle loop。KernelInitFlow、KthreaddFlow 和
+UserTaskFlow 随所属 Task 发布为 Online，运行主体由 contextual Continue 进入。
 
-`UserAppFlow` 的统一 lifecycle 是：Base 中的结构 `Bind` 建立唯一 owner/parent、入口来源和 fresh/独占关系但不推进 lifecycle；Preset 启动已绑定 Flow；Setup 准备 exec 映像或 fork continuation 的执行上下文；Enable 成为 owner 唯一 Online Flow 并跨入用户应用黑盒；Disable 处理 exit、exit_group 或 successful-exec replacement；Cleanup 释放实例并保证它不再 active。用户应用内部不声明 action 或 transition；syscall、trap、files 和其它内核资源操作仍属于相应内核对象。successful exec 不替换 Task：新 Flow 先 Bind/Preset/Setup，旧 Flow 再 Disable，随后提交 active binding handoff、新 Flow Enable，最后旧 Flow Cleanup。
+TaskFlow lifecycle/action 必须校验 parent OnCpu/Live、固定 pair、FlowRef/generation、CpuRef、
+CurrentTask/CurrentStack 和 effective-flow guard。陷入不改变 Task.OnCpu 或 TaskFlow.Online，只把
+effective-flow 栈叠加到 Trap/Interrupt/Exception leaf。若陷入内切出，恢复 context 先落到该 leaf。
 
-普通 Task 退出必须先 Disable/Cleanup 当前 Flow；每次成功 exec 还必须 Cleanup 被替换的旧 Flow
-并记录 prior-owned Flow 已 Destroyed。Flow 清理后的 terminal handoff 从
-`OnCpu/Live/Invalid` 直接执行 Task Disable 到 `Offline/None/Invalid`，再由 next 栈执行 Cleanup；
-禁止为了退出而制造一个没有可恢复 continuation 的 Online 断点。`Task.Cleanup` 要求所有 owned Flow
-均已 Destroyed，因此任一 owned Flow 仍存活时 Task 不得进入 Destroyed。动态声明、owned Flow facts
-与泛型实例 lifecycle 调用是本模型的正式能力；BootTask 没有退出 transition。
+普通 Task terminal exit 要先使固定 Flow Offline并清理 Runtime/Trap/token，Task 再从 OnCpu 直接
+Disable 到 Offline，由 next stack Cleanup。Task.Cleanup 要求固定 Flow Destroyed；BootTask 不退出。
 
 `TaskRuntimeState` 是 `Task` 的扩展运行态，不是对象 lifecycle state。因此，设置任务运行态应建模为 `Task.Transition::SetRuntimeState(state: TaskRuntimeState)` 这样的运行期 transition，而不是 `Action::SetTaskState`。当前实现先使用简单的 `StateEffect::Conditional` 和普通 fact 表达运行态提交；后续引入状态机模型后，每次进入特定 `TaskRuntimeState` 时应执行 transition guard、leave-state check 和 enter-state consistency check，例如确认调度实体、runqueue 选择、锁/抢占/中断上下文和跨对象不变量。
 
@@ -717,10 +742,10 @@ Scheduler 是普通 Task Suspend 的唯一同步驱动者，也是普通 Task Co
 
 正式规格必须区分对象和对象引用。对象拥有 lifecycle/runtime state、facts 和 invariants；引用是在上下文中访问对象的类型化能力。`TaskRef`、`SchedulerRef`、`CpuRef` 与 `SchedClassRef` 分别绑定对应目标。`CurrentTask` 是 CPU 执行上下文已经提交的 task binding；通用 `CurrentTask.Action::BindTask(task_ref: TaskRef)` 只在 Scheduler 非 identity switch commit 中执行，`CurrentTaskRef` 再从已绑定 Task 的唯一有效 TaskRef 派生。BootTask 的入口例外使用 `BindTaskStack(BootTask, BootTask.stack)` 和 `RefreshTaskStack(BootTask, BootTask.stack)` 原子提交 task/stack pair。CurrentTask/CurrentStack 都不是 object、owned child、lifecycle 或 slot；`Stack` 只是 `Task.stack` 的值类型。当前 Scheduler 由 effective `TaskFlow.cpu_ref` 解引用 CPU 后取得该 CPU 唯一 owned Scheduler；不存在独立 `CurrentRunQueueRef`。action 返回引用时，调用方使用 SSA 风格 `let` 绑定；后续可用 typed reference receiver 分发到目标对象。CPU 归属只保存在 TaskFlow：入口和 scheduler commit 写 `TaskFlow.Action::AssignCpuRef`，Task 不保存同义字段。
 
-Ref receiver 的正式分发规则是：若 `R` 是 `XXXRef` 类型的引用值，且 `XXXRef` 的目标对象类型 `XXX` 声明了 `Transition::E` 或 `Action::A`，则 `R.Transition::E(...)` / `R.Action::A(...)` 表示通过引用对目标对象执行 `XXX` 类型定义的 process；process 内部的 `self` 绑定到引用当前指向的目标对象。引用类型自身的 structural process，例如 `TaskRef.Action::Bind(task)`，只用于建立普通引用，不得用于改写 CurrentTaskRef。typed association path 允许引用目标的 association 透明访问，例如 Task 的 `initial_flow` 与 `active_flow`。普通 attribute 与 owned child 的通用 `Ref.attr` / `Ref.child` 仍未开放；其它引用关系继续使用 `task_ref_targets(...)`、`scheduler_ref_targets(...)`、`scheduler_ref_cpu_is(...)` 等 fact 承载。
+Ref receiver 的正式分发规则是：若 `R` 是 `XXXRef` 类型的引用值，且 `XXXRef` 的目标对象类型 `XXX` 声明了 `Transition::E` 或 `Action::A`，则 `R.Transition::E(...)` / `R.Action::A(...)` 表示通过引用对目标对象执行 `XXX` 类型定义的 process；process 内部的 `self` 绑定到引用当前指向的目标对象。引用类型自身的 structural process，例如 `TaskRef.Action::Bind(task)`，只用于建立普通引用，不得用于改写 CurrentTaskRef。typed association path 允许透明访问 Task 的唯一 `flow`。普通 attribute 与 owned child 的通用 `Ref.attr` / `Ref.child` 仍未开放；其它引用关系继续使用类型化 fact 承载。
 
 `CurrentTask` 先从 effective Flow 的 CpuRef 找到 CPU-local binding，再以 effective TaskFlow 校验绑定
-目标。Flow parent/owner 必须与绑定 Task 一致，Task.active_flow 必须等于 effective TaskFlow，目标必须
+目标。Flow parent/owner 必须与绑定 Task 一致，Task.flow 必须等于 effective TaskFlow，目标必须
 是该 CPU 上的 `OnCpu/Live` 执行主体，并且恰好一个 live TaskRef 通过 generation 校验且指向目标；
 `CurrentTaskRef` 只返回该引用。缺失 CPU 上下文、尚未绑定、非活跃 Flow、错误 owner/CPU、非
 `OnCpu/Live`、悬空或重复引用一律拒绝。BootTask 首次绑定前 CurrentCPU 仍可从 BootInitFlow.cpu_ref
@@ -780,13 +805,20 @@ PickNextTask 按 stop→DL→RT→fair→idle 优先级选择。类可提供组�
 内部协议，Blocked/on-rq=false prev 绝不能重入队。Scheduler 的 `task_refs` 与五类 queue membership
 表示 runnable/on-rq 资格；`Online` Task 可以是 Blocked，直到 wake/enqueue 恢复资格。
 
-若 `next == prev`，不进入 SwitchTo，不改变 lifecycle/context/CurrentTask，并由 Scheduler 向原 sender
-active TaskFlow `emits Continue` 表达 `schedule()` 返回。若 `next != prev`，SwitchTo 先完整预检双方引用、
-状态、context/stack 与 Signal 容量，再按 `prev.SaveCoreContext -> prev.Suspend ->
-next.RestoreCoreContext/CurrentTask+CurrentStack commit -> next-stack finish` 顺序同步推进，最后向 next Task
-`emits Continue`。next Task 接受后才提交 `Online/None/Valid -> OnCpu/Live/Invalid`，再向 Base initial Flow
-`emits Startup`，或向唯一 active Flow `emits Continue`。MM、FPU/vector、`last` 返回值、完整 hooks、
-fairness、bandwidth 与 migration 细节继续按对象展开或保持 Deferred。
+当前固定 TaskFlow 用 `yields Scheduler.Action::Schedule` 进入调度分界。若 `next == prev`，不进入
+SwitchTo，不改变 lifecycle/context/CurrentTask；Schedule handler 完成后由通用 default resume attempt
+立即消费 token并从 yields 后返回，不交付 Continue。
+
+若 `next != prev`，SwitchTo 先完整预检双方 TaskRef、固定 FlowRef/generation、context epoch、stack、
+CPU-local binding 与后续容量，再按
+`prev.SaveCoreContext -> prev.Suspend -> next.RestoreCoreContext + CurrentTask/CurrentStack commit ->
+next-stack finish -> next.Task.Continue -> next.flow.Action::Continue` 显式推进。Scheduler 不保存首次/恢复
+dispatch kind。next Flow Continue 的机器入口由已恢复 context 决定；若 lane 有 pending YieldToken，
+还必须交叉校验 dispatch record/context epoch 后精确一次恢复。
+
+non-identity Schedule 目标完成时 prev binding 已改变，所以 source token 保持 pending；未来 A→B→A
+切回时由 contextual Continue 恢复。MM、FPU/vector、`last` 返回值、完整 hooks、fairness、bandwidth、
+GlobalArbiter、跨 CPU mailbox、migration 和 replay 保持 Deferred/P2。
 
 ## SEM-EXCLUSIVE-CONTEXT-001: Guard And Resource Exclusive Context Are Distinct
 
@@ -1044,7 +1076,7 @@ Synchronous continuations preserve the selected CPU context; asynchronous receiv
 
 `CpuGroup.cpus[logic_id]` is the sole canonical CPU instance collection. `CurrentCPU` is not an object, owner, instance, or lifecycle. It resolves as `dereference(effective_task_flow.cpu_ref)` and is valid only while that Flow has execution authority. `CpuRef` is a typed stable reference to a published indexed element; dereference of a missing element is an error.
 
-Only entry and scheduler-commit boundaries may write `TaskFlow.cpu_ref`; Task has no synonymous CPU assignment. A Flow retains the assigned or last CPU while not OnCpu, migration changes it at commit, and Flow handoff copies it before the successor becomes active. A synchronous `drives` subtree inherits the effective Flow and may use `CurrentCPU`; an asynchronous `emits` edge does not. Trace records the canonical `CpuGroup.cpus[i]` target and source Flow/CpuRef.
+Only entry and scheduler-commit boundaries may write `TaskFlow.cpu_ref`; Task has no synonymous CPU assignment. A fixed Flow retains the assigned or last CPU while its Task is Online, and migration changes it only at commit. A synchronous `drives` subtree inherits the effective Flow and may use `CurrentCPU`; an asynchronous `emits` edge does not. Trace records the canonical `CpuGroup.cpus[i]` target and source Flow/CpuRef.
 
 `CpuGroup.Preset` atomically declares CPU0 and advances both child and parent to Prepared before Kernel Enable. Kernel acceptance binds CPU0s CpuRef to BootInitFlow; BootInitFlow.Preset resolves CurrentCPU, records the first entry argument for later use, and advances CPU0 to Ready without assigning its hartid in assembly. The later `smp_setup_processor_id()` boundary consumes the saved value for CPU0. CpuGroup.Setup atomically creates AP elements and publishes topology. possible/present/active/online sets derive from CPU states and may be cached only as rebuildable bitmaps.
 

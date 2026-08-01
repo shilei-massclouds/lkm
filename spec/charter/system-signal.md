@@ -88,11 +88,13 @@ failed。
 
 信号处理过程中，系统可以向自己或其它系统再次发出信号，如此一个信号可以导致连锁反应。
 
-系统通过 `drives` 或 `emits` 发送信号，二者后面跟随的目标是信号，而不是目标系统的
+系统通过 `drives`、`emits` 或 `yields` 发送信号，三者后面跟随的目标是信号，而不是目标系统的
 `Transition`/`Action`。目标系统收到信号后，再执行它为该信号定义的响应过程：
 
 1. `drives` 同步发送信号：源系统阻塞等待目标系统完成对信号的处理过程；
-2. `emits` 异步发送信号：源系统只负责向目标系统发出信号，不等待目标完成处理。
+2. `emits` 异步发送信号：源响应提交完成后，Signal 才进入全局 FIFO；源不等待目标完成；
+3. `yields` 立即交付 Signal：源 handler continuation 在模型 execution lane 上挂起，目标成为下一项
+   强制执行工作；目标正常完成后执行一次默认 resume attempt。
 
 一次 `drives` 或同步根请求包含两次有方向的信息交互：Signal request 从 source 到 target，目标响应
 完成、拒绝或失败后，feedback 从 target 返回 source，解除源的逻辑等待。feedback 属于同一个 Signal
@@ -101,9 +103,29 @@ envelope 的响应，不创建第二个 Signal，也不改变既有 identity、c
 是目标内部处理事实，不是返回发送源的 feedback。全局推导仍必须观察 emits 的拒绝或失败并决定根
 verdict，这种全局严格失败传播不表示发送源等待或接收了反馈。
 
-上述是目标语义；当前 model 中 `drives/emits Object.Transition::X` 仍是有效的兼容写法，不能在
-formal semantics 和工具更新前直接按新语法解释。异步发送的交付、排序、失败和推导链规则也必须
-在 formal semantics 中闭合后才可实施。
+`yields` 可投递任意合法 Signal，不得按 receiver、Signal 名称或 `Scheduler.Schedule` 特判。它挂起的
+是 source `TaskFlowLane` 上的 handler continuation，不是 Task 或 TaskFlow lifecycle。引擎在发送前
+解析并预检 receiver、handler 与 payload；成功后创建 Signal occurrence、可序列化 YieldToken 和
+规范化 resume coordinate，把 source lane 标为 awaiting-resume，并立即执行目标。目标不进入 emits
+FIFO。
+
+目标 handler 正常完成后，引擎必须执行一次默认 resume attempt：若 token ownership、source
+generation、lane binding 和 execution eligibility 仍有效，则立即、精确一次地消费 token，并从
+`yields` 后继续；若目标通过显式模型效果改变了执行 lane，token 保持 pending，直到未来匹配的
+contextual `TaskFlow.Continue`。嵌套 yields 按最内层目标到最外层 source 的顺序恢复。preflight
+rejection 不创建 token或改变 source lane；目标提交后失败、stale、错误 CPU/Flow/context epoch 或
+重复恢复都是终止失败，不回滚、不重试。
+
+YieldToken 只绑定 source response identity、TaskRef/FlowRef/generation、目标 occurrence、模型 resume
+coordinate、CPU/TaskFlowLane 与 context epoch。它不得保存 Python frame、宿主调用栈、客户机 PC 或
+架构寄存器，也不得读写 TaskThreadContext。`yields` 本身不改变 Task/TaskFlow lifecycle、CurrentTask、
+CurrentStack、CpuRef、runqueue、锁或中断状态；Scheduler 如需这些效果，必须在目标 handler 中用显式
+Schedule/SwitchTo steps 声明。立即恢复并完成后，最终 snapshot 不保留活动 token，但 event trace
+必须保留 yielded、target completed、resume attempt、resumed 和 token consumed。
+
+当前 model 中 `drives/emits/yields Object.Transition::X` 仍是有效的兼容写法；三者都先规范化为目标
+Signal，再由同名 handler 响应。不得把调用文本中的 receiver 或 handler kind 变成 `yields` 的语言特判。
+三种交付方式的排序、失败和推导链规则以 formal semantics 为准。
 
 每种类型信号可以定义自己的附加信息，随着信号发送。目标系统决定如何处理附加信息。
 
@@ -120,13 +142,14 @@ Signal 推导工具采用下列兼容边界：
 
 - 当前 `Target.Transition::Name(...)` 和 `Target.Action::Name(...)` 规范化为发往 `Target` 的隐式
   `Name` Signal，原调用参数成为 payload；目标暂以同名 Transition/Action 作为兼容 handler。
-- `drives` 同步发送并等待目标响应结束；`emits` 只在源响应提交后投递，并按全局 FIFO 处理。
+- `drives` 同步发送并等待目标响应结束；`emits` 只在源响应提交后投递并按全局 FIFO 处理；`yields`
+  提交 token 后立即执行目标，不进入 FIFO，并按通用 eligibility 规则恢复或保持 awaiting-resume。
 - `drives` 中的 `A || B` 是按源码顺序选择首个当前可接受的 Signal handler；未被选择的候选不发送 Signal，也不制造 rejected/failed 记录。
 - tools2 外部 Signal 名称中的 `Startup` 是 `Preset` 的保留别名；别名必须在 Signal identity、handler
   查找和截至匹配前规范化，正式 DSL 和 handler 仍只使用 `Transition::Preset`。
 - 有效 parent 只定义推导传播的层级坐标和预算，不产生隐式冒泡、广播或 handler 继承。
-- 当前里程碑不引入显式 `signal`/`on Signal` 语法，不把 handler 改名为 `OnName`，也不实现等待未来
-  Signal 的 continuation；这些都必须作为后续独立模型变更完成。
+- 当前里程碑不引入显式 `signal`/`on Signal` 语法，也不把 handler 改名为 `OnName`；只增加由
+  `yields` 和 contextual Continue 闭合的可序列化 handler continuation，不实现任意条件等待器。
 
 响应结果必须使用明确分类：
 
@@ -135,9 +158,12 @@ Signal 推导工具采用下列兼容边界：
 - `failed`：规格、类型、推导或 invariant 失败，或者任一已发送 Signal 被拒绝导致根请求失败。
 - `truncated`：下一次传播超出显式预算，因此不执行 frontier Signal。
 - `completed`：响应和其同步子响应完成；其异步 Signal 已按规则进入 FIFO。
+- `yielded`：响应已接受并创建 token，但 source lane 因执行绑定不再具备继续资格而停在显式 resume
+  coordinate；这是可快照恢复的控制结果，不是 Task/TaskFlow lifecycle state。
 - `stopped`：发送前截至边界已到达，当前已接受但尚未提交的祖先响应或已经存在但尚未处理的 FIFO
   Signal 不再继续；这不是可恢复 continuation。
-- `pending`：Signal 已接受但等待未来 Signal 才能继续。该概念保留，但当前工具不得产生它。
+- `pending`：通用未来 Signal 等待概念仍保留但不作为本轮 response outcome；本轮等待只由
+  `yielded` response 与 pending YieldToken 表达。
 
 条件不成立只表示本次接收被拒绝，不得猜测为临时等待。拒绝诊断必须保留从根 Signal 到拒绝点的
 完整因果链；异步 `emits` 的目标处理失败也必须传播为最终根执行失败，不得静默忽略、排队重试或
@@ -196,10 +222,11 @@ tools2 可以复用老工具的阶段名称和 CLI 外壳，但不导入 `tools/
 规范化后的 Signal 查找 `tools2/scenarios/<CanonicalSignal>.snapshot.json`；显式 scenario 优先，
 `Startup` 与 `Preset` 因而选择同一 canonical 文件。缺少默认文件或规范化名称不能安全落在 scenarios
 目录内时，快捷入口必须在推导前以用户错误退出；省略 `-t` 时仍从模型初态执行 Human 外部编排，
-包括只给出 `-u Kernel.Startup` 的发送前截至命令。tools2 协议统一为
-version 9，移除 `lossy` 字段与 `discarded` outcome，并拒绝
-version 1 至 version 8、老工具协议和旧 snapshot。动画封装协议保持 version 3，
-按 v9 event sequence 发布每个 Signal 的 request 及其 feedback、settle 或 terminal 因果时刻。受支持的旧 `tools/`
+包括只给出 `-u Kernel.Startup` 的发送前截至命令。tools2 的
+AST/Model/Derive/Check/View/Snapshot 协议统一为 version 10，并严格拒绝 v9 及更早版本、老工具协议
+和旧 snapshot；动画封装协议为 version 4。v10 event sequence 除既有 Signal request、feedback、
+settle 和 terminal 因果时刻外，还发布 yield token created、target completed、default resume attempt、
+resumed、consumed 和 response yielded。受支持的旧 `tools/`
 parse/model/derive/check/view/render 路径必须解析同一 `external` 声明并遵守
 同一默认编排与显式单 Signal 边界；它们保留各自现有的中间协议版本，且不得导入 tools2 实现。
 

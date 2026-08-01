@@ -75,8 +75,8 @@
     <g transform="translate(0 716)">
       <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">7</text>
       <rect x="292" y="204" width="876" height="84" rx="10" class="box handoff"/>
-      <text x="320" y="232" class="line1">成功分支：UserAppFlow.Online</text>
-      <text x="320" y="260" class="line2">PID 1 当前流 exec 成用户态 init；kernel_init() 返回 0，启动编排链不再继续</text>
+      <text x="320" y="232" class="line1">成功分支：UserAppRuntime 替换 ApplicationInstance</text>
+      <text x="320" y="260" class="line2">PID 1 保持 KernelInitFlow；exec 只替换 runtime 内部应用实例</text>
     </g>
     <g transform="translate(0 826)">
       <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">8</text>

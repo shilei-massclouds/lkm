@@ -11,11 +11,10 @@
 
 occurrence 与陷入现场相邻存放在实际内核栈的 `TrapExecutionRecord`，不使用堆或固定池。
 
-返回时的长期 continuation 必须仍是入口 `TaskFlow`，或者是同一 Task 在本次陷入中已提交的
-successful-exec successor。后一种情形必须能以本次 exec transaction 的唯一提交事实和 successor 对入口
-Flow 的精确 predecessor 关系证明；历史提交、仅有 Task 相等或任意 Flow 变化都不足以授权返回。
-清理完成后恢复的是该有效长期 continuation；若 exec 已替换入口 Flow，则恢复 successor，不再恢复
-已退役的入口 Flow。
+返回时的长期 continuation 必须仍是入口 Task 的固定 `Task.flow`，且 TaskRef、FlowRef、generation、
+CPU 与 context epoch 全部匹配。exec 只替换 Flow-owned UserAppRuntime 内的 ApplicationInstance，不会
+产生 successor/predecessor Flow。清理完成后先消费一次性 TrapReturnToken，再恢复同一个固定
+TaskFlow；stale、错误 Flow 或重复返回终止失败。
 
 ## Mapping
 

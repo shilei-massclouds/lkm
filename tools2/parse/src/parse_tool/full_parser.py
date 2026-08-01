@@ -402,6 +402,7 @@ _HANDLER_BLOCKS = frozenset(
         "depends_on",
         "drives",
         "emits",
+        "yields",
         "ensures",
         "updates",
         "may_change",

@@ -619,7 +619,7 @@ object BootIdleSetup: KernelObject {
                         CurrentSchedulerRef,
                         CurrentCPU,
                         CurrentTaskRef,
-                        BootIdleFlow
+                        BootInitFlow
                     );
                     task_thread_context_owned(BootTask, BootTask.thread_context);
                     task_thread_context_core_register_set(BootTask.thread_context);
@@ -653,7 +653,7 @@ object BootIdleSetup: KernelObject {
                 CurrentSchedulerRef,
                 CurrentCPU,
                 CurrentTaskRef,
-                BootIdleFlow
+                BootInitFlow
             );
             task_thread_context_owned(BootTask, BootTask.thread_context);
             task_thread_context_core_register_set(BootTask.thread_context);

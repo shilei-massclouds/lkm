@@ -38,7 +38,7 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
 `tools2.tests` 自动装载所有并列源码包。上述入口不得要求调用者组装 `PYTHONPATH`，并必须有
 清除外部 `PYTHONPATH` 后仍能导入 `pyveri` 及全部阶段包的回归测试。测试必须覆盖：
 
-- 每类 schema/version/producer 校验，含 version 9、拒绝 tools2 v1 至 v8、老工具/旧 snapshot 和老工具不被
+- 每类 schema/version/producer 校验，含 version 10、拒绝 tools2 v1 至 v9、老工具/旧 snapshot 和老工具不被
   tools2 产物误用的边界；
 - Transition/Action 调用规范化、命名 payload 绑定、受控值/系统引用类型错误和带 span unsupported；
 - self、向下、向上、同级、跨分支坐标，默认 `3/3`、整数、`all`、分支预算独立和 frontier truncation；
@@ -112,7 +112,7 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
   必须逐个 position=1 入队并以 remaining=0 出队。边界处 CpuGroup 与 CPU0 均为 Prepared，并恰有一个
   `indexed_instance_declared` 事件；Kernel.Enable 不得已有 Signal ID 或收发/handler 事件，且不得出现
   `BootArgs` 或 `BootCpuRegisters` 生命周期 Signal。
-  同一次 derive 的 model/derive/view fingerprint 必须一致；compact、verbose 和 animation v3 都只能消费
+  同一次 derive 的 model/derive/view fingerprint 必须一致；compact、verbose 和 animation v4 都只能消费
   该推导，不得各自重建或重排 Signal。
 - 主模型的 `tools2/bin/pyveri -u BootInitFlow.Preset` 必须同样从默认 Human 外部编排开始，并证明实际
   sender 是 OpenSBI：前 15 个 Signal 后，`sig-0016 OpenSBI -> Kernel.Enable` 必须以 emits/cause 0013
@@ -127,16 +127,16 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
 - 提交的 `tools2/scenarios/BootInitFlow.Setup.snapshot.json` 必须与从模型初态执行
   `tools2/bin/pyveri -u BootInitFlow.Setup --snapshot-out /tmp/boot-init-flow-setup-presend.snapshot.json`
   得到的 canonical bytes 逐字节一致，并从仓库根与其它 cwd 重建出相同结果。当前正式模型下其
-  SHA-256 固定为 `9b3d2741eacfb7729fc784ee46850952368abd0bb7894c9d5e4ac2f3e3f6dc9f`，model
-  fingerprint 固定为 `sha256:19093e0c075b6768dc74709487ef3f128ae395adb3367c187890036437070ebe`。
+  SHA-256 固定为 `5621c3bbca374491d98c8888ec9189d591cdcbb4d04fb7beba9ad6e9af97c49f`，model
+  fingerprint 固定为 `sha256:331e2f94b9bc453473be347fbe9ac51d1b502ce511a1fe3f1ee6b85ac248dc72`。
   `tools2/bin/pyveri -t BootInitFlow.Setup` 必须自动采用该第 3 组入口 scenario；显式 `-s` 仍优先，
   其它模型必须因 stale fingerprint 拒绝，缺失 canonical scenario 必须在 derive 前返回 2。
 - 提交的 `tools2/scenarios/Cpu0Scheduler.Schedule.snapshot.json` 必须与从模型初态执行
   `tools2/bin/pyveri -u Cpu0Scheduler.Schedule` 得到的 canonical bytes 逐字节一致；SHA-256 固定为
-  `7573a6770d790b0feda0a43fde48f86805575d4f47846836b38fe51e8faf7e6c`，model fingerprint 与上述
-  Setup scenario 相同。该 before-send 边界的真实 sender 必须是 `BootIdleFlow`，上一个已完成 Signal
-  必须是 `BootInitFlow -> BootIdleFlow.RequestSchedule`；边界处 BootInitFlow=Online、BootTask=OnCpu、
-  BootIdleFlow=Online，Cpu0Scheduler=Online、Cpu1Scheduler..Cpu7Scheduler=Ready，且 8 个
+  `975c7c5903b2e2e88d7976e80d648f364db1443f40b683cdd5a1b6a9ee720632`，model fingerprint 与上述
+  Setup scenario 相同。该 before-send 边界的真实 sender 必须是 `BootInitFlow`，delivery 为
+  `yields`；边界处 BootInitFlow=Online、BootTask=OnCpu、Cpu0Scheduler=Online、
+  Cpu1Scheduler..Cpu7Scheduler=Ready，且 8 个
   `CpuGroup.cpus[i].scheduler` reference 分别指向唯一的 `Cpu{i}Scheduler` lifecycle identity。推导中
   不得已经存在 Cpu0Scheduler.Schedule Signal、PreparePrev 或 context switch occurrence。
 - `-u BootInitFlow.Setup` 的真实上游推导必须精确包含 52 个 Signal，并逐项固定
@@ -191,7 +191,7 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
   BootInitFlow.Setup；该边界不得提前包含 `cpu_hartid_ready(CpuGroup.cpus[0], ...)`。compact text 必须显示 reached/before-send 与 0016 stopped，verbose text 必须保留
   真实 Human root、0020 identity、handler 和 reached boundary，结构化 event 必须保留 context，且两种
   text render 都不得改变 derive/view/snapshot。
-- 同一 `BootInitFlow.Setup` completion-event 边界的 animation v3 必须精确包含 52 request、48 feedback、3 settle、
+- 同一 `BootInitFlow.Setup` completion-event 边界的 animation v4 必须精确包含 52 request、48 feedback、3 settle、
   1 terminal，共 104 moments。0016 terminal 表示已 receive 的 stopped emits ancestor；0020 feedback
   必须晚于 0021–0052 的全部嵌套 feedback，且边界必须保留 BootInitFlow 自发 emits、cause 0020 与
   FIFO position 1 的因果元数据；
@@ -215,7 +215,7 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
   选择，并验证两种文本模式不改变 derive/view JSON、snapshot、verdict、Signal 顺序或退出码。
 - animate 必须拒绝错误 model/view schema、producer、version、source/fingerprint 组合、缺失端点、
   parent cycle、未知 handler 结构和损坏 snapshot；输出使用安全 JSON 内嵌与原子写入，失败不留半成品。
-- animation v3 fixture 必须覆盖 drives、同步根请求、emits、同步嵌套、emits 内嵌 drives、异步 FIFO、
+- animation v4 fixture 必须覆盖 drives、同步根请求、emits、yields、同步嵌套、emits 内嵌 drives、异步 FIFO、
   Transition/Action 和 completed/rejected/failed/truncated/stopped。`signal_sent` 只作证据，receive 生成
   request；drives/root 终止生成 feedback，emits 终止生成 settle，truncated/stopped 生成 terminal。未
   receive 的 Signal 只有 terminal，不 reveal target。每个 moment 按 event sequence 排列，同步父 feedback
@@ -224,7 +224,10 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
   request reveal；虚拟 `$root` 和任意 parent 的 sibling order 稳定按 `first_seen` 升序，feedback/settle/
   terminal 不得改变首次出现或同级顺序。至少四层 parent 树不得因层级方向或当前 Signal 重排；重复生成、
   sibling 稳定性与任意前后往返必须恢复完全相同的 frame 和 sibling order。
-- 主模型 `-u Kernel.Enable` 的 animation v3 必须精确包含 15 个 Signal、30 个 moment：15 request、
+- yields fixture 必须按 source request → token yield → target request → target settle → token resume → source
+  feedback 展示；yield/resume moment 保存同一 token ownership、lane 与 resume coordinate，consumption 不得
+  产生第二次 resume moment。
+- 主模型 `-u Kernel.Enable` 的 animation v4 必须精确包含 15 个 Signal、30 个 moment：15 request、
   12 feedback、3 settle。request 顺序服从实际 receive/FIFO，Preset/Setup/CpuGroup Preset 的父 feedback 位于同步子
   feedback 之后；Computer、Riscv64Platform、OpenSBI 的 Enable 分别在 emits settle 提交且不得伪装成
   feedback。Preset 三个

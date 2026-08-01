@@ -775,7 +775,7 @@ pub fn smoke_commit_builtin_grandchild_exec_image(
             .user_task_set
             .builtin_grandchild_exec_parent_snapshot_live();
     ctx.exec_transaction.mark_point_of_no_return().ok()?;
-    if !commit_runtime_flow_handoff(ctx) {
+    if !commit_runtime_application_replacement(ctx) {
         return None;
     }
     let mut directly_released = 0;
@@ -1148,12 +1148,12 @@ fn prepare_and_commit(
 }
 
 #[cfg(any(app_smoke, app_user_boot))]
-fn commit_runtime_flow_handoff(ctx: &mut crate::context::Context) -> bool {
+fn commit_runtime_application_replacement(ctx: &mut crate::context::Context) -> bool {
     if ctx.user_task_set.active_task_ref().is_valid() {
-        ctx.user_task_set.commit_active_exec_flow_handoff()
-    } else if ctx.user_app_flow.state() == State::Online {
-        ctx.user_app_flow
-            .commit_runtime_exec_handoff(&mut ctx.kernel_init_task)
+        ctx.user_task_set.commit_active_application_replacement()
+    } else if ctx.kernel_init_user_runtime.state() == State::Online {
+        ctx.kernel_init_user_runtime
+            .replace_kernel_application(&mut ctx.kernel_init_task)
             .is_ok()
     } else {
         true
@@ -1213,8 +1213,8 @@ fn commit_prepared(
             .user_task_set
             .builtin_grandchild_exec_parent_snapshot_live();
     ctx.exec_transaction.mark_point_of_no_return()?;
-    if !commit_runtime_flow_handoff(ctx) {
-        exec_terminal("runtime exec flow handoff invariant failed\n");
+    if !commit_runtime_application_replacement(ctx) {
+        exec_terminal("runtime application replacement invariant failed\n");
     }
     let old_satp = crate::arch::riscv64::csr::read_satp();
     let new_satp = ctx.exec_transaction.staging_address_space.satp_token();

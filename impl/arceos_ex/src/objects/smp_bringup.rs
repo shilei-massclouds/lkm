@@ -33,7 +33,6 @@ use super::{
     vm::Vm,
 };
 use crate::checkpoint::Checkpoint;
-use crate::flows::boot_idle_flow::BootIdleFlow;
 
 const AP_STACK_SIZE: usize = 16 * 1024;
 const SSTATUS_FPU_VECTOR_MASK: usize = (0b11 << 9) | (0b11 << 13);
@@ -168,11 +167,16 @@ impl ApIdleTaskRecord {
         }
         self.logical_id = logical_id;
         self.hartid = hartid;
+        if self.flow.preset(&self.task, None).is_err()
+            || self.flow.setup(&self.task, None).is_err()
+            || self.flow.enable(&self.task, None).is_err()
+        {
+            return false;
+        }
         self.reserved_before_hsm = self.task.state() == State::OnCpu
             && self.task.execution_authority() == TaskExecutionAuthority::Reserved
             && self.task.breakpoint_state() == TaskBreakpointState::Invalid
-            && self.flow.state() == State::Base
-            && !self.flow.active();
+            && self.flow.state() == State::Online;
         self.prepared_task_ref = self.task.task_ref();
         self.prepared_flow_ref = self.flow.flow_ref();
         self.unified_carrier_ready(logical_id)
@@ -188,18 +192,15 @@ impl ApIdleTaskRecord {
             && self.task.running()
             && !self.task.runqueue_published()
             && self.flow.owner() == self.task.task_ref()
-            && self.task.initial_flow() == self.flow.flow_ref()
+            && self.task.flow() == self.flow.flow_ref()
             && self.reserved_before_hsm
             && self.prepared_task_ref == self.task.task_ref()
             && self.prepared_flow_ref == self.flow.flow_ref()
-            && ((self.task.execution_authority() == TaskExecutionAuthority::Reserved
-                && self.flow.state() == State::Base
-                && !self.flow.active()
-                && !self.task.active_flow().is_valid())
-                || (self.task.execution_authority() == TaskExecutionAuthority::Live
-                    && self.flow.state() == State::Online
-                    && self.flow.active()
-                    && self.task.active_flow() == self.flow.flow_ref()))
+            && self.flow.state() == State::Online
+            && matches!(
+                self.task.execution_authority(),
+                TaskExecutionAuthority::Reserved | TaskExecutionAuthority::Live
+            )
     }
 
     fn activate_entry_execution(&mut self, logical_id: usize) -> EventResult {
@@ -208,9 +209,8 @@ impl ApIdleTaskRecord {
             || self.task.state() != State::OnCpu
             || self.task.execution_authority() != TaskExecutionAuthority::Reserved
             || self.task.breakpoint_state() != TaskBreakpointState::Invalid
-            || self.flow.state() != State::Base
-            || self.flow.active()
-            || self.task.active_flow().is_valid()
+            || self.flow.state() != State::Online
+            || self.task.flow() != self.flow.flow_ref()
         {
             return failed_condition(
                 LifecycleEvent::Continue,
@@ -219,8 +219,7 @@ impl ApIdleTaskRecord {
                 State::OnCpu,
             );
         }
-        self.task.activate_hsm_authority()?;
-        self.flow.start_initial(&mut self.task, None, None)
+        self.task.activate_hsm_authority()
     }
 }
 
@@ -546,8 +545,8 @@ fn ap_idle_task_target_logical_id(pointer: usize) -> Option<usize> {
     let mut logical_id = 1usize;
     while logical_id < MAX_CPUS {
         if ap_idle_task_virt(logical_id) == Some(pointer) {
-            let initial_flow = unsafe { AP_IDLE_TASKS[logical_id].task.initial_flow() };
-            if initial_flow.same_identity(TaskFlowRef::ap_idle(logical_id)) {
+            let flow = unsafe { AP_IDLE_TASKS[logical_id].task.flow() };
+            if flow.same_identity(TaskFlowRef::ap_idle(logical_id)) {
                 return Some(logical_id);
             }
             return None;
@@ -815,7 +814,7 @@ impl CpuHotplugSyncSet {
     pub fn preset(
         &mut self,
         cpu_group: &mut CpuGroup,
-        boot_idle_flow: &BootIdleFlow,
+        boot_flow: &TaskFlow,
         kthreadd_task: &KthreaddTask,
         cpu_hotplug_lock: &mut PerCpuRwSemaphore,
         smpboot_threads_lock: &mut Mutex,
@@ -824,7 +823,7 @@ impl CpuHotplugSyncSet {
             || cpu_group.state() != State::Ready
             || cpu_group.boot_cpu_state() != State::Online
             || !cpu_group.secondary_cpus_present_not_online()
-            || boot_idle_flow.state() != State::Online
+            || boot_flow.state() != State::Online
             || kthreadd_task.state() != State::Online
             || !cpu_hotplug_lock.ready()
             || !smpboot_threads_lock.ready()
@@ -1224,8 +1223,7 @@ impl CpuStartProvider {
                 };
                 self.hsm_start_keys[logical_id] = logical_id;
                 self.hsm_start_task_refs[logical_id] = AP_IDLE_TASKS[logical_id].task.task_ref();
-                self.hsm_start_flow_refs[logical_id] =
-                    AP_IDLE_TASKS[logical_id].task.initial_flow();
+                self.hsm_start_flow_refs[logical_id] = AP_IDLE_TASKS[logical_id].task.flow();
             }
 
             self.secondary_start_sbi_selected = true;

@@ -1,4 +1,4 @@
-use crate::flows::{boot_idle_flow::BootIdleFlow, boot_init_flow::BootInitFlow};
+use crate::flows::boot_init_flow::BootInitFlow;
 #[cfg(checkpoint_handler_uart_irq_chain)]
 use crate::objects::irq_time::{
     Serial8250ConsoleBurstIrqTxProbe, Serial8250ConsoleIrqTxProbe,
@@ -112,9 +112,9 @@ use crate::objects::{
     static_branch::StaticBranch,
     static_objects::StaticObjects,
     task::{Task, TaskRef},
-    task_flow::{TaskFlow, TaskFlowRef},
+    task_flow::TaskFlowRef,
     user_boot::{
-        ElfObject, KernelInitTaskUserState, UserAddressSpace, UserAppFlow, UserBootPayload,
+        ElfObject, KernelInitTaskUserState, UserAddressSpace, UserAppRuntime, UserBootPayload,
         UserCloneDeferredBoundaries, UserTaskSet, UserTrapFrame,
     },
     user_stack::UserStack,
@@ -274,7 +274,6 @@ pub struct Context {
     pub system_state: SystemState,
     pub kthreadd_ready_gate: KthreaddReadyGate,
     pub kthreadd_ready_gate_wait_lock: RawSpinLock,
-    pub boot_idle_flow: BootIdleFlow,
     pub vmstat_core: VmstatCore,
     pub pre_smp_initcalls: PreSmpInitcallTable,
     pub pre_smp_boundary: PreSmpInitBoundary,
@@ -343,7 +342,7 @@ pub struct Context {
     pub user_task_set: UserTaskSet,
     pub kernel_init_user_state: KernelInitTaskUserState,
     #[cfg_attr(app_hello, allow(dead_code))]
-    pub user_app_flow: UserAppFlow,
+    pub kernel_init_user_runtime: UserAppRuntime,
 }
 
 impl Context {
@@ -517,7 +516,6 @@ impl Context {
             system_state: SystemState::new(),
             kthreadd_ready_gate: KthreaddReadyGate::new(),
             kthreadd_ready_gate_wait_lock: RawSpinLock::new(),
-            boot_idle_flow: BootIdleFlow::new(),
             vmstat_core: VmstatCore::new(),
             pre_smp_initcalls: PreSmpInitcallTable::new(),
             pre_smp_boundary: PreSmpInitBoundary::new(),
@@ -580,7 +578,7 @@ impl Context {
             user_trap_frame: UserTrapFrame::new(),
             user_task_set: UserTaskSet::new(),
             kernel_init_user_state: KernelInitTaskUserState::new(),
-            user_app_flow: UserAppFlow::new(),
+            kernel_init_user_runtime: UserAppRuntime::new(),
         }
     }
 
@@ -644,32 +642,6 @@ impl Context {
             )
         })?;
         Ok(candidate.flow.flow_ref())
-    }
-
-    pub(crate) fn committed_exec_flow_handoff_matches(
-        &self,
-        task_ref: TaskRef,
-        predecessor: TaskFlowRef,
-        successor: TaskFlowRef,
-        entry_commit_count: usize,
-    ) -> bool {
-        if !task_ref.is_valid()
-            || !predecessor.is_valid()
-            || !successor.is_valid()
-            || predecessor.same_identity(successor)
-            || self.exec_transaction.active()
-            || self.exec_transaction.point_of_no_return()
-            || entry_commit_count.checked_add(1) != Some(self.exec_transaction.commit_count())
-        {
-            return false;
-        }
-        let Some(candidate) = self.current_task_candidate(task_ref) else {
-            return false;
-        };
-        candidate.task.task_ref().same_identity(task_ref)
-            && candidate.task.active_flow().same_identity(successor)
-            && candidate.flow.flow_ref().same_identity(successor)
-            && candidate.flow.predecessor().same_identity(predecessor)
     }
 
     pub(crate) fn bind_task_root_trap_flow(
@@ -843,21 +815,13 @@ impl Context {
             self.boot_current_task_candidate()
         } else if task_ref.same_identity(TaskRef::KERNEL_INIT) {
             let task = self.kernel_init_task.task();
-            let effective_flow = if task.active_flow().is_valid() {
-                task.active_flow()
-            } else {
-                task.initial_flow()
-            };
-            let flow = self.flow_for_kernel_init_task(effective_flow)?;
-            Some(CurrentTaskCandidate { task, flow })
+            Some(CurrentTaskCandidate {
+                task,
+                flow: self.kernel_init_flow.core(),
+            })
         } else if task_ref.same_identity(TaskRef::KTHREADD) {
             let task = self.kthreadd_task.task();
-            let effective_flow = if task.active_flow().is_valid() {
-                task.active_flow()
-            } else {
-                task.initial_flow()
-            };
-            if !effective_flow.same_identity(self.kthreadd_flow.flow_ref()) {
+            if !task.flow().same_identity(self.kthreadd_flow.flow_ref()) {
                 return None;
             }
             Some(CurrentTaskCandidate {
@@ -883,27 +847,11 @@ impl Context {
     #[inline(never)]
     fn boot_current_task_candidate(&self) -> Option<CurrentTaskCandidate<'_>> {
         let task = self.boot_task.task();
-        let active_flow = task.active_flow();
-        if active_flow.same_identity(TaskFlowRef::BOOT_INIT) {
+        if task.flow().same_identity(TaskFlowRef::BOOT_INIT) {
             Some(CurrentTaskCandidate {
                 task,
                 flow: self.boot_init_flow.core(),
             })
-        } else if active_flow.same_identity(TaskFlowRef::BOOT_IDLE) {
-            Some(CurrentTaskCandidate {
-                task,
-                flow: self.boot_idle_flow.core(),
-            })
-        } else {
-            None
-        }
-    }
-
-    fn flow_for_kernel_init_task(&self, flow_ref: TaskFlowRef) -> Option<&TaskFlow> {
-        if flow_ref.same_identity(self.kernel_init_flow.flow_ref()) {
-            Some(self.kernel_init_flow.core())
-        } else if flow_ref.same_identity(self.user_app_flow.flow_ref()) {
-            Some(self.user_app_flow.current_core())
         } else {
             None
         }
@@ -955,7 +903,7 @@ impl Context {
         let (flow_ref, cpu_ref) = candidate
             .map(|candidate| {
                 (
-                    candidate.task.active_flow(),
+                    candidate.task.flow(),
                     candidate
                         .flow
                         .cpu_ref()
@@ -1138,10 +1086,9 @@ impl Context {
             scheduler_test_tasks,
             kernel_init_task,
             kernel_init_flow,
-            user_app_flow,
             kthreadd_task,
             kthreadd_flow,
-            boot_idle_flow,
+            boot_init_flow,
             user_task_set,
             ..
         } = self;
@@ -1157,10 +1104,9 @@ impl Context {
         let mut task_access = SchedulerTaskAccess::new(
             kernel_init_task,
             kernel_init_flow,
-            user_app_flow,
             kthreadd_task,
             kthreadd_flow,
-            boot_idle_flow,
+            boot_init_flow.core(),
             user_task_set,
             scheduler_test_tasks,
         );
@@ -1252,10 +1198,9 @@ impl Context {
                 scheduler_test_tasks,
                 kernel_init_task,
                 kernel_init_flow,
-                user_app_flow,
                 kthreadd_task,
                 kthreadd_flow,
-                boot_idle_flow,
+                boot_init_flow,
                 user_task_set,
                 ..
             } = self;
@@ -1271,10 +1216,9 @@ impl Context {
             let task_access = SchedulerTaskAccess::new(
                 kernel_init_task,
                 kernel_init_flow,
-                user_app_flow,
                 kthreadd_task,
                 kthreadd_flow,
-                boot_idle_flow,
+                boot_init_flow.core(),
                 user_task_set,
                 scheduler_test_tasks,
             );
@@ -1290,10 +1234,9 @@ impl Context {
             scheduler_test_tasks,
             kernel_init_task,
             kernel_init_flow,
-            user_app_flow,
             kthreadd_task,
             kthreadd_flow,
-            boot_idle_flow,
+            boot_init_flow,
             user_task_set,
             ..
         } = self;
@@ -1308,10 +1251,9 @@ impl Context {
         let mut task_access = SchedulerTaskAccess::new(
             kernel_init_task,
             kernel_init_flow,
-            user_app_flow,
             kthreadd_task,
             kthreadd_flow,
-            boot_idle_flow,
+            boot_init_flow.core(),
             user_task_set,
             scheduler_test_tasks,
         );
@@ -1366,10 +1308,9 @@ impl Context {
             scheduler_test_tasks,
             kernel_init_task,
             kernel_init_flow,
-            user_app_flow,
             kthreadd_task,
             kthreadd_flow,
-            boot_idle_flow,
+            boot_init_flow,
             user_task_set,
             ..
         } = self;
@@ -1384,10 +1325,9 @@ impl Context {
         let task_access = SchedulerTaskAccess::new(
             kernel_init_task,
             kernel_init_flow,
-            user_app_flow,
             kthreadd_task,
             kthreadd_flow,
-            boot_idle_flow,
+            boot_init_flow.core(),
             user_task_set,
             scheduler_test_tasks,
         );
@@ -1426,20 +1366,18 @@ impl Context {
                 scheduler_test_tasks,
                 kernel_init_task,
                 kernel_init_flow,
-                user_app_flow,
                 kthreadd_task,
                 kthreadd_flow,
-                boot_idle_flow,
+                boot_init_flow,
                 user_task_set,
                 ..
             } = self;
             let mut task_access = SchedulerTaskAccess::new(
                 kernel_init_task,
                 kernel_init_flow,
-                user_app_flow,
                 kthreadd_task,
                 kthreadd_flow,
-                boot_idle_flow,
+                boot_init_flow.core(),
                 user_task_set,
                 scheduler_test_tasks,
             );
@@ -1448,46 +1386,20 @@ impl Context {
                 .is_some_and(|scheduler| scheduler.suspend_task(task_ref, &mut task_access).is_ok())
         } else {
             if self
-                .user_app_flow
-                .cleanup_active_flow_for_shutdown(&mut self.kernel_init_task)
+                .kernel_init_user_runtime
+                .begin_kernel_shutdown(&mut self.kernel_init_task)
                 .is_err()
-                || {
-                    let Self {
-                        cpu_group,
-                        scheduler_test_tasks,
-                        kernel_init_task,
-                        kernel_init_flow,
-                        user_app_flow,
-                        kthreadd_task,
-                        kthreadd_flow,
-                        boot_idle_flow,
-                        user_task_set,
-                        ..
-                    } = self;
-                    let mut task_access = SchedulerTaskAccess::new(
-                        kernel_init_task,
-                        kernel_init_flow,
-                        user_app_flow,
-                        kthreadd_task,
-                        kthreadd_flow,
-                        boot_idle_flow,
-                        user_task_set,
-                        scheduler_test_tasks,
-                    );
-                    cpu_group.boot_scheduler_mut().is_none_or(|scheduler| {
-                        scheduler
-                            .suspend_task(
-                                crate::objects::task::TaskRef::KERNEL_INIT,
-                                &mut task_access,
-                            )
-                            .is_err()
-                    })
-                }
+                || self
+                    .kernel_init_flow
+                    .cleanup_for_exit(&self.kernel_init_task)
+                    .is_err()
+                || self.kernel_init_task.task_mut().disable().is_err()
+                || self.kernel_init_task.task_mut().cleanup().is_err()
             {
                 return false;
             }
-            self.user_app_flow
-                .cleanup_task_after_shutdown_suspend(&mut self.kernel_init_task)
+            self.kernel_init_user_runtime
+                .finish_kernel_shutdown(&self.kernel_init_task)
                 .is_ok()
         }
     }
@@ -1513,10 +1425,9 @@ impl Context {
                 scheduler_test_tasks,
                 kernel_init_task,
                 kernel_init_flow,
-                user_app_flow,
                 kthreadd_task,
                 kthreadd_flow,
-                boot_idle_flow,
+                boot_init_flow,
                 user_task_set,
                 ..
             } = self;
@@ -1531,10 +1442,9 @@ impl Context {
             let task_access = SchedulerTaskAccess::new(
                 kernel_init_task,
                 kernel_init_flow,
-                user_app_flow,
                 kthreadd_task,
                 kthreadd_flow,
-                boot_idle_flow,
+                boot_init_flow.core(),
                 user_task_set,
                 scheduler_test_tasks,
             );
@@ -1567,10 +1477,9 @@ impl Context {
                 scheduler_test_tasks,
                 kernel_init_task,
                 kernel_init_flow,
-                user_app_flow,
                 kthreadd_task,
                 kthreadd_flow,
-                boot_idle_flow,
+                boot_init_flow,
                 user_task_set,
                 ..
             } = self;
@@ -1585,10 +1494,9 @@ impl Context {
             let task_access = SchedulerTaskAccess::new(
                 kernel_init_task,
                 kernel_init_flow,
-                user_app_flow,
                 kthreadd_task,
                 kthreadd_flow,
-                boot_idle_flow,
+                boot_init_flow.core(),
                 user_task_set,
                 scheduler_test_tasks,
             );

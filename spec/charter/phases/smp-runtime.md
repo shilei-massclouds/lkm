@@ -1,40 +1,29 @@
 # KernelInitFlow 的 SMP/runtime 叶子阶段
 
-本目录保留 smp-runtime 命名空间，但不再存在 `SmpRuntimePhase` 包装对象或 lifecycle。
-`KernelInitFlow` 在 PID 1 的真实 execution continuation 上直接编排六个 BP 叶子：
+不存在 `SmpRuntimePhase` wrapper。固定 `KernelInitFlow` 在 PID 1 的真实 execution continuation 上直接
+编排 `PreSmpInitPhase`、`SmpBringupPhase`、`RuntimeCorePhase`、`InitcallPhase`、`RootfsPhase`、
+`FinalizePhase`、`PayloadPreparePhase` 和 `PayloadHandoffPreparePhase`。
 
-- Preset 依次驱动 `PreSmpInitPhase`、`SmpBringupPhase`；两者 Online 后提交
-  `KernelInitFlow.Prepared`。
-- Setup 依次驱动 `RuntimeCorePhase`、`InitcallPhase`、`RootfsPhase`、`FinalizePhase`，随后进入
-  `PayloadPreparePhase`；后者 Online 后提交 `KernelInitFlow.Ready`。
-- Enable 驱动 `PayloadHandoffPreparePhase` 并提交 `KernelInitFlow.Online`。Preset/Setup/Enable 全部
-  运行在 Kernel Ready 的 Enable 执行上下文中，不错误要求 Kernel 已 Online。
+`KernelInitTask` 发布时已为 Online/None/Valid，KernelInitFlow 也已 Online。首次真实 dispatch 与恢复
+统一由 Scheduler 恢复 TaskThreadContext、提交 CurrentTask/CurrentStack、drives Task.Continue，再向
+KernelInitFlow 交付 contextual Continue。首个 context 令 Continue 从 `kernel_init_entry()` 开始；保存
+context 则回到相应 continuation。不存在 Activate/Startup 分支。
 
-首次真实 dispatch 先同步驱动 BootTask.Suspend；完成栈切换后，Scheduler 在 PID 1 真实获得 CPU 的
-入口同步驱动 `KernelInitTask.Activate` 提交 OnCpu，再直接向 `KernelInitFlow` 发出 Startup。runtime lowering 必须在
-`kernel_init_entry()` 验证 PID 1 vmalloc stack 后执行 Preset body 和所有
-叶子代码；不得在 BootTask 栈上预执行。
+runtime lowering 必须在 PID 1 vmalloc stack 上执行，不能在 BootTask 栈预执行。叶子完成后
+KernelInitFlow 保持 Online；Kernel.Enable 随后提交 Kernel.Online 并作为唯一发送者发出
+CommitPayloadHandoff。exec 只替换 Flow-owned UserAppRuntime 内的 ApplicationInstance。
 
-KernelInitFlow.Online 只把应用环境准备结果返回 Kernel.Enable，不自行发送 payload handoff。Kernel
-随后提交 Online 并作为唯一发送者异步发送 `CommitPayloadHandoff`。
+`ApIdleFlow[logical_id]` 与 `ApIdleTask[logical_id]` pointwise 固定。BP 发布 Linux
+`{task_ptr, stack_ptr}` boot data并异步发出 keyed HSM entry；AP 验证后建立 tp/sp、激活 Live authority，
+再对已经 Online 的固定 Flow 交付 contextual Continue。ApEntryPrelude、ApSmpCallin、ApOnlineIdle 由该
+Flow 承载。AP 首次切出才保存 context并进入 Online，以后使用普通 Continue/Suspend。
 
-SmpBringup 的 BP 协调属于 `KernelInitFlow` continuation。`ApEntryPreludePhase`、
-`ApSmpCallinPhase`、`ApOnlineIdlePhase` 由按 logical-id replicated 的 `ApIdleFlow` pointwise 驱动，
-不属于 KernelInitFlow 的 execution ownership。每个 `ApIdleTask` 在 HSM 前已经是
-`OnCpu/Reserved/Invalid`，其 Flow 为 Base；BP 只发布 Linux `{task_ptr, stack_ptr}` boot data 并异步
-发出 keyed HSM Startup。AP 架构入口验证 boot data、建立 `tp/sp`、激活 Live authority 后启动同 key
-Flow；BP 仅通过 cpu_running/done_up wait/barrier 观察完成。
+stopped AP 的 active translation controller 必须 absent。AP 入口按 PhysicalDirect → TrampolineVm →
+SwapperVm pointwise 激活，不经过 EarlyVm；CPU-local journal、SATP 和 committed count 不得由全局
+Ready/Online 事实代替。
 
-BootTask 与 AP idle 的架构首次入口都不伪造 Online/Activate；它们首次切出后进入 Suspended，以后只
-通过 Scheduler drives Continue 恢复。
-
-stopped AP 的 `active_translation_controller` association 必须 absent，并且没有 live SATP；BP 发布的
-boot data 只保存 AP 入口预期 SATP，不代表 AP 已执行 CSR 写入或激活任何 controller。真实
-`ApEntryPreludePhase` 架构入口接受该 CPU 时，必须原子提交 PhysicalDirect 的
-`ActivateOnCpu(cpu_ref, InitialActivation)`，随后以两个 Handoff 依次激活 TrampolineVm 与
-SwapperVm。AP 不经过 EarlyVm；每个 AP 的 association、live SATP、同步事实、journal 和 committed
-count 与 BP 及其它 AP 隔离。`CpuGroup`、`KernelAddrSpace`、`Vm` 或任一 controller 的全局
-Ready/Online 不能代替这些 CPU-local activation 事实。
+本轮不引入 GlobalArbiter、cross-CPU mailbox、migration 或 schedule replay；这些保持 P2 延期，且不
+为其保留 initial/active Flow 或首次/恢复 dispatch 兼容字段。
 
 ## 引用
 

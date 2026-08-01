@@ -23,9 +23,9 @@ This file is the testing authority for CPU ownership, references and the
 - TaskFlow is the only Task-side owner of a `cpu_ref` field. Tests must reject a
   synonymous Task field and writes outside entry acceptance or scheduler
   migration commit.
-- Leaving OnCpu retains the assigned/last CpuRef. Migration updates it at commit,
-  and a Flow handoff copies it to the successor before active-flow publication
-  and successor activation.
+- Leaving OnCpu retains the fixed Flow's assigned CpuRef. Migration updates that
+  same Flow association only at an explicitly modeled scheduler commit; this
+  round keeps cross-CPU migration as P2.
 - `CurrentCPU` is tested as a selector, never an object. Every resolved Signal
   trace must record selector `CurrentCPU`, source Flow, source CpuRef and actual
   canonical target `CpuGroup.cpus[i]`. A synchronous `drives` subtree inherits
@@ -65,5 +65,5 @@ This file is the testing authority for CPU ownership, references and the
   committed count. Final runtime state is not sufficient evidence for this
   transient ordering contract.
 - Focused tool tests cover indexed publication/rollback and selector isolation;
-  scheduler and user-flow smoke cover migration and handoff. The final gate
+  scheduler and user-flow smoke cover fixed binding and dispatch. The final gate
   after implementation changes is the direct repository-root `make test`.

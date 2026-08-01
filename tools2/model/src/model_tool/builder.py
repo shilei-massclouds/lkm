@@ -287,7 +287,7 @@ def _normalize_members(members: list[dict[str, Any]]) -> list[dict[str, Any]]:
             result.append(
                 {**member, "entries": [_expression(entry, assignment=True) for entry in member["entries"]]}
             )
-        elif kind in {"drives", "emits"}:
+        elif kind in {"drives", "emits", "yields"}:
             calls = [_call(entry) for entry in member["entries"]]
             for call in calls:
                 if call.get("kind") == "call":
@@ -668,7 +668,7 @@ def _check_task_only_lifecycle(
     diagnostics: list[dict[str, Any]],
     owner_span: dict[str, Any],
 ) -> None:
-    if initial_state in {"OnCpu", "Suspended"} and not task_lifecycle:
+    if initial_state == "OnCpu" and not task_lifecycle:
         _diagnostic(
             diagnostics,
             "error",
@@ -676,7 +676,7 @@ def _check_task_only_lifecycle(
             owner_span,
         )
     for state in states:
-        if state["name"] in {"OnCpu", "Suspended"} and not task_lifecycle:
+        if state["name"] == "OnCpu" and not task_lifecycle:
             _diagnostic(
                 diagnostics,
                 "error",
@@ -816,7 +816,7 @@ def _handler_entry_keys(handler: dict[str, Any]) -> dict[tuple[str, str], dict[s
     result: dict[tuple[str, str], dict[str, Any]] = {}
     for member in handler.get("body", []):
         kind = member.get("kind")
-        if kind not in {"depends_on", "ensures", "updates", "drives", "emits"}:
+        if kind not in {"depends_on", "ensures", "updates", "drives", "emits", "yields"}:
             continue
         for entry in member.get("entries", []):
             key = (kind, json.dumps(_semantic_value(entry), sort_keys=True, separators=(",", ":")))
@@ -1440,6 +1440,16 @@ def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
             for variant in member.get("variants", []):
                 report_invalid_calls(variant.get("members", []))
 
+    def yield_calls(members: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        for member in members:
+            if member.get("kind") == "yields":
+                result.extend(member.get("entries", []))
+            result.extend(yield_calls(member.get("members", [])))
+            for variant in member.get("variants", []):
+                result.extend(yield_calls(variant.get("members", [])))
+        return result
+
     seen_handlers: set[str] = set()
     for system in systems.values():
         for handlers in system["handlers_by_name"].values():
@@ -1448,6 +1458,38 @@ def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
                     continue
                 seen_handlers.add(handler["id"])
                 report_invalid_calls(handler.get("body", []))
+                calls = yield_calls(handler.get("body", []))
+                if not calls:
+                    continue
+                if handler.get("kind") != "Action":
+                    _diagnostic(
+                        diagnostics,
+                        "error",
+                        f"yields is allowed only in Action handlers: {handler['id']}",
+                        calls[0].get("span", handler["span"]),
+                    )
+                if _handler_property(handler, "state_effect") != "StateEffect::None":
+                    _diagnostic(
+                        diagnostics,
+                        "error",
+                        f"yields requires state_effect: StateEffect::None: {handler['id']}",
+                        calls[0].get("span", handler["span"]),
+                    )
+                if len(calls) > 1:
+                    _diagnostic(
+                        diagnostics,
+                        "error",
+                        f"a handler occurrence may contain at most one yields call: {handler['id']}",
+                        calls[1].get("span", handler["span"]),
+                    )
+                if any(call.get("kind") != "call" for call in calls):
+                    invalid = next(call for call in calls if call.get("kind") != "call")
+                    _diagnostic(
+                        diagnostics,
+                        "error",
+                        "yields requires one direct process call",
+                        invalid.get("span", handler["span"]),
+                    )
 
     core = {
         "boundary_inventory": boundary_inventory,

@@ -49,8 +49,8 @@ impl RawSpinLockFixture {
     fn setup_ready(&mut self, assertions: &mut SmokeAssertions) {
         let ctx = context();
         assertions.assert(
-            "boot task suspended",
-            ctx.boot_task.state() == State::Suspended,
+            "boot task returned Online",
+            ctx.boot_task.state() == State::Online,
         );
         assertions.assert_ok(
             "local interrupt setup",

@@ -1,5 +1,5 @@
 {
-  "total_checkpoints": 479,
+  "total_checkpoints": 478,
   "mapping_kind_counts": [
     {
       "mapping_kind": "exact",
@@ -11,13 +11,13 @@
     },
     {
       "mapping_kind": "unmapped",
-      "count": 355
+      "count": 354
     }
   ],
   "confidence_counts": [
     {
       "confidence": "none",
-      "count": 355
+      "count": 354
     },
     {
       "confidence": "high",
@@ -204,7 +204,7 @@
       "count": 3
     },
     {
-      "family": "UserAppFlow",
+      "family": "UserAppRuntime",
       "count": 3
     },
     {
@@ -417,10 +417,6 @@
     },
     {
       "family": "BootCpuLocalInterrupt",
-      "count": 1
-    },
-    {
-      "family": "BootIdleFlow",
       "count": 1
     },
     {
@@ -1068,5 +1064,5 @@
       "count": 1
     }
   ],
-  "unmapped_singleton_family_count": 170
+  "unmapped_singleton_family_count": 169
 }

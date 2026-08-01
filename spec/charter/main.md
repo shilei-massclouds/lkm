@@ -59,16 +59,18 @@ Model 到代码表示的约束。两个具体实现之间的静态对照、差�
 `PayloadPhase` 已删除；本文后续保留的旧名称只用于记录历史分析目录/批次，不再定义对象、parent、
 lifecycle 或 checkpoint。
 
-- `Kernel.Enable` 同步驱动 BootInitFlow 三段 lifecycle；BootInitFlow Online 后，当前 BootTask 的 active
-  `BootIdleFlow` 向 CPU0 Scheduler `emits Schedule()`。非 identity switch 通过
-  Scheduler drives next Task Activate/Continue、再直接向预检 TaskFlow emits Startup/Continue，承载
-  KernelInitFlow 的后续执行；Kernel 不是 Schedule sender，Task 也不转发 Flow continuation。
+- `Kernel.Enable` 同步驱动 BootInitFlow 三段 lifecycle；BootInitFlow Online 后，同一固定 Flow 对
+  CPU0 Scheduler `yields Schedule()`。非 identity switch 由 Scheduler 显式保存/恢复 TaskThreadContext、
+  Suspend prev、Continue next，再向 next 固定 TaskFlow 交付 contextual Continue；Kernel 不是 Schedule
+  sender，`yields` 不隐式产生调度效果。
 - `BootInitFlow.Preset` 直接驱动入口对象并提交 Prepared；Setup 直接驱动 boot/interrupt 叶子以及
   `BootInitRestInitPhase`；Enable 只驱动 `BootInitScheduleHandoffPhase`。
-- `KernelInitFlow.Preset` 直接驱动 PreSMP/SMP bringup；Setup 直接驱动 runtime、initcall、rootfs、
-  finalize 和 `PayloadPreparePhase`；Enable 只驱动 `PayloadHandoffPreparePhase`。
+- KernelInitFlow 随 KernelInitTask 发布为 Online；首次及恢复派发都由 contextual Continue 承载。
+  首个 Continue 直接驱动 PreSMP/SMP bringup、runtime、initcall、rootfs、finalize、PayloadPrepare 和
+  PayloadHandoffPrepare 叶子。
 - `PayloadHandoffPreparePhase.Online` 后 Kernel.Enable 提交 Kernel.Online，并由 Kernel 作为唯一发送者
-  `emits KernelInitFlow.CommitPayloadHandoff`。UserBoot 执行 replacement；Hello/Smoke 不替换 Flow。
+  `emits KernelInitFlow.CommitPayloadHandoff`。UserBoot 只替换 Flow-owned UserAppRuntime 内部的
+  ApplicationInstance；Hello/Smoke 同样保持固定 Flow。
 
 ## 文档用途
 
@@ -143,7 +145,7 @@ lifecycle 或 checkpoint。
 | 前置环境 | 内核领域建立之前，由硬件、固件与引导过程所提供的执行条件、资源基础及控制关系的总和。 |
 | 内核领域 | 本规格重点讨论的领域，指内核接管控制权后，用以组织执行流、资源对象与组件关系的对象空间。 |
 | 常规流 | 在本规格当前讨论中，指 Flow 在内核领域的一种核心表现形态，表示在默认情况下持续推进、首尾衔接、源源不断的执行状态。 |
-| 启动执行阶段（BootInitFlow） | `BootTask.initial_flow` 指向的初始 TaskFlow；它继承 PhaseObject 并从内核入口开始编排启动阶段。完成 PID 1 首次调度切换前，后继 `BootIdleFlow` 成为 `BootTask` 的 active continuation。 |
+| 启动执行阶段（BootInitFlow） | `BootTask.flow` 指向的终身 TaskFlow；它继承 PhaseObject，从内核入口编排启动阶段，并在 Online 后继续承载首次 schedule 返回与 idle loop。 |
 | 事件流 | 在本规格当前讨论中，指 Flow 在内核领域的一种核心表现形态，表示由事件源触发并导向相应处理路径的离散执行形态。其核心子形态包括中断流与异常流。 |
 | 内核 | 软件执行流中的核心阶段。它从前序引导阶段接收控制权，并继续组织系统初始化、组件装配、运行与退出。 |
 | 组件 | 内核内部参与某一段执行流的功能单元，具有明确职责、边界、输入输出与生命周期。 |
@@ -825,7 +827,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 在阶段内部继续划分子阶段时，应以执行主体的视角作为首要边界原则。子阶段是某个 `Flow` / 任务 / 事件处理流连续执行片段的最小规格粒度，不能跨越任务切换、中断进入/返回、异常进入/返回或其它执行主体交接边界。一个子阶段可以创建、唤醒、释放或调度其它任务，也可以发布其它执行主体后续入口所需的事实；但它不能驱动或声明已经执行了其它任务、异常流或中断流自己的子阶段。跨执行主体的衔接应通过 entry、release、dispatch、completion、scheduler handoff 等可观察事实表达，而不是把两个执行主体的子阶段串成普通 sibling 顺序。
 
-因此，Linux 源码中的函数边界只能作为识别子阶段的线索，不能覆盖执行主体边界。若一个函数内部发生任务切换、Flow binding 或调度分叉，则函数前后应按执行 continuation 拆成不同子阶段；例如 `BootTask` 的 `BootInitFlow` 启动阶段和其后 `BootIdleFlow` 片段应在规格上可区分，但不得据此制造第二个 Task。后续异常执行流和中断执行流也采用同一原则：它们拥有自己的子阶段，只能由对应事件流执行，常规任务子阶段只能记录进入这些事件流的边界事实。
+因此，Linux 源码中的函数边界只能作为识别子阶段的线索，不能覆盖执行主体边界。若一个函数内部发生任务切换或调度分叉，则函数前后应按 execution continuation 拆分；BootTask 启动片段与 schedule 返回后的 idle 片段都属于同一固定 BootInitFlow 的不同 Online Action resume coordinate，不得据此制造第二个 Task 或第二个长期 Flow。后续异常流和中断流也采用同一原则。
 
 <p align="center">
   <img src="pic/kernel-context-phases.svg" alt="内核上下文相关阶段划分" width="820">
@@ -1038,7 +1040,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 据此，当前可先识别出十项本步骤涉及的核心建模要素，其中九类是对象，一项是 Task 的值属性。这里统一采用“中文名 + 英文名”的命名方式；对于约定俗成的工程对象，也可直接使用英文名。需要注意，`物理内存空间` 属于准备期输入对象，不是入口前导步骤新建立的对象；它在本步骤中作为只读资源布局被读取和验证。
 
-1. `启动执行阶段`，英文名 `BootInitFlow`：`BootTask.initial_flow` 指向的初始 TaskFlow；它继承 PhaseObject，用于把前置环境交接下来的唯一启动执行片段显式纳入内核阶段树。
+1. `启动执行阶段`，英文名 `BootInitFlow`：`BootTask.flow` 指向的终身 TaskFlow；它继承 PhaseObject，把入口启动、schedule return 和 idle continuation 纳入同一个阶段树。
 2. `启动根任务`，英文名 `BootTask`：镜像入口前已经存在且从模型入口起 OnCpu 的静态 carrier；它对应 Linux 静态 `init_task` / PID 0 / swapper 的身份。
 3. `启动根任务栈属性`，写作 `BootTask.stack`：Task 类型上的唯一 `stack: Stack` 值属性；它与 BootTask 一起在镜像中构造，对应 Linux 静态 `init_thread_union` / `init_stack` 存储，但不是对象、子对象、引用或 lifecycle。
 4. `中断资源`，英文名 `InterruptType`：当前 CPU 的中断门控与分派资源，是 `TrapType.interrupt`。在本子阶段它首先封闭中断进入路径，确保入口前导期在受控条件下继续执行。
@@ -2297,13 +2299,13 @@ AP 已有 live `CurrentCPU`、Online Scheduler 或可运行 TaskFlow。
 - secondary CPU 尚未启动
 
 当前 `BootInitFlow.Enable` 正式拥有两个 BootTask 启动子阶段：
-`BootInitRestInitPhase` 和 `BootInitScheduleHandoffPhase`。不再建立聚合 wrapper；二者 Online 且
-`BootIdleFlow` 首个 owner/active binding 建立后发布 `BootInitFlow.Online`。需要注意，
+`BootInitRestInitPhase` 和 `BootInitScheduleHandoffPhase`。不再建立聚合 wrapper；二者 Online 后发布
+`BootInitFlow.Online`。需要注意，
 `rest_init()` 中的 `schedule_preempt_disabled()` 展开后会 fork 出另一条由
 `KernelInitTask` 驱动的执行线：
 
-- `BootTask` 的 switch context 被保存；只有调度器未来恢复它时，才由 `BootIdleFlow`
-  continuation 驱动 `BootIdleEntryPhase` 并进入 `cpu_startup_entry(CPUHP_ONLINE)` 与 idle 路径。
+- `BootTask` 的 switch context 被保存；只有调度器未来恢复它时，才由 BootInitFlow 的 pending
+  YieldToken 从 schedule 返回点继续，驱动 `BootIdleEntryPhase` 和 idle 路径。
 - `KernelInitTask` 在同一次调度交接后获得运行机会，消费 `kthreadd_done` 释放事实，
   然后进入 `kernel_init_freeable()`，启动 `SmpRuntimePhase`，其首个子阶段是
   `PreSmpInitPhase`。
@@ -2316,11 +2318,11 @@ AP 已有 live `CurrentCPU`、Online Scheduler 或可运行 TaskFlow。
 `BootTask` 在 `BootInitFlow` 中执行 `rest_init()` 前半段时能够直接推进和观察的片段。它可以创建并唤醒
 `KernelInitTask` / `KthreaddTask`，发布二者的 entry、release 和 provider facts；但首次调度交接、
 `KernelInitTask` 的 `PreSmpInitPhase`、`KthreaddTask` 的服务循环子阶段，以及调度交接后的
-`BootIdleFlow` idle 子阶段，都应作为对应执行 continuation 的子阶段处理。
+BootInitFlow 的 idle resume 子阶段，都应作为对应 execution continuation 的子阶段处理。
 
 1. `BootInitRestInitPhase`：由上一阶段遗留的 `BootTask` 执行 `rcu_scheduler_starting()`，创建 PID 1 的 `KernelInitTask`，把 init 临时固定在 boot CPU，创建 `KthreaddTask`，设置 `system_state = SYSTEM_SCHEDULING`，并完成 `kthreadd_done`。PID 1 解除等待必须由 `KernelInitTask` 在自己的 wait side 观察该 completion 后提交。本阶段不提交 `Scheduler.schedule()`，不执行 kthreadd 服务循环，也不进入 boot idle。
 2. `BootInitScheduleHandoffPhase`：仍由 `BootTask` 执行，只覆盖 `schedule_preempt_disabled()` 中退出 inherited preempt-disabled guard、进入 `Scheduler.schedule()` 并提交首次 handoff facts 的调度分界点。
-3. `BootIdleEntryPhase`：由首次调度交接后同一 `BootTask` 的 `BootIdleFlow` continuation 执行，进入 `cpu_startup_entry(CPUHP_ONLINE)` 和代表性 idle loop cycle；该子阶段完全受 `BootIdleStartupContext` 覆盖。
+3. `BootIdleEntryPhase`：由首次调度交接后同一 BootTask/BootInitFlow 的 contextual Continue 从 schedule 返回点执行，进入 `cpu_startup_entry(CPUHP_ONLINE)` 和代表性 idle loop cycle；该子阶段完全受 `BootIdleStartupContext` 覆盖。
 4. `SmpRuntimePhase` 的入口由 `TaskEntry::KernelInit` 启动；其首个子阶段 `PreSmpInitPhase` 覆盖 `kernel_init` 线程中 `kernel_init_freeable()` 从 `gfp_allowed_mask = __GFP_BITS_MASK` 到 `smp_init()` 前的初始化段。它运行在 `KernelInitTask` 上，完成 SMP 启动前仍必须在单核多任务环境中推进的准备动作，例如打开 PageAllocator 完整 GFP mask、记录当前配置下裁剪的内存节点访问路径和 deferred 的 `cad_pid` 绑定位置、执行 `smp_prepare_cpus(setup_max_cpus)`、完成 `workqueue_init()`、`init_mm_internals()`、`rcu_init_tasks_generic()`、`do_pre_smp_initcalls()` 和 `lockup_detector_init()`。`smp_init()` 本身不属于本子阶段，而是后续 `SmpBringupPhase` 的入口边界。
 
 ##### BootInitFlow Enable 分叉修正规则
@@ -2339,29 +2341,29 @@ BootIdleEntry 子阶段直接启动，也不从 `BootIdleEntryPhase.Ready` 推�
 
 实现层应拆分 `rest_init`：`BootInitRestInitPhase` 创建 PID 1/kthreadd 并完成
 `kthreadd_done`；`BootInitScheduleHandoffPhase` 退出 boot 初始 preempt-disabled 上下文，完成首次
-切换的可逆预检和 dispatch 提交；BootInitFlow 建立 BootIdleFlow binding、发布 Online 后才执行
-不可逆真实切换。`BootIdleEntryPhase` 留给未来恢复 BootTask 的返回路径。测试应验证 PID 1 的下一阶段
+切换的可逆预检和 dispatch 提交；BootInitFlow 发布 Online 后以 `yields Schedule` 执行不可逆真实
+切换。`BootIdleEntryPhase` 留给未来恢复 BootTask 的返回路径。测试应验证 PID 1 的下一阶段
 启动条件来自 release/dispatch 与 scheduler facts，而不是来自某个 `RestInitPhase` wrapper。
 
 #### BootInitFlow Enable 子阶段：rest_init 与首次切换
 
 `BootInitFlow Enable` 的启动路径拆为 `BootInitRestInitPhase` 和
-`BootInitScheduleHandoffPhase`；`BootIdleEntryPhase` 属于 `BootIdleFlow`，不计入 BootInitFlow
-完成条件。两者覆盖 Linux 6.12 `rest_init()` 从 `rcu_scheduler_starting()` 到首次真实切换 commit
+`BootInitScheduleHandoffPhase`；`BootIdleEntryPhase` 属于 BootInitFlow Online continuation，但不计入
+BootInitFlow Enable 的完成条件。两者覆盖 Linux 6.12 `rest_init()` 从 `rcu_scheduler_starting()` 到首次真实切换 commit
 前的对象级边界，不把不同执行主体串成一个最小子阶段。
 
 这个边界的核心不是继续建立静态基础设施，而是把系统从“单一 BootTask 执行初始化”推进为
 “boot CPU 上的单核多任务运行环境”：PID 1 的 `KernelInitTask` 被创建并等待 `kthreadd_done`，
 `KthreaddTask` 被创建并登记为全局线程管理者，系统状态进入 `SYSTEM_SCHEDULING`，
-`KthreaddReadyGate.complete()` 释放后 PID 1 可以继续执行 `kernel_init_freeable()`；`BootIdleFlow`
-成为 `BootTask` initial `BootInitFlow` 之后的 active successor。因此，本子阶段是 `InterruptPhase` 到真实 PID 1 执行线的
+`KthreaddReadyGate.complete()` 释放后 PID 1 可以继续执行 `kernel_init_freeable()`；BootInitFlow 保存
+schedule 后的 resume coordinate 并在 BootTask 恢复后进入 idle。因此，本子阶段是 `InterruptPhase` 到真实 PID 1 执行线的
 实际运行语义转换点。
 
 当前先将 rest_init 路径的对象和边界记录如下：
 
 1. `BootInitRestInitPhase`：属于阶段对象，是 `BootInitFlow Enable` 的第一个 owner-scoped 子阶段对象。它从 `ProcessPreparePhase.Online` 接续，按 `rest_init()` 前半段有效顺序编排 RCU、任务创建、同步门和系统状态动作，并以 `kthreadd_done` release facts 作为完成边界。
 2. `RCU 核心对象`（暂名 `RcuCore`）的调度启动动作：覆盖 `rcu_scheduler_starting()`。它不是创建新的 RCU 对象，而是在前序 `RcuCore.Ready` 基础上执行 `RcuCore.setup()`，把 RCU 退出 early boot 模式并记录 scheduler 开始参与 RCU 语义；Linux 当前要求此时仍只有一个 online CPU，且尚未发生普通上下文切换。后续 `rcu_set_runtime_mode()` 可作为 `RcuCore.enable()` 推进到 `Online`；`rcu_end_inkernel_boot()` 不消耗主对象 slot，作为 `RcuCore.end_inkernel_boot()` action 修改内部 `boot_mode` / `inkernel_boot_ended` 子状态。将来若需要细化 RCU 流程，可以增加 `RcuTree`、`RcuSoftirqHook`、`RcuGpWorker` 或 `RcuBootMode` 等下级子对象，主对象 slots 仍然足够。
-3. `内核 init 任务对象`（`KernelInitTask`）：覆盖 `user_mode_thread(kernel_init, NULL, CLONE_FS)` 创建的稳定 PID 1。它是与 `BootTask` 同属唯一 `Task` 类型的独立实例，后续将执行 `kernel_init()`，先等待 `kthreadd_done`，再进入 `PreSmpInitPhase` 对应的 `kernel_init_freeable()`。规格层把目标新任务作为生命周期主体：`KernelInitTask.preset/setup/enable()` 通过公共 `TaskCreationCore.CopyProcess` 以 `BootTask/current` 为模板复制 task/thread 基础，再为新任务指定 `kernel_init` 入口和 `CLONE_FS` 等局部参数；`KernelInitFlow` 独立承载 exec 前 continuation，并在 successful exec 时被 fresh `UserAppFlow` 替换，Task 身份不变。`KernelInitTask` 的 lifecycle 语义为：
+3. `内核 init 任务对象`（`KernelInitTask`）：覆盖 `user_mode_thread(kernel_init, NULL, CLONE_FS)` 创建的稳定 PID 1。它是与 `BootTask` 同属唯一 `Task` 类型的独立实例，后续将执行 `kernel_init()`，先等待 `kthreadd_done`，再进入 `PreSmpInitPhase` 对应的 `kernel_init_freeable()`。规格层把目标新任务作为生命周期主体：`KernelInitTask.preset/setup/enable()` 通过公共 `TaskCreationCore.CopyProcess` 以 `BootTask/current` 为模板复制 task/thread 基础，再为新任务指定 `kernel_init` 入口和 `CLONE_FS` 等局部参数；`KernelInitFlow` 终身承载 PID 1 continuation，successful exec 只替换其 owned UserAppRuntime 内的 ApplicationInstance，Task 与 Flow identity 均不变。`KernelInitTask` 的 lifecycle 语义为：
 
    | slot | Linux 对应动作 | 依赖 | drives / 产物 |
    |---|---|---|---|
@@ -2379,11 +2381,9 @@ BootIdleEntry 子阶段直接启动，也不从 `BootIdleEntryPhase.Ready` 推�
    | `KthreaddTask.enable()` | `wake_up_new_task(p)` | 依赖 `KthreaddTask.Ready`，并由 `Scheduler.wake_new_task()` / `Scheduler.enqueue_task()` action 驱动；该 action 依赖 `Scheduler.Ready` 与 boot CPU runqueue 可接收新 task | 将 `KthreaddTask` 放入调度器可运行集合并推进到 `Online`。它使 kthreadd provider 具备被调度执行并消费 `kthread_create_list` 的机会；后续外部 kthread 创建请求可通过全局 provider 引用唤醒它。 |
 7. `kthreadd 准备同步门`（暂名 `KthreaddReadyGate`）：覆盖静态 completion `kthreadd_done` 和 `complete(&kthreadd_done)`。它是 `Completion` 类型的静态实例；`DECLARE_COMPLETION(kthreadd_done)` 可看作由 `KthreaddReadyGate` 自身的 `preset()` 与 `setup()` 绑定静态存储并确认初始化事实，初始扩展状态为 `Pending`。它把 `KernelInitTask` 和 `KthreaddTask` 解耦：PID 1 可以先创建并阻塞等待，待 `kthreadd_task` 全局引用建立且 `SystemState.value == SYSTEM_SCHEDULING` 后，`complete(&kthreadd_done)` 建模为 `KthreaddReadyGate.complete()` 扩展事件，只发布 token/wake 事实；PID 1 继续执行 `kernel_init_freeable()` 的 release fact 由 `KernelInitTask` 的 wait side 观察或消费该 token 后提交。
 8. `系统状态对象`（暂名 `SystemState`）的 setup：覆盖 `system_state = SYSTEM_SCHEDULING`。`SystemState` 是独立全局对象，早期由静态全局数据形成，`SystemState.preset()` 已把对象生命周期推进到 `Prepared`，并在内部属性 `value` 中记录 `SYSTEM_BOOTING`。本处执行 `SystemState.setup()`，把对象生命周期推进到 `Ready`，同时把内部属性 `SystemState.value` 更新为 `SYSTEM_SCHEDULING`。这里的 `value` 是 Linux 的全局阶段枚举，不是对象生命周期状态；该对象不替代 `Scheduler`，也不把 SMP 或 workqueue 直接推进到后续状态。
-9. `boot idle Flow`（`BootIdleFlow`）：它是 `BootTask` 的后继 idle Flow；`BootTask.initial_flow`
-仍固定指向 `BootInitFlow`。首次真实切换前直接建立
-owner/active binding 并到达 Ready；只有调度器未来恢复 `BootTask` 后，才由其 continuation 覆盖
-`cpu_startup_entry(CPUHP_ONLINE)`。Task carrier 始终是 Linux 静态 `init_task/current` 对应的
-`BootTask`，不得用 Task disable/enable 模拟身份替换。
+9. `boot idle continuation`：它是 BootInitFlow Online Action 在 `yields Schedule` 后的 resume
+coordinate，不是对象或另一个 Flow。只有调度器未来恢复 BootTask 后，contextual Continue 才覆盖
+`cpu_startup_entry(CPUHP_ONLINE)`。Task carrier 始终是 Linux 静态 `init_task/current` 对应的 BootTask。
 
 <p align="center">
   <img src="pic/rest-init-objects.svg" alt="rest_init 期对象分类与相互关系" width="900">
@@ -2408,7 +2408,7 @@ owner/active binding 并到达 Ready；只有调度器未来恢复 `BootTask` �
 | `system_state = SYSTEM_SCHEDULING` | formal candidate: `SystemState.setup()` | 把 `SystemState.state` 推进到 `Ready`，并把内部属性 `SystemState.value` 从 `SYSTEM_BOOTING` 更新为 `SYSTEM_SCHEDULING`；表示系统进入调度运行状态，但不等价于 SMP 已启动，也不自动推进 workqueue 到 enabled。 |
 | `complete(&kthreadd_done)` | extension event: `KthreaddReadyGate.complete()` | 对静态 `Completion` 实例执行 `complete()`：通常把扩展状态从 `Pending` 推进到 `Completed`，并唤醒等待中的 `KernelInitTask`。若随后 PID 1 的 `wait()` 消费该令牌，实例扩展状态可回到 `Pending`；因此本阶段不把 `Open` 作为长期结束状态。 |
 | `schedule_preempt_disabled()` | formal pattern: `BootIdlePreemption.enable_no_resched()` + `Scheduler.schedule()` + `BootIdleStartupContext` | 退出继承的禁抢占原子上下文，执行一次调度分界，再进入 post-schedule boot idle 原子上下文；形成第一次实际调度交接，使已入队的新任务具备运行机会。 |
-| `cpu_startup_entry(CPUHP_ONLINE)` | formal: `BootIdleEntryPhase` + idle actions | 同一 `BootTask` 保持身份；调度器恢复它后由已 Ready/active 的 `BootIdleFlow` 驱动入口和 idle 循环。该过程同时以 `CPUHP_ONLINE` 标记 boot CPU hotplug 状态；secondary CPU 仍未启动。 |
+| `cpu_startup_entry(CPUHP_ONLINE)` | formal: `BootIdleEntryPhase` + idle actions | 同一 BootTask/BootInitFlow 保持身份；调度器恢复它后由 contextual Continue 从 schedule 返回点驱动入口和 idle 循环。该过程同时以 `CPUHP_ONLINE` 标记 boot CPU hotplug 状态；secondary CPU 仍未启动。 |
 
 <p align="center">
   <img src="pic/rest-init-sequence.svg" alt="rest_init 期对象构建时序" width="900">
@@ -2440,8 +2440,8 @@ Boot idle 入口不构成其前置条件。
 - `SystemState.value == SYSTEM_SCHEDULING`
 - `Scheduler.first_schedule_committed == true`，表示 `schedule_preempt_disabled()` 展开的 `Scheduler.schedule()` 已完成第一次实际调度交接
 - `BootTask.state == Online`，表示首次切换已通过 Suspend 使其离开 OnCpu；Task identity、PID 0、CPU 归属和 switch context 均保持
-- `BootIdleFlow.state == Ready`，并且 `task_active_flow_is(BootTask, BootIdleFlow)`；
-  `BootIdleEntryPhase` 仍可为 Base，直到调度器恢复 BootTask
+- `BootInitFlow.state == Online` 且 `BootTask.flow == BootInitFlow`；Flow lane 的 Schedule token 可以
+  pending，`BootIdleEntryPhase` 仍可为 Base，直到调度器恢复 BootTask
 - `BootCPU.hotplug_state == CPUHP_ONLINE`
 - `NumaDefaultPolicy` 按当前配置记录为 trimmed/no-op
 - 下一子阶段的主执行任务是 `KernelInitTask`，入口是 `kernel_init_freeable()` 中 `gfp_allowed_mask = __GFP_BITS_MASK`
@@ -3018,7 +3018,7 @@ Ext2、VFS、RootFS 和 `FsStruct` 的更一般对象关系不放在本 rootfs �
 
 当前先保留两个规格变种：
 
-1. `UserBootPayload`：Linux-like 变种，基于 Linux 的第一个用户态 init 选择与 `kernel_execve()` 交接路径建模。它不创建新的 PID 1，而是驱动前序已经建立的 `KernelInitTask` / PID 1 在当前执行任务上读取并进入首个用户态 ELF；成功后 Task 身份保持，`KernelInitFlow` 被 fresh `UserAppFlow` 替换。
+1. `UserBootPayload`：Linux-like 变种，基于 Linux 的第一个用户态 init 选择与 `kernel_execve()` 交接路径建模。它不创建新的 PID 1，而是驱动前序已经建立的 `KernelInitTask` / PID 1 在当前执行任务上读取并进入首个用户态 ELF；成功后 Task、KernelInitFlow 与 UserAppRuntime identity 保持，只替换 Runtime 内部 ApplicationInstance。
 2. `UnikernelApp`：内核态应用变种，当前只做粗粒度规格约束。它要求 selected app、入口、参数和基础输出设施可用；`enable()` 调用 app 入口并把启动编排链交给 app，不展开 VFS、binfmt、用户态地址空间和 exec 细节。
 
 本阶段的输入事实至少包括：
@@ -3053,11 +3053,11 @@ Exec 核心对象的权威职责已经拆到
 6. `ELF 对象`（`ElfObject`）：表示 main/interpreter artifact 与 load plan。详细职责见独立 charter；格式选择属于 registry，提交属于 transaction，不建立 `ElfLoader`。
 7. `用户地址空间对象`（暂名 `UserAddressSpace`）：表示每个用户态进程独立的低地址用户区映射。它是多实例对象；高地址内核映射共享或引用 `SwapperVm`。`SwapperVm` 继续表示内核共享地址空间实例，不改成普通多实例用户地址空间。首轮仅要求最小用户页表、用户页 `U` 权限、内核页 `U=0`、ELF 段映射、用户栈映射和阶段性的 heap/mmap arena；dynamic libc 首片要求同一个 `UserAddressSpace` 同时映射主程序 ELF 和 `PT_INTERP` 指向的 musl interpreter ELF，并用固定 non-overlap load bias 装载 `ET_DYN` interpreter。ELF 段的 backing/PTE 以页粒度覆盖 `align_down(p_vaddr)..align_up(p_vaddr + p_memsz)`，因此 `mprotect`/`munmap` 对动态链接器 RELRO 页保护请求的 mapped-range 判断也必须按页范围处理，而不是只按原始 `p_vaddr..p_vaddr+p_memsz` 字节范围拒绝页内前缀。heap/mmap arena 用于承接动态链接器早期 `brk`/anonymous `mmap` 需求，属于正式运行时语义，不是测试专用入口。完整 VMA 树、文件映射、COW、ASLR 和 page fault recovery 后续再展开。
 8. `用户栈对象`（`UserStack`）：表示 exec initial stack 与当前用户栈的稀疏物理 backing owner。initial VMA 覆盖参数页并向下预扩展 128 KiB，只分配实际写入页；运行期 load/store fault 可在 8 MiB rlimit、256 页 guard gap 和相邻 mapping 允许时按页向下增长，跨页跳跃不填充中间页。每次 exec 的单次 24 字节 HWRNG 读取中，16 字节只供栈内 `AT_RANDOM`，独立 8 字节只在 `0x40000000` 以下 8 MiB 窗口内选择页对齐 top。initial auxv 是当前可准确表达的 Linux RISC-V 基线：程序头/entry/interpreter、HWCAP、页大小、时钟 tick、flags、exec 前 credentials、secure=0、`AT_RANDOM`、指向独立 filename 副本的 `AT_EXECFN` 和 `AT_NULL`；没有事实支撑的 platform/HWCAP2/rseq/vDSO 条目不生成。stack mapping 只持有 RW/NX VMA 与 ownership token，不复制 backing 引用；动态 `setrlimit`、越界 signal、通用 VMA fault core、COW/多线程栈、完整 CRNG 和内核 compiler stack protector 后续再展开。
-9. `用户 trap frame 对象`（暂名 `UserTrapFrame`）：表示进入 U-mode 前的寄存器现场，至少绑定 `sepc=ElfObject.runtime_entry`、用户 `sp`、`sstatus.SPP=U` 和 `SPIE=1`。静态程序的 runtime entry 是主 ELF entry；动态程序的 runtime entry 是 interpreter entry。它是 `UserAppFlow.Enable` 执行最终 trap-return handoff 的输入，并直接关联稳定 `KernelInitTask`。当前 RISC-V `APP=user-boot` 入口还为 boot CPU 上的 PID 1 建立 16 KiB、32 KiB 对齐的 VMAP kernel trap stack 和 4 KiB、16 字节对齐的静态 overflow stack。正式响应入口必须区分异常或中断来自用户态还是内核态：用户态来源在进入通用事件、调度或 CurrentTask 路径前恢复当前 Task 身份并切换到其内核栈，返回用户态前按调度提交后的 Task 刷新入口上下文；内核态来源保持被中断的内核栈和当前 Task 身份。该入口上下文只是体系结构 lowering，不是 CurrentTask 对象、槽或 snapshot state。两种来源都必须在保存完整响应现场前确认当前栈足以容纳完整响应记录；容量不足时切换到紧急栈，保留可定位故障的完整整数寄存器及 `sepc/scause/stval/sstatus`，并以 terminal panic 停止，不得进入普通 checkpoint、分配器、printk 锁或信号路径。该首片不把不可恢复的 kernel stack overflow 转换为用户信号；per-task stack owner 泛化、per-CPU overflow stack 与 IRQ hardirq stack switch 继续 deferred。
+9. `用户 trap frame 对象`（暂名 `UserTrapFrame`）：表示进入 U-mode 前的寄存器现场，至少绑定 `sepc=ElfObject.runtime_entry`、用户 `sp`、`sstatus.SPP=U` 和 `SPIE=1`。静态程序的 runtime entry 是主 ELF entry；动态程序的 runtime entry 是 interpreter entry。它是固定 KernelInitFlow 的 Runtime exec commit 执行最终 trap-return handoff 的输入，并直接关联稳定 KernelInitTask。当前 RISC-V `APP=user-boot` 入口还为 boot CPU 上的 PID 1 建立 16 KiB、32 KiB 对齐的 VMAP kernel trap stack 和 4 KiB、16 字节对齐的静态 overflow stack。正式响应入口必须区分异常或中断来自用户态还是内核态：用户态来源在进入通用事件、调度或 CurrentTask 路径前恢复当前 Task 身份并切换到其内核栈，返回用户态前按调度提交后的 Task 刷新入口上下文；内核态来源保持被中断的内核栈和当前 Task 身份。该入口上下文只是体系结构 lowering，不是 CurrentTask 对象、槽或 snapshot state。两种来源都必须在保存完整响应现场前确认当前栈足以容纳完整响应记录；容量不足时切换到紧急栈，保留可定位故障的完整整数寄存器及 `sepc/scause/stval/sstatus`，并以 terminal panic 停止，不得进入普通 checkpoint、分配器、printk 锁或信号路径。该首片不把不可恢复的 kernel stack overflow 转换为用户信号；per-task stack owner 泛化、per-CPU overflow stack 与 IRQ hardirq stack switch 继续 deferred。
 10. `系统调用入口与表对象`（`SyscallException` / `SyscallTable`）：`SyscallException` 是 `ExceptionType` 下已有的 ecall/syscall 异常对象，负责用户态 syscall 入口、来源检查、参数提取和分发选择；不再单独建立 `SyscallDispatcher` 对象。`SyscallTable` 是独立分发表对象，承载当前支持的 syscall action 集合；具体 syscall 不是资源对象，而是 `SyscallTable.Action::Write`、`SyscallTable.Action::Writev`、`SyscallTable.Action::OpenAt`、`SyscallTable.Action::Read`、`SyscallTable.Action::Close`、`SyscallTable.Action::NewFstatAt`、`SyscallTable.Action::Brk`、`SyscallTable.Action::Mmap`、`SyscallTable.Action::Mprotect`、`SyscallTable.Action::Munmap`、`SyscallTable.Action::SetTidAddress`、`SyscallTable.Action::Exit`、`SyscallTable.Action::ExitGroup` 等 action。`write/writev` 不再直接按 fd 特判转发到 console，而是经 `FilesStruct -> FileDescriptorTable -> OpenFileDescription -> FileBackend` 解析到标准输出/标准错误对应的字符设备后端；只读 `openat/read/close/newfstatat` 首片则经 `FilesStruct` 分配一个普通文件 opened instance，并通过 VFS path read 读取当前 ext2 rootfs 中已存在的 regular file；`brk/mmap/mprotect/munmap` 路由到 `UserAddressSpace` 的阶段性 heap/mmap arena，用于支撑 musl dynamic loader 的早期运行；`set_tid_address` 按 Linux `current->clear_child_tid = tidptr; return task_pid_vnr(current);` 的形态落到当前 `KernelInitTask` 的 PID 1 任务属性上，不建立 persona 或 futex 完整对象。
 11. `打开文件上下文对象`（`FilesStruct` / `FileDescriptorTable` / `OpenFileDescription` / `FileBackend`）：`FilesStruct` 是任务拥有的打开文件上下文，和表示 root/pwd 的 `FsStruct` 并列，不是 `FsStruct` 的下级类型。`FileDescriptorTable` 是 `FilesStruct` 内部的 fd table，负责把 fd 映射到 `OpenFileDescription`；`OpenFileDescription` 表示一次打开后的文件实例，承载 flags、offset 和后端引用；`FileBackend` 表示具体后端类型。当前支持边界分两层：第一层预安装 fd 0/1/2 为 console-like `CharDevice` 后端；第二层只支持一个 read-only `RegularFile` opened instance，用于 `openat` 后的 `read`、`close` 和 `newfstatat` 最小元数据返回。块设备文件、完整 `/dev/console`、TTY、权限、目录 fd、symlink、poll、共享 fd table、写路径和 page cache 后续展开。
-12. `KernelInitTask 与用户应用 Flow`（`KernelInitTask` / `UserAppFlow`）：`KernelInitTask` 是 exec 前后不变且 PID 为 1 的 Task carrier；用户地址空间、files、credentials、signal 和 trap frame 直接附着于它，不建立用户态 persona wrapper。首次 exec 在执行点声明一个 fresh `UserAppFlow` 运行实例，只承载该次应用 continuation 的 lifecycle。successful exec 固定按“新 Flow Preset/Setup -> `KernelInitFlow.Disable` -> `KernelInitTask.CommitFlowHandoff` -> 新 Flow Enable -> `KernelInitFlow.Cleanup`”推进；一个 Task 任一时刻最多一个 Flow Online。后续 exec 仍保持 Task 身份，并声明另一个 fresh `UserAppFlow`。
-13. `信号运行期对象`（暂名 `SignalRuntime`）：表示 Task 拥有或引用的用户态信号运行期机制。它挂在 `KernelInitTask` 等 `Task` 实例之下，不属于 `UserAppFlow`。`SignalRuntime` 不等同于前序 `ProcessPreparePhase` 中的 `SignalCore`：`SignalCore` 只表示 `proc_caches_init()` / `signals_init()` 相关的全局分配基础与初始化边界，`SignalRuntime` 表示 task/process 运行期信号状态。后续规格应把 `SignalRuntime` 拆成三个主要子对象：`ProcessSignalState` 对应 Linux `signal_struct` 的线程组/进程共享状态，至少包括 `shared_pending` 及后续 group stop/job control 等进程级 signal 状态；`ThreadSignalState` 对应 Linux `task_struct` 的线程私有状态，包括 `pending`、`blocked`、`real_blocked` 和 `saved_sigmask`；`SignalActionTable` 对应 Linux `sighand_struct.action[_NSIG]`，其条目可命名为 `SignalAction`，由 `rt_sigaction()` 读写。`rt_sigprocmask()` 应建模为 `SignalRuntime.Action::RtSigprocmask`，作用于 `ThreadSignalState.blocked`；`rt_sigaction()` 应建模为 `SignalRuntime.Action::RtSigaction`，作用于 `SignalActionTable.actions[sig]`。`get_signal()`、`dequeue_signal()`、signal frame 构造、进入用户 handler 和 `rt_sigreturn` 不应作为这些状态集合的父对象，而应作为 `SignalRuntime` 上的后续运行期 actions，例如 `RecalcPending`、`DequeueSignal`、`DeliverSignal`、`BuildSignalFrame` 和 `RtSigreturn`；这些 action 消费 `ProcessSignalState`、`ThreadSignalState` 和 `SignalActionTable`，必要时创建或消费 `SignalFrame`。当前单 PID1/单线程首片可以在实现上把这些状态折叠到 `KernelInitTask` 的内部 user-resource 字段，但规格边界必须保留进程共享、线程私有和 action table 的区分。
+12. `KernelInitTask 与用户应用 Runtime`（`KernelInitTask` / `UserAppRuntime`）：KernelInitTask 是 exec 前后不变且 PID 为 1 的 Task carrier，KernelInitFlow 是其终身 Flow。Flow 最多创建一个稳定 Runtime owned child；successful exec 原子替换 Runtime 内部 ApplicationInstance。后续 exec 保持 Task、Flow、Runtime identity。
+13. `信号运行期对象`（暂名 `SignalRuntime`）：表示 Task 拥有或引用的用户态信号运行期机制。它挂在 `KernelInitTask` 等 Task 实例之下，并可由 UserAppRuntime 的当前 ApplicationInstance 使用。它与全局初始化用 SignalCore 不同；后续仍应区分 ProcessSignalState、ThreadSignalState 和 SignalActionTable，并由运行期 actions 消费这些状态。
 14. `payload 失败终端`（暂名 `PayloadPanic`）：覆盖 Linux-like 路径中 `init=` 指定 init 失败或所有候选 init 均失败后的 panic。它是失败终端，不是正常生命周期对象。
 
 <p align="center">
@@ -3083,8 +3083,8 @@ Exec 核心对象的权威职责已经拆到
 | ELF 类型检查 | event: `ElfObject.preset()` | 检查 ELF64、little-endian、RISC-V、当前支持的 executable 类型；失败是普通候选失败，不导致内核崩溃，除非该候选来自强制 `init=`。 |
 | ELF 解析与装载 | event: `ElfObject.setup()` | 解析 ELF header / program headers，并把 `PT_LOAD` 段映射到 `UserAddressSpace`；`PT_INTERP` 只建立 interpreter role 的第二个 `ElfObject`，不单独引入 `ElfLoader` 或 `Load` 生命周期阶段。 |
 | 用户态入口就绪 | event: `ElfObject.enable()` | 确认 entry、用户栈和 `UserTrapFrame` 已就绪，交给 `UserBootPayload` 做最终 U-mode handoff。 |
-| `execute_command` branch | action: `UserBootPayload.try_candidate(path, requested=true)` | 来自 `init=`；若成功则为 `KernelInitTask` 建立并 handoff 到 `UserAppFlow`；若失败则进入 `PayloadPanic.requested_init_failed()`，不继续默认/fallback 候选。 |
-| `CONFIG_DEFAULT_INIT` branch | action: `UserBootPayload.try_candidate(path, default=true)` | 配置非空时尝试；成功则 handoff 到 fresh `UserAppFlow`；失败只记录错误并继续 fallback。 |
+| `execute_command` branch | action: `UserBootPayload.try_candidate(path, requested=true)` | 来自 `init=`；若成功则提交 KernelInitFlow-owned Runtime 的新 ApplicationInstance；若失败则进入 `PayloadPanic.requested_init_failed()`，不继续默认/fallback 候选。 |
+| `CONFIG_DEFAULT_INIT` branch | action: `UserBootPayload.try_candidate(path, default=true)` | 配置非空时尝试；成功则替换同一 Runtime 内的 ApplicationInstance；失败只记录错误并继续 fallback。 |
 | `try_to_run_init_process("/sbin/init" ... "/bin/sh")` | action: `UserBootPayload.try_fallbacks()` | 固定 fallback 列表；每个候选仍调用 `try_candidate(path)`；`-ENOENT` 静默，其它错误打印后继续。 |
 | 所有候选失败 | terminal: `PayloadPanic.no_working_init()` | Linux panic，不形成 `PayloadPhase.Online`。 |
 | `UnikernelApp.setup()` / `UnikernelApp.enable()` | coarse variant | 只约束 app 已选定、入口存在、参数和基础输出设施可用；不展开 Linux exec 细节。 |
@@ -3104,14 +3104,14 @@ Exec 核心对象的权威职责已经拆到
 - `PayloadPhase.state == Online`，表示 selected payload 已完成不可逆交接
 - Linux-like 路径下，`UserBootPayload.state == Online`
 - Linux-like 路径下，`KernelInitTask.state == Online` 且该 Task（PID 1）的 identity 保持
-- Linux-like 路径下，本次 exec 声明的 `UserAppFlow` 实例处于 `Online`、`KernelInitFlow.state == Destroyed`，active binding 指向该运行实例
+- Linux-like 路径下，`KernelInitFlow.state == Online`，其唯一 UserAppRuntime identity 保持且 current ApplicationInstance 为本次 exec 提交实例
 - Linux-like 路径下，`UserBootPayload.selected_path` 已确定
 - Linux-like 路径下，`InitArgEnv.argv0 == UserBootPayload.selected_path`
 - Linux-like 路径下，`ElfObject.state == Online`
 - Linux-like 路径下，`UserAddressSpace.state == Online`
 - Linux-like 路径下，`UserTrapFrame` 已绑定 entry 和用户栈
 - Linux-like 路径下，`SyscallException` 绑定 `SyscallTable`，并通过 `SyscallTable` actions 支持最小 `write` 与 `exit/exit_group`
-- Unikernel 路径下，`UnikernelApp.state == Online`，但不要求存在 `UserAppFlow`
+- Unikernel 路径下，`UnikernelApp.state == Online`，但不要求存在 UserAppRuntime
 - 如果 Linux-like 路径进入 `PayloadPanic`，则该路径是失败终端，不满足 `PayloadPhase.state == Online`
 
 ### 内核领域与前置环境
@@ -3786,7 +3786,7 @@ boot/primary hart 事实并精确建立
 负责关闭 BootCPU 的中断分路门控或完成待决中断清除写。CpuGroup 效果由真实内核入口 adoption，不要求修改外部固件。实际字节放置可以由
 QEMU/loader 完成；OpenSBI.Enable 交接域保证其结果，不虚构
 固件内部复制。Kernel 在 Ready 内 drives BootInitFlow，后者的 Preset 首先由
-InterruptType 关闭 BootCPU 的全部中断分路门控、完成一次待决中断清除写并建立相应顺序事实；该写不保证硬件驱动的待决位随后保持为零。BootInitFlow Online 后由 active BootIdleFlow 发出首次 Schedule；非 identity switch 的 Task/Flow continuation 再推进 KernelInitFlow；
+InterruptType 关闭 BootCPU 的全部中断分路门控、完成一次待决中断清除写并建立相应顺序事实；该写不保证硬件驱动的待决位随后保持为零。BootInitFlow Online 后由同一固定 Flow `yields` 首次 Schedule；non-identity switch 的显式 Task/context commit 与 contextual Continue 再推进 KernelInitFlow；
 `PayloadHandoffPreparePhase.Online` 后提交
 Online，再 emits `KernelInitFlow.CommitPayloadHandoff`。其余启动相关寄存器由入口阶段逐步更新。
 全局 `Startup` 仍规范化为 `Preset`，不重绑定为 `Enable`。

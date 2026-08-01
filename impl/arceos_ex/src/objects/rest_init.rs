@@ -38,15 +38,11 @@ pub enum SystemStateValue {
     Running,
 }
 
-/// The kernel-mode continuation initially owned and activated by
-/// [`KernelInitTask`], whose PID is 1.
-///
-/// This is deliberately separate from [`KernelInitTask`]: exec retires this
-/// flow while preserving the task carrier and PID identity.
+/// The lifetime Flow of [`KernelInitTask`], whose PID is 1. Exec replaces the
+/// owned application instance, never this Flow association.
 #[cfg_attr(not(app_smoke), allow(dead_code))]
 pub struct KernelInitFlow {
     flow: TaskFlow,
-    initial_start_accepted: bool,
     payload_handoff_committed: bool,
 }
 
@@ -55,7 +51,6 @@ impl KernelInitFlow {
     pub const fn new() -> Self {
         Self {
             flow: TaskFlow::new_static(TaskFlowRef::KERNEL_INIT),
-            initial_start_accepted: false,
             payload_handoff_committed: false,
         }
     }
@@ -66,18 +61,6 @@ impl KernelInitFlow {
 
     pub const fn owner_bound(&self) -> bool {
         self.flow.owner().is_valid()
-    }
-
-    pub const fn active(&self) -> bool {
-        self.flow.active()
-    }
-
-    pub const fn released(&self) -> bool {
-        self.flow.cleaned()
-    }
-
-    pub const fn initial_start_accepted(&self) -> bool {
-        self.initial_start_accepted
     }
 
     pub const fn payload_handoff_committed(&self) -> bool {
@@ -97,44 +80,24 @@ impl KernelInitFlow {
         self.flow.cpu_ref()
     }
 
-    pub fn bind_cpu_ref(&mut self, cpu_ref: super::cpu::CpuRef) -> bool {
-        self.flow.bind_cpu_ref(cpu_ref)
+    pub fn commit_cpu_ref(&mut self, cpu_ref: super::cpu::CpuRef) -> bool {
+        self.flow.commit_cpu_ref(cpu_ref)
     }
 
-    pub fn bind_initial(&mut self, owner: &mut KernelInitTask) -> EventResult {
-        self.flow.bind(owner.task_mut(), TaskFlowRef::NONE)?;
-        owner.task_mut().bind_initial_flow(&self.flow)
+    pub fn bind_fixed(&mut self, owner: &mut KernelInitTask) -> EventResult {
+        self.flow.bind(owner.task_mut())?;
+        owner.task_mut().bind_flow(&self.flow)
     }
 
-    pub fn start_initial(&mut self, owner: &mut KernelInitTask) -> EventResult {
-        if self.initial_start_accepted
-            || self.flow.state() != State::Base
-            || !owner
-                .task()
-                .initial_flow()
-                .same_identity(self.flow.flow_ref())
-            || owner.task().active_flow().is_valid()
-            || !owner.task().owns_flow(self.flow.flow_ref())
-            || !super::task_flow::task_flow_execution_guard_satisfied(&self.flow, owner.task())
-        {
-            return failed_condition(
-                LifecycleEvent::Preset,
-                self.flow.state(),
-                State::Base,
-                State::Prepared,
-            );
-        }
-        self.initial_start_accepted = true;
-        Ok(())
+    pub fn publish(&mut self, owner: &KernelInitTask) -> EventResult {
+        self.flow.preset(owner.task(), None)?;
+        self.flow.setup(owner.task(), None)?;
+        self.flow.enable(owner.task(), None)
     }
 
-    pub fn continue_active(&self, owner: &KernelInitTask) -> EventResult {
+    pub fn continue_flow(&self, owner: &KernelInitTask) -> EventResult {
         if self.flow.state() != State::Online
-            || !self.flow.active()
-            || !owner
-                .task()
-                .active_flow()
-                .same_identity(self.flow.flow_ref())
+            || !owner.task().flow().same_identity(self.flow.flow_ref())
             || !super::task_flow::task_flow_execution_guard_satisfied(&self.flow, owner.task())
         {
             return failed_condition(
@@ -147,39 +110,8 @@ impl KernelInitFlow {
         Ok(())
     }
 
-    pub fn commit_preset_after_children(&mut self, owner: &KernelInitTask) -> EventResult {
-        if !self.initial_start_accepted
-            || !owner.entry_stack_verified()
-            || !owner.current_stack_pointer_in_range()
-        {
-            return failed_condition(
-                LifecycleEvent::Preset,
-                self.flow.state(),
-                State::Base,
-                State::Prepared,
-            );
-        }
-        self.flow.preset(owner.task(), None)
-    }
-
-    pub fn commit_setup_after_children(&mut self, owner: &KernelInitTask) -> EventResult {
-        self.flow.setup(owner.task(), None)
-    }
-
-    pub fn commit_enable_after_children(&mut self, owner: &mut KernelInitTask) -> EventResult {
-        if self.flow.state() != State::Ready
-            || owner.task().active_flow().is_valid()
-            || self.flow.active()
-        {
-            return failed_condition(
-                LifecycleEvent::Enable,
-                self.flow.state(),
-                State::Ready,
-                State::Online,
-            );
-        }
-        owner.task_mut().activate_initial_flow(&mut self.flow)?;
-        self.flow.enable(owner.task(), None)
+    pub fn cleanup_for_exit(&mut self, owner: &KernelInitTask) -> EventResult {
+        self.flow.cleanup_for_exit(owner.task())
     }
 
     pub fn require_payload_handoff_action(&self, owner: &KernelInitTask) -> EventResult {
@@ -198,41 +130,6 @@ impl KernelInitFlow {
 
     pub fn mark_payload_handoff_committed(&mut self) {
         self.payload_handoff_committed = true;
-    }
-
-    pub fn disable_for_exec(&mut self, owner: &KernelInitTask) -> EventResult {
-        if self.flow.state() != State::Online
-            || owner.state() != State::OnCpu
-            || self.flow.owner() != owner.task_ref()
-            || !self.flow.active()
-            || owner.task().active_flow() != self.flow.flow_ref()
-        {
-            return failed_condition(
-                LifecycleEvent::Disable,
-                self.flow.state(),
-                State::Online,
-                State::Offline,
-            );
-        }
-        self.flow
-            .disable(owner.task(), Some(Checkpoint::KernelInitFlowOffline))
-    }
-
-    pub fn cleanup_after_handoff(&mut self, owner: &mut KernelInitTask) -> EventResult {
-        if self.flow.state() != State::Offline
-            || self.flow.active()
-            || owner.task().active_flow() == self.flow.flow_ref()
-        {
-            return failed_condition(
-                LifecycleEvent::Cleanup,
-                self.flow.state(),
-                State::Offline,
-                State::Destroyed,
-            );
-        }
-        self.flow
-            .cleanup(owner.task(), Some(Checkpoint::KernelInitFlowDestroyed))?;
-        owner.task_mut().retire_destroyed_flow(&self.flow)
     }
 
     pub const fn core(&self) -> &TaskFlow {
@@ -255,7 +152,7 @@ pub struct KernelInitTask {
     entry_started_count: usize,
     entry_stack_pointer: usize,
     entry_stack_verified: bool,
-    flow_handoff_committed: bool,
+    application_committed: bool,
 }
 
 #[cfg_attr(not(app_smoke), allow(dead_code))]
@@ -276,7 +173,7 @@ impl KernelInitTask {
             entry_started_count: 0,
             entry_stack_pointer: 0,
             entry_stack_verified: false,
-            flow_handoff_committed: false,
+            application_committed: false,
         }
     }
 
@@ -384,46 +281,13 @@ impl KernelInitTask {
         self.task.owns_flow(TaskFlowRef::KERNEL_INIT)
     }
 
-    pub const fn user_flow_owned(&self) -> bool {
-        self.task.active_flow().is_valid()
-            && !self
-                .task
-                .active_flow()
-                .same_identity(TaskFlowRef::KERNEL_INIT)
-    }
-
     #[cfg_attr(app_smoke, allow(dead_code))]
-    pub const fn kernel_init_flow_active(&self) -> bool {
-        self.task
-            .active_flow()
-            .same_identity(TaskFlowRef::KERNEL_INIT)
+    pub const fn application_committed(&self) -> bool {
+        self.application_committed
     }
 
-    pub const fn user_flow_active(&self) -> bool {
-        self.task.active_flow().is_valid()
-            && !self
-                .task
-                .active_flow()
-                .same_identity(TaskFlowRef::KERNEL_INIT)
-    }
-
-    pub const fn flow_handoff_committed(&self) -> bool {
-        self.flow_handoff_committed
-    }
-
-    pub fn mark_user_flow_handoff_committed(&mut self) {
-        self.flow_handoff_committed = true;
-    }
-
-    /// Commit the active-flow replacement without replacing `KernelInitTask`.
-    pub fn commit_user_flow_handoff(
-        &mut self,
-        old: &KernelInitFlow,
-        new: &mut TaskFlow,
-    ) -> EventResult {
-        self.task.commit_flow_handoff(old.core(), new)?;
-        self.flow_handoff_committed = true;
-        Ok(())
+    pub fn mark_application_committed(&mut self) {
+        self.application_committed = true;
     }
 
     pub fn switch_context(&self) -> &TaskSwitchContext {
@@ -629,32 +493,30 @@ impl KthreaddFlow {
         self.flow.bind_cpu_ref(cpu_ref)
     }
 
+    pub fn commit_cpu_ref(&mut self, cpu_ref: super::cpu::CpuRef) -> bool {
+        self.flow.commit_cpu_ref(cpu_ref)
+    }
+
     #[cfg_attr(app_smoke, allow(dead_code))]
     pub const fn owner(&self) -> TaskRef {
         self.flow.owner()
     }
 
     #[cfg_attr(app_smoke, allow(dead_code))]
-    pub const fn active(&self) -> bool {
-        self.flow.active()
+    pub fn bind_fixed(&mut self, owner: &mut KthreaddTask) -> EventResult {
+        self.flow.bind(owner.task_mut())?;
+        owner.task_mut().bind_flow(&self.flow)
     }
 
-    pub fn bind_initial(&mut self, owner: &mut KthreaddTask) -> EventResult {
-        self.flow.bind(owner.task_mut(), TaskFlowRef::NONE)?;
-        owner.task_mut().bind_initial_flow(&self.flow)
+    pub fn publish(&mut self, owner: &KthreaddTask) -> EventResult {
+        self.flow.preset(owner.task(), None)?;
+        self.flow.setup(owner.task(), None)?;
+        self.flow.enable(owner.task(), None)
     }
 
-    pub fn start_initial(&mut self, owner: &mut KthreaddTask) -> EventResult {
-        self.flow.start_initial(owner.task_mut(), None, None)
-    }
-
-    pub fn continue_active(&self, owner: &KthreaddTask) -> EventResult {
+    pub fn continue_flow(&self, owner: &KthreaddTask) -> EventResult {
         if self.flow.state() != State::Online
-            || !self.flow.active()
-            || !owner
-                .task()
-                .active_flow()
-                .same_identity(self.flow.flow_ref())
+            || !owner.task().flow().same_identity(self.flow.flow_ref())
             || !super::task_flow::task_flow_execution_guard_satisfied(&self.flow, owner.task())
         {
             return failed_condition(
@@ -866,7 +728,6 @@ impl KthreaddTask {
     pub fn mark_schedule_loop_active(&mut self, flow: &KthreaddFlow) -> EventResult {
         if self.task.state() != State::OnCpu
             || flow.state() != State::Online
-            || !flow.active()
             || !super::task_flow::task_flow_execution_guard_satisfied(flow.core(), &self.task)
         {
             return failed_condition(

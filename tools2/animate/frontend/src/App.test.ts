@@ -17,7 +17,7 @@ const child = {
   structural: false, first_seen: 2
 };
 const animation: AnimationTrace = {
-  schema: 'lkm.spec.signal-animation', version: 3, source: 'fixture.spec',
+  schema: 'lkm.spec.signal-animation', version: 4, source: 'fixture.spec',
   inputs: { model_fingerprint: 'sha256:fixture' },
   trace: {
     verdict: 'complete', total_signals: 2, total_moments: 4,
@@ -38,7 +38,7 @@ const animation: AnimationTrace = {
         description: '先关闭全部中断分路门控，再清空全部待决中断信号。'
       },
       outcome: 'completed', reason: null, transfer: { from: 'Human', to: 'Root' },
-      response: { before_state: 'Base', after_state: 'Ready' }
+      response: { before_state: 'Base', after_state: 'Ready' }, control: null
     },
     {
       index: 1, id: 'sig-0001:feedback', kind: 'feedback', event_sequence: 4,
@@ -48,21 +48,21 @@ const animation: AnimationTrace = {
         description: '先关闭全部中断分路门控，再清空全部待决中断信号。'
       },
       outcome: 'completed', reason: null, transfer: { from: 'Root', to: 'Human' },
-      response: { before_state: 'Base', after_state: 'Ready' }
+      response: { before_state: 'Base', after_state: 'Ready' }, control: null
     },
     {
       index: 2, id: 'sig-0002:request', kind: 'request', event_sequence: 6,
       signal_id: 'sig-0002', cause_id: 'sig-0001', source: 'Root', target: 'Child',
       signal: 'Inspect', delivery: 'drives', handler: { id: 'Child.Action::Inspect', kind: 'Action' },
       outcome: 'completed', reason: null, transfer: { from: 'Root', to: 'Child' },
-      response: { before_state: null, after_state: null }
+      response: { before_state: null, after_state: null }, control: null
     },
     {
       index: 3, id: 'sig-0002:feedback', kind: 'feedback', event_sequence: 8,
       signal_id: 'sig-0002', cause_id: 'sig-0001', source: 'Root', target: 'Child',
       signal: 'Inspect', delivery: 'drives', handler: { id: 'Child.Action::Inspect', kind: 'Action' },
       outcome: 'completed', reason: null, transfer: { from: 'Child', to: 'Root' },
-      response: { before_state: null, after_state: null }
+      response: { before_state: null, after_state: null }, control: null
     }
   ],
   initial_frame: { index: -1, moment_id: null, nodes: [], sibling_order: {} },

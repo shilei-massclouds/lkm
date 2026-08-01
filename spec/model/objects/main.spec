@@ -311,7 +311,7 @@ predicate sbi_hsm_extension_available<T>(sbi: T) -> bool;
 predicate bp_selects_secondary_start_sbi_entry<T>(provider: T) -> bool;
 predicate sbi_hsm_hart_start_requests_issued<T, U>(provider: T, cpu_group: U) -> bool;
 predicate sbi_hsm_startup_signal_keyed_by_logical_id<T, F: TaskFlow>(provider: T, flow: F) -> bool;
-predicate sbi_hsm_startup_targets_task_initial_flow<T, K: Task, F: TaskFlow>(
+predicate sbi_hsm_startup_targets_task_fixed_flow<T, K: Task, F: TaskFlow>(
     provider: T,
     task: K,
     flow: F
@@ -610,7 +610,7 @@ predicate scheduler_switch_to_committed<T, U, V>(scheduler: T, prev_ref: U, next
 predicate scheduler_switch_to_identity_path<T, U>(scheduler: T, task_ref: U) -> bool;
 predicate scheduler_switch_to_core_context_saved<T, U>(scheduler: T, task_ref: U) -> bool;
 predicate scheduler_switch_to_core_context_restored<T, U>(scheduler: T, task_ref: U) -> bool;
-predicate scheduler_switch_prepare_validates_prev_live_active_flow<T, U>(scheduler: T, prev_ref: U) -> bool;
+predicate scheduler_switch_prepare_validates_prev_live_fixed_flow<T, U>(scheduler: T, prev_ref: U) -> bool;
 predicate scheduler_switch_prepare_validates_next_breakpoint_flow_ref<T, U>(scheduler: T, next_ref: U) -> bool;
 predicate scheduler_switch_finish_atomic<T, U, V>(scheduler: T, prev_ref: U, next_ref: V) -> bool;
 predicate scheduler_identity_switch_emits_no_task_or_context_event<T, U>(scheduler: T, task_ref: U) -> bool;

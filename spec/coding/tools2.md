@@ -32,7 +32,8 @@ Python 测试统一由 `tools2/bin/test-python` 装载。无参数时它从仓�
 parser/model 必须让 `spec/model/main.spec` 通过零 error、零 unsupported，并支持 include、嵌套泛型、
 enum、type/object/system 与传递继承、属性、owned、association/reference、predicate/function、context/
 lock、state、Type lifecycle/process、对象 lifecycle override、命名形参/result、`within`、结构化
-`deferred`/`trimmed` evidence、`depends_on`、`ensures`、`updates`、`external`、`drives` 和 `emits`。v9 不接受
+`deferred`/`trimmed` evidence、`depends_on`、`ensures`、`updates`、`external`、`drives`、`emits` 和
+`yields`。v10 不接受
 `lossy` 修饰；所有已发送 Signal 都必须被 handler 接受并处理。
 model 必须把 `drives` 的顶层 `A || B` 规范化为有序 choice 节点；derive 在发送前检查候选可接受性，未选择候选不得进入 Signal 序列或消耗预算。
 条件和 invariant 的顶层 `P || Q` 必须规范化为布尔 any-of 节点并按当前快照短路求值，不得保留为无法解释的 assertion 字符串。
@@ -62,8 +63,8 @@ external 编排；显式 `--signal` 只发送该单个根 Signal。三个 Human 
 ## 中间协议
 
 所有 JSON 顶层必须包含 `schema`、`version`、`producer: "tools2"` 和 `source`。schema 名沿用
-`lkm.spec.ast/model/derive/check/view/snapshot`，tools2 各自使用 version `9`。消费者必须在读取后立即
-验证三元组，不接受缺失 producer、老 producer、version 1 至 version 8 或其它 version。Signal/model/view JSON
+`lkm.spec.ast/model/derive/check/view/snapshot`，tools2 各自使用 version `10`。消费者必须在读取后立即
+验证三元组，不接受缺失 producer、老 producer、version 1 至 version 9 或其它 version。Signal/model/view JSON
 不包含 `lossy`/`strict` 字段，outcome 不包含 `discarded`。
 
 AST 保留 include 展开后的声明、source order 和每个声明/语句 span。model 建立 enum、system、parent、
@@ -97,7 +98,7 @@ deferred/trimmed、occurrence 和 unresolved obligation 计数。
 阶段工具都接受显式 `-o/--output`。parse 接收 `.spec`；model 接收 ast.json；derive 接收 model.json
 以及可选的 `--signal Target.Name`、`-u/--until Target.Name`、`--source`、`--scenario`、`--max-depth`、`--max-breadth`；check 和 view
 接收 derive.json；render 接收 view.json 且只实现 `--format text`；animate 接收 model.json、view.json
-并原子写出 HTML。animate 必须先分别验证两个输入的 v9 schema/version/producer、source 与 model
+并原子写出 HTML。animate 必须先分别验证两个输入的 v10 schema/version/producer、source 与 model
 fingerprint 身份，协议、身份、缺失端点或 I/O 错误返回 2 且不留下部分输出。
 
 driver 接收 `.spec` 和同一组 derive 参数，另提供 `--snapshot-out`、`--work-dir`、文本 `-o` 与
@@ -150,6 +151,18 @@ state 或 condition 拒绝，以及 handler body/invariant/下游 Signal 失败�
 不得静默忽略、重试或转换为 discarded。`drives A || B` 只在发送前选择第一个可接受候选；未选候选
 不创建 Signal。预算导致的 `truncated` 与显式 until 导致的 `stopped` 仍是独立非丢失结果。
 
+`yields` 只允许出现在 `StateEffect::None` Action，同一 handler occurrence 最多一次。
+发送前先解析 receiver/handler/payload，然后创建可序列化 YieldToken 和
+TaskFlowLane resume coordinate，把 source lane 标记为 awaiting-resume，并立即执行目标。
+Target 正常完成后始终执行通用默认恢复检查：若 source lane 的 Task/Flow/CPU/context epoch
+和执行 binding 未改变，立即消费 token 并从该词法坐标继续；若已改变，token 保持 pending，
+由未来匹配的 contextual Continue 精确一次消费。不得根据 target 是否包含 Continue 来猜测结果。
+
+YieldToken 包含 source response identity、TaskRef/FlowRef/generation、occurrence、模型 resume coordinate、
+CPU/TaskFlowLane 和 context epoch 交叉校验值。它不包含 Python frame、宿主调用栈、寄存器或
+TaskThreadContext。消费后 active token 必须删除，仅保留用于拒绝重复恢复的稳定 ledger。
+嵌套 yields 形成 C->B->A 的栈式恢复顺序。target 失败直接传播且不恢复 source。
+
 默认 `tools2/bin/pyveri` 从主模型初态执行完整闭包时是验收场景：必须返回 0、check/view verdict
 必须为 `complete`，且 Signal 列表不得包含 `rejected` 或 `failed`。canonical Kernel snapshot 续跑
 同样必须完整成功。成功测试不得接受 `{0, 1}`；负向 fixture 继续精确断言返回 1、`failed` 及原因。
@@ -159,12 +172,12 @@ state 或 condition 拒绝，以及 handler body/invariant/下游 Signal 失败�
 derive 必须在 snapshot 中保存按 canonical CPU key 隔离的 CurrentTask contextual binding；它不是
 system state、instance、reference assignment、全局单例或 `CurrentTaskSlot`。`CurrentTask.BindTask`
 即使在尚未绑定 CurrentTask 时也必须可接收：先从 effective TaskFlow.cpu_ref 解析 CurrentCPU，再验证
-target Task 的 parent/owner/active Flow、同 CPU `OnCpu/Live` 与唯一有效 TaskRef。boot 首次调用建立
+target Task 的 parent/owner/fixed Flow、同 CPU `OnCpu/Live` 与唯一有效 TaskRef。boot 首次调用建立
 binding，同目标调用替换地址表示并增加可验证的刷新序号；不同目标只接受 scheduler switch commit。
 任一失败前后 snapshot 必须一致，同一 CPU 的成功换绑不得改写其它 CPU entry。
 
 derive 解析 `CurrentTask` receiver 或 `CurrentTaskRef` value 时，必须先读取该 CPU binding，再验证 Flow
-parent/owner 一致、`Task.active_flow` 指向 effective Flow、目标是该 CPU 的 `OnCpu/Live` 执行主体，且
+parent/owner 一致、`Task.flow` 指向 effective Flow、目标是该 CPU 的 `OnCpu/Live` 执行主体，且
 binding source `TaskRef` 仍唯一有效。缺失 effective Flow/CPU binding、错误 owner/CPU、非活跃 Flow、
 非 `OnCpu/Live`、悬空或过期引用都必须拒绝。同步 `drives` continuation 继承更新后的 effective Flow；
 异步 `emits` 在接收方上下文重新解析。CurrentCPU 在 BootTask 首次绑定前仍可独立解析。
@@ -204,15 +217,15 @@ verbose renderer 保持本轮修改前的详细格式和 canonical `Preset` 名�
 明确标记 `drives wait`、`emits enqueue/dequeue`、payload、predicate proof source、effective context、
 到达时快照来源、selector resolutions、before/after state/fact/reference delta、reached boundary、stopped propagation、
 reject、truncated coordinate、source span 和完整因果链；还必须逐项显示 inventory、occurrence、
-proof source/classification 和 obligation 来源。当前 tools2 version 9 view 已包含两种
+proof source/classification 和 obligation 来源。当前 tools2 version 10 view 已包含两种
 renderer 所需字段，因此不得为文本模式升级协议或改写 view。
 当前 tools2 render 不实现 DOT、SVG 或 HTML。交互 HTML 由独立 animate 包及 Svelte 5 + TypeScript
 frontend 生成，不属于 `lkm-render --format text` 的格式分支。老静态 trace/SVG 任务继续保留，退役
 老工具必须由用户另行决定。
 
-## Animation v3 与确定帧
+## Animation v4 与确定帧
 
-animate 必须按 v9 view `events[].sequence` 重放并投影 `lkm.spec.signal-animation` version `3` 因果时刻。
+animate 必须按 v10 view `events[].sequence` 重放并投影 `lkm.spec.signal-animation` version `4` 因果时刻。
 `signal_sent` 只验证 Signal 已发送，不生成 moment；`signal_received` 生成 `<signal-id>:request`。
 completed/rejected/failed 的 `drives` 或同步根请求生成 `<signal-id>:feedback`，`emits` 生成
 `<signal-id>:settle`；truncated/stopped/response_stopped 生成 `<signal-id>:terminal`。moment kind 只取
@@ -250,7 +263,7 @@ animation trace 必须逐字段投影 view 的 boundary inventory、occurrences�
 新增 causal moment。
 
 自包含 HTML 必须安全编码内嵌 JSON，阻止 `</script>`、`<!--` 等数据提前终止 script 内容；CSS、
-播放器 JS 和 animation v3 数据均不得依赖网络。Svelte/TypeScript 源码、lockfile 与编译后的 JS/CSS
+播放器 JS 和 animation v4 数据均不得依赖网络。Svelte/TypeScript 源码、lockfile 与编译后的 JS/CSS
 都纳入仓库，并提供确定 rebuild 和 stale-bundle 检查。
 
 播放器从预生成 frame 恢复前后位置，不重新 derive 或逆执行。request moment 显示 source 到 target
@@ -271,7 +284,7 @@ column 从下向上排列，任意深度继续交替。stage 的布局原点位�
 和上到下；普通 path 只使用端到端的 `M … L …` 直线，起点位于 source 对应边，终点和箭头尖精确位于
 target 对应边，label 位于两端中点。source DOM 节点递归包含 target DOM 节点且两者不相同时，播放
 request 阶段不构造 SVG 箭头；该判定只使用当前 frame 的 DOM parent 包含关系，不修改 animation
-v3、Python frame、model 或 derive，且不得跳过端点高亮、请求抖动、Transition/Action 响应、异常 reason、滚动或
+v4、Python frame、model 或 derive，且不得跳过端点高亮、请求抖动、Transition/Action 响应、异常 reason、滚动或
 导航。self、descendant 到 ancestor、同级和跨分支仍构造箭头。self Signal 从节点右侧中部到左侧中部，
 控制点位于节点上方，弧高和横向 reach 按节点宽高计算；label 位于上弧外侧。`.frame-forest` 顶部
 padding 必须提供有上下限的流式净空，至少容纳实时缩放自环及 label，避免桌面、移动端和深层节点被

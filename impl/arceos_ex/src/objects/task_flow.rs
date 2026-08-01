@@ -7,15 +7,11 @@ use super::{
     task::{Task, TaskExecutionAuthority, TaskRef},
 };
 
-pub const USER_FLOW_SLOTS_PER_TASK: usize = 2;
-
 const FLOW_SLOT_BOOT_INIT: u16 = 1;
-const FLOW_SLOT_BOOT_IDLE: u16 = 2;
 const FLOW_SLOT_KERNEL_INIT: u16 = 3;
 const FLOW_SLOT_KTHREADD: u16 = 4;
 const FLOW_SLOT_SMOKE_BASE: u16 = 8;
 const FLOW_SLOT_AP_IDLE_BASE: u16 = 16;
-const FLOW_SLOT_KERNEL_INIT_USER_BASE: u16 = 32;
 const FLOW_SLOT_USER_BASE: u16 = 64;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -27,7 +23,6 @@ pub struct TaskFlowRef {
 impl TaskFlowRef {
     pub const NONE: Self = Self::new(0, 0);
     pub const BOOT_INIT: Self = Self::new(FLOW_SLOT_BOOT_INIT, 1);
-    pub const BOOT_IDLE: Self = Self::new(FLOW_SLOT_BOOT_IDLE, 1);
     pub const KERNEL_INIT: Self = Self::new(FLOW_SLOT_KERNEL_INIT, 1);
     pub const KTHREADD: Self = Self::new(FLOW_SLOT_KTHREADD, 1);
 
@@ -75,8 +70,6 @@ pub struct TaskFlow {
     generation: u32,
     declared: bool,
     owner: TaskRef,
-    active: bool,
-    predecessor: TaskFlowRef,
     disabled: bool,
     cleaned: bool,
     cpu_ref: CpuRef,
@@ -91,8 +84,6 @@ impl TaskFlow {
             generation: flow_ref.generation,
             declared: flow_ref.is_valid(),
             owner: TaskRef::NONE,
-            active: false,
-            predecessor: TaskFlowRef::NONE,
             disabled: false,
             cleaned: false,
             cpu_ref: CpuRef::invalid(),
@@ -107,24 +98,6 @@ impl TaskFlow {
             generation: flow_ref.generation,
             declared: flow_ref.is_valid(),
             owner,
-            active: false,
-            predecessor: TaskFlowRef::NONE,
-            disabled: false,
-            cleaned: false,
-            cpu_ref: CpuRef::invalid(),
-        }
-    }
-
-    pub(crate) const fn new_static_bound_active(flow_ref: TaskFlowRef, owner: TaskRef) -> Self {
-        Self {
-            lifecycle: Lifecycle::new(State::Base),
-            flow_ref,
-            storage_slot: flow_ref.slot,
-            generation: flow_ref.generation,
-            declared: flow_ref.is_valid(),
-            owner,
-            active: true,
-            predecessor: TaskFlowRef::NONE,
             disabled: false,
             cleaned: false,
             cpu_ref: CpuRef::invalid(),
@@ -139,22 +112,14 @@ impl TaskFlow {
             generation: 0,
             declared: false,
             owner: TaskRef::NONE,
-            active: false,
-            predecessor: TaskFlowRef::NONE,
             disabled: false,
             cleaned: false,
             cpu_ref: CpuRef::invalid(),
         }
     }
 
-    pub const fn new_kernel_init_user(slot: usize) -> Self {
-        Self::new_dynamic(FLOW_SLOT_KERNEL_INIT_USER_BASE + slot as u16)
-    }
-
-    pub const fn new_user(task_slot: usize, flow_slot: usize) -> Self {
-        Self::new_dynamic(
-            FLOW_SLOT_USER_BASE + (task_slot * USER_FLOW_SLOTS_PER_TASK + flow_slot) as u16,
-        )
+    pub const fn new_user(task_slot: usize) -> Self {
+        Self::new_dynamic(FLOW_SLOT_USER_BASE + task_slot as u16)
     }
 
     pub const fn state(&self) -> State {
@@ -173,22 +138,9 @@ impl TaskFlow {
         self.owner
     }
 
-    pub const fn active(&self) -> bool {
-        self.active
-    }
-
-    #[allow(dead_code)]
-    pub const fn predecessor(&self) -> TaskFlowRef {
-        self.predecessor
-    }
-
     #[allow(dead_code)]
     pub const fn disabled(&self) -> bool {
         self.disabled
-    }
-
-    pub const fn cleaned(&self) -> bool {
-        self.cleaned
     }
 
     pub const fn cpu_ref(&self) -> Option<CpuRef> {
@@ -228,22 +180,8 @@ impl TaskFlow {
         true
     }
 
-    pub(crate) fn inherit_cpu_ref(&mut self, predecessor: &TaskFlow) -> bool {
-        let Some(cpu_ref) = predecessor.cpu_ref() else {
-            return false;
-        };
-        if self.cpu_ref.is_valid() && self.cpu_ref != cpu_ref {
-            return false;
-        }
-        self.cpu_ref = cpu_ref;
-        true
-    }
-
     pub fn declare(&mut self) -> EventResult {
-        if self.declared
-            || !matches!(self.lifecycle.state(), State::Base | State::Destroyed)
-            || self.active
-        {
+        if self.declared || !matches!(self.lifecycle.state(), State::Base | State::Destroyed) {
             return failed_condition(
                 LifecycleEvent::Preset,
                 self.lifecycle.state(),
@@ -256,20 +194,18 @@ impl TaskFlow {
         self.lifecycle = Lifecycle::new(State::Base);
         self.declared = true;
         self.owner = TaskRef::NONE;
-        self.predecessor = TaskFlowRef::NONE;
         self.disabled = false;
         self.cleaned = false;
         self.cpu_ref = CpuRef::invalid();
         Ok(())
     }
 
-    pub fn bind(&mut self, owner: &mut Task, predecessor: TaskFlowRef) -> EventResult {
+    pub fn bind(&mut self, owner: &mut Task) -> EventResult {
         if !self.declared
             || !self.flow_ref.is_valid()
             || self.lifecycle.state() != State::Base
             || self.owner.is_valid()
             || !owner.task_ref().is_valid()
-            || (predecessor.is_valid() && !owner.owns_flow(predecessor))
         {
             return failed_condition(
                 LifecycleEvent::Preset,
@@ -278,9 +214,8 @@ impl TaskFlow {
                 State::Base,
             );
         }
-        owner.register_owned_flow(self.flow_ref)?;
+        owner.bind_flow_ref(self.flow_ref)?;
         self.owner = owner.task_ref();
-        self.predecessor = predecessor;
         Ok(())
     }
 
@@ -290,7 +225,6 @@ impl TaskFlow {
             || self.lifecycle.state() != State::Base
             || self.owner != owner.task_ref()
             || !owner.owns_flow(self.flow_ref)
-            || !task_flow_execution_guard_satisfied(self, owner)
         {
             return failed_condition(
                 LifecycleEvent::Preset,
@@ -315,7 +249,7 @@ impl TaskFlow {
     }
 
     pub fn setup(&mut self, owner: &Task, checkpoint: Option<Checkpoint>) -> EventResult {
-        if self.owner != owner.task_ref() || !task_flow_execution_guard_satisfied(self, owner) {
+        if self.owner != owner.task_ref() || !owner.flow().same_identity(self.flow_ref) {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
@@ -338,67 +272,10 @@ impl TaskFlow {
         }
     }
 
-    pub fn setup_successor(&mut self, owner: &Task, checkpoint: Option<Checkpoint>) -> EventResult {
-        if self.lifecycle.state() != State::Base
-            || self.owner != owner.task_ref()
-            || !task_flow_execution_guard_satisfied(self, owner)
-        {
-            return failed_condition(
-                LifecycleEvent::Setup,
-                self.lifecycle.state(),
-                State::Base,
-                State::Ready,
-            );
-        }
-        match checkpoint {
-            Some(checkpoint) => self.lifecycle.transition(
-                LifecycleEvent::Setup,
-                State::Base,
-                State::Ready,
-                checkpoint,
-            ),
-            None => {
-                self.lifecycle
-                    .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
-            }
-        }
-    }
-
-    pub(super) fn commit_active_binding(&mut self, owner: TaskRef) -> EventResult {
-        if !matches!(self.lifecycle.state(), State::Prepared | State::Ready)
-            || self.owner != owner
-            || self.active
-        {
-            return failed_condition(
-                LifecycleEvent::Setup,
-                self.lifecycle.state(),
-                State::Ready,
-                State::Ready,
-            );
-        }
-        self.active = true;
-        Ok(())
-    }
-
-    pub(super) fn relinquish_active_binding(&mut self, owner: TaskRef) -> EventResult {
-        if self.owner != owner || !self.active {
-            return failed_condition(
-                LifecycleEvent::Setup,
-                self.lifecycle.state(),
-                self.lifecycle.state(),
-                self.lifecycle.state(),
-            );
-        }
-        self.active = false;
-        Ok(())
-    }
-
     pub fn enable(&mut self, owner: &Task, checkpoint: Option<Checkpoint>) -> EventResult {
         if self.lifecycle.state() != State::Ready
             || self.owner != owner.task_ref()
-            || owner.active_flow() != self.flow_ref
-            || !self.active
-            || !task_flow_execution_guard_satisfied(self, owner)
+            || owner.flow() != self.flow_ref
         {
             return failed_condition(
                 LifecycleEvent::Enable,
@@ -421,70 +298,10 @@ impl TaskFlow {
         }
     }
 
-    pub(crate) fn enable_after_successor_handoff(
-        &mut self,
-        owner: &Task,
-        successor: &TaskFlow,
-        checkpoint: Checkpoint,
-    ) -> EventResult {
-        if self.lifecycle.state() != State::Ready
-            || self.owner != owner.task_ref()
-            || self.active
-            || owner.active_flow() != successor.flow_ref()
-            || successor.owner() != owner.task_ref()
-            || successor.state() != State::Ready
-            || !successor.active()
-            || !task_flow_execution_guard_satisfied(self, owner)
-        {
-            return failed_condition(
-                LifecycleEvent::Enable,
-                self.lifecycle.state(),
-                State::Ready,
-                State::Online,
-            );
-        }
-        self.lifecycle.transition(
-            LifecycleEvent::Enable,
-            State::Ready,
-            State::Online,
-            checkpoint,
-        )
-    }
-
-    /// Strictly execute the initial-flow Startup signal after the owning Task
-    /// has accepted Continue and entered OnCpu. Any mismatch fails the signal.
-    pub fn start_initial(
-        &mut self,
-        owner: &mut Task,
-        setup_checkpoint: Option<Checkpoint>,
-        online_checkpoint: Option<Checkpoint>,
-    ) -> EventResult {
-        if self.lifecycle.state() != State::Base
-            || owner.initial_flow() != self.flow_ref
-            || owner.active_flow().is_valid()
-            || !owner.owns_flow(self.flow_ref)
-            || !task_flow_execution_guard_satisfied(self, owner)
-        {
-            return failed_condition(
-                LifecycleEvent::Preset,
-                self.lifecycle.state(),
-                State::Base,
-                State::Prepared,
-            );
-        }
-
-        self.preset(owner, None)?;
-        self.setup(owner, setup_checkpoint)?;
-        owner.activate_initial_flow(self)?;
-        self.enable(owner, online_checkpoint)
-    }
-
     pub fn disable(&mut self, owner: &Task, checkpoint: Option<Checkpoint>) -> EventResult {
         if self.lifecycle.state() != State::Online
             || self.owner != owner.task_ref()
-            || owner.active_flow() != self.flow_ref
-            || !self.active
-            || !task_flow_execution_guard_satisfied(self, owner)
+            || owner.flow() != self.flow_ref
         {
             return failed_condition(
                 LifecycleEvent::Disable,
@@ -493,7 +310,6 @@ impl TaskFlow {
                 State::Offline,
             );
         }
-        self.active = false;
         self.disabled = true;
         match checkpoint {
             Some(checkpoint) => self.lifecycle.transition(
@@ -510,58 +326,17 @@ impl TaskFlow {
         }
     }
 
-    pub fn cleanup(&mut self, owner: &Task, checkpoint: Option<Checkpoint>) -> EventResult {
-        if self.lifecycle.state() != State::Offline
-            || self.owner != owner.task_ref()
-            || owner.active_flow() == self.flow_ref
-            || self.active
-            || !self.disabled
-            || !task_flow_execution_guard_satisfied(self, owner)
-        {
-            return failed_condition(
-                LifecycleEvent::Cleanup,
-                self.lifecycle.state(),
-                State::Offline,
-                State::Destroyed,
-            );
-        }
-        self.cleaned = true;
-        self.declared = false;
-        match checkpoint {
-            Some(checkpoint) => self.lifecycle.transition(
-                LifecycleEvent::Cleanup,
-                State::Offline,
-                State::Destroyed,
-                checkpoint,
-            ),
-            None => self.lifecycle.adopt_transition(
-                LifecycleEvent::Cleanup,
-                State::Offline,
-                State::Destroyed,
-            ),
-        }
-    }
-
-    pub fn cleanup_active_for_exit(&mut self, owner: &mut Task) -> EventResult {
+    pub fn cleanup_for_exit(&mut self, owner: &Task) -> EventResult {
         self.disable(owner, None)?;
-        owner.clear_active_flow_for_exit(self.flow_ref)?;
         self.cleaned = true;
         self.declared = false;
-        self.lifecycle.adopt_transition(
-            LifecycleEvent::Cleanup,
-            State::Offline,
-            State::Destroyed,
-        )?;
-        owner.retire_destroyed_flow(self)
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Cleanup, State::Offline, State::Destroyed)
     }
 
     #[allow(dead_code)]
     pub const fn storage_slot(&self) -> usize {
         self.storage_slot as usize
-    }
-
-    pub const fn generation(&self) -> u32 {
-        self.generation
     }
 }
 
@@ -569,4 +344,5 @@ pub fn task_flow_execution_guard_satisfied(flow: &TaskFlow, owner: &Task) -> boo
     owner.state() == State::OnCpu
         && owner.execution_authority() == TaskExecutionAuthority::Live
         && flow.owner() == owner.task_ref()
+        && owner.flow().same_identity(flow.flow_ref())
 }

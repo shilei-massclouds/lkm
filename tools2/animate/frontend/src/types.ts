@@ -1,6 +1,6 @@
 export interface AnimationTrace {
   schema: 'lkm.spec.signal-animation';
-  version: 3;
+  version: 4;
   source: string;
   inputs: { model_fingerprint: string };
   trace: {
@@ -79,8 +79,8 @@ export interface BoundaryObligation {
 }
 
 export type HandlerKind = 'Transition' | 'Action' | null;
-export type AnimationPhase = 'idle' | 'request' | 'before' | 'feedback' | 'settle' | 'terminal' | 'clear';
-export type MomentKind = 'request' | 'feedback' | 'settle' | 'terminal';
+export type AnimationPhase = 'idle' | 'request' | 'before' | 'feedback' | 'settle' | 'yield' | 'resume' | 'terminal' | 'clear';
+export type MomentKind = 'request' | 'feedback' | 'settle' | 'yield' | 'resume' | 'terminal';
 
 export interface AnimationMoment {
   index: number;
@@ -94,10 +94,17 @@ export interface AnimationMoment {
   signal: string;
   delivery: string;
   handler: { id: string | null; kind: HandlerKind; description?: string };
-  outcome: 'completed' | 'rejected' | 'failed' | 'truncated' | 'stopped';
+  outcome: 'completed' | 'rejected' | 'failed' | 'truncated' | 'stopped' | 'yielded';
   reason: string | null;
   transfer: { from: string; to: string } | null;
   response: { before_state: string | null; after_state: string | null };
+  control: {
+    token_id: string;
+    lane: string | null;
+    resume_coordinate: { handler: string; member_index: number; context: string[] } | null;
+    resume_signal_id: string | null;
+    identity: boolean | null;
+  } | null;
 }
 
 export interface AnimationNode {

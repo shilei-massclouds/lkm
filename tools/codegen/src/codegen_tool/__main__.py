@@ -7,7 +7,6 @@ import sys
 from pathlib import Path
 
 from common import read_json
-from common.model_json import model_json_to_object_model
 
 from .linker import LinkerProfile, generate_riscv64_linker_script
 
@@ -36,13 +35,13 @@ def main(argv: list[str] | None = None) -> int:
 
 def _generate_linker_script(args: argparse.Namespace) -> int:
     try:
-        model = model_json_to_object_model(read_json(args.model))
+        raw_model = read_json(args.model)
         profile = LinkerProfile(
             kernel_link_addr=args.kernel_link_addr,
             page_size=args.page_size,
             boot_stack_size=args.boot_stack_size,
         )
-        output = generate_riscv64_linker_script(model, profile)
+        output = generate_riscv64_linker_script(raw_model, profile)
     except (OSError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

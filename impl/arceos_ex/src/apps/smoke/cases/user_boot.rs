@@ -1438,73 +1438,58 @@ impl SmokeScenario for UserBootElfScenario {
                 .bind_syscall_context(&ctx.user_trap_frame, exception_type, &ctx.syscall_table)
                 .is_ok(),
         );
-        assertions.assert("user flow declared", ctx.user_app_flow.declare().is_ok());
         assertions.assert(
-            "KernelInitTask user flow preset",
-            ctx.user_app_flow.preset(&mut ctx.kernel_init_task).is_ok(),
+            "user runtime declared",
+            ctx.kernel_init_user_runtime.declare().is_ok(),
         );
         assertions.assert(
-            "KernelInitTask user flow setup",
-            ctx.user_app_flow
+            "KernelInitTask user runtime preset",
+            ctx.kernel_init_user_runtime
+                .preset(&mut ctx.kernel_init_task)
+                .is_ok(),
+        );
+        assertions.assert(
+            "KernelInitTask user runtime setup",
+            ctx.kernel_init_user_runtime
                 .setup(&ctx.kernel_init_task, &ctx.kernel_init_user_state)
                 .is_ok(),
         );
         assertions.assert(
-            "kernel init flow disabled for exec",
-            ctx.kernel_init_flow
-                .disable_for_exec(&ctx.kernel_init_task)
-                .is_ok(),
-        );
-        assertions.assert(
-            "KernelInitTask flow handoff committed",
-            ctx.kernel_init_task
-                .commit_user_flow_handoff(&ctx.kernel_init_flow, ctx.user_app_flow.core_mut())
-                .is_ok(),
-        );
-        assertions.assert(
-            "KernelInitTask user flow active binding",
-            ctx.user_app_flow
+            "KernelInitTask user runtime active binding",
+            ctx.kernel_init_user_runtime
                 .commit_active_binding(&ctx.kernel_init_task)
                 .is_ok(),
         );
         assertions.assert(
-            "KernelInitTask user flow online",
-            ctx.user_app_flow
+            "KernelInitTask user runtime online",
+            ctx.kernel_init_user_runtime
                 .enable(&ctx.kernel_init_task, &ctx.kernel_init_user_state)
                 .is_ok(),
         );
         assertions.assert(
             "KernelInitTask user state active",
             ctx.kernel_init_user_state
-                .activate_user_flow(&ctx.user_app_flow)
-                .is_ok(),
-        );
-        assertions.assert(
-            "kernel init flow cleaned after exec",
-            ctx.kernel_init_flow
-                .cleanup_after_handoff(&mut ctx.kernel_init_task)
+                .activate_user_flow(&ctx.kernel_init_user_runtime)
                 .is_ok(),
         );
         let process = &ctx.kernel_init_user_state;
         assertions.assert(
-            "KernelInitTask user flow remains separate from task resources",
+            "KernelInitTask user runtime remains a Flow-owned child",
             process.resources_bound()
                 && process.active_user_flow_online()
-                && ctx.user_app_flow.state() == State::Online
-                && ctx.user_app_flow.declared()
-                && ctx.user_app_flow.declaration_occurrence() == 1
-                && ctx.user_app_flow.owner_pid() == crate::objects::rest_init::KERNEL_INIT_PID
-                && ctx.user_app_flow.application_entered()
-                && !ctx.user_app_flow.released()
-                && ctx.kernel_init_flow.state() == State::Destroyed
+                && ctx.kernel_init_user_runtime.state() == State::Online
+                && ctx.kernel_init_user_runtime.declared()
+                && ctx.kernel_init_user_runtime.declaration_occurrence() == 1
+                && ctx.kernel_init_user_runtime.owner_pid()
+                    == crate::objects::rest_init::KERNEL_INIT_PID
+                && ctx.kernel_init_user_runtime.application_entered()
+                && !ctx.kernel_init_user_runtime.released()
+                && ctx.kernel_init_flow.state() == State::Online
                 && ctx.kernel_init_flow.owner_bound()
-                && !ctx.kernel_init_flow.active()
-                && ctx.kernel_init_flow.released()
                 && ctx.kernel_init_task.state() == State::OnCpu
-                && !ctx.kernel_init_task.kernel_init_flow_owned()
-                && ctx.kernel_init_task.user_flow_owned()
-                && ctx.user_app_flow.task_ref_owner() == ctx.kernel_init_task.task_ref()
-                && ctx.user_app_flow.flow_generation() != 0,
+                && ctx.kernel_init_task.kernel_init_flow_owned()
+                && ctx.kernel_init_user_runtime.task_ref_owner() == ctx.kernel_init_task.task_ref()
+                && ctx.kernel_init_user_runtime.flow_generation() != 0,
         );
         assertions.assert(
             "user init identity",
@@ -1515,28 +1500,34 @@ impl SmokeScenario for UserBootElfScenario {
                 && process.kernel_init_not_destroyed(),
         );
         let kernel_init_task_ref = ctx.kernel_init_task.task_ref();
-        let initial_user_flow_ref = ctx.user_app_flow.flow_ref();
+        let lifetime_flow_ref = ctx.kernel_init_user_runtime.flow_ref();
         let first_runtime_handoff = ctx
-            .user_app_flow
-            .commit_runtime_exec_handoff(&mut ctx.kernel_init_task)
+            .kernel_init_user_runtime
+            .replace_kernel_application(&mut ctx.kernel_init_task)
             .is_ok();
-        let first_runtime_flow_ref = ctx.user_app_flow.flow_ref();
+        let first_runtime_flow_ref = ctx.kernel_init_user_runtime.flow_ref();
         let second_runtime_handoff = ctx
-            .user_app_flow
-            .commit_runtime_exec_handoff(&mut ctx.kernel_init_task)
+            .kernel_init_user_runtime
+            .replace_kernel_application(&mut ctx.kernel_init_task)
             .is_ok();
-        let second_runtime_flow_ref = ctx.user_app_flow.flow_ref();
+        let second_runtime_flow_ref = ctx.kernel_init_user_runtime.flow_ref();
         assertions.assert(
-            "KernelInitTask consecutive exec preserves TaskRef and replaces FlowRef",
+            "KernelInitTask consecutive exec preserves TaskRef and FlowRef",
             first_runtime_handoff
                 && second_runtime_handoff
                 && ctx.kernel_init_task.task_ref() == kernel_init_task_ref
-                && !initial_user_flow_ref.same_identity(first_runtime_flow_ref)
-                && !first_runtime_flow_ref.same_identity(second_runtime_flow_ref)
-                && !ctx.user_app_flow.flow_ref_valid(initial_user_flow_ref)
-                && !ctx.user_app_flow.flow_ref_valid(first_runtime_flow_ref)
-                && ctx.user_app_flow.flow_ref_valid(second_runtime_flow_ref)
-                && ctx.kernel_init_task.task().active_flow() == second_runtime_flow_ref,
+                && lifetime_flow_ref.same_identity(first_runtime_flow_ref)
+                && first_runtime_flow_ref.same_identity(second_runtime_flow_ref)
+                && ctx
+                    .kernel_init_user_runtime
+                    .flow_ref_valid(lifetime_flow_ref)
+                && ctx
+                    .kernel_init_user_runtime
+                    .flow_ref_valid(first_runtime_flow_ref)
+                && ctx
+                    .kernel_init_user_runtime
+                    .flow_ref_valid(second_runtime_flow_ref)
+                && ctx.kernel_init_task.task().flow() == second_runtime_flow_ref,
         );
         assertions.assert(
             "user init inherited context",
@@ -2423,13 +2414,13 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
     let interpreter_image =
         (interpreter_len != 0).then_some(&interpreter_buffer[..interpreter_len]);
     let exec_task_ref = context().user_task_set.active_task_ref();
-    let fork_flow_ref = context().user_task_set.active_flow_ref();
+    let fork_flow_ref = context().user_task_set.flow_ref();
     let first_exec = crate::objects::exec_transaction::smoke_commit_builtin_grandchild_exec_image(
         context(),
         &main_buffer[..main_len],
         interpreter_image,
     );
-    let first_exec_flow_ref = context().user_task_set.active_flow_ref();
+    let first_exec_flow_ref = context().user_task_set.flow_ref();
     let first_exec_closed_child_fd = matches!(
         context().files_struct.fcntl_getfd_fd(cloexec_fd),
         Err(FileError::BadFd)
@@ -2461,10 +2452,7 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
                 .parent_address_space_snapshot_saved()
                 == outer_parent_satp_owned
             && context().user_task_set.active_task_ref() == exec_task_ref
-            && !fork_flow_ref.same_identity(first_exec_flow_ref)
-            && !context()
-                .user_task_set
-                .flow_ref_valid(exec_task_ref, fork_flow_ref)
+            && fork_flow_ref.same_identity(first_exec_flow_ref)
             && context()
                 .user_task_set
                 .flow_ref_valid(exec_task_ref, first_exec_flow_ref),
@@ -2475,7 +2463,7 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
         &main_buffer[..main_len],
         interpreter_image,
     );
-    let second_exec_flow_ref = context().user_task_set.active_flow_ref();
+    let second_exec_flow_ref = context().user_task_set.flow_ref();
     assertions.assert(
         "builtin grandchild consecutive exec releases intermediate image",
         second_exec.is_some_and(|success| success.retired_pages_released != 0)
@@ -2496,10 +2484,7 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
                 .parent_address_space_snapshot_saved()
                 == outer_parent_satp_owned
             && context().user_task_set.active_task_ref() == exec_task_ref
-            && !first_exec_flow_ref.same_identity(second_exec_flow_ref)
-            && !context()
-                .user_task_set
-                .flow_ref_valid(exec_task_ref, first_exec_flow_ref)
+            && first_exec_flow_ref.same_identity(second_exec_flow_ref)
             && context()
                 .user_task_set
                 .flow_ref_valid(exec_task_ref, second_exec_flow_ref),
@@ -2702,7 +2687,7 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
     );
 
     let precheck_task_ref = context().user_task_set.active_task_ref();
-    let precheck_flow_ref = context().user_task_set.active_flow_ref();
+    let precheck_flow_ref = context().user_task_set.flow_ref();
     let precheck_free_slots = context().user_task_set.free_task_slot_count();
     let invalid_identity_rejected = !context()
         .kernel_init_user_state
@@ -2715,7 +2700,7 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
         invalid_identity_rejected
             && context().user_task_set.next_child_pid() == invalid_next_pid
             && context().user_task_set.active_task_ref() == precheck_task_ref
-            && context().user_task_set.active_flow_ref() == precheck_flow_ref
+            && context().user_task_set.flow_ref() == precheck_flow_ref
             && context().user_task_set.free_task_slot_count() == precheck_free_slots
             && !context().user_task_set.builtin_grandchild_bound()
             && context().user_task_set.pid1_plain_fork_child_continuation(),

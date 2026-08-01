@@ -1,4 +1,4 @@
-//! BootIdleEntryPhase lowering owned by BootIdleFlow.
+//! BootInitIdleEntryPhase lowering owned by BootInitFlow.
 
 use core::sync::atomic::AtomicU8;
 
@@ -60,7 +60,7 @@ fn enter_startup_context(ctx: &mut Context) -> EventResult {
 
 fn prepare_entry(ctx: &mut Context) -> EventResult {
     let Context {
-        boot_idle_flow,
+        boot_init_flow,
         boot_task,
         cpu_group,
         ..
@@ -68,7 +68,9 @@ fn prepare_entry(ctx: &mut Context) -> EventResult {
     let Some(scheduler) = cpu_group.boot_scheduler() else {
         return failed_preset();
     };
-    boot_idle_flow.prepare_idle_entry(boot_task, scheduler, cpu_group)
+    boot_init_flow
+        .idle
+        .prepare_idle_entry(&boot_init_flow.flow, boot_task, scheduler, cpu_group)
 }
 
 fn run_idle_loop(ctx: &mut Context) -> EventResult {
@@ -79,12 +81,11 @@ fn run_idle_loop(ctx: &mut Context) -> EventResult {
         return failed_preset();
     };
     let Context {
-        boot_idle_flow,
+        boot_init_flow,
         cpu_group,
         scheduler_test_tasks,
         kernel_init_task,
         kernel_init_flow,
-        user_app_flow,
         kthreadd_task,
         kthreadd_flow,
         user_task_set,
@@ -95,14 +96,14 @@ fn run_idle_loop(ctx: &mut Context) -> EventResult {
     else {
         return failed_preset();
     };
-    boot_idle_flow.run_idle_loop(
+    boot_init_flow.idle.run_idle_loop(
+        &boot_init_flow.flow,
         scheduler,
         scheduler_test_tasks,
         current_task,
         current_cpu,
         kernel_init_task,
         kernel_init_flow,
-        user_app_flow,
         kthreadd_task,
         kthreadd_flow,
         user_task_set,
@@ -127,10 +128,9 @@ fn idle_continuation(ctx: &mut Context) -> ! {
             scheduler_test_tasks,
             kernel_init_task,
             kernel_init_flow,
-            user_app_flow,
             kthreadd_task,
             kthreadd_flow,
-            boot_idle_flow,
+            boot_init_flow,
             user_task_set,
             ..
         } = ctx;
@@ -141,10 +141,9 @@ fn idle_continuation(ctx: &mut Context) -> ! {
         let mut task_access = SchedulerTaskAccess::new(
             kernel_init_task,
             kernel_init_flow,
-            user_app_flow,
             kthreadd_task,
             kthreadd_flow,
-            boot_idle_flow,
+            boot_init_flow.core(),
             user_task_set,
             scheduler_test_tasks,
         );
@@ -225,26 +224,30 @@ fn phase_ready(ctx: &Context) -> bool {
     restore_ready(ctx)
         && ctx.scheduler().boot_idle_preemption().state() == State::Ready
         && ctx.scheduler().boot_idle_preemption().disabled()
-        && ctx.boot_idle_flow.state() == State::Online
-        && ctx.boot_idle_flow.first_schedule_committed()
-        && ctx.boot_idle_flow.idle_entry_prepared()
-        && ctx.boot_idle_flow.cpu_startup_entry_ready()
-        && ctx.boot_idle_flow.idle_loop_entered()
-        && ctx.boot_idle_flow.idle_cycle_committed()
+        && ctx.boot_init_flow.state() == State::Online
+        && ctx.boot_init_flow.idle.first_schedule_committed()
+        && ctx.boot_init_flow.idle.idle_entry_prepared()
+        && ctx.boot_init_flow.idle.cpu_startup_entry_ready()
+        && ctx.boot_init_flow.idle.idle_loop_entered()
+        && ctx.boot_init_flow.idle.idle_cycle_committed()
         && ctx
-            .boot_idle_flow
+            .boot_init_flow
+            .idle
             .representative_need_resched_cycle_committed()
-        && ctx.boot_idle_flow.nohz_run_idle_balance_done()
-        && ctx.boot_idle_flow.local_irq_disabled_for_sleep()
-        && ctx.boot_idle_flow.arch_cpu_idle_enter_done()
-        && ctx.boot_idle_flow.arch_cpu_idle_exit_done()
-        && ctx.boot_idle_flow.smp_call_function_queue_flushed()
+        && ctx.boot_init_flow.idle.nohz_run_idle_balance_done()
+        && ctx.boot_init_flow.idle.local_irq_disabled_for_sleep()
+        && ctx.boot_init_flow.idle.arch_cpu_idle_enter_done()
+        && ctx.boot_init_flow.idle.arch_cpu_idle_exit_done()
+        && ctx.boot_init_flow.idle.smp_call_function_queue_flushed()
         && ctx.scheduler().idle_schedule_passes() != 0
         && ctx.scheduler().idle_schedule_returned_passes() != 0
-        && ctx.boot_idle_flow.boot_init_handoff_complete()
-        && ctx.boot_idle_flow.boot_cpu_hotplug_online()
-        && ctx.boot_idle_flow.secondary_cpus_not_started()
-        && ctx.boot_idle_flow.kernel_init_task_switch_handoff_ready()
+        && ctx.boot_init_flow.idle.boot_init_handoff_complete()
+        && ctx.boot_init_flow.idle.boot_cpu_hotplug_online()
+        && ctx.boot_init_flow.idle.secondary_cpus_not_started()
+        && ctx
+            .boot_init_flow
+            .idle
+            .kernel_init_task_switch_handoff_ready()
         && runtime_services_still_deferred(&ctx.workqueue, &ctx.rcu_core, &ctx.cpu_group)
 }
 
@@ -261,8 +264,7 @@ fn restore_ready(ctx: &Context) -> bool {
         && ctx
             .current_task_ref()
             .is_ok_and(|task_ref| task_ref.same_identity(ctx.boot_task.task_ref()))
-        && ctx.boot_idle_flow.state() == State::Online
-        && ctx.boot_idle_flow.active()
-        && ctx.boot_idle_flow.owner() == ctx.boot_task.task_ref()
-        && ctx.boot_task.task().active_flow() == ctx.boot_idle_flow.flow_ref()
+        && ctx.boot_init_flow.state() == State::Online
+        && ctx.boot_init_flow.core().owner() == ctx.boot_task.task_ref()
+        && ctx.boot_task.task().flow() == ctx.boot_init_flow.core().flow_ref()
 }

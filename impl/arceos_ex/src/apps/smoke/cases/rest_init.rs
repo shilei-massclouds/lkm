@@ -13,18 +13,10 @@ use crate::{
 
 pub fn run() -> SmokeResult {
     let ctx = context();
-    if ctx
-        .kernel_init_flow
-        .start_initial(&mut ctx.kernel_init_task)
-        .is_ok()
-        || ctx
-            .kthreadd_flow
-            .start_initial(&mut ctx.kthreadd_task)
-            .is_ok()
-        || ctx.kernel_init_flow.state() != State::Online
-        || !ctx.kernel_init_flow.active()
-        || ctx.kthreadd_flow.state() != State::Base
-        || ctx.kthreadd_flow.active()
+    if ctx.kernel_init_flow.state() != State::Online
+        || ctx.kthreadd_flow.state() != State::Online
+        || ctx.kernel_init_task.task().flow() != TaskFlowRef::KERNEL_INIT
+        || ctx.kthreadd_task.task().flow() != TaskFlowRef::KTHREADD
     {
         printk::write_str("task flow strict dispatch facts invalid\n");
         return SmokeResult::Failed;
@@ -49,12 +41,10 @@ pub fn run() -> SmokeResult {
         || !ctx.boot_task.idle_role_bound()
         || ctx.boot_init_flow.cpu_ref() != Some(boot_cpu.cpu_ref())
         || !ctx.boot_task.switch_context().initialized()
-        || ctx.boot_idle_flow.state() != State::Online
-        || !ctx.boot_idle_flow.active()
-        || ctx.boot_idle_flow.owner() != TaskRef::BOOT
-        || ctx.boot_idle_flow.flow_ref() != TaskFlowRef::BOOT_IDLE
-        || ctx.boot_task.task().initial_flow() != TaskFlowRef::BOOT_INIT
-        || ctx.boot_task.task().active_flow() != TaskFlowRef::BOOT_IDLE
+        || ctx.boot_init_flow.state() != State::Online
+        || ctx.boot_init_flow.core().owner() != TaskRef::BOOT
+        || ctx.boot_init_flow.core().flow_ref() != TaskFlowRef::BOOT_INIT
+        || ctx.boot_task.task().flow() != TaskFlowRef::BOOT_INIT
     {
         printk::write_str("boot task/flow carrier facts invalid\n");
         return SmokeResult::Failed;
@@ -62,7 +52,7 @@ pub fn run() -> SmokeResult {
 
     if !crate::flows::boot_init_flow::rest_init_is_online()
         || !crate::flows::boot_init_flow::schedule_handoff_is_online()
-        || crate::flows::boot_idle_flow::entry_is_online()
+        || crate::flows::boot_init_flow::idle_entry_is_online()
         || !crate::flows::boot_init_flow::is_online()
     {
         printk::write_str("rest init phase is not online\n");
@@ -106,9 +96,8 @@ pub fn run() -> SmokeResult {
             .irqrestore_restored_before_preemption_enabled()
         || ctx.kernel_init_task.task_ref() != TaskRef::KERNEL_INIT
         || ctx.kernel_init_flow.state() != State::Online
-        || !ctx.kernel_init_flow.active()
         || ctx.kernel_init_flow.flow_ref() != TaskFlowRef::KERNEL_INIT
-        || ctx.kernel_init_task.task().active_flow() != TaskFlowRef::KERNEL_INIT
+        || ctx.kernel_init_task.task().flow() != TaskFlowRef::KERNEL_INIT
     {
         printk::write_str("kernel_init task facts invalid\n");
         return SmokeResult::Failed;
@@ -149,12 +138,10 @@ pub fn run() -> SmokeResult {
             .kthreadd_task_pi_lock
             .irqrestore_restored_before_preemption_enabled()
         || ctx.kthreadd_task.task_ref() != TaskRef::KTHREADD
-        || ctx.kthreadd_flow.state() != State::Base
-        || ctx.kthreadd_flow.active()
+        || ctx.kthreadd_flow.state() != State::Online
         || ctx.kthreadd_flow.owner() != TaskRef::KTHREADD
         || ctx.kthreadd_flow.flow_ref() != TaskFlowRef::KTHREADD
-        || ctx.kthreadd_task.task().initial_flow() != TaskFlowRef::KTHREADD
-        || ctx.kthreadd_task.task().active_flow().is_valid()
+        || ctx.kthreadd_task.task().flow() != TaskFlowRef::KTHREADD
     {
         printk::write_str("kthreadd task facts invalid\n");
         return SmokeResult::Failed;
@@ -263,42 +250,49 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
-    if ctx.boot_idle_flow.state() != State::Online
-        || ctx.boot_idle_flow.first_schedule_committed()
-        || ctx.boot_idle_flow.idle_entry_prepared()
-        || ctx.boot_idle_flow.cpu_startup_entry_ready()
-        || ctx.boot_idle_flow.idle_loop_entered()
-        || ctx.boot_idle_flow.idle_cycle_committed()
-        || ctx.boot_idle_flow.idle_cycle_started()
-        || ctx.boot_idle_flow.need_resched_clear_before_wait()
-        || ctx.boot_idle_flow.observed_no_need_resched()
-        || ctx.boot_idle_flow.idle_polling_set()
-        || ctx.boot_idle_flow.idle_polling_rmb_before_sleep_check()
-        || ctx.boot_idle_flow.nohz_idle_entered()
-        || ctx.boot_idle_flow.local_irq_save_count_for_sleep() != 0
-        || ctx.boot_idle_flow.local_irq_restore_count_for_sleep() != 0
-        || ctx.boot_idle_flow.rcu_nocb_deferred_wakeup_flushed()
-        || ctx.boot_idle_flow.cpu_offline_dead_path_not_taken()
-        || ctx.boot_idle_flow.poll_or_cpuidle_path_deferred()
-        || ctx.boot_idle_flow.idle_wait_committed()
-        || ctx.boot_idle_flow.idle_wait_path_deferred()
-        || ctx.boot_idle_flow.need_resched_set_for_schedule()
-        || ctx.boot_idle_flow.observed_need_resched()
-        || ctx.boot_idle_flow.idle_polling_cleared()
-        || ctx.boot_idle_flow.preempt_need_resched_set()
-        || ctx.boot_idle_flow.nohz_idle_exited()
-        || ctx.boot_idle_flow.polling_clear_mb_before_flush()
-        || ctx.boot_idle_flow.idle_schedule_requested()
-        || ctx.boot_idle_flow.idle_schedule_returned()
-        || ctx.boot_idle_flow.need_resched_drained()
-        || ctx.boot_idle_flow.livepatch_state_update_deferred()
-        || ctx.boot_idle_flow.idle_loop_continues()
+    if ctx.boot_init_flow.state() != State::Online
+        || ctx.boot_init_flow.idle.first_schedule_committed()
+        || ctx.boot_init_flow.idle.idle_entry_prepared()
+        || ctx.boot_init_flow.idle.cpu_startup_entry_ready()
+        || ctx.boot_init_flow.idle.idle_loop_entered()
+        || ctx.boot_init_flow.idle.idle_cycle_committed()
+        || ctx.boot_init_flow.idle.idle_cycle_started()
+        || ctx.boot_init_flow.idle.need_resched_clear_before_wait()
+        || ctx.boot_init_flow.idle.observed_no_need_resched()
+        || ctx.boot_init_flow.idle.idle_polling_set()
         || ctx
-            .boot_idle_flow
+            .boot_init_flow
+            .idle
+            .idle_polling_rmb_before_sleep_check()
+        || ctx.boot_init_flow.idle.nohz_idle_entered()
+        || ctx.boot_init_flow.idle.local_irq_save_count_for_sleep() != 0
+        || ctx.boot_init_flow.idle.local_irq_restore_count_for_sleep() != 0
+        || ctx.boot_init_flow.idle.rcu_nocb_deferred_wakeup_flushed()
+        || ctx.boot_init_flow.idle.cpu_offline_dead_path_not_taken()
+        || ctx.boot_init_flow.idle.poll_or_cpuidle_path_deferred()
+        || ctx.boot_init_flow.idle.idle_wait_committed()
+        || ctx.boot_init_flow.idle.idle_wait_path_deferred()
+        || ctx.boot_init_flow.idle.need_resched_set_for_schedule()
+        || ctx.boot_init_flow.idle.observed_need_resched()
+        || ctx.boot_init_flow.idle.idle_polling_cleared()
+        || ctx.boot_init_flow.idle.preempt_need_resched_set()
+        || ctx.boot_init_flow.idle.nohz_idle_exited()
+        || ctx.boot_init_flow.idle.polling_clear_mb_before_flush()
+        || ctx.boot_init_flow.idle.idle_schedule_requested()
+        || ctx.boot_init_flow.idle.idle_schedule_returned()
+        || ctx.boot_init_flow.idle.need_resched_drained()
+        || ctx.boot_init_flow.idle.livepatch_state_update_deferred()
+        || ctx.boot_init_flow.idle.idle_loop_continues()
+        || ctx
+            .boot_init_flow
+            .idle
             .representative_need_resched_cycle_committed()
-        || ctx.boot_idle_flow.boot_init_handoff_complete()
-        || !ctx.boot_idle_flow.secondary_cpus_not_started()
-        || !ctx.boot_idle_flow.kernel_init_task_switch_handoff_ready()
+        || ctx.boot_init_flow.idle.boot_init_handoff_complete()
+        || !ctx.boot_init_flow.idle.secondary_cpus_not_started()
+        || !ctx
+            .boot_init_flow
+            .idle
+            .kernel_init_task_switch_handoff_ready()
         || ctx.scheduler().kernel_init_stack_switch_started_count() != 1
         || ctx.scheduler().kernel_init_stack_switch_returned_count() != 0
         || ctx.kernel_init_task.entry_started_count() != 1
@@ -323,7 +317,7 @@ pub fn run() -> SmokeResult {
         ctx.kernel_init_task.entry_stack_pointer(),
         ctx.scheduler().schedule_passes(),
         ctx.scheduler().switch_to_passes(),
-        crate::flows::boot_idle_flow::entry_is_online()
+        crate::flows::boot_init_flow::idle_entry_is_online()
     ));
     SmokeResult::Passed
 }

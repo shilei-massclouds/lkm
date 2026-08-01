@@ -1,111 +1,91 @@
 # Scheduler
 
-`Scheduler` 是 Linux 每 CPU `struct rq` 的对象语义对应物。每个 possible `CPU` 恰好拥有一个
-Scheduler；它不是全局 singleton，也不再与一个独立 `RunQueue` 对象形成两套 CPU-local 拓扑。Scheduler
-拥有 CPU-local lock、`curr/idle/stop` 引用和 stop/DL/RT/fair/idle 五类队列。root domain、sched
-domain 与其它跨 CPU 协调资源是独立共享对象，只通过 `CpuRef`/`SchedulerRef` 覆盖 CPU 集合，不拥有或
-复制 CPU/Scheduler 本体。
+`Scheduler` 对应 Linux 每 CPU `struct rq`。每个 possible CPU 恰有一个 Scheduler；它拥有 CPU-local
+lock、`curr/idle/stop` TaskRef 和 stop/DL/RT/fair/idle 队列。root/sched domain 是独立共享资源，不
+复制 CPU 或 Scheduler。队列、curr、idle、stop 只保存 generation-checked TaskRef。
 
-## Lifecycle 与 CPU ownership
+## lifecycle、队列与 Task 状态
 
-`sched_init()` 为所有 possible CPU 建立 Scheduler，并使它们到达 Ready。CPU0 Scheduler 随 boot CPU
-进入可调度状态而 Online；AP Scheduler 保持 Ready，直到对应 CPU online handoff 才进入 Online。CPU
-offline/hotplug teardown 不在本轮能力范围内。
+`sched_init()` 使 possible CPU Scheduler Ready；CPU0 随 boot CPU 可调度边界 Online，AP Scheduler 在
+对应 CPU online commit 后 Online。class priority 固定为 stop → DL → RT → fair → idle。
 
-Scheduler 的队列只保存稳定 `TaskRef`。`curr`、`idle`、`stop` 也只保存引用；Task storage、lifecycle、
-Flow 和可恢复上下文仍由 Task/TaskFlow owner 解析。class priority 固定为：
+Task lifecycle 与 runnable/on-rq/blocked 正交。当前执行者为 OnCpu；所有当前不在 CPU 的已发布 Task
+统一为 Online，不区分首次与恢复。blocked Task 可以保持 Online/None/Valid，但
+在 wake/enqueue 恢复资格前不得被选择。
 
-```text
-stop -> DL -> RT -> fair -> idle
-```
+## Schedule 与 `yields`
 
-具体公平性、带宽控制、迁移和 SMP balance 算法只有在存在可复核 Linux evidence 时才收口，否则保持
-Deferred。参考配置未启用的 SCX 保持 Trimmed。
+只有当前 Task 的固定 TaskFlow 可以根据其 CpuRef 对本 Scheduler 执行
+`yields Scheduler.Action::Schedule()`。Schedule 无 payload；每次调用创建独立 Signal occurrence 和
+模型 YieldToken。Scheduler 从 sender Flow、CpuRef、CPU-local CurrentTask/CurrentStack 推导 prev，
+并要求同一 CPU、同一 OnCpu/Live Task、固定 FlowRef 和 generation 全部一致。跨 CPU、stale Flow、错误
+CurrentTask 或 ineffective Flow 在 token 提交前拒绝。
 
-## Task lifecycle 与调度资格
+`yields` 本身只挂起 source `TaskFlowLane` 的模型 handler continuation，不保存或恢复寄存器、不读写
+TaskThreadContext、不改变 Task/TaskFlow lifecycle，也不修改 CpuRef、runqueue、锁或中断状态。所有这些
+调度效果必须由 Schedule/SwitchTo 的显式步骤产生。
 
-Task lifecycle 与 runnable/on-rq/blocked 资格正交。`OnCpu` 只表示 Task 当前拥有 CPU 执行权；`Online`
-只表示 Task 已发布但从未获得 CPU，`Suspended` 表示 Task 曾执行且拥有有效、可恢复的 active
-continuation。两者都不保证它在 runnable queue。Scheduler 的 class queue membership 与一次
-Schedule 的 prev disposition 共同决定 runnable/on-rq/blocked。blocked Task 可以保持
-`Suspended/None/Valid`，但在 wake/enqueue 恢复资格前不得被选中。
+Schedule 顺序为：
 
-## Schedule 信号与 sender 解析
+1. PreparePrev(prev) → PrevDisposition；
+2. PickNextTask(prev, disposition) → next；
+3. next != prev 时 SwitchTo(prev,next)；
+4. next == prev 时完成 handler，由通用 yield default resume attempt 返回 source。
 
-只有当前 Task 的 active TaskFlow 可以向该 Flow 的 `CpuRef` 所指 CPU Scheduler `emits Schedule()`。
-Schedule 没有 payload；每次发送产生独立 occurrence。Scheduler 从 sender Flow、其 `CpuRef` 与 CPU-local
-CurrentTask binding 推导 `prev: TaskRef`，并要求三者解析为同一 CPU 上的同一 `OnCpu/Live` Task。跨 CPU、
-stale Flow、非 active Flow 或错误 CurrentTask binding 必须在任何调度状态修改前拒绝。
+identity 不进入 SwitchTo，不保存/恢复 context，不交付 Task/TaskFlow Continue，不改变 lifecycle、
+authority、Flow/CpuRef、CurrentTask/CurrentStack、runqueue 选择结果或观察计数。目标 handler 完成后，
+source execution binding 仍有效，因此通用 yields 逻辑立即精确一次消费 token。
 
-一次 Schedule 固定按以下顺序执行：
+## PreparePrev 与 PickNextTask
 
-1. `drives PreparePrev(prev) -> PrevDisposition`；
-2. `drives PickNextTask(prev, disposition) -> next`；
-3. 仅当 `next != prev` 时 `drives SwitchTo(prev, next)`；
-4. 当 `next == prev` 时不执行 SwitchTo，Scheduler 向原 active TaskFlow `emits Continue`，表达 Linux
-   `schedule()` 返回。
+PreparePrev 对齐 `__schedule()` 的 prev disposition：抢占或仍 running 返回 Runnable；sleeping 但有匹配
+pending wake 时一次性消费 wake 并返回 Runnable；非抢占 sleeping 且无 wake 时先 DeactivateTask，
+移出 class queue，返回 Blocked。它不改变 Task lifecycle、不保存 context、不调用 class put/set。
 
-发出 Schedule 和 PreparePrev 都不改变 Task lifecycle。BootTask 在 `schedule_preempt_disabled()` 对应路径
-为 Runnable；它在请求发送、PreparePrev 和 PickNextTask 期间始终保持 `OnCpu/Live/Invalid`。只有实际
-选择 `next != prev` 并执行 SwitchTo 时，它才 Suspend 为 Suspended。
+PickNextTask 保留组合 `pick_next_task` callback，或 fallback 的
+`pick_task -> prev_class.PutPrevTask -> next_class.SetNextTask`。Blocked/on-rq=false prev 不得重新入队。
+identity 路径可以完成 class bookkeeping，但不产生 switch effects。
 
-## PreparePrev
+## SwitchTo 与统一 Continue
 
-`PreparePrev` 对齐 Linux `__schedule()` 对 prev state 的先行处理，并返回稳定
-`PrevDisposition::{Runnable, Blocked}`：
-
-- 抢占调度，或 prev 仍声明 running/runnable：返回 Runnable，保留其调度资格；
-- 非抢占调度、prev 已声明 sleeping，但存在匹配的 pending wake signal：恢复 running并返回
-  Runnable；pending signal 的消费是一次性的；
-- 非抢占调度、prev sleeping 且没有 matching pending signal：在选择 next 前
-  `drives DeactivateTask(prev)`，从所属 class queue 移除并令 on-rq=false，然后返回 Blocked。
-
-PreparePrev 不改变 Task lifecycle，不保存上下文，也不调用 class put/set。DeactivateTask 已确定的
-blocked/on-rq=false 结果是后续 class protocol 的硬门禁。
-
-## PickNextTask 与 class handoff
-
-PickNextTask 保留 Linux 两种合法路径：class 提供组合 `pick_next_task` callback；或 fallback 执行
-`pick_task -> prev_class.PutPrevTask(prev,next) -> next_class.SetNextTask(next)`。`PutPrevTask` 属于
-PickNextTask 内部的 class protocol，禁止在 PreparePrev 之前或选择 next 之前无条件重新入队 prev。
-
-Runnable prev 可按所属 class 规则保留或重新进入可选结构；Blocked/on-rq=false prev 绝不能被
-PutPrevTask 放回。identity 选择是否执行 put/set 记账由所走 Linux callback 路径决定；无论是否记账，
-都不能发生真正 context switch 或 Task lifecycle/CurrentTask/context 变化。
-
-## SwitchTo 与 continuation
-
-identity path 不进入 SwitchTo，也不产生 Task lifecycle、context、CurrentTask/CurrentStack binding 或
-Task Activate/Suspend/Continue。非 identity SwitchTo 必须先完整预检双方 TaskRef、状态、Flow/context
-generation、CPU-local binding、stack 和后续 Signal 容量，并一次性保存稳定 TaskRef、TaskFlowRef、Flow
-generation 与 `NextDispatchKind::{ActivateInitial,ContinueActive}`；任一失败不得留下部分提交。
-
-- next=Online 时只允许 ActivateInitial：initial Flow 必须 Base、owned、generation 有效，active Flow
-  必须无效且 Startup 容量可接受；
-- next=Suspended 时只允许 ContinueActive：active Flow 必须唯一、Online、owned、generation 有效且
-  Continue 容量可接受；
-- 状态与 Flow 事实不一致、两条路径同时成立或均不成立时，都必须在物理切换前拒绝。
+non-identity SwitchTo 在任何不可逆效果前完整预检：prev/next TaskRef、双方固定 FlowRef/generation、
+prev OnCpu/Live/Invalid、next Online/None/Valid、context epoch、dispatch record、stack、CPU-local binding
+和后续 Signal 容量。Scheduler 不保存任何 first/resume dispatch kind；
+next 只有一个固定 Flow 和一个 Continue 路径。
 
 预检成功后严格执行：
 
-1. `drives prev.SaveCoreContext`；
-2. `drives prev.Suspend`，使 prev `OnCpu -> Suspended`，同时保持 PreparePrev 已确定的 Runnable/Blocked
-   资格；
-3. `drives next.RestoreCoreContext`，提交寄存器、stack 与 CPU-local CurrentTask/CurrentStack binding；
-4. 在 next stack 上完成 Linux finish-task-switch 对应清理；
-5. Online next：Scheduler `drives next.Activate`，随后直接向预检 initial Flow `emits Startup`；
-6. Suspended next：Scheduler `drives next.Continue`，随后直接向预检 active Flow `emits Continue`。
+1. `SaveCoreContext(prev)` 保存 `ra/sp/s0..s11`、固定 FlowRef、可能的 root TrapFlowRef，并推进 prev
+   context epoch/dispatch record；
+2. `Task.Suspend(prev)` 提交 `OnCpu/Live/Invalid -> Online/None/Valid`，不改变 PreparePrev 的
+   Runnable/Blocked 结果；
+3. `RestoreCoreContext(next)` 恢复寄存器，并在同一 switch commit 原子提交 next Flow CpuRef、
+   CurrentTask 与由 live sp 校验的 CurrentStack；
+4. 在 next stack 上完成 finish-task-switch 清理；
+5. `Task.Continue(next)` 提交 `Online/None/Valid -> OnCpu/Live/Invalid`；
+6. 向 next 固定 FlowRef 交付 contextual `TaskFlow.Action::Continue`。
 
-next Task 接受 Activate/Continue 后分别提交 `Online/None/Valid -> OnCpu/Live/Invalid` 或
-`Suspended/None/Valid -> OnCpu/Live/Invalid`。Task 不产生 TaskFlow Startup/Continue；跨执行主体的
-TaskFlow→Scheduler 与 Scheduler→TaskFlow 使用 `emits`，Scheduler 对 Task lifecycle 及内部状态检查、
-选择、put/set、保存与恢复使用 `drives`。
+contextual Continue 不携带机器入口；TaskThreadContext 决定首次入口、普通保存入口或嵌套 Trap leaf。
+若 next FlowLane 有 pending YieldToken，它必须与 TaskRef、FlowRef、generation、CPU、context epoch 和
+dispatch record 匹配后才恢复模型 continuation；否则 Continue 从 context 指定入口开始。
+
+Schedule occurrence 所创建的 YieldToken 绑定 source response identity、TaskRef/FlowRef/generation、
+target occurrence、模型 resume coordinate、CPU/TaskFlowLane 和 context epoch。TaskThreadContext 独立
+保存真实寄存器。两者只能通过 epoch/dispatch record 交叉校验，不得互相复制。
+
+non-identity Schedule handler 完成时 source binding 已被上述显式步骤改变，因此默认 resume attempt
+只保持 token pending。未来切回 source 时 contextual Continue 精确一次消费 token并从 `yields` 后继续，
+形成 A→B→A 的 schedule return。rejection 必须在 token commit 前无状态变化；post-commit failure、
+stale、错误 Flow/CPU/epoch 或重复恢复终止失败，不回滚、不重试。
+
+terminal prev 走 OnCpu→Offline 并在 next 侧 Cleanup，不先发布不可恢复的 Online context。陷入中真实
+切出保存当前 trap leaf；恢复 next context 后先落到该 leaf。普通 IRQ 若没有真实 task switch，不改变
+Task/TaskFlow 或 CPU-local binding。
 
 ## 当前能力边界
 
-本轮只闭合可复核的 Linux schedule 主序、prev disposition、class handoff、per-CPU ownership 与
-task-stack switch。完整 SMP balancing、带宽、公平性和 SCX 不由实现症状推导。具体 Linux symbol、函数
-或 checkpoint 映射只属于 Testing/cross-reference，不进入本 Charter 或 Coding 核心规格。
+本轮闭合单 CPU schedule、prev disposition、class handoff、固定 TaskFlow、显式 context switch 与
+通用 yields return。GlobalArbiter、cross-CPU mailbox、迁移与完整 schedule replay 保持 P2 延期。
 
 ## Mapping
 

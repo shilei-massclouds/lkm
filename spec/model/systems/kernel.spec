@@ -360,8 +360,6 @@ object Kernel: KernelObject {
                     BootInitFlow.Action::AssignCpuRef(BootCPURef);
                     PhysicalDirect.Action::ActivateOnCpu(BootCPURef);
                     BootInitFlow.Transition::Preset;
-                    KernelInitFlow.Transition::Setup;
-                    KernelInitFlow.Transition::Enable;
                 }
 
                 ensures {
@@ -423,8 +421,8 @@ object Kernel: KernelObject {
 
 /*
  * Stable completion fact captured at the Kernel.Online commit. The concrete
- * lower states above are checked at that instant; an emitted UserBoot handoff
- * may then replace and destroy KernelInitFlow without rolling Kernel back.
+ * lower states above are checked at that instant; an emitted UserBoot commit
+ * may then replace the Flow-owned ApplicationInstance without rolling Kernel back.
  */
 predicate kernel_application_environment_ready<K, B, S, T, F, P, H>(
     kernel: K,

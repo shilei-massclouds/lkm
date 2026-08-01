@@ -285,8 +285,8 @@ object SecondaryIdleTaskSet: TaskSet {
                         ApIdleTask,
                         TaskBreakpointState::Invalid
                     );
-                    task_initial_flow_is(ApIdleTask, ApIdleFlow);
-                    task_owns_flow(ApIdleTask, ApIdleFlow);
+                    task_fixed_flow_is(ApIdleTask, ApIdleFlow);
+                    task_fixed_flow_is(ApIdleTask, ApIdleFlow);
                     task_flow_owner_is(ApIdleFlow, ApIdleTask);
                     task_flow_parent_is(ApIdleFlow, ApIdleTask);
                     ap_idle_flow_key_matches_task(ApIdleFlow, ApIdleTask);
@@ -316,8 +316,8 @@ object SecondaryIdleTaskSet: TaskSet {
                 ApIdleTask,
                 TaskBreakpointState::Invalid
             );
-            task_initial_flow_is(ApIdleTask, ApIdleFlow);
-            task_owns_flow(ApIdleTask, ApIdleFlow);
+            task_fixed_flow_is(ApIdleTask, ApIdleFlow);
+            task_fixed_flow_is(ApIdleTask, ApIdleFlow);
             task_flow_owner_is(ApIdleFlow, ApIdleTask);
             task_flow_parent_is(ApIdleFlow, ApIdleTask);
             ap_idle_flow_key_matches_task(ApIdleFlow, ApIdleTask);
@@ -462,7 +462,7 @@ object CpuStartProvider: HardwareObject {
                     sbi_hsm_startup_signal_keyed_by_logical_id(CpuStartProvider, ApIdleFlow);
                     ap_idle_flow_hsm_startup_keyed(ApIdleFlow);
                     ap_idle_flow_key_matches_task(ApIdleFlow, ApIdleTask);
-                    sbi_hsm_startup_targets_task_initial_flow(
+                    sbi_hsm_startup_targets_task_fixed_flow(
                         CpuStartProvider,
                         ApIdleTask,
                         ApIdleFlow
@@ -473,6 +473,9 @@ object CpuStartProvider: HardwareObject {
                     ApIdleTask.Action::ActivateHsmAuthority;
                     ApIdleFlow.Action::AssignCpuRef(ApCPURef);
                     ApIdleFlow.Transition::Preset;
+                    ApIdleFlow.Transition::Setup;
+                    ApIdleFlow.Transition::Enable;
+                    ApIdleFlow.Action::Continue;
                 }
             }
         }
@@ -498,7 +501,7 @@ object CpuStartProvider: HardwareObject {
             cpu_hotplug_write_guard_used(CpuStartProvider, CpuHotplugLock);
             sbi_boot_data_publish_barriers_observed(CpuStartProvider);
             sbi_hsm_startup_signal_keyed_by_logical_id(CpuStartProvider, ApIdleFlow);
-            sbi_hsm_startup_targets_task_initial_flow(
+            sbi_hsm_startup_targets_task_fixed_flow(
                 CpuStartProvider,
                 ApIdleTask,
                 ApIdleFlow
@@ -1049,7 +1052,7 @@ object SmpBringupPhase: PhaseObject {
                         TaskExecutionAuthority::Live
                     );
                     BootIdleSetup.state == State::Ready;
-                    BootIdleFlow.state == State::Online;
+                    BootInitFlow.state == State::Online;
                     KthreaddTask.state == State::Online;
                     CpuGroup.state == State::Ready;
                     PerCpuStorage.state == State::Ready;

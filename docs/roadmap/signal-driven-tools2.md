@@ -77,7 +77,7 @@ canonical snapshot；Model 区分全局 inventory 与动态 occurrence，并要�
   旧 `tools/` 的 135/52 与事件计数仅保留为 shadow comparison，没有覆盖 v9 结果。
 - `make -C tools2 test-all` 通过：Python 91/91、Svelte 0 error/0 warning、Vitest 16/16、bundle stale
   check 和 Playwright 9/9。测试覆盖 v1–v8 全拒绝、v9 round-trip、已证明/未证明 evidence、重复
-  occurrence、非因果 obligation、check/snapshot 门禁以及 animation v3 同源投影。
+  occurrence、非因果 obligation、check/snapshot 门禁以及 animation v4 同源投影。
 - `make verify` 通过；仓库根直接 `make test` 最终为 184/184，两侧 KUnit 各 25/25、app smoke 各
   56/56，LTP close list native/linux-object 均通过。
 - 两个 canonical snapshot 已重建为 v9，Model fingerprint 均为
@@ -100,7 +100,7 @@ canonical snapshot；Model 区分全局 inventory 与动态 occurrence，并要�
    Schedule-return TaskFlow lane、SMP CpuLane 仲裁、cross-CPU mailbox、迁移和 schedule replay 不属于
    本里程碑，由独立的
    [`deterministic-smp-lanes.md`](deterministic-smp-lanes.md) 统一规划。
-5. 交互 HTML（已完成）：独立 animate 阶段共同消费 tools2 v9 `model.json` 和 `view.json`，生成内嵌
+5. 交互 HTML（已完成）：独立 animate 阶段共同消费 tools2 v10 `model.json` 和 `view.json`，生成内嵌
    `lkm.spec.signal-animation` v3 因果时刻的自包含 HTML；按 request/feedback/settle/terminal moment
    前进/后退，不重新求值 v9 view 的 boundary/obligation 投影，也不把浏览器变成推导器。首轮 v1 计划见
    [`interactive-model-animation.md`](interactive-model-animation.md)，老 tools 静态 SVG 保持原责任。
@@ -195,7 +195,7 @@ BootInit 内部语义。
   `Kernel -> BootInitFlow.Setup`、drives/cause 0014，且未创建 Setup Signal。
 - 测试逐项固定 0014–0050 的 identity、delivery、cause、handler、目标状态、顺序、关键入口事实、
   compact/verbose text、canonical bytes/default scenario，以及缺失 acceptance、BootTask execution
-  authority、entry `satp` 和 RawDtb guard 的首失败短路。animation v3 精确为 50 request、46 feedback、
+  authority、entry `satp` 和 RawDtb guard 的首失败短路。animation v4 精确为 50 request、46 feedback、
   3 settle、1 terminal，共 100 moments；0016 feedback 位于全部嵌套 child feedback 之后。
 - Linux 6.12 RISC-V `head.S`、`setup_vm()`/`relocate_enable_mmu()` 与现有 model/coding/compose/实现、
   checkpoint 顺序复核一致，因此本组没有修改 model、coding、compose 或 `impl/arceos_ex`。focused

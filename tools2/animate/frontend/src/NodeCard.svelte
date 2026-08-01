@@ -19,7 +19,7 @@
     activeTarget?: boolean;
     responseKind?: 'Transition' | 'Action' | null;
     outcome?: string;
-    effectPhase?: 'idle' | 'request' | 'before' | 'feedback' | 'settle' | 'terminal' | 'clear';
+    effectPhase?: 'idle' | 'request' | 'before' | 'feedback' | 'settle' | 'yield' | 'resume' | 'terminal' | 'clear';
   } = $props();
   const stateClass = $derived(node.state ? `state-${node.state.toLowerCase()}` : 'state-none');
 </script>
@@ -33,6 +33,8 @@
   class:feedback-response={activeTarget && effectPhase === 'feedback'}
   class:action-response={activeTarget && effectPhase === 'feedback' && responseKind === 'Action'}
   class:settling={activeTarget && effectPhase === 'settle'}
+  class:yielding={activeTarget && effectPhase === 'yield'}
+  class:resuming={activeTarget && effectPhase === 'resume'}
   class:terminal-effect={activeTarget && effectPhase === 'terminal'}
   class:error-response={activeTarget && outcome !== 'completed' && ['feedback', 'settle', 'terminal'].includes(effectPhase)}
   class="node-card {stateClass}"

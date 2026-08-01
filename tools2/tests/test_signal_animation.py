@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 TOOLS2 = ROOT / "tools2"
 PIPELINE = TOOLS2 / "tests" / "fixtures" / "pipeline.spec"
 EMITS_NESTED = TOOLS2 / "tests" / "fixtures" / "animation-emits-nested.spec"
+YIELDS = TOOLS2 / "tests" / "fixtures" / "yields.spec"
 
 
 class SignalAnimationTests(unittest.TestCase):
@@ -136,7 +137,7 @@ class SignalAnimationTests(unittest.TestCase):
         self._resequence(view)
         return view
 
-    def test_animation_v3_projects_request_feedback_and_settle_moments(self) -> None:
+    def test_animation_v4_projects_request_feedback_and_settle_moments(self) -> None:
         animation = build_animation(self.model, self.view)
         self.assertEqual(
             (animation["schema"], animation["version"], animation["producer"]),
@@ -190,6 +191,40 @@ class SignalAnimationTests(unittest.TestCase):
             animation["moments"][3]["transfer"], {"from": "Root", "to": "Human"}
         )
         self.assertIsNone(animation["moments"][5]["transfer"])
+
+    def test_animation_v4_projects_yield_and_resume_token_moments(self) -> None:
+        work = self.root / "yields-work"
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(
+                driver_main(
+                    [
+                        str(YIELDS),
+                        "--signal",
+                        "Source.Run",
+                        "--source",
+                        "Human",
+                        "--max-depth",
+                        "all",
+                        "--max-breadth",
+                        "all",
+                        "--work-dir",
+                        str(work),
+                    ]
+                ),
+                0,
+            )
+        animation = build_animation(
+            read_json(work / "model.json"), read_json(work / "view.json")
+        )
+        control = [
+            (moment["kind"], moment["control"]["token_id"])
+            for moment in animation["moments"]
+            if moment["kind"] in {"yield", "resume"}
+        ]
+        self.assertEqual(control, [("yield", "yield-0001"), ("resume", "yield-0001")])
+        kinds = [moment["kind"] for moment in animation["moments"]]
+        self.assertLess(kinds.index("yield"), kinds.index("settle"))
+        self.assertLess(kinds.index("settle"), kinds.index("resume"))
 
     def test_animation_projects_boundary_proofs_without_new_causal_moments(self) -> None:
         spec = self.root / "boundary.spec"
@@ -432,11 +467,11 @@ class SignalAnimationTests(unittest.TestCase):
             ("producer", "view", "producer", "tools", "view protocol mismatch"),
             *[
                 (f"model-v{version}", "model", "version", version, "model protocol mismatch")
-                for version in range(1, 9)
+                for version in range(1, 10)
             ],
             *[
                 (f"view-v{version}", "view", "version", version, "view protocol mismatch")
-                for version in range(1, 9)
+                for version in range(1, 10)
             ],
         ]
         for label, owner, field, value, message in cases:
@@ -569,7 +604,7 @@ class SignalAnimationTests(unittest.TestCase):
         cases.append(("handler", self.model, unknown_handler, "unknown structure"))
         unknown_outcome = deepcopy(self.view)
         unknown_outcome["signals"][0]["outcome"] = "pending"
-        cases.append(("outcome", self.model, unknown_outcome, "not an animation v3 outcome"))
+        cases.append(("outcome", self.model, unknown_outcome, "not an animation v4 outcome"))
         damaged_snapshot = deepcopy(self.view)
         damaged_snapshot["signals"][0]["before_snapshot"]["facts"] = {}
         cases.append(("snapshot", self.model, damaged_snapshot, "facts must be a string list"))
@@ -843,7 +878,7 @@ class SignalAnimationTests(unittest.TestCase):
                 derivation["model_fingerprint"],
                 view["model_fingerprint"],
             },
-            {"sha256:19093e0c075b6768dc74709487ef3f128ae395adb3367c187890036437070ebe"},
+            {"sha256:331e2f94b9bc453473be347fbe9ac51d1b502ce511a1fe3f1ee6b85ac248dc72"},
         )
         animation = build_animation(model, view)
         self.assertEqual(animation["trace"]["total_signals"], 52)

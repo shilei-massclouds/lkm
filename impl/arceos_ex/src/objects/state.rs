@@ -16,9 +16,6 @@ pub enum State {
     /// Task-only live execution state. Generic object lifecycles never enter
     /// this state.
     OnCpu,
-    /// Task-only recoverable execution state. The Task has run before, owns
-    /// an active Flow and is not currently executing on a CPU.
-    Suspended,
 }
 
 #[allow(dead_code)]
@@ -32,7 +29,6 @@ pub enum LifecycleEvent {
     Cleanup,
     Continue,
     Suspend,
-    Activate,
 }
 
 impl LifecycleEvent {
@@ -49,7 +45,6 @@ impl LifecycleEvent {
             Self::Cleanup => b'C',
             Self::Continue => b'R',
             Self::Suspend => b'U',
-            Self::Activate => b'A',
         }
     }
 }
@@ -222,7 +217,6 @@ impl State {
             Self::Offline => b'F',
             Self::Destroyed => b'D',
             Self::OnCpu => b'C',
-            Self::Suspended => b'S',
         }
     }
 }
@@ -439,11 +433,9 @@ arceos_ex_is_allowed_lifecycle_transition:
     beq  t0, t1, 1f
     li   t1, 0x445
     beq  t0, t1, 1f
-    li   t1, 0x376
+    li   t1, 0x356
     beq  t0, t1, 1f
-    li   t1, 0x667
-    beq  t0, t1, 1f
-    li   t1, 0x756
+    li   t1, 0x663
     beq  t0, t1, 1f
     li   t1, 0x634
     beq  t0, t1, 1f
@@ -494,9 +486,8 @@ const fn is_allowed_lifecycle_transition_rust(
         || key == transition_key(State::Online, LifecycleEvent::Disable, State::Offline)
         || key == transition_key(State::Online, LifecycleEvent::Cleanup, State::Destroyed)
         || key == transition_key(State::Offline, LifecycleEvent::Cleanup, State::Destroyed)
-        || key == transition_key(State::Online, LifecycleEvent::Activate, State::OnCpu)
-        || key == transition_key(State::OnCpu, LifecycleEvent::Suspend, State::Suspended)
-        || key == transition_key(State::Suspended, LifecycleEvent::Continue, State::OnCpu)
+        || key == transition_key(State::Online, LifecycleEvent::Continue, State::OnCpu)
+        || key == transition_key(State::OnCpu, LifecycleEvent::Suspend, State::Online)
         || key == transition_key(State::OnCpu, LifecycleEvent::Disable, State::Offline)
 }
 

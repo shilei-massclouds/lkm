@@ -216,7 +216,7 @@ object PreSmpInitPhase: PhaseObject {
                         KernelInitTask,
                         TaskExecutionAuthority::Live
                     );
-                    task_owns_flow(KernelInitTask, KernelInitFlow);
+                    task_fixed_flow_is(KernelInitTask, KernelInitFlow);
                     kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
                     kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
                     KernelInitKthreaddDoneWait.state == State::Ready;
@@ -245,7 +245,7 @@ object PreSmpInitPhase: PhaseObject {
 
                 ensures {
                     pre_smp_init_ready(PreSmpInitPhase);
-                    task_owns_flow(KernelInitTask, KernelInitFlow);
+                    task_fixed_flow_is(KernelInitTask, KernelInitFlow);
                     kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
                     kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
                     KernelInitKthreaddDoneWait.state == State::Online;
@@ -303,7 +303,7 @@ object PreSmpInitPhase: PhaseObject {
             );
             kernel_init_released_for_pre_smp_init(KernelInitTask);
             kernel_init_observed_kthreadd_done_release(KernelInitTask, KthreaddReadyGate);
-            task_owns_flow(KernelInitTask, KernelInitFlow);
+            task_fixed_flow_is(KernelInitTask, KernelInitFlow);
             kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
             kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
             PageAllocator.state == State::Ready;

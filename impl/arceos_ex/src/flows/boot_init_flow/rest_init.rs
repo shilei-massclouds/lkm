@@ -71,8 +71,8 @@ fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
     preset_kernel_init_task(ctx)?;
     setup_kernel_init_task(ctx)?;
     crate::checkpoint::dispatch(Checkpoint::KernelInitTaskReady, ctx);
-    ctx.kernel_init_flow
-        .bind_initial(&mut ctx.kernel_init_task)?;
+    ctx.kernel_init_flow.bind_fixed(&mut ctx.kernel_init_task)?;
+    ctx.kernel_init_flow.publish(&ctx.kernel_init_task)?;
     ctx.kernel_init_task_pi_lock.setup()?;
     wake_and_enable_kernel_init_task(ctx)?;
     crate::checkpoint::dispatch(Checkpoint::KernelInitTaskOnline, ctx);
@@ -87,7 +87,8 @@ fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
     pin_kernel_init_to_boot_cpu(ctx, boot_cpu.logical_id())?;
     preset_kthreadd_task(ctx)?;
     setup_kthreadd_task(ctx)?;
-    ctx.kthreadd_flow.bind_initial(&mut ctx.kthreadd_task)?;
+    ctx.kthreadd_flow.bind_fixed(&mut ctx.kthreadd_task)?;
+    ctx.kthreadd_flow.publish(&ctx.kthreadd_task)?;
     ctx.kthreadd_task_pi_lock
         .setup_with_checkpoint(Checkpoint::KthreaddTaskPiLockReady)?;
     wake_and_enable_kthreadd_task(ctx)?;
@@ -400,7 +401,7 @@ fn wake_and_enable_kernel_init_task(ctx: &mut Context) -> EventResult {
                 State::Online,
             );
         };
-        if !ctx.kernel_init_flow.bind_cpu_ref(selected_cpu_ref) {
+        if !ctx.kernel_init_flow.commit_cpu_ref(selected_cpu_ref) {
             return failed_condition(
                 LifecycleEvent::Enable,
                 ctx.kernel_init_task.state(),
@@ -639,7 +640,7 @@ fn wake_and_enable_kthreadd_task(ctx: &mut Context) -> EventResult {
                 State::Online,
             );
         };
-        if !ctx.kthreadd_flow.bind_cpu_ref(selected_cpu_ref) {
+        if !ctx.kthreadd_flow.commit_cpu_ref(selected_cpu_ref) {
             return failed_condition(
                 LifecycleEvent::Enable,
                 ctx.kthreadd_task.state(),

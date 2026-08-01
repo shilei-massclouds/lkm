@@ -41,14 +41,13 @@ model semantics.
 
 ## Task and Flow scenarios
 
-- Two fork executions yield different Task, TaskRef and fork-continuation Flow
-  identities, independent occurrence/lifecycle state, and different Ref targets.
-- Two exec executions on the same Task preserve the Task identity while creating
-  distinct `UserAppFlow` instances.
-- A Flow cannot be owned by two Tasks, two owned Flows cannot both be Online,
-  and a Task cannot become Destroyed until all owned Flows are Destroyed.
-- Successful exec ordering is new Flow Preset/Setup, old Flow Disable, active
-  handoff, new Flow Enable, old Flow Cleanup.
+- Two fork executions yield different Task, TaskRef, UserTaskFlow, and
+  UserAppRuntime identities with independent occurrence/lifecycle state and Ref
+  targets.
+- Two exec executions on one Task preserve Task, TaskFlow, and UserAppRuntime
+  identity while creating distinct internal ApplicationInstance generations.
+- A Flow cannot be owned by two Tasks, and Task terminal cleanup cannot complete
+  until its one Flow and any owned Runtime have completed terminal cleanup.
 
 ## Stress and differential gates
 

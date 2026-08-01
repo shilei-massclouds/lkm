@@ -139,6 +139,10 @@ def _render_verbose(view: dict[str, Any]) -> str:
         )
         if delivery == "drives":
             lines.append(f"{indent}  synchronous: sender waits for this response")
+        elif delivery == "yields":
+            lines.append(
+                f"{indent}  yielding: target runs immediately; sender resumes through its YieldToken"
+            )
         elif delivery == "emits":
             lines.append(f"{indent}  asynchronous: delivered by global FIFO")
         if signal.get("handler"):

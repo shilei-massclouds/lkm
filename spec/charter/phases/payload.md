@@ -1,35 +1,39 @@
 # KernelInitFlow 的 payload 准备与提交
 
-原 `PayloadPhase` 包装 lifecycle 被拆除，payload 边界由两个直接属于 `KernelInitFlow` 的叶子阶段和
-一个 Flow action 表达。构建配置仍必须在 Hello、Smoke、UserBoot 中恰好选择一种 payload。
+payload 边界由直接属于固定 `KernelInitFlow` 的叶子阶段、Flow-owned `UserAppRuntime` 和 exec action
+表达。Hello、Smoke、UserBoot 构建配置仍必须恰好选择一种 payload。
 
 ## PayloadPreparePhase
 
-`KernelInitFlow.Setup` 在 `FinalizePhase.Online` 后驱动本阶段。它准备公共
-`ExecSyncBoundaries`、`ExecTransaction`、`UserCloneDeferredBoundaries`，确认唯一 selected payload，
-并完成变种 setup。`PayloadPreparePhase.Online` 继承原 `PayloadPhase.Ready` 的 Linux 对齐语义：
-`do_sysctl_args()` 返回后的 payload-selection boundary。完成后只返回 KernelInitFlow.Setup。
+KernelInitFlow 的 Online initialization Action 在 `FinalizePhase.Online` 后驱动本阶段。它准备公共
+`ExecSyncBoundaries`、`ExecTransaction`、`UserCloneDeferredBoundaries`，确认唯一 selected payload 并
+完成变种 setup。阶段 Online 对齐 `do_sysctl_args()` 返回后的 payload-selection boundary。
 
 ## PayloadHandoffPreparePhase
 
-`KernelInitFlow.Enable` 只驱动本阶段。该阶段完成 selected payload、no-return entry binding、
-UserBoot 映像/地址空间准备、fresh `UserAppFlow.Preset/Setup` 以及 replacement 的完整可逆预检。
-阶段 Online 时 `KernelInitFlow` 必须仍存活且未 Disable；`UserAppFlow` 最多为 Ready，active binding
-仍指向 KernelInitFlow。该 Online 是 precommit 边界，默认不做 Linux exact mapping。
+本阶段准备 selected payload、no-return entry、UserBoot image/address-space 与应用实例候选，并完成
+exec 的可逆预检。若所属 Flow 尚无 `UserAppRuntime`，它可以创建唯一、终身稳定的 Runtime owned child；
+若已存在则复用同一 Runtime。阶段 Online 时 KernelInitFlow 必须仍 Online，Runtime identity 不变，
+旧 ApplicationInstance 尚未被替换。
 
 ## CommitPayloadHandoff
 
-`KernelInitFlow` 和 Kernel 均提交 Online 后才能执行 `CommitPayloadHandoff` action，且 action 必须再次
-检查 parent `KernelInitTask.OnCpu`。唯一发送者是已经提交 Online 的 `Kernel.Enable`；
-`KernelInitFlow.Enable` 不得自行发送该 action。
+KernelInitFlow 和 Kernel 都 Online 后才能执行 `CommitPayloadHandoff`，并再次检查 parent
+KernelInitTask.OnCpu、effective-flow guard 和 exec transaction epoch。唯一发送者是已提交 Online 的
+`Kernel.Enable`。
 
-- UserBoot 固定执行 `KernelInitFlow.Disable -> KernelInitTask.CommitFlowHandoff ->
-  UserAppFlow.Enable -> KernelInitFlow.Cleanup`，再提交用户 payload Online 和用户态 no-return entry。
-- Hello/Smoke 不替换 Flow，只进入已经绑定的内核态 no-return entry，KernelInitFlow 保持 Online。
+- UserBoot 原子提交 Runtime 内部 old ApplicationInstance → new ApplicationInstance，更新用户地址空间/
+  trap-frame 所属的 exec facts，然后进入用户态 no-return entry。Task、KernelInitFlow、FlowRef、
+  UserAppRuntime、CpuRef 和 TaskThreadContext binding 均不替换。
+- Hello/Smoke 不创建用户 ApplicationInstance，只进入固定 KernelInitFlow 下已经绑定的内核态
+  no-return entry。
 
-`KernelInitFlow.PayloadHandoffCommitted` 继承原成功 exec 后 `PayloadPhase.Online` 的 Linux 对齐语义。
-任何候选、映像或 precheck 失败都不得伪造该 checkpoint；requested/default init 失败继续保持既有
-panic terminal 规则。Kernel.Online 后 action 失败不回滚 Kernel，但根执行结果必须为 failed。
+`KernelInitFlow.PayloadHandoffCommitted` 是 successful exec 的 commit checkpoint。任何候选、映像或
+precheck 失败都不得伪造它；requested/default init 失败保持既有 terminal 规则。Kernel.Online 后 action
+失败不回滚 Kernel，也不通过声明新 Flow 重试。
+
+fork/clone 创建 fresh Task、fresh UserTaskFlow 和 fresh UserAppRuntime；child 后续 exec 只替换自身
+Runtime 内部 ApplicationInstance。不同 Task/Flow 不共享 Runtime。
 
 ## 引用
 

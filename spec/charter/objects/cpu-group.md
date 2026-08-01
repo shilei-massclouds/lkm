@@ -33,8 +33,8 @@ active、online 集合。缓存位图仅是派生加速；禁止 `cpu_refs[]`、
 
 `CpuRef` 不拥有目标。TaskFlow 是任务执行路径中唯一保存 CpuRef 的对象；入口 adoption 和调度提交
 边界可以写它，Flow 本体执行及其同步 drives 子孙只能读取。Flow 离开 OnCpu 后保留已分配/最后归属
-CpuRef；迁移只在调度 commit 修改。Flow handoff 必须在激活新 Flow 前复制旧 Flow 的 CpuRef，避免
-handoff 窗口内 CurrentCPU 无法解析。
+CpuRef；迁移只在调度 commit 修改。Task 与其固定 TaskFlow 终身一对一，因此没有 Flow 切换或 CpuRef
+复制窗口；真实 switch/migration commit 直接更新该固定 Flow 的归属。
 
 ## 启动因果
 

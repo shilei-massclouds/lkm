@@ -66,7 +66,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--source", default="Human")
     parser.add_argument("--scenario", type=Path)
-    parser.add_argument("--snapshot-out", type=Path, help="write a snapshot on complete or reached")
+    parser.add_argument(
+        "--snapshot-out", type=Path, help="write a snapshot on complete, reached, or yielded"
+    )
     parser.add_argument("--max-depth", type=parse_budget, default=3, metavar="N|all")
     parser.add_argument("--max-breadth", type=parse_budget, default=3, metavar="N|all")
     parser.add_argument("--work-dir", type=Path)

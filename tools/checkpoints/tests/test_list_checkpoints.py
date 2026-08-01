@@ -173,7 +173,7 @@ class ListCheckpointsTests(unittest.TestCase):
                 self.assertNotIn(f"{removed}.{boundary}", by_name)
 
         self.assertEqual([record.index for record in records], list(range(len(records))))
-        self.assertEqual(len(records), 479)
+        self.assertEqual(len(records), 478)
 
 
 if __name__ == "__main__":

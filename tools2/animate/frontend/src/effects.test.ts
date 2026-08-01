@@ -25,7 +25,7 @@ const transition: AnimationMoment = {
   signal_id: 'sig-0001', cause_id: null, source: 'Root', target: 'Root', signal: 'Start',
   delivery: 'root', handler: { id: 'Root.Transition::Start', kind: 'Transition' },
   outcome: 'completed', reason: null, transfer: { from: 'Root', to: 'Root' },
-  response: { before_state: 'Base', after_state: 'Ready' }
+  response: { before_state: 'Base', after_state: 'Ready' }, control: null
 };
 
 describe('Signal response effects', () => {

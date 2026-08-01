@@ -1,4 +1,4 @@
-"""Validate tools2 v9 inputs and project causal animation v3 moments."""
+"""Validate tools2 v10 inputs and project causal animation v4 moments."""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ from tools2_common import ANIMATION_SCHEMA, ANIMATION_VERSION, PRODUCER, Protoco
 
 
 _HANDLER_KINDS = {"Transition", "Action"}
-_OUTCOMES = {"completed", "rejected", "failed", "truncated", "stopped"}
-_DELIVERIES = {"root", "drives", "emits"}
+_OUTCOMES = {"completed", "rejected", "failed", "truncated", "stopped", "yielded"}
+_DELIVERIES = {"root", "drives", "emits", "yields"}
 _INDEXED_CHILD = re.compile(r"^(?P<field>[A-Za-z_][A-Za-z0-9_]*)\[[^]]+\]$")
 _TERMINAL_EVENTS = {
     "response_completed": "completed",
@@ -20,6 +20,7 @@ _TERMINAL_EVENTS = {
     "signal_truncated": "truncated",
     "signal_stopped": "stopped",
     "response_stopped": "stopped",
+    "response_yielded": "yielded",
 }
 
 
@@ -245,7 +246,7 @@ def _project_signal(
     name = _required_string(signal, "name", label=label)
     delivery = _required_string(signal, "delivery", label=label)
     if delivery not in _DELIVERIES:
-        raise ProtocolError(f"{label}.delivery is not an animation v3 delivery: {delivery!r}")
+        raise ProtocolError(f"{label}.delivery is not an animation v4 delivery: {delivery!r}")
     if source not in systems and source != external:
         raise ProtocolError(f"{label}.source references unknown endpoint {source!r}")
     if target not in systems:
@@ -272,7 +273,7 @@ def _project_signal(
         handler_description = None
     outcome = signal.get("outcome")
     if outcome not in _OUTCOMES:
-        raise ProtocolError(f"{label}.outcome is not an animation v3 outcome: {outcome!r}")
+        raise ProtocolError(f"{label}.outcome is not an animation v4 outcome: {outcome!r}")
     reason = signal.get("reason")
     if reason is not None and not isinstance(reason, str):
         raise ProtocolError(f"{label}.reason must be a string or null")
@@ -336,7 +337,24 @@ def _moment(signal: dict[str, Any], *, kind: str, sequence: int) -> dict[str, An
         "reason": signal["reason"],
         "transfer": transfer,
         "response": deepcopy(signal["response"]),
+        "control": None,
     }
+
+
+def _yield_moment(
+    signal: dict[str, Any], *, kind: str, sequence: int, event: dict[str, Any]
+) -> dict[str, Any]:
+    moment = _moment(signal, kind=kind, sequence=sequence)
+    token_id = _required_string(event, "token_id", label=f"{kind} event")
+    moment["id"] = f"{signal['signal_id']}:{kind}:{token_id}"
+    moment["control"] = {
+        "token_id": token_id,
+        "lane": event.get("lane"),
+        "resume_coordinate": deepcopy(event.get("resume_coordinate")),
+        "resume_signal_id": event.get("resume_signal_id"),
+        "identity": event.get("identity"),
+    }
+    return moment
 
 
 def _validate_events(
@@ -354,6 +372,9 @@ def _validate_events(
     sent: set[str] = set()
     received: set[str] = set()
     terminal: dict[str, str] = {}
+    token_sources: dict[str, str] = {}
+    resumed_tokens: set[str] = set()
+    consumed_tokens: set[str] = set()
     next_signal_index = 0
 
     for event_index, event in enumerate(raw_events):
@@ -364,10 +385,51 @@ def _validate_events(
         if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence != event_index + 1:
             raise ProtocolError(f"{label}.sequence must be the next contiguous event sequence")
         kind = _required_string(event, "kind", label=label)
+        if kind == "yield_token_created":
+            signal_id = _required_string(event, "signal_id", label=label)
+            token_id = _required_string(event, "token_id", label=label)
+            signal = by_id.get(signal_id)
+            if signal is None or signal_id not in received:
+                raise ProtocolError(f"{label} must belong to a received source Signal")
+            if token_id in token_sources:
+                raise ProtocolError(f"YieldToken {token_id!r} was created more than once")
+            replay = deepcopy(
+                _validate_snapshot(event.get("snapshot"), label=f"{label}.snapshot")
+            )
+            token_sources[token_id] = signal_id
+            moments.append(
+                _yield_moment(signal, kind="yield", sequence=sequence, event=event)
+            )
+            moment_snapshots.append(deepcopy(replay))
+            continue
+        if kind == "yield_token_resumed":
+            token_id = _required_string(event, "token_id", label=label)
+            signal_id = token_sources.get(token_id)
+            if signal_id is None or token_id in resumed_tokens or token_id in consumed_tokens:
+                raise ProtocolError(f"{label} does not resume one pending YieldToken")
+            replay = deepcopy(
+                _validate_snapshot(event.get("snapshot"), label=f"{label}.snapshot")
+            )
+            resumed_tokens.add(token_id)
+            moments.append(
+                _yield_moment(by_id[signal_id], kind="resume", sequence=sequence, event=event)
+            )
+            moment_snapshots.append(deepcopy(replay))
+            continue
+        if kind == "yield_token_consumed":
+            token_id = _required_string(event, "token_id", label=label)
+            if token_id not in resumed_tokens or token_id in consumed_tokens:
+                raise ProtocolError(f"{label} does not consume one resumed YieldToken")
+            replay = deepcopy(
+                _validate_snapshot(event.get("snapshot"), label=f"{label}.snapshot")
+            )
+            consumed_tokens.add(token_id)
+            continue
         if kind in {
             "indexed_instance_declared",
             "dynamic_declared",
             "indexed_transaction_rolled_back",
+            "yielded_response_completed",
         } and "snapshot" in event:
             replay = deepcopy(
                 _validate_snapshot(event["snapshot"], label=f"{label}.snapshot")
@@ -457,9 +519,9 @@ def _validate_events(
                 replay, signal["_after_snapshot"], label=f"{label} terminal"
             )
         terminal[signal_id] = kind
-        if expected_outcome in {"truncated", "stopped"}:
+        if expected_outcome in {"truncated", "stopped", "yielded"}:
             moment_kind = "terminal"
-        elif signal["delivery"] == "emits":
+        elif signal["delivery"] in {"emits", "yields"}:
             moment_kind = "settle"
         else:
             moment_kind = "feedback"
@@ -472,6 +534,9 @@ def _validate_events(
             raise ProtocolError(f"Signal {signal_id!r} has no signal_sent event")
         if signal_id not in terminal:
             raise ProtocolError(f"Signal {signal_id!r} has no terminal event")
+    for token_id in resumed_tokens:
+        if token_id not in consumed_tokens:
+            raise ProtocolError(f"resumed YieldToken {token_id!r} was not consumed")
     for index, moment in enumerate(moments):
         moment["index"] = index
     return moments, moment_snapshots
@@ -588,7 +653,7 @@ def _build_frames(
 
 
 def build_animation(model: dict[str, Any], view: dict[str, Any]) -> dict[str, Any]:
-    """Build animation v3 moments without deriving any new Signal behavior."""
+    """Build animation v4 moments without deriving any new Signal behavior."""
     systems = _validate_systems(model, view)
     source, model_fingerprint = _validate_identity(model, view)
     inventory, occurrences, obligations, summary = _validate_boundary_projection(model, view)

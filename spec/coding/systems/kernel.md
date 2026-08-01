@@ -73,14 +73,13 @@ Kernel.Enable accepts
   -> PhysicalDirect.ActivateOnCpu(InitialActivation)
   -> BootInitFlow.Preset -> BootInitFlow.Setup -> BootInitFlow.Enable
   -> BootInitScheduleHandoff -> BootInitFlow.Online
-  -> Scheduler.schedule(): BootTask.Suspend, save, current/context commit
+  -> BootInitFlow yields Scheduler.Schedule
+  -> Scheduler.schedule(): save BootTask context, BootTask.Suspend, current/context commit
   -> physical switch to KernelInitTask
   -> KernelInitTask.Continue
-  -> kernel_init_entry() verifies actual SP and directly starts KernelInitFlow.Preset
-  -> KernelInitFlow.Preset: PreSmpInit, SmpBringup
-  -> KernelInitFlow.Setup: RuntimeCore, Initcall, Rootfs, Finalize, PayloadPrepare
-  -> KernelInitFlow.Enable: PayloadHandoffPrepare
-  -> KernelInitFlow.Online
+  -> KernelInitFlow contextual Continue verifies actual SP
+  -> KernelInitFlow.Online actions: PreSmpInit, SmpBringup, RuntimeCore,
+     Initcall, Rootfs, Finalize, PayloadPrepare, PayloadHandoffPrepare
   -> Kernel.Online
   -> Kernel emits KernelInitFlow.CommitPayloadHandoff
 ```
@@ -92,8 +91,8 @@ Continue 或运行 KernelInitFlow 叶阶段。`kernel_init_entry()` 验证 PID 1
 continuation，后者验证 Kernel Ready 且 Enable 已接受、BootInitFlow Online、KernelInitTask OnCpu、CurrentTask
 identity 和 entry count，再执行 KernelInitFlow 的第一个叶阶段。
 
-UserBoot 的 commit action 完成旧 Flow Disable、active handoff、新 Flow Enable 和旧 Flow Cleanup；
-Hello/Smoke 保持 KernelInitFlow，不进行 Flow replacement。准备期断言必须要求 Kernel Ready 且 Enable
+UserBoot 的 commit action 仅替换 KernelInitFlow 私有 UserAppRuntime 内的 ApplicationInstance；
+Hello/Smoke 与用户 payload 都保持 KernelInitFlow。准备期断言必须要求 Kernel Ready 且 Enable
 已接受；commit action 必须要求 Kernel 已经 Online，且不得修改 Kernel 状态。唯一 action sender 是
 已经完成 Online 提交的 Kernel.Enable，KernelInitFlow.Enable 不得自行发送。
 
@@ -101,6 +100,6 @@ Hello/Smoke 保持 KernelInitFlow，不进行 Flow replacement。准备期断言
 
 - KernelInitFlow 每个 transition/action 都即时检查 parent KernelInitTask 为 OnCpu。
 - guard 任一条件失败必须在状态和 checkpoint 修改前 fail-stop。
-- KthreaddFlow 只承载服务循环；BootIdleFlow 只直接拥有 BootIdleEntryPhase；UserAppFlow 只承载应用
-  continuation/黑盒。
+- KthreaddFlow 只承载服务循环；BootInitFlow 直接拥有 BootIdleEntryPhase；UserTaskFlow
+  拥有稳定 UserAppRuntime。
 - AP Entry/Callin/OnlineIdle 不得伪装成 KernelInitFlow 子阶段。

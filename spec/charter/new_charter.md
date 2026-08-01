@@ -42,13 +42,12 @@ PID、CPU 归属、调度状态、线程切换上下文以及它拥有的 Flow �
 内核线程都使用同一 Task 类型；idle、init、
 kthread 或测试角色只是 Task metadata，不能成为另一套 lifecycle、PID 或 switch-context carrier。
 
-`TaskFlow` 是 Task 上一段 execution continuation 的独立生命周期载体。每个 Flow 恰有一个 owner
-Task；一个 Task 可以按执行历史拥有多个 Flow，但任一时刻最多只能有一个 active Flow。exec 和
-boot-idle handoff 保持 Task identity，只替换 active Flow；fork/clone 才创建 fresh Task，并为它
-创建 fresh Flow。syscall、files、credentials、signal、地址空间等资源归属于实际当前 Task，不能
+`TaskFlow` 是 Task 终身唯一的 execution continuation 载体。每个 Flow 恰有一个 owner Task，每个 Task
+也恰有一个不可变 Flow；exec 只替换 Flow-owned UserAppRuntime 内部 ApplicationInstance，fork/clone
+才创建 fresh Task、fresh Flow 和 fresh Runtime。syscall、files、credentials、signal、地址空间等资源归属于实际当前 Task，不能
 因为启动主线最初由 `KernelInitTask`（PID 1）执行就一律归入它。
 
-每个 Task 以 typed `initial_flow` association 固定记录创建时 Flow；BootTask、KernelInitTask 和
+每个 Task 以 typed `flow` association 固定记录终身 Flow；BootTask、KernelInitTask 和
 KthreaddTask 分别绑定 `BootInitFlow`、`KernelInitFlow` 和 `KthreaddFlow`。TaskFlow 继承
 PhaseObject 并以 `parent: Task` 约束 owner，但不拥有 guard 字段、guard 状态或 `process_guard`
 类型块。每个 Flow lifecycle/执行 action 在尝试推进时即时检查 parent Task 为 OnCpu。
@@ -111,9 +110,9 @@ Base 尚未完成规格采纳，Prepared 已建立规格，Ready 已构造且可
 Human 在模型外部依次同步 drives Computer.Preset、Computer.Setup，二者成功后异步 emits
 Computer.Enable；Computer 的三个 handler 不相互触发。子 System 规格和构造使用同步 `drives`。运行交接按
 `Computer.Enable -> Riscv64Platform.Enable -> OpenSBI.Enable -> Kernel.Enable` 异步推进；
-Kernel.Enable 同步驱动 `BootInitFlow` 的三段 lifecycle。BootInitFlow 提交 Online 后，当前
-BootTask 的 active `BootIdleFlow` 才向 CPU0 拥有的 Scheduler 异步 `emits Schedule()`；首次非
-identity switch 的 Task/TaskFlow continuation 再承载 KernelInitFlow 的后续执行。
+Kernel.Enable 同步驱动 `BootInitFlow` 的三段 lifecycle。BootInitFlow 提交 Online 后，同一固定 Flow
+向 CPU0 Scheduler `yields Schedule()`；non-identity switch 的显式 context save/restore 和统一
+Task/TaskFlow Continue 再承载 KernelInitFlow 的后续执行。
 
 > MUST[model]：Computer 模型
 >
@@ -192,12 +191,12 @@ identity switch 的 Task/TaskFlow continuation 再承载 KernelInitFlow 的后�
 
 ### 启动执行阶段 BootInitFlow
 
-`BootInitFlow` 是静态 `BootTask.initial_flow` 指向的 TaskFlow；TaskFlow 继承 PhaseObject，因此它使用标准
+`BootInitFlow` 是静态 `BootTask.flow` 指向的终身 TaskFlow；TaskFlow 继承 PhaseObject，因此它使用标准
 `Base -> Prepared -> Ready -> Online` 生命周期。Preset 直接执行入口前导对象编排；Setup 直接顺序驱动
 `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、`SchedInitPhase`、`IrqTimeInitPhase`、
 `LocalIrqEnablePhase`、`IrqOpenPreparePhase`、`ProcessPreparePhase`、`BootInitRestInitPhase`；Enable 只驱动
 `BootInitScheduleHandoffPhase`。三段 lifecycle 由 Kernel.Enable 依次驱动；Enable 提交 Online 后，
-当前 BootTask 的 active `BootIdleFlow` 向 CPU0 Scheduler `emits Schedule()`。不存在 `BootPhase` 或 `InterruptPhase` 包装
+同一 Flow 的 Online Action 向 CPU0 Scheduler `yields Schedule()`。不存在 `BootPhase` 或 `InterruptPhase` 包装
 lifecycle，也不产生第二次 Kernel Enable 接受。
 
 ### BootInitFlow.Preset 的入口前导步骤
@@ -268,10 +267,9 @@ identity、active Flow、`BootTask.stack` identity/range 与当前 CPU 的地址
 ### BootInitFlow Enable
 
 同一 `BootTask` 保持 PID 0 与 Task identity；`BootInitRestInitPhase` 完整驱动具有各自 Task identity
-与初始 Flow 的 `KernelInitTask` 和 `KthreaddTask` Preset/Setup/Enable；Task Enable 只发布 Online，
-不启动 Flow。`BootInitScheduleHandoffPhase` 预检并提交首次调度事实。`BootInitFlow` 是 BootTask 的
-initial Flow；`BootIdleFlow` 是后继 active continuation，
-且不会改写 `BootTask.initial_flow`。
+与固定 Flow 的 `KernelInitTask` 和 `KthreaddTask` Preset/Setup/Enable；Task Enable 发布
+Online/None/Valid，固定 Flow 同时已 Online。`BootInitScheduleHandoffPhase` 预检并提交首次调度事实；
+BootInitFlow Online Actions 继续承载 schedule return 和 idle continuation。
 
 #### BootInitRestInitPhase
 
@@ -283,16 +281,15 @@ initial Flow；`BootIdleFlow` 是后继 active continuation，
 
 #### BootIdleEntryPhase
 
-它是 `BootIdleFlow` 的子 Phase，只在调度器未来恢复 BootTask 后执行，不属于 BootInitFlow 的完成链。
+它是 `BootInitFlow` 的 Online 子 Phase，只在调度器未来恢复 BootTask 并由 contextual Continue 回到
+schedule 返回点后执行。
 
 ### KernelInitFlow 直接叶子
 
-首次 dispatch 必须先同步提交 `BootTask.Suspend`，在真实栈切换后才由 Scheduler drives
-`KernelInitTask.Activate` 提交 OnCpu；PID 1 的真实入口由 Scheduler 直接向 `KernelInitFlow` emits
-Startup。实际 body 必须在 `kernel_init_entry()` 验证 PID 1
-vmalloc stack 后执行。Preset 驱动 `PreSmpInitPhase` 和
-`SmpBringupPhase`，Setup 驱动 runtime/rootfs/finalize 与 `PayloadPreparePhase`，Enable 只驱动
-`PayloadHandoffPreparePhase`。
+首次 dispatch 必须显式保存 BootTask context并 Suspend；真实栈切换后 Scheduler 恢复 PID 1 context、
+提交 CurrentTask/CurrentStack、drives KernelInitTask.Continue，再向已 Online 的固定 KernelInitFlow
+交付 contextual Continue。首个 context 从 `kernel_init_entry()` 验证 PID 1 vmalloc stack后执行全部
+PreSMP/SMP/runtime/rootfs/finalize/payload 叶子。
 
 #### PreSmpInitPhase
 
@@ -321,9 +318,9 @@ vmalloc stack 后执行。Preset 驱动 `PreSmpInitPhase` 和
 ### Payload 准备与 commit
 
 `PayloadPreparePhase.Online` 是原 payload Ready 的 selection boundary；
-`PayloadHandoffPreparePhase.Online` 是可逆 precommit。`KernelInitFlow` Online 后的
-Kernel.Online commit 作为唯一发送者发出 `CommitPayloadHandoff`，才执行 UserBoot Flow replacement；
-Hello/Smoke 不替换 Flow。
+`PayloadHandoffPreparePhase.Online` 是可逆 precommit。Kernel.Online commit 作为唯一发送者发出
+`CommitPayloadHandoff`，UserBoot 随后只替换稳定 UserAppRuntime 内部的 ApplicationInstance；
+Hello/Smoke 同样保持固定 Flow。
 
 #### PayloadExecSyncBoundaries
 

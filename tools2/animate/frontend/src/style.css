@@ -170,6 +170,8 @@ dd {
 .node-card.signal-source { box-shadow: 0 0 0 .18rem rgb(67 113 83 / 18%), 0 .6rem 1.5rem rgb(24 42 32 / 10%); }
 .node-card.signal-target.request-arrival { border-color: #2f7650; box-shadow: 0 0 0 .22rem rgb(76 146 99 / 20%), 0 .75rem 1.75rem rgb(24 42 32 / 12%); animation: request-arrival 480ms ease-in-out; }
 .node-card.signal-target.feedback-response { border-color: #2f7650; animation: feedback-response 420ms ease-out; }
+.node-card.signal-target.yielding { border-color: #9b6b1f; box-shadow: 0 0 0 .22rem rgb(155 107 31 / 18%); }
+.node-card.signal-target.resuming { border-color: #2f7650; box-shadow: 0 0 0 .22rem rgb(47 118 80 / 18%); }
 .node-card.signal-target.settling { border-color: #52705e; box-shadow: 0 0 0 .2rem rgb(82 112 94 / 18%), 0 .75rem 1.75rem rgb(24 42 32 / 10%); }
 .node-card.action-response { animation-name: feedback-response; }
 .node-card.error-response { border-color: #b33636; animation: error-response 420ms ease-out; }

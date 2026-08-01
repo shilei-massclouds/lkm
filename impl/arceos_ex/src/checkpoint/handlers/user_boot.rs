@@ -55,7 +55,7 @@ const SCOPE: &[Checkpoint] = &[
     #[cfg(app_user_boot)]
     Checkpoint::UserAddressSpaceReady,
     #[cfg(app_user_boot)]
-    Checkpoint::UserAppFlowEnterUserMode,
+    Checkpoint::UserAppRuntimeEnterUserMode,
     #[cfg(app_user_boot)]
     Checkpoint::SyscallTableExecveArgsReady,
     #[cfg(app_user_boot)]
@@ -235,7 +235,7 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> Checkpoint
             sink.diag_usize("tlb_flush", ctx.user_stack.last_tlb_flush() as usize);
         }
         #[cfg(app_user_boot)]
-        Checkpoint::UserAppFlowEnterUserMode => {
+        Checkpoint::UserAppRuntimeEnterUserMode => {
             run_user_mode_entry(checkpoint, ctx, sink, total);
         }
         #[cfg(app_user_boot)]
@@ -419,8 +419,8 @@ fn run_selected_payload_handoff(
         && crate::phases::payload::handoff_prepare::is_online()
         && crate::systems::kernel::state() == State::Ready
         && crate::systems::kernel::enable_in_progress()
-        && ctx.kernel_init_flow.state() == State::Ready
-        && !ctx.kernel_init_flow.released()
+        && ctx.kernel_init_flow.state() == State::Online
+        && ctx.kernel_init_flow.owner_bound()
         && handoff.state() == State::Online
         && handoff.kind() == ctx.config.selected_payload_kind()
         && handoff.kind_bound()
@@ -443,7 +443,7 @@ fn run_selected_payload_handoff(
 #[cfg(app_user_boot)]
 fn selected_variant_state_ready(ctx: &Context) -> bool {
     ctx.user_boot_payload.state() == State::Ready
-        && ctx.user_app_flow.state() == State::Ready
+        && ctx.kernel_init_user_runtime.state() == State::Ready
         && !ctx.user_boot_payload.enters_user_mode()
         && !ctx.user_boot_payload.no_return_handoff()
 }
@@ -473,21 +473,19 @@ fn run_payload_handoff_committed(
 
 #[cfg(app_user_boot)]
 fn committed_variant_state_valid(ctx: &Context) -> bool {
-    ctx.kernel_init_flow.state() == State::Destroyed
-        && ctx.kernel_init_flow.released()
-        && ctx.user_app_flow.state() == State::Online
-        && ctx.user_app_flow.active_binding_committed()
-        && ctx.kernel_init_task.user_flow_active()
-        && ctx.kernel_init_task.flow_handoff_committed()
+    ctx.kernel_init_flow.state() == State::Online
+        && ctx.kernel_init_flow.owner_bound()
+        && ctx.kernel_init_user_runtime.state() == State::Online
+        && ctx.kernel_init_user_runtime.active_binding_committed()
+        && ctx.kernel_init_task.application_committed()
         && ctx.user_boot_payload.state() == State::Online
 }
 
 #[cfg(not(app_user_boot))]
 fn committed_variant_state_valid(ctx: &Context) -> bool {
     ctx.kernel_init_flow.state() == State::Online
-        && ctx.kernel_init_flow.active()
-        && ctx.kernel_init_task.kernel_init_flow_active()
-        && !ctx.kernel_init_flow.released()
+        && ctx.kernel_init_flow.owner_bound()
+        && ctx.kernel_init_task.kernel_init_flow_owned()
 }
 
 #[cfg(app_user_boot)]
@@ -505,12 +503,12 @@ fn emit_execve_checkpoint_diag(checkpoint: Checkpoint, sink: &mut dyn Sink) {
     let (task_ref, flow_ref) = if ctx.user_task_set.active_task_ref().is_valid() {
         (
             ctx.user_task_set.active_task_ref(),
-            ctx.user_task_set.active_flow_ref(),
+            ctx.user_task_set.flow_ref(),
         )
     } else {
         (
             ctx.kernel_init_task.task_ref(),
-            ctx.user_app_flow.flow_ref(),
+            ctx.kernel_init_user_runtime.flow_ref(),
         )
     };
     sink.diag_usize("execve_task_ref_slot", task_ref.slot());
@@ -946,9 +944,9 @@ fn run_user_mode_entry(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sin
         && ctx.user_trap_frame.user_fpu_initial()
         && ctx.user_trap_frame.fpu_context_switch_deferred()
         && ctx.user_trap_frame.sret_ready()
-        && ctx.user_app_flow.state() == State::Online
-        && ctx.user_app_flow.task_ref_owner() == ctx.kernel_init_task.task_ref()
-        && ctx.user_app_flow.flow_generation() != 0
+        && ctx.kernel_init_user_runtime.state() == State::Online
+        && ctx.kernel_init_user_runtime.task_ref_owner() == ctx.kernel_init_task.task_ref()
+        && ctx.kernel_init_user_runtime.flow_generation() != 0
         && ctx.files_struct.state() == State::Ready
         && ctx.files_struct.stdio_bound()
         && ctx.files_struct.fd_bound(FdRef::Stdout)
@@ -976,10 +974,13 @@ fn run_user_mode_entry(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sin
         "kernel_init_task_generation",
         ctx.kernel_init_task.task_ref().generation() as usize,
     );
-    sink.diag_usize("user_flow_ref_slot", ctx.user_app_flow.flow_ref().slot());
     sink.diag_usize(
-        "user_flow_generation",
-        ctx.user_app_flow.flow_generation() as usize,
+        "user_runtime_flow_ref_slot",
+        ctx.kernel_init_user_runtime.flow_ref().slot(),
+    );
+    sink.diag_usize(
+        "user_runtime_flow_generation",
+        ctx.kernel_init_user_runtime.flow_generation() as usize,
     );
     sink.diag_usize(
         "trap_return_context_used",
@@ -1466,7 +1467,7 @@ fn run_user_clone_vfork_child_handoff(
     let child = &ctx.user_task_set;
     let child_task_ref = child.active_task_ref();
     let current_task_ref = ctx.current_task_ref().unwrap_or(TaskRef::NONE);
-    let child_flow_ref = child.active_flow_ref();
+    let child_flow_ref = child.flow_ref();
     let valid = child.vfork_clone()
         && child.vfork_child_handoff()
         && child.current_child_continuation()
@@ -2083,7 +2084,7 @@ fn run_syscall_table_wait4(
     let obs = wait4_checkpoint_observation();
     let child_task_ref = child.active_task_ref();
     let current_task_ref = ctx.current_task_ref().unwrap_or(TaskRef::NONE);
-    let child_flow_ref = child.active_flow_ref();
+    let child_flow_ref = child.flow_ref();
     let child_dispatch_valid = child.active_task_state() == State::OnCpu
         && current_task_ref.same_identity(child_task_ref)
         && child_flow_ref.is_valid();

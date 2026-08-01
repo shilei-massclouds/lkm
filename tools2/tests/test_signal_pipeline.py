@@ -169,6 +169,475 @@ class SignalPipelineTests(unittest.TestCase):
                 "  Root -- Observe --> Sink\n",
             )
 
+    def test_yields_is_immediate_non_fifo_and_has_no_implicit_machine_delta(self) -> None:
+        source = """
+            system Flow {
+                initial_state: State::Online;
+                state State::Online {
+                    actions {
+                        on Action::Run {
+                            state_effect: StateEffect::None;
+                            yields { Target.Action::Noop; }
+                        }
+                        on Action::Continue { state_effect: StateEffect::None; }
+                    }
+                }
+            }
+            system Target {
+                initial_state: State::Online;
+                state State::Online {
+                    actions {
+                        on Action::Noop { state_effect: StateEffect::None; }
+                    }
+                }
+            }
+        """
+        derivation, checked, _ = self.run_source(source, "Flow.Run")
+        self.assertEqual(checked["verdict"], "complete", derivation.get("failure"))
+        self.assertEqual(
+            [(item["target"], item["delivery"], item["outcome"]) for item in derivation["signals"]],
+            [("Flow", "root", "completed"), ("Target", "yields", "completed")],
+        )
+        self.assertFalse(
+            any(event["kind"].startswith("emits_") for event in derivation["events"])
+        )
+        before = derivation["signals"][0]["before_snapshot"]
+        after = derivation["signals"][0]["after_snapshot"]
+        for field in ("states", "facts", "references", "contextual_bindings", "instances"):
+            self.assertEqual(before[field], after[field], field)
+        self.assertEqual(after["contextual_bindings"], {})
+        self.assertEqual(after["yield_tokens"], {})
+        consumed = next(
+            event
+            for event in derivation["events"]
+            if event["kind"] == "yield_token_consumed"
+        )
+        token = consumed["token"]
+        self.assertEqual(
+            (token["outcome"], token["identity_return"], token["context_epoch"]),
+            ("resumed", True, 0),
+        )
+        positions = {
+            kind: next(
+                event["sequence"]
+                for event in derivation["events"]
+                if event["kind"] == kind
+            )
+            for kind in (
+                "yield_token_created",
+                "yield_default_resume_attempt",
+                "yield_token_resumed",
+                "yield_token_consumed",
+            )
+        }
+        target_completed = next(
+            event["sequence"]
+            for event in derivation["events"]
+            if event["kind"] == "response_completed" and event["signal_id"] == "sig-0002"
+        )
+        self.assertLess(positions["yield_token_created"], target_completed)
+        self.assertLess(target_completed, positions["yield_default_resume_attempt"])
+        self.assertLess(positions["yield_default_resume_attempt"], positions["yield_token_resumed"])
+        self.assertLess(positions["yield_token_resumed"], positions["yield_token_consumed"])
+        serialized = json.dumps(after, sort_keys=True)
+        for forbidden in ('"ra"', '"sp"', '"s0"', "CurrentTask", "CurrentStack", "runqueue"):
+            self.assertNotIn(forbidden, serialized)
+
+    def test_yields_resumes_exactly_once_through_contextual_continue(self) -> None:
+        source = """
+            predicate source_tail_completed<S>(source: S) -> bool;
+            system FlowA {
+                initial_state: State::Online;
+                state State::Online {
+                    transitions {
+                        on Transition::Park -> State::Ready { }
+                    }
+                    actions {
+                        on Action::Run {
+                            state_effect: StateEffect::None;
+                            yields { Scheduler.Action::Schedule; }
+                            ensures { source_tail_completed(self); }
+                        }
+                    }
+                }
+                state State::Ready {
+                    transitions {
+                        on Transition::Restore -> State::Online { }
+                    }
+                    actions {
+                        on Action::Continue {
+                            state_effect: StateEffect::None;
+                            drives { FlowA.Transition::Restore; }
+                        }
+                    }
+                }
+            }
+            system Scheduler {
+                initial_state: State::Online;
+                state State::Online {
+                    actions {
+                        on Action::Schedule {
+                            state_effect: StateEffect::None;
+                            drives {
+                                FlowA.Transition::Park;
+                                FlowA.Action::Continue;
+                            }
+                        }
+                    }
+                }
+            }
+        """
+        derivation, checked, rendered = self.run_source(source, "FlowA.Run")
+        self.assertEqual(checked["verdict"], "complete", rendered)
+        self.assertEqual(
+            [item["delivery"] for item in derivation["signals"]],
+            ["root", "yields", "drives", "drives", "drives"],
+        )
+        self.assertEqual(derivation["last_stable_snapshot"]["yield_tokens"], {})
+        token = next(
+            event["token"]
+            for event in derivation["events"]
+            if event["kind"] == "yield_token_consumed"
+        )
+        self.assertEqual(token["outcome"], "resumed")
+        self.assertFalse(token["identity_return"])
+        self.assertEqual(token["continue_occurrences"], 1)
+        self.assertIn(
+            "source_tail_completed(FlowA)", derivation["last_stable_snapshot"]["facts"]
+        )
+        self.assertEqual(
+            sum(event["kind"] == "yield_token_resumed" for event in derivation["events"]),
+            1,
+        )
+
+    def test_yields_generic_nonempty_target_and_nested_resume_order(self) -> None:
+        source = """
+            predicate a_tail_done() -> bool;
+            predicate b_tail_done() -> bool;
+            predicate c_body_done() -> bool;
+            system FlowA {
+                initial_state: State::Online;
+                state State::Online {
+                    actions {
+                        on Action::Run {
+                            state_effect: StateEffect::None;
+                            yields { FlowB.Action::Run; }
+                            ensures { a_tail_done(); }
+                        }
+                    }
+                }
+            }
+            system FlowB {
+                initial_state: State::Online;
+                state State::Online {
+                    actions {
+                        on Action::Run {
+                            state_effect: StateEffect::None;
+                            yields { FlowC.Action::Run; }
+                            ensures { b_tail_done(); }
+                        }
+                    }
+                }
+            }
+            system FlowC {
+                initial_state: State::Online;
+                state State::Online {
+                    actions {
+                        on Action::Run {
+                            state_effect: StateEffect::None;
+                            ensures { c_body_done(); }
+                        }
+                    }
+                }
+            }
+        """
+        derivation, checked, rendered = self.run_source(source, "FlowA.Run")
+        self.assertEqual(checked["verdict"], "complete", rendered)
+        self.assertEqual(
+            [(item["target"], item["delivery"], item["outcome"]) for item in derivation["signals"]],
+            [
+                ("FlowA", "root", "completed"),
+                ("FlowB", "yields", "completed"),
+                ("FlowC", "yields", "completed"),
+            ],
+        )
+        completions = [
+            event["signal_id"]
+            for event in derivation["events"]
+            if event["kind"] == "response_completed"
+            and event["signal_id"] in {"sig-0001", "sig-0002", "sig-0003"}
+        ]
+        self.assertEqual(completions, ["sig-0003", "sig-0002", "sig-0001"])
+        self.assertEqual(
+            sum(event["kind"] == "yield_token_created" for event in derivation["events"]),
+            2,
+        )
+        self.assertEqual(
+            sum(event["kind"] == "yield_token_consumed" for event in derivation["events"]),
+            2,
+        )
+        self.assertEqual(derivation["last_stable_snapshot"]["yield_tokens"], {})
+        self.assertTrue(
+            {"a_tail_done", "b_tail_done", "c_body_done"}.issubset(
+                derivation["last_stable_snapshot"]["facts"]
+            )
+        )
+
+    def test_yields_target_failure_and_duplicate_resume_are_terminal(self) -> None:
+        target_failure = """
+            predicate source_tail_done() -> bool;
+            predicate child_allowed() -> bool;
+            system Source {
+                initial_state: State::Online;
+                state State::Online {
+                    actions {
+                        on Action::Run {
+                            state_effect: StateEffect::None;
+                            yields { Target.Action::Work; }
+                            ensures { source_tail_done(); }
+                        }
+                    }
+                }
+            }
+            system Target {
+                initial_state: State::Online;
+                state State::Online {
+                    actions {
+                        on Action::Work {
+                            state_effect: StateEffect::None;
+                            drives { Child.Action::Fail; }
+                        }
+                    }
+                }
+            }
+            system Child {
+                initial_state: State::Online;
+                state State::Online {
+                    actions {
+                        on Action::Fail {
+                            state_effect: StateEffect::None;
+                            depends_on { child_allowed(); }
+                        }
+                    }
+                }
+            }
+        """
+        failed, failed_check, _ = self.run_source(target_failure, "Source.Run")
+        self.assertEqual(failed_check["verdict"], "failed")
+        self.assertTrue(
+            any(event["kind"] == "yield_token_created" for event in failed["events"])
+        )
+        self.assertFalse(
+            any(event["kind"] == "yield_token_consumed" for event in failed["events"])
+        )
+        self.assertNotIn("source_tail_done", failed["last_stable_snapshot"]["facts"])
+
+        duplicate = """
+            system Source {
+                initial_state: State::Online;
+                state State::Online {
+                    actions {
+                        on Action::Run {
+                            state_effect: StateEffect::None;
+                            yields { Target.Action::Work; }
+                        }
+                        on Action::Continue { state_effect: StateEffect::None; }
+                    }
+                }
+            }
+            system Target {
+                initial_state: State::Online;
+                state State::Online {
+                    actions {
+                        on Action::Work {
+                            state_effect: StateEffect::None;
+                            emits { Source.Action::Continue; }
+                        }
+                    }
+                }
+            }
+        """
+        repeated, repeated_check, _ = self.run_source(duplicate, "Source.Run")
+        self.assertEqual(repeated_check["verdict"], "failed")
+        self.assertIn("duplicate_yield_resume", repeated["failure"]["reason"])
+
+    def test_yield_token_snapshot_round_trip_and_terminal_resume_errors(self) -> None:
+        source = """
+            predicate source_tail_completed<S>(source: S) -> bool;
+            system FlowA {
+                initial_state: State::Online;
+                state State::Online {
+                    transitions {
+                        on Transition::Park -> State::Ready { }
+                    }
+                    actions {
+                        on Action::Run {
+                            state_effect: StateEffect::None;
+                            yields { Scheduler.Action::Schedule; }
+                            ensures { source_tail_completed(self); }
+                        }
+                    }
+                }
+                state State::Ready {
+                    transitions {
+                        on Transition::Restore -> State::Online { }
+                    }
+                    actions {
+                        on Action::Continue {
+                            state_effect: StateEffect::None;
+                            drives { FlowA.Transition::Restore; }
+                        }
+                    }
+                }
+            }
+            system Scheduler {
+                initial_state: State::Online;
+                state State::Online {
+                    actions {
+                        on Action::Schedule {
+                            state_effect: StateEffect::None;
+                            drives { FlowA.Transition::Park; }
+                        }
+                    }
+                }
+            }
+        """
+        yielded, yielded_check, _ = self.run_source(source, "FlowA.Run")
+        self.assertEqual(
+            (yielded["verdict"], yielded_check["allowed"]),
+            ("yielded", True),
+            yielded.get("failure"),
+        )
+        snapshot = yielded["last_stable_snapshot"]
+        token_id = next(iter(snapshot["yield_tokens"]))
+        self.assertEqual(snapshot["yield_tokens"][token_id]["outcome"], "yielded")
+
+        resumed, resumed_check, _ = self.run_source(
+            source, "FlowA.Continue", scenario=snapshot
+        )
+        self.assertEqual(resumed_check["verdict"], "complete")
+        self.assertEqual(resumed["last_stable_snapshot"]["yield_tokens"], {})
+        self.assertIn(
+            "source_tail_completed(FlowA)", resumed["last_stable_snapshot"]["facts"]
+        )
+
+        for field, value, expected in (
+            ("generation", 99, "stale_yield_generation"),
+            ("context_epoch", 1, "yield_token_lane_mismatch"),
+            ("cpu", "WrongCPU", "yield_token_lane_mismatch"),
+            ("flow_ref", "FlowB", "yield_token_lane_mismatch"),
+        ):
+            damaged = deepcopy(snapshot)
+            damaged["yield_tokens"][token_id][field] = value
+            failed, failed_check, _ = self.run_source(
+                source, "FlowA.Continue", scenario=damaged
+            )
+            self.assertEqual(failed_check["verdict"], "failed", field)
+            self.assertIn(expected, failed["failure"]["reason"], field)
+
+    def test_yields_model_constraints_and_precommit_rejection(self) -> None:
+        cases = {
+            "transition": (
+                "on Transition::Run -> State::Ready",
+                "state_effect: StateEffect::None; yields { Scheduler.Action::Schedule; }",
+                "yields is allowed only in Action handlers",
+            ),
+            "state-effect": (
+                "on Action::Run",
+                "state_effect: StateEffect::Conditional; yields { Scheduler.Action::Schedule; }",
+                "yields requires state_effect: StateEffect::None",
+            ),
+            "multiple": (
+                "on Action::Run",
+                "state_effect: StateEffect::None; yields { Scheduler.Action::Schedule; } yields { Scheduler.Action::Schedule; }",
+                "at most one yields call",
+            ),
+        }
+        for name, (declaration, body, message) in cases.items():
+            with self.subTest(name=name):
+                source = f"""
+                    system Flow {{
+                        initial_state: State::Base;
+                        state State::Base {{ actions {{ {declaration} {{ {body} }} }} }}
+                        state State::Ready {{ }}
+                    }}
+                    system Scheduler {{
+                        initial_state: State::Online;
+                        state State::Online {{
+                            actions {{ on Action::Schedule {{ state_effect: StateEffect::None; }} }}
+                        }}
+                    }}
+                """
+                derivation, checked, rendered = self.run_source(source, "Flow.Run")
+                self.assertEqual(checked["verdict"], "failed")
+                self.assertIn(message, rendered)
+
+        rejected_source = """
+            predicate schedule_allowed() -> bool;
+            system Flow {
+                initial_state: State::Online;
+                state State::Online {
+                    actions {
+                        on Action::Run {
+                            state_effect: StateEffect::None;
+                            yields { Scheduler.Action::Schedule; }
+                        }
+                    }
+                }
+            }
+            system Scheduler {
+                initial_state: State::Online;
+                state State::Online {
+                    actions {
+                        on Action::Schedule {
+                            state_effect: StateEffect::None;
+                            depends_on { schedule_allowed(); }
+                        }
+                    }
+                }
+            }
+        """
+        rejected, rejected_check, _ = self.run_source(rejected_source, "Flow.Run")
+        self.assertEqual(rejected_check["verdict"], "failed")
+        self.assertEqual(len(rejected["signals"]), 1)
+        self.assertEqual(rejected["last_stable_snapshot"]["yield_tokens"], {})
+        self.assertEqual(rejected["last_stable_snapshot"]["task_flow_lanes"], {})
+
+        postcommit_source = """
+            system Flow {
+                initial_state: State::Online;
+                state State::Online {
+                    actions {
+                        on Action::Run {
+                            state_effect: StateEffect::None;
+                            yields { Scheduler.Action::Schedule; }
+                        }
+                    }
+                }
+            }
+            system Missing {
+                initial_state: State::Online;
+                state State::Online { }
+            }
+            system Scheduler {
+                initial_state: State::Online;
+                state State::Online {
+                    actions {
+                        on Action::Schedule {
+                            state_effect: StateEffect::None;
+                            drives { Missing.Action::Continue; }
+                        }
+                    }
+                }
+            }
+        """
+        postcommit, postcommit_check, _ = self.run_source(postcommit_source, "Flow.Run")
+        self.assertEqual(postcommit_check["verdict"], "failed")
+        token = next(iter(postcommit["last_stable_snapshot"]["yield_tokens"].values()))
+        self.assertEqual((token["status"], token["outcome"]), ("terminal-failed", "failed"))
+        lane = next(iter(postcommit["last_stable_snapshot"]["task_flow_lanes"].values()))
+        self.assertEqual(lane["state"], "terminal-failed")
+
     def test_handler_model_comments_are_display_metadata_through_view(self) -> None:
         source = """
             system Root {
@@ -996,7 +1465,7 @@ class SignalPipelineTests(unittest.TestCase):
             data = read_json(ast)
             self.assertEqual((data["schema"], data["version"], data["producer"]), (AST_SCHEMA, AST_VERSION, PRODUCER))
 
-            for old_version in (1, 2, 3, 4, 5, 6, 7, 8):
+            for old_version in range(1, 10):
                 old = root / f"old-v{old_version}.ast.json"
                 old.write_text(
                     json.dumps(
@@ -1013,7 +1482,7 @@ class SignalPipelineTests(unittest.TestCase):
                 stderr = io.StringIO()
                 with contextlib.redirect_stderr(stderr):
                     self.assertEqual(model_main([str(old), "-o", str(root / "no.json")]), 2)
-                self.assertIn("version=9", stderr.getvalue())
+                self.assertIn("version=10", stderr.getvalue())
 
                 old_snapshot = root / f"old-v{old_version}.snapshot.json"
                 old_snapshot.write_text(
@@ -1308,7 +1777,7 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(len(modeled["model"]["boundary_inventory"]), 1)
             self.assertTrue(any("duplicate boundary id" in item["message"] for item in modeled["diagnostics"]))
 
-    def test_obligation_blocks_snapshot_create_or_overwrite_and_zero_allows_v9(self) -> None:
+    def test_obligation_blocks_snapshot_create_or_overwrite_and_zero_allows_v10(self) -> None:
         template = """
             system Root {{
                 initial_state: State::Base;
@@ -1372,7 +1841,7 @@ class SignalPipelineTests(unittest.TestCase):
                 )
             saved = read_json(allowed_snapshot)
             self.assertEqual(saved["version"], SNAPSHOT_VERSION)
-            self.assertEqual(saved["version"], 9)
+            self.assertEqual(saved["version"], 10)
             self.assertTrue(read_json(root / "allowed-work" / "check.json")["allowed"])
 
     def test_every_tools2_consumer_rejects_wrong_producer(self) -> None:
@@ -1397,7 +1866,7 @@ class SignalPipelineTests(unittest.TestCase):
                 self.assertEqual(exit_code, 2)
                 self.assertIn("producer='tools2'", stderr.getvalue())
 
-    def test_every_tools2_consumer_rejects_pre_v9_protocols(self) -> None:
+    def test_every_tools2_consumer_rejects_pre_v10_protocols(self) -> None:
         cases = [
             (model_main, AST_SCHEMA, []),
             (derive_main, MODEL_SCHEMA, ["--signal", "Root.Go"]),
@@ -1407,7 +1876,7 @@ class SignalPipelineTests(unittest.TestCase):
         ]
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            for old_version in (1, 2, 3, 4, 5, 6, 7, 8):
+            for old_version in range(1, 10):
                 for index, (entry, schema, extra) in enumerate(cases):
                     source = root / f"input-v{old_version}-{index}.json"
                     source.write_text(
@@ -1422,7 +1891,7 @@ class SignalPipelineTests(unittest.TestCase):
                             [str(source), *extra, "-o", str(root / f"out-v{old_version}-{index}")]
                         )
                     self.assertEqual(exit_code, 2)
-                    self.assertIn("version=9", stderr.getvalue())
+                    self.assertIn("version=10", stderr.getvalue())
 
     def test_include_is_resolved_and_retains_child_source_span(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1643,7 +2112,7 @@ class SignalPipelineTests(unittest.TestCase):
         self.assertNotIn("pending", {item["outcome"] for item in derivation["signals"]})
         self.assertIn("!! rejected: condition_not_satisfied", text)
 
-    def test_lossy_signal_syntax_is_rejected_by_v9_model(self) -> None:
+    def test_lossy_signal_syntax_is_rejected_by_v10_model(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             spec = root / "input.spec"
@@ -2389,8 +2858,7 @@ class SignalPipelineTests(unittest.TestCase):
             enum TaskExecutionAuthority { None, Reserved, Live }
             type Task {
                 associations {
-                    initial_flow: TaskFlow;
-                    mutable active_flow: TaskFlow;
+                    flow: TaskFlow;
                 }
                 processes {
                     Action::Touch { state_effect: StateEffect::None; }
@@ -2448,7 +2916,7 @@ class SignalPipelineTests(unittest.TestCase):
             }
             object CpuGroup: CpuGroupObject { }
             object BootTask: Task {
-                associations { initial_flow = BootInitFlow; active_flow = BootInitFlow; }
+                associations { flow = BootInitFlow; }
                 initial_state: State::OnCpu;
                 state State::OnCpu {
                     invariant {
@@ -2543,7 +3011,7 @@ class SignalPipelineTests(unittest.TestCase):
                 state State::Base { }
             }
             type Task {
-                associations { initial_flow: TaskFlow; mutable active_flow: TaskFlow; }
+                associations { flow: TaskFlow; }
                 processes {
                     Action::Touch {
                         state_effect: StateEffect::None;
@@ -2582,7 +3050,7 @@ class SignalPipelineTests(unittest.TestCase):
             }
             object CPU0: CPU { }
             object BootTask: Task {
-                associations { initial_flow = BootFlow; active_flow = BootFlow; }
+                associations { flow = BootFlow; }
                 initial_state: State::OnCpu;
                 state State::OnCpu {
                     invariant {
@@ -2601,7 +3069,6 @@ class SignalPipelineTests(unittest.TestCase):
                         cpu_ref_targets(BootCPURef, CPU0);
                         task_flow_parent_is(BootFlow, BootTask);
                         task_flow_owner_is(BootFlow, BootTask);
-                        task_active_flow_is(BootTask, BootFlow);
                     }
                 }
             }
@@ -2668,13 +3135,13 @@ class SignalPipelineTests(unittest.TestCase):
             flow_name: str = "BootInitFlow",
             state: str = "OnCpu",
             authority: str = "Live",
-            active_flow: str | None = None,
+            fixed_flow: str | None = None,
             parent: str | None = None,
             owner: str | None = None,
             ready_ref: bool = True,
             second_ref: bool = False,
         ) -> str:
-            active_flow = active_flow or flow_name
+            fixed_flow = fixed_flow or flow_name
             parent = parent or task_name
             owner = owner or task_name
             ready_fact = f"task_ref_ready({task_name}Ref);" if ready_ref else ""
@@ -2696,8 +3163,7 @@ class SignalPipelineTests(unittest.TestCase):
                 }}
                 type Task {{
                     associations {{
-                        initial_flow: TaskFlow;
-                        mutable active_flow: TaskFlow;
+                        flow: TaskFlow;
                     }}
                     processes {{
                         Action::Touch(task_ref: TaskRef) {{
@@ -2731,7 +3197,7 @@ class SignalPipelineTests(unittest.TestCase):
                 }}
                 object CPU0: CPU {{ }}
                 object {task_name}: Task {{
-                    associations {{ initial_flow = {flow_name}; active_flow = {active_flow}; }}
+                    associations {{ flow = {fixed_flow}; }}
                     initial_state: State::{state};
                     state State::{state} {{
                         invariant {{
@@ -2743,7 +3209,7 @@ class SignalPipelineTests(unittest.TestCase):
                     }}
                 }}
                 object OtherTask: Task {{
-                    associations {{ initial_flow = OtherFlow; active_flow = OtherFlow; }}
+                    associations {{ flow = OtherFlow; }}
                     initial_state: State::Online;
                     state State::Online {{ }}
                 }}
@@ -2825,7 +3291,7 @@ class SignalPipelineTests(unittest.TestCase):
 
         cases = [
             (source(owner="OtherTask"), "parent/owner does not uniquely match"),
-            (source(active_flow="OtherFlow"), "parent/owner does not uniquely match"),
+            (source(fixed_flow="OtherFlow"), "parent/owner does not uniquely match the fixed child"),
             (source(state="Online"), "is not OnCpu"),
             (source(authority="Reserved"), "is not Live"),
             (source(ready_ref=False), "exactly one live TaskRef"),
@@ -2859,7 +3325,7 @@ class SignalPipelineTests(unittest.TestCase):
                 }
             }
             type Task {
-                associations { initial_flow: TaskFlow; mutable active_flow: TaskFlow; }
+                associations { flow: TaskFlow; }
                 processes {
                     Action::Touch { state_effect: StateEffect::None; }
                 }
@@ -2886,7 +3352,7 @@ class SignalPipelineTests(unittest.TestCase):
             }
             object CPU0: CPU { }
             object BootTask: Task {
-                associations { initial_flow = Flow; active_flow = Flow; }
+                associations { flow = Flow; }
                 initial_state: State::OnCpu;
                 state State::OnCpu {
                     invariant {
@@ -2974,7 +3440,7 @@ class SignalPipelineTests(unittest.TestCase):
                     state State::Base {{ }}
                 }}
                 type Task {{
-                    associations {{ initial_flow: TaskFlow; mutable active_flow: TaskFlow; }}
+                    associations {{ flow: TaskFlow; }}
                 }}
                 type TaskFlow {{
                     parent: Task;
@@ -3000,7 +3466,7 @@ class SignalPipelineTests(unittest.TestCase):
                 object CPU0: CPU {{ }}
                 object CPU1: CPU {{ }}
                 object BootTask: Task {{
-                    associations {{ initial_flow = BootInitFlow; active_flow = BootInitFlow; }}
+                    associations {{ flow = BootInitFlow; }}
                     initial_state: State::OnCpu;
                     state State::OnCpu {{
                         invariant {{
@@ -3011,7 +3477,7 @@ class SignalPipelineTests(unittest.TestCase):
                     }}
                 }}
                 object OtherTask: Task {{
-                    associations {{ initial_flow = OtherFlow; }}
+                    associations {{ flow = OtherFlow; }}
                     initial_state: State::Online;
                     state State::Online {{
                         invariant {{
@@ -3046,8 +3512,8 @@ class SignalPipelineTests(unittest.TestCase):
                 object OtherFlow: TaskFlow {{
                     parent: OtherTask;
                     associations {{ cpu_ref = {other_cpu_ref}; }}
-                    initial_state: State::Base;
-                    state State::Base {{
+                    initial_state: State::Online;
+                    state State::Online {{
                         invariant {{
                             task_flow_parent_is(OtherFlow, OtherTask);
                             task_flow_owner_is(OtherFlow, OtherTask);
@@ -3170,7 +3636,7 @@ class SignalPipelineTests(unittest.TestCase):
         )
         self.assertEqual(
             bind_next["after_snapshot"]["contextual_bindings"]["current_stack"]["CPU0"]["stack"],
-            "BootTask.stack",
+            "OtherTask.stack",
         )
         switch_commit = next(
             item for item in switched["signals"] if item["name"] == "SwitchTo"
@@ -3195,7 +3661,7 @@ class SignalPipelineTests(unittest.TestCase):
                     state State::Base {{ }}
                 }}
                 type Task {{
-                    associations {{ initial_flow: TaskFlow; mutable active_flow: TaskFlow; }}
+                    associations {{ flow: TaskFlow; }}
                 }}
                 type TaskFlow {{
                     parent: Task;
@@ -3222,7 +3688,7 @@ class SignalPipelineTests(unittest.TestCase):
                 }}
                 object CPU0: CPU {{ }}
                 object BootTask: Task {{
-                    associations {{ initial_flow = BootInitFlow; active_flow = BootInitFlow; }}
+                    associations {{ flow = BootInitFlow; }}
                     initial_state: State::OnCpu;
                     state State::OnCpu {{
                         invariant {{
@@ -3753,7 +4219,7 @@ class SignalPipelineTests(unittest.TestCase):
             unreached_check = read_json(root / "work-2" / "check.json")
             self.assertIn("until_signal_not_reached", unreached_check["reasons"][0])
 
-    def test_reached_snapshot_is_v9_with_boundary_provenance_and_resumes(self) -> None:
+    def test_reached_snapshot_is_v10_with_boundary_provenance_and_resumes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             work = root / "work"
@@ -4231,7 +4697,7 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertFalse(
                 any("stack" in item.get("text", "").lower() for item in bind_guards)
             )
-            self.assertTrue(
+            self.assertFalse(
                 any(
                     item.get("name") == "cpu_translation_controller_matches_live_satp_for_ref"
                     for item in bind_guards
@@ -4241,16 +4707,19 @@ class SignalPipelineTests(unittest.TestCase):
             bind_stack_guards = next(
                 item["entries"] for item in bind_stack_body if item["kind"] == "depends_on"
             )
+            bind_stack_ensures = next(
+                item["entries"] for item in bind_stack_body if item["kind"] == "ensures"
+            )
             self.assertTrue(
                 any(
                     item.get("name") == "boot_task_bind_task_stack_boundary_valid"
-                    for item in bind_stack_guards
+                    for item in bind_stack_ensures
                 )
             )
             self.assertTrue(
                 any(
-                    item.get("name") == "cpu_active_translation_controller_for_ref_is"
-                    and item["arguments"][1]["value"] == "PhysicalDirect"
+                    item.get("kind") == "reference_condition"
+                    and item.get("reference") == "task.flow"
                     for item in bind_stack_guards
                 )
             )
@@ -4258,16 +4727,19 @@ class SignalPipelineTests(unittest.TestCase):
             refresh_guards = next(
                 item["entries"] for item in refresh_body if item["kind"] == "depends_on"
             )
+            refresh_ensures = next(
+                item["entries"] for item in refresh_body if item["kind"] == "ensures"
+            )
             self.assertTrue(
                 any(
                     item.get("name") == "boot_task_refresh_task_stack_boundary_valid"
-                    for item in refresh_guards
+                    for item in refresh_ensures
                 )
             )
             self.assertTrue(
                 any(
-                    item.get("name") == "cpu_active_translation_controller_for_ref_is"
-                    and item["arguments"][1]["value"] == "EarlyVm"
+                    item.get("kind") == "reference_condition"
+                    and item.get("reference") == "task.flow"
                     for item in refresh_guards
                 )
             )
@@ -4386,7 +4858,7 @@ class SignalPipelineTests(unittest.TestCase):
             boot_ready_index = signal_index("BootInitFlow", "BootInitFlow", "Setup")
             boot_online_index = signal_index("BootInitFlow", "BootInitFlow", "Enable")
             first_schedule_index = signal_index(
-                "BootIdleFlow", "Cpu0Scheduler", "Schedule"
+                "BootInitFlow", "Cpu0Scheduler", "Schedule"
             )
             kernel_init_restore_index = signal_index(
                 "Cpu0Scheduler", "KernelInitTask", "RestoreCoreContext"
@@ -4394,17 +4866,20 @@ class SignalPipelineTests(unittest.TestCase):
             kernel_init_finish_index = signal_index(
                 "Cpu0Scheduler", "Cpu0Scheduler", "FinishTaskSwitch"
             )
-            kernel_init_activate_index = signal_index(
-                "Cpu0Scheduler", "KernelInitTask", "Activate"
+            kernel_init_continue_index = signal_index(
+                "Cpu0Scheduler", "KernelInitTask", "Continue"
             )
             kernel_init_started_index = signal_index(
-                "Cpu0Scheduler", "KernelInitFlow", "Preset"
+                "BootInitRestInitPhase", "KernelInitFlow", "Preset"
             )
             kernel_init_ready_index = signal_index(
-                "Kernel", "KernelInitFlow", "Setup"
+                "BootInitRestInitPhase", "KernelInitFlow", "Setup"
             )
             kernel_init_online_index = signal_index(
-                "Kernel", "KernelInitFlow", "Enable"
+                "BootInitRestInitPhase", "KernelInitFlow", "Enable"
+            )
+            kernel_init_flow_continue_index = signal_index(
+                "Cpu0Scheduler", "KernelInitFlow", "Continue"
             )
             handoff_prepare_online_index = signal_index(
                 "PayloadHandoffPreparePhase",
@@ -4420,14 +4895,15 @@ class SignalPipelineTests(unittest.TestCase):
                     accept_index,
                     boot_started_index,
                     boot_ready_index,
+                    kernel_init_started_index,
+                    kernel_init_ready_index,
+                    kernel_init_online_index,
                     boot_online_index,
                     first_schedule_index,
                     kernel_init_restore_index,
                     kernel_init_finish_index,
-                    kernel_init_activate_index,
-                    kernel_init_started_index,
-                    kernel_init_ready_index,
-                    kernel_init_online_index,
+                    kernel_init_continue_index,
+                    kernel_init_flow_continue_index,
                     handoff_prepare_online_index,
                     payload_commit_index,
                 ],
@@ -4437,14 +4913,15 @@ class SignalPipelineTests(unittest.TestCase):
                         accept_index,
                         boot_started_index,
                         boot_ready_index,
+                        kernel_init_started_index,
+                        kernel_init_ready_index,
+                        kernel_init_online_index,
                         boot_online_index,
                         first_schedule_index,
                         kernel_init_restore_index,
                         kernel_init_finish_index,
-                        kernel_init_activate_index,
-                        kernel_init_started_index,
-                        kernel_init_ready_index,
-                        kernel_init_online_index,
+                        kernel_init_continue_index,
+                        kernel_init_flow_continue_index,
                         handoff_prepare_online_index,
                         payload_commit_index,
                     ]
@@ -4452,10 +4929,10 @@ class SignalPipelineTests(unittest.TestCase):
             )
             self.assertEqual(
                 (
-                    signals[kernel_init_activate_index]["delivery"],
-                    signals[kernel_init_started_index]["delivery"],
+                    signals[kernel_init_continue_index]["delivery"],
+                    signals[kernel_init_flow_continue_index]["delivery"],
                 ),
-                ("drives", "emits"),
+                ("drives", "drives"),
             )
             self.assertFalse(
                 any(
@@ -4502,8 +4979,8 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(normal_states["BootCpuRegisters"], "Online")
             self.assertEqual(normal_states["OpenSBI"], "Online")
             self.assertEqual(normal_states["Kernel"], "Online")
-            self.assertEqual(normal_states["KernelInitFlow"], "Destroyed")
-            self.assertEqual(normal_states["Pid1UserAppFlow"], "Online")
+            self.assertEqual(normal_states["KernelInitFlow"], "Online")
+            self.assertEqual(normal_states["KernelInitUserAppRuntime"], "Online")
             self.assertEqual(
                 {
                     name: normal_states[name]
@@ -4533,7 +5010,7 @@ class SignalPipelineTests(unittest.TestCase):
                     for fact in normal_data["last_stable_snapshot"]["facts"]
                 )
             )
-            flow_lifecycle_counts = {
+            lifetime_lifecycle_counts = {
                 (target, transition): sum(
                     item["target"] == target and item["name"] == transition
                     for item in normal_data["signals"]
@@ -4542,19 +5019,19 @@ class SignalPipelineTests(unittest.TestCase):
                     "BootInitFlow",
                     "KernelInitFlow",
                     "ApIdleFlow",
-                    "Pid1UserAppFlow",
+                    "KernelInitUserAppRuntime",
                 )
                 for transition in ("Setup", "Enable")
             }
             self.assertEqual(
-                flow_lifecycle_counts,
+                lifetime_lifecycle_counts,
                 {
                     (target, transition): 1
                     for target in (
                         "BootInitFlow",
                         "KernelInitFlow",
                         "ApIdleFlow",
-                        "Pid1UserAppFlow",
+                        "KernelInitUserAppRuntime",
                     )
                     for transition in ("Setup", "Enable")
                 },
@@ -5090,6 +5567,7 @@ class SignalPipelineTests(unittest.TestCase):
                     "stopped": 1,
                     "truncated": 0,
                     "unresolved_obligations": 0,
+                    "yielded": 0,
                 },
             )
             self.assertEqual(
@@ -5346,10 +5824,10 @@ class SignalPipelineTests(unittest.TestCase):
                 boundary["call_span"],
                 {
                     "end_column": 1,
-                    "end_line": 141,
+                    "end_line": 168,
                     "source_file": "spec/model/phases/boot-init/phase.spec",
                     "start_column": 1,
-                    "start_line": 140,
+                    "start_line": 167,
                 },
             )
             self.assertEqual(boundary["snapshot"], derivation["signals"][19]["after_snapshot"])
@@ -5541,14 +6019,14 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(snapshot.read_bytes(), BOOT_INIT_SETUP_SCENARIO.read_bytes())
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "9b3d2741eacfb7729fc784ee46850952368abd0bb7894c9d5e4ac2f3e3f6dc9f",
+                "5621c3bbca374491d98c8888ec9189d591cdcbb4d04fb7beba9ad6e9af97c49f",
             )
             self.assertEqual(
                 {
                     derivation["model_fingerprint"], model["model_fingerprint"],
                     view["model_fingerprint"], saved["model_fingerprint"],
                 },
-                {"sha256:19093e0c075b6768dc74709487ef3f128ae395adb3367c187890036437070ebe"},
+                {"sha256:331e2f94b9bc453473be347fbe9ac51d1b502ce511a1fe3f1ee6b85ac248dc72"},
             )
             with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
                 compact_text = render_text(view)
@@ -5680,16 +6158,17 @@ class SignalPipelineTests(unittest.TestCase):
                 derivation["summary"],
                 {
                     "boundary_occurrences": 118,
-                    "completed": 342,
+                    "completed": 345,
                     "failed": 0,
                     "inventory_deferred": 138,
                     "inventory_trimmed": 53,
                     "pending": 0,
                     "rejected": 0,
-                    "signals": 343,
-                    "stopped": 1,
+                    "signals": 347,
+                    "stopped": 2,
                     "truncated": 0,
                     "unresolved_obligations": 0,
+                    "yielded": 0,
                 },
             )
             boundary = derivation["boundary"]
@@ -5704,15 +6183,15 @@ class SignalPipelineTests(unittest.TestCase):
                 (
                     "before_signal_send",
                     "Cpu0Scheduler.Schedule",
-                    "BootIdleFlow",
+                    "BootInitFlow",
                     "Cpu0Scheduler",
-                    "emits",
+                    "yields",
                 ),
             )
             states = boundary["snapshot"]["states"]
             self.assertEqual(
-                (states["BootInitFlow"], states["BootTask"], states["BootIdleFlow"]),
-                ("Online", "OnCpu", "Online"),
+                (states["BootInitFlow"], states["BootTask"]),
+                ("Online", "OnCpu"),
             )
             references = boundary["snapshot"]["references"]
             for index in range(8):
@@ -5737,14 +6216,14 @@ class SignalPipelineTests(unittest.TestCase):
                     derivation["signals"][-1]["name"],
                     derivation["signals"][-1]["outcome"],
                 ),
-                ("BootInitFlow", "BootIdleFlow", "RequestSchedule", "completed"),
+                ("BootInitFlow", "BootInitFlow", "RequestSchedule", "stopped"),
             )
             self.assertEqual(
                 snapshot.read_bytes(), CPU0_SCHEDULER_SCHEDULE_SCENARIO.read_bytes()
             )
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "7573a6770d790b0feda0a43fde48f86805575d4f47846836b38fe51e8faf7e6c",
+                "975c7c5903b2e2e88d7976e80d648f364db1443f40b683cdd5a1b6a9ee720632",
             )
             model = read_json(work / "model.json")
             view = read_json(work / "view.json")
@@ -5756,7 +6235,7 @@ class SignalPipelineTests(unittest.TestCase):
                     view["model_fingerprint"],
                     saved["model_fingerprint"],
                 },
-                {"sha256:19093e0c075b6768dc74709487ef3f128ae395adb3367c187890036437070ebe"},
+                {"sha256:331e2f94b9bc453473be347fbe9ac51d1b502ce511a1fe3f1ee6b85ac248dc72"},
             )
 
     def test_main_model_boot_init_entry_stops_at_first_missing_guard(self) -> None:
@@ -5816,8 +6295,8 @@ class SignalPipelineTests(unittest.TestCase):
 
             cases = (
                 (
-                    "missing-task-authority",
-                    "task_execution_authority_is(BootTask,TaskExecutionAuthority::Live)",
+                    "missing-task-concurrency",
+                    "task_concurrency_closed",
                     ("BootInitFlow", "Preset"),
                     None,
                 ),

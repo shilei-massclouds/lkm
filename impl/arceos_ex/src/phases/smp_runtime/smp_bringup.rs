@@ -60,7 +60,7 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
     preset_step(
         ctx.cpu_hotplug_sync.preset(
             &mut ctx.cpu_group,
-            &ctx.boot_idle_flow,
+            ctx.boot_init_flow.core(),
             &ctx.kthreadd_task,
             &mut ctx.cpu_hotplug_lock,
             &mut ctx.smpboot_threads_lock,
