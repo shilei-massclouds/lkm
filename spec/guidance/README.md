@@ -33,7 +33,7 @@ Charter -> Model -> Coding -> Impl
 
 ### `标准校准`
 
-只有用户明确要求“标准校准”时才触发。它是按 Linux 顶层调用顺序逐系统复核候选边界、经过两个人工门禁后再把确认的 formal 系统闭合到核心四层的加强版 `charter-first` 流程；现有函数—系统表只是校准清单，不代表设计已经确认。完整流程见 [`standard_calibration.md`](standard_calibration.md)。
+只有用户明确要求“标准校准”时才触发。它接收目标系统名称和用户明确指定的共同相对路径，只把该系统在 Charter、Model、Coding、Impl 中已有的内容拆入四个同径独立文件，完成后立即停止；代理不得自行推断路径，也不得借此改变系统语义或运行时行为。完整流程见 [`standard_calibration.md`](standard_calibration.md)。
 
 ### `model-first`
 
