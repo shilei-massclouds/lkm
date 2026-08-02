@@ -235,11 +235,11 @@ predicate static_branch_jump_label_mutex_guard_used<T>(static_branch: T) -> bool
 predicate static_branch_text_patch_sync_deferred<T>(static_branch: T) -> bool;
 predicate riscv_early_boot_alternatives_deferred<T>(vm: T) -> bool;
 predicate riscv_early_boot_alternatives_mmu_off_boundary_preserved<T>(vm: T) -> bool;
-predicate vmlinux_build_id_deferred<T>(phase: T) -> bool;
-predicate page_address_init_deferred<T>(phase: T) -> bool;
 predicate efi_boot_init_deferred<T>(phase: T) -> bool;
 predicate boot_init_setup_start_kernel_position_preserved<T>(flow: T) -> bool;
 predicate boot_init_setup_debug_objects_trimmed<T>(flow: T) -> bool;
+predicate boot_init_setup_vmlinux_build_id_trimmed<T>(flow: T) -> bool;
+predicate boot_init_setup_page_address_init_trimmed<T>(flow: T) -> bool;
 predicate boot_init_setup_cgroup_early_trimmed<T>(flow: T) -> bool;
 predicate memblock_phys_ram_base_ready<T>(memblock: T) -> bool;
 predicate memblock_kernel_va_pa_offset_ready<T, U>(memblock: T, vm: U) -> bool;

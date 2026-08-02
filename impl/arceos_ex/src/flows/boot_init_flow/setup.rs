@@ -11,11 +11,11 @@ use core::sync::atomic::{AtomicU8, Ordering};
 #[unsafe(link_section = ".data.boot_init_flow")]
 static BOOT_INIT_SETUP_FACTS: AtomicU8 = AtomicU8::new(0);
 
-const DEFERRED_VMLINUX_BUILD_ID: u8 = 1 << 0;
-const DEFERRED_PAGE_ADDRESS_INIT: u8 = 1 << 1;
+const TRIMMED_VMLINUX_BUILD_ID: u8 = 1 << 0;
+const TRIMMED_PAGE_ADDRESS_INIT: u8 = 1 << 1;
 const START_KERNEL_POSITION_PRESERVED: u8 = 1 << 2;
 const REQUIRED_FACTS: u8 =
-    DEFERRED_VMLINUX_BUILD_ID | DEFERRED_PAGE_ADDRESS_INIT | START_KERNEL_POSITION_PRESERVED;
+    TRIMMED_VMLINUX_BUILD_ID | TRIMMED_PAGE_ADDRESS_INIT | START_KERNEL_POSITION_PRESERVED;
 
 pub(super) fn run(ctx: &mut Context) -> ! {
     crate::phases::shutdown_on_error(

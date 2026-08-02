@@ -165,6 +165,49 @@ class ModelToolTests(unittest.TestCase):
             )
             self.assertTrue(clone["span"]["source_file"].endswith("objects/user_boot.spec"))
             self.assertGreater(clone["span"]["source_line"], 0)
+            self.assertEqual(
+                {
+                    boundary_id: boundaries[boundary_id]["status"]
+                    for boundary_id in (
+                        "boot_init_setup.001",
+                        "boot_init_setup.002",
+                        "boot_init_setup.003",
+                        "boot_init_setup.004",
+                        "boot_init_setup.005",
+                        "boot_init_setup.006",
+                        "boot_init_setup.007",
+                        "boot_init_setup.008",
+                        "boot_init_setup.009",
+                        "boot_init_setup.010",
+                        "boot_init_setup.011",
+                        "boot_init_setup.012",
+                        "boot_init_setup.013",
+                        "boot_init_setup.014",
+                        "boot_init_setup.015",
+                        "boot_init_setup.016",
+                        "boot_init_setup.017",
+                    )
+                },
+                {
+                    "boot_init_setup.001": "deferred",
+                    "boot_init_setup.002": "trimmed",
+                    "boot_init_setup.003": "trimmed",
+                    "boot_init_setup.004": "trimmed",
+                    "boot_init_setup.005": "trimmed",
+                    "boot_init_setup.006": "trimmed",
+                    "boot_init_setup.007": "trimmed",
+                    "boot_init_setup.008": "trimmed",
+                    "boot_init_setup.009": "trimmed",
+                    "boot_init_setup.010": "trimmed",
+                    "boot_init_setup.011": "trimmed",
+                    "boot_init_setup.012": "trimmed",
+                    "boot_init_setup.013": "trimmed",
+                    "boot_init_setup.014": "deferred",
+                    "boot_init_setup.015": "deferred",
+                    "boot_init_setup.016": "deferred",
+                    "boot_init_setup.017": "deferred",
+                },
+            )
 
     def test_empty_object_inherits_type_lifecycle_and_explicit_override_replaces_it(self) -> None:
         source = """
@@ -1057,10 +1100,10 @@ class ModelToolTests(unittest.TestCase):
                 [entry["text"] for entry in boot_init_setup["ensures"][0]["entries"]],
                 [
                     "efi_boot_init_deferred(BootInitFlow)",
-                    "vmlinux_build_id_deferred(BootInitFlow)",
-                    "page_address_init_deferred(BootInitFlow)",
                     "boot_init_setup_start_kernel_position_preserved(BootInitFlow)",
                     "boot_init_setup_debug_objects_trimmed(BootInitFlow)",
+                    "boot_init_setup_vmlinux_build_id_trimmed(BootInitFlow)",
+                    "boot_init_setup_page_address_init_trimmed(BootInitFlow)",
                     "boot_init_setup_cgroup_early_trimmed(BootInitFlow)",
                     "boot_init_setup_acpi_boot_tables_trimmed(BootInitFlow)",
                     "boot_init_setup_early_memtest_input_trimmed(BootInitFlow)",

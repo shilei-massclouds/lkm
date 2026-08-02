@@ -262,10 +262,10 @@ object BootInitFlow: TaskFlow {
 
                 ensures {
                     efi_boot_init_deferred(BootInitFlow);
-                    vmlinux_build_id_deferred(BootInitFlow);
-                    page_address_init_deferred(BootInitFlow);
                     boot_init_setup_start_kernel_position_preserved(BootInitFlow);
                     boot_init_setup_debug_objects_trimmed(BootInitFlow);
+                    boot_init_setup_vmlinux_build_id_trimmed(BootInitFlow);
+                    boot_init_setup_page_address_init_trimmed(BootInitFlow);
                     boot_init_setup_cgroup_early_trimmed(BootInitFlow);
                     boot_init_setup_acpi_boot_tables_trimmed(BootInitFlow);
                     boot_init_setup_early_memtest_input_trimmed(BootInitFlow);
@@ -298,17 +298,17 @@ object BootInitFlow: TaskFlow {
                     evidence { efi_boot_init_deferred(BootInitFlow); }
                     close_when: "EFI initialization, handoff facts and enabled-reference-path tests pass.";
                 }
-                deferred boot_init_setup.002 {
-                    category: DeferredCategory::ModelDetail;
-                    summary: "Model init_vmlinux_build_id metadata publication.";
-                    evidence { vmlinux_build_id_deferred(BootInitFlow); }
-                    close_when: "Build-ID metadata ownership, publication and implementation checks are modeled and tested.";
+                trimmed boot_init_setup.002 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "init_vmlinux_build_id is an inline no-op because STACKTRACE_BUILD_ID and VMCORE_INFO are disabled.";
+                    evidence { boot_init_setup_vmlinux_build_id_trimmed(BootInitFlow); }
+                    revisit_when: "The reference configuration enables CONFIG_STACKTRACE_BUILD_ID or CONFIG_VMCORE_INFO.";
                 }
-                deferred boot_init_setup.003 {
-                    category: DeferredCategory::ModelDetail;
-                    summary: "Model page_address freelist and hash metadata initialization.";
-                    evidence { page_address_init_deferred(BootInitFlow); }
-                    close_when: "page_address metadata lifecycle and reference call-position tests pass.";
+                trimmed boot_init_setup.003 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "page_address_init expands to no work without HASHED_PAGE_VIRTUAL or WANT_PAGE_VIRTUAL.";
+                    evidence { boot_init_setup_page_address_init_trimmed(BootInitFlow); }
+                    revisit_when: "The reference architecture enables hashed or explicit page virtual-address metadata.";
                 }
                 trimmed boot_init_setup.004 {
                     category: TrimmedCategory::BuildConfig;

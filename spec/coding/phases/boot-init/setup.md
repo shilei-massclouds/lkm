@@ -50,5 +50,7 @@
 DMA/cache policy 已完成。PerCpuStorage、StaticBranch、saved/static command line、普通参数、
 PrintkBuffer.Setup、ExceptionTable 与正式 ExceptionType.Setup 均未推进。
 
-start-kernel/EFI 与 setup-arch-tail 的 deferred/trimmed facts 归属 BootInitFlow.Setup。实现只需以私有
-bitset/检查函数保存对应事实，不得为事实建立 wrapper state 或 checkpoint。
+start-kernel/EFI 与 setup-arch-tail 的 deferred/trimmed facts 归属 BootInitFlow.Setup。当前 sibling
+配置下 `init_vmlinux_build_id()` 与 `page_address_init()` 都是 trimmed 空调用，私有 bitset 必须以
+trimmed 命名保存二者的位置事实；EFI、boot alternatives、RT signal 和 user ISA 的真实调用保持
+deferred。实现不得为这些事实建立 wrapper state 或 checkpoint。

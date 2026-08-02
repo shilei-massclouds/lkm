@@ -5065,8 +5065,8 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(resumed_checked["verdict"], "complete")
             self.assertEqual(resumed_checked["exit_code"], 0)
             self.assertTrue(resumed_checked["allowed"])
-            self.assertEqual(resumed_data["summary"]["inventory_deferred"], 138)
-            self.assertEqual(resumed_data["summary"]["inventory_trimmed"], 55)
+            self.assertEqual(resumed_data["summary"]["inventory_deferred"], 136)
+            self.assertEqual(resumed_data["summary"]["inventory_trimmed"], 57)
             self.assertEqual(resumed_data["summary"]["unresolved_obligations"], 0)
             self.assertEqual(len(resumed_data["boundary_inventory"]), 193)
             occurrence_by_boundary = {
@@ -5559,8 +5559,8 @@ class SignalPipelineTests(unittest.TestCase):
                     "boundary_occurrences": 2,
                     "completed": 51,
                     "failed": 0,
-                    "inventory_deferred": 138,
-                    "inventory_trimmed": 55,
+                    "inventory_deferred": 136,
+                    "inventory_trimmed": 57,
                     "pending": 0,
                     "rejected": 0,
                     "signals": 52,
@@ -6014,19 +6014,46 @@ class SignalPipelineTests(unittest.TestCase):
             saved = read_json(snapshot)
             model = read_json(work / "model.json")
             view = read_json(work / "view.json")
+            boot_init_setup_inventory = {
+                item["id"]: item["status"]
+                for item in model["model"]["boundary_inventory"]
+                if item["id"].startswith("boot_init_setup.")
+            }
+            self.assertEqual(
+                boot_init_setup_inventory,
+                {
+                    "boot_init_setup.001": "deferred",
+                    "boot_init_setup.002": "trimmed",
+                    "boot_init_setup.003": "trimmed",
+                    "boot_init_setup.004": "trimmed",
+                    "boot_init_setup.005": "trimmed",
+                    "boot_init_setup.006": "trimmed",
+                    "boot_init_setup.007": "trimmed",
+                    "boot_init_setup.008": "trimmed",
+                    "boot_init_setup.009": "trimmed",
+                    "boot_init_setup.010": "trimmed",
+                    "boot_init_setup.011": "trimmed",
+                    "boot_init_setup.012": "trimmed",
+                    "boot_init_setup.013": "trimmed",
+                    "boot_init_setup.014": "deferred",
+                    "boot_init_setup.015": "deferred",
+                    "boot_init_setup.016": "deferred",
+                    "boot_init_setup.017": "deferred",
+                },
+            )
             self.assertEqual(saved["snapshot"], boundary["snapshot"])
             self.assertEqual(saved["provenance"]["boundary"], boundary)
             self.assertEqual(snapshot.read_bytes(), BOOT_INIT_SETUP_SCENARIO.read_bytes())
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "41b6b87aa6c93cc41edf521ff554e0e4f9397e030d710ad1473a8282afd85b3b",
+                "3c3cf9cccbcbbd8338e66be5bf55ce9b3115c05ceea49fff999e255f6768cf6d",
             )
             self.assertEqual(
                 {
                     derivation["model_fingerprint"], model["model_fingerprint"],
                     view["model_fingerprint"], saved["model_fingerprint"],
                 },
-                {"sha256:86f8506515619e9fc601261d5d169c81d335625c9edb2e944ad1be95da096300"},
+                {"sha256:28696ae42d7e7af5884f37f9aab70c6db86016474036f42cb3d1d110be2b58cd"},
             )
             with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
                 compact_text = render_text(view)
@@ -6168,8 +6195,8 @@ class SignalPipelineTests(unittest.TestCase):
                     "boundary_occurrences": 2,
                     "completed": 61,
                     "failed": 0,
-                    "inventory_deferred": 138,
-                    "inventory_trimmed": 55,
+                    "inventory_deferred": 136,
+                    "inventory_trimmed": 57,
                     "pending": 0,
                     "rejected": 0,
                     "signals": 62,
@@ -6317,8 +6344,8 @@ class SignalPipelineTests(unittest.TestCase):
                     "boundary_occurrences": 120,
                     "completed": 342,
                     "failed": 0,
-                    "inventory_deferred": 138,
-                    "inventory_trimmed": 55,
+                    "inventory_deferred": 136,
+                    "inventory_trimmed": 57,
                     "pending": 0,
                     "rejected": 0,
                     "signals": 344,
@@ -6380,7 +6407,7 @@ class SignalPipelineTests(unittest.TestCase):
             )
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "d2deffece24b21984050a254900f557a9f7b0a50e923fc005bdecec50c6f5773",
+                "fcbd2a5276481b4f62734177866ae137ba264fe13e480c29312eb1f412275a0f",
             )
             model = read_json(work / "model.json")
             view = read_json(work / "view.json")
@@ -6392,7 +6419,7 @@ class SignalPipelineTests(unittest.TestCase):
                     view["model_fingerprint"],
                     saved["model_fingerprint"],
                 },
-                {"sha256:86f8506515619e9fc601261d5d169c81d335625c9edb2e944ad1be95da096300"},
+                {"sha256:28696ae42d7e7af5884f37f9aab70c6db86016474036f42cb3d1d110be2b58cd"},
             )
 
     def test_main_model_boot_init_entry_stops_at_first_missing_guard(self) -> None:

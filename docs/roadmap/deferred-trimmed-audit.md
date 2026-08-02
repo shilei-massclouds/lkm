@@ -21,7 +21,8 @@
 | 原 legacy owner / 子句范围 | disposition |
 | --- | --- |
 | Entry prelude VM、swapper VM、SoC early platform | 活跃责任拆为 `entry_vm.001`、`swapper_vm.001`、`soc.001`；入口前导已成立事实保留在 ensures/invariant。 |
-| MemBlock hugetlb CMA；EFI、build-id、page-address metadata | 活跃责任拆为 `memblock.001`、`boot_init_setup.001`–`.003`；混合调用位置说明删除。 |
+| MemBlock hugetlb CMA；EFI | 活跃 deferred 责任为 `memblock.001`、`boot_init_setup.001`。 |
+| build-id、page-address metadata | sibling 配置下为空调用，按 trimmed `boot_init_setup.002`–`.003` 保留位置。 |
 | CorePrepare 的 ACPI、memtest、sparse/vmemmap、crashkernel、KASAN、ACPI topology、CBOP、alternatives、RT signal、user ISA、static-call、LSM、bootconfig、boot-CPU hook、extra init args、early VFS cache | 每个子句独立归入 `core_prepare.001`–`.018`；配置/架构/参考输入 no-op 使用 trimmed，其余使用 deferred。setup_nr_cpu_ids、第二次 early-param parse 和 unknown-option printk 等已实现 checkpoint 不进入 inventory。 |
 | Page allocator GFP reclaim、compaction、OOM、失败传播 | 拆为 `page_alloc.001`–`.004`。 |
 | SLUB reclaim、NUMA、memcg、redzone、freelist randomization、freelist hardening | 拆为 `slub_alloc.001`–`.006`。 |
