@@ -31,6 +31,10 @@ Charter -> Model -> Coding -> Impl
 
 适用的 Compose 在 Coding 到 Impl 的装配路径中审查，Testing 在核心规格和实现确定后负责验证；它们是旁支，不加入上述权威链。层间冲突按核心链顺序处理。Charter 不足以确定含义时不得从现有代码、测试、roadmap 或 Compose 猜测意图，必须回到 Charter 决策；锁定 Charter 仍须按下文获得对具体文件的显式解锁授权。
 
+### `标准校准`
+
+只有用户明确要求“标准校准”时才触发。它是按 Linux 顶层调用顺序逐系统复核候选边界、经过两个人工门禁后再把确认的 formal 系统闭合到核心四层的加强版 `charter-first` 流程；现有函数—系统表只是校准清单，不代表设计已经确认。完整流程见 [`standard_calibration.md`](standard_calibration.md)。
+
 ### `model-first`
 
 `model-first` 是用户显式触发的当轮修改顺序，不是代理可以自行选择的快捷方式。它只改变修改与确认顺序，不改变 Charter 的最终最高语义权威。每轮必须遵守：
