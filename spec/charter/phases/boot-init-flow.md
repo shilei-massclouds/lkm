@@ -41,7 +41,9 @@ Ready。所有保留的叶子 parent 均直接是 BootInitFlow；物理目录中
 
 表中的 **trimmed** 表示当前配置或固定输入使调用编译为空、被条件编译删除或确定不执行实质工作，
 并必须对应 Model 的 `trimmed` 记录；**deferred** 只用于当前配置下未裁剪、真实调用仍存在但语义尚未
-形式化的责任，并必须对应 Model 的 `deferred` 记录。`.config` 中未出现的布尔选项按未启用处理。
+形式化的责任，并必须对应 Model 的 `deferred` 记录。**formal/推进型** 表示当前调用在本边界直接推进
+对应系统；**formal/位置型** 表示调用位置和幂等关系已形式化，但系统 lifecycle 按 Charter 明确绑定到
+另一处真实调用。`.config` 中未出现的布尔选项按未启用处理。
 
 | # | Linux 顶层函数 | 对应系统/对象 | sibling `.config` / 实际路径 | Charter / Model 当前处理 |
 | --- | --- | --- | --- | --- |
@@ -59,7 +61,7 @@ Ready。所有保留的叶子 parent 均直接是 BootInitFlow；物理目录中
 | 10.2 | `setup_initial_init_mm()` | `InitMM` | `CONFIG_MMU=y`，真实调用 | formal：建立 init-mm 映像边界与 BootTask active-mm 关系 |
 | 10.3 | `early_ioremap_setup()` | `EarlyIoremap` | `CONFIG_GENERIC_EARLY_IOREMAP=y` | formal：建立 FIX_BTMAP 临时映射服务 |
 | 10.4 | `sbi_init()` | `SBI` | `CONFIG_RISCV_SBI=y` | formal：建立内核可见的 SBI capability view |
-| 10.5 | `jump_label_init()` | `StaticBranch` | `CONFIG_JUMP_LABEL=y`，真实调用 | 调用位置保留；当前 Model 把 `StaticBranch` lifecycle 放在返回后的 `CorePreparePhase`，不是 trimmed/deferred |
+| 10.5 | `jump_label_init()` | `StaticBranch` | `CONFIG_JUMP_LABEL=y`；RISC-V `setup_arch()` 与其返回后的通用 `start_kernel()` 各有一次真实调用 | **formal/位置型**：保留第一次调用位置，`StaticBranch.Setup` 按主 Charter 绑定第二次调用；不是 trimmed/deferred，与 Model/CorePrepare 一致 |
 | 10.6 | `parse_early_param()` | `Params` / `EarlyParam` | 真实调用；early-param 表可用 | formal：解析 early params，并驱动 `EarlyCon` |
 | 10.7 | `efi_init()` | `EFI` | `CONFIG_EFI=y`，真实符号存在；运行期可因 FDT 无 EFI 参数提前返回 | **deferred**：`boot_init_setup.001`，enabled alternate path 分类一致 |
 | 10.8 | `paging_init()` | `Vm` | `CONFIG_MMU=y`，真实调用 | formal：内部推进 MemBlock、SwapperVm、KernelAddrSpace、Vm 与 EarlyDtb 退出 |
