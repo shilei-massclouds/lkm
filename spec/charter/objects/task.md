@@ -78,6 +78,21 @@ trap return token 返回固定 TaskFlow。
 不是 CurrentStack 副本。`tp`、CPU-local CurrentTask/CurrentStack binding、runqueue、锁和中断状态都
 不属于 TaskThreadContext 的可恢复核心寄存器集合。
 
+## 栈底保护 Action
+
+`Task.Action::EnableStackGuard` 是 Task owner 的通用 Action。它只接受该 Task 唯一拥有、范围非空、
+方向有效、足以容纳一个机器字且满足机器字对齐的 `stack`；调用方给出的范围还必须与 Task 已记录的
+stack 范围完全相同。任一前置条件不满足时，Action 必须在第一次内存写入前失败，不建立保护事实。
+
+Action 在向低地址增长的内核栈底安装固定保护值并建立 `task_stack_guard_ready(Task, Task.stack)`，
+不推进 Task 或 stack lifecycle。对同一完整保护字重复调用成功且不再次改写；已经安装后若只读完整性
+检查发现保护值损坏，后续调用必须报告损坏，不得把它当成未安装状态自动修复。安装状态属于 Task，
+完整性检查只读取保护位置，不改变安装状态、保护值或其它 Task 属性。
+
+该保护字是栈边界溢出的确定性哨兵，不是不可访问的 guard page，也不是由随机秘密派生、用于检测
+函数局部覆盖的 stack canary；三者不得共享状态或把各自的成功事实互相替代。普通 Task 何时触发
+该 Action 由各自 TaskFlow 规定，本 owner 不把它限定为 BootTask 或 current Task。
+
 ## 创建与发布
 
 普通 Task.Preset 建立 fresh identity、TaskRef、不可变 Flow association、Flow owner/parent 和 clone

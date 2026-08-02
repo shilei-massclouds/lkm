@@ -56,7 +56,12 @@ fn direct_setup_start(ctx: &Context) -> EventResult {
 }
 
 fn direct_setup_objects(ctx: &mut Context) -> EventResult {
-    ctx.init_stack.enable()?;
+    let stack_base = ctx.lds.init_stack_start();
+    let stack_top = ctx.lds.init_stack_end();
+    ctx.boot_task
+        .task_mut()
+        .enable_stack_guard(stack_base, stack_top)?;
+    dispatch(Checkpoint::BootTaskStackGuardEnabled, ctx);
 
     let Some(boot_hartid) = ctx.cpu_group.boot_hartid() else {
         return direct_setup_failure(ctx);
@@ -157,7 +162,9 @@ fn direct_setup_objects(ctx: &mut Context) -> EventResult {
 
 fn setup_arch_return_ready(ctx: &Context) -> EventResult {
     let ready = super::is_prepared()
-        && ctx.init_stack.state() == State::Online
+        && ctx.init_stack.state() == State::Ready
+        && ctx.boot_task.task().stack_guard_installed()
+        && ctx.boot_task.task().stack_guard_intact()
         && ctx.cpu_group.boot_cpu_state() == State::Online
         && ctx
             .cpu_group

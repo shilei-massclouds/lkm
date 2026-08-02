@@ -3,7 +3,7 @@
   "mapping_kind_counts": [
     {
       "mapping_kind": "exact",
-      "count": 102
+      "count": 103
     },
     {
       "mapping_kind": "range",
@@ -11,17 +11,17 @@
     },
     {
       "mapping_kind": "unmapped",
-      "count": 351
+      "count": 350
     }
   ],
   "confidence_counts": [
     {
       "confidence": "none",
-      "count": 351
+      "count": 350
     },
     {
       "confidence": "high",
-      "count": 62
+      "count": 63
     },
     {
       "confidence": "medium",
@@ -31,7 +31,7 @@
   "mapped_linux_file_counts": [
     {
       "linux_file": "init/main.c",
-      "count": 52
+      "count": 53
     },
     {
       "linux_file": "arch/riscv/kernel/head.S",
@@ -180,10 +180,6 @@
       "count": 3
     },
     {
-      "family": "InitStack",
-      "count": 3
-    },
-    {
       "family": "InterruptType",
       "count": 3
     },
@@ -237,6 +233,10 @@
     },
     {
       "family": "FinalizePhase",
+      "count": 2
+    },
+    {
+      "family": "InitStack",
       "count": 2
     },
     {

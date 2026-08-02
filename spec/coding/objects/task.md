@@ -20,6 +20,26 @@ record. A newly published ordinary Task already has an initialized architectural
 breakpoint bound to `flow`. The boot Task starts `OnCpu` with an Invalid breakpoint and initializes the
 architectural save area only on its first real switch out.
 
+## Stack guard representation
+
+`Task` owns the stack-guard installation flag and the lowering of `Action::EnableStackGuard`; `InitStack`
+does not own a parallel guard lifecycle. On RISC-V64 the kernel stack grows toward lower addresses, so the
+guard occupies exactly one machine word at the recorded stack base. Its `usize` encoding is
+`0x0000000057AC6E9D` (`0x57AC6E9D` zero-extended to the 64-bit machine word).
+
+Before the first memory write, the implementation must validate in this order-independent set that both
+range endpoints are nonzero, `base < top`, `top - base >= size_of::<usize>()`, both endpoints are aligned
+to `align_of::<usize>()`, and the supplied pair exactly matches the Task's recorded kernel-stack bounds.
+Any failure returns without reading or writing the supplied address and without setting the installation
+flag.
+
+The first valid call performs one volatile machine-word write at `base` and then marks the guard installed.
+A repeated call first performs the read-only integrity check: an intact word succeeds without another
+write; a different word reports corruption and leaves it unchanged. The public installation query reads
+only the flag. The integrity query validates the recorded range before a volatile read and never writes or
+changes Task state. Guard-page mappings and randomized stack canaries remain separate representations and
+cannot satisfy this flag or integrity query.
+
 ## Lifecycle and scheduler ownership
 
 Ordinary Task lifecycle is `Base -> Prepared -> Ready -> Online -> OnCpu -> Online`, with terminal

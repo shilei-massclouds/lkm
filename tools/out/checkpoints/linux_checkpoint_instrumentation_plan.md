@@ -1,6 +1,6 @@
 # Linux Checkpoint Instrumentation Plan
 
-- planned exact checkpoints: 102
+- planned exact checkpoints: 103
 - marker identity: checkpoint_name + checkpoint_variant
 - skipped mapping kinds: range, unmapped
 
@@ -17,6 +17,7 @@
 | 26 | EarlyVm.ActivatedOnCpu | EarlyVmActivatedOnCpu | high | arch/riscv/kernel/head.S | relocate_enable_mmu | relocate_enable_mmu line 122: csrw CSR_SATP, a2 | /* LKM_CHECKPOINT name=EarlyVm.ActivatedOnCpu variant=EarlyVmActivatedOnCpu fingerprint=sha256:a6c18ae723f71bc365b8b970d16f0fa18bf47b973b95e592dd0234545aba90cb */ | sha256:a6c18ae723f71bc365b8b970d16f0fa18bf47b973b95e592dd0234545aba90cb |
 | 32 | KernelImage.Online | KernelImageOnline | medium | arch/riscv/kernel/head.S | relocate_enable_mmu | relocate_enable_mmu line 114: load_global_pointer | /* LKM_CHECKPOINT name=KernelImage.Online variant=KernelImageOnline fingerprint=sha256:92093ea32ea3ea091c0b75b6116558b1873a315b8d1eb4a202c4b1b14e832467 */ | sha256:92093ea32ea3ea091c0b75b6116558b1873a315b8d1eb4a202c4b1b14e832467 |
 | 33 | TrapType.Ready | TrapTypeReady | high | arch/riscv/kernel/head.S | _start | _start line 185: la a0, handle_exception | /* LKM_CHECKPOINT name=TrapType.Ready variant=TrapTypeReady fingerprint=sha256:73984e9dbc51a745cb111d4e6cf9494f4485104d99407371c2eac30db61239e3 */ | sha256:73984e9dbc51a745cb111d4e6cf9494f4485104d99407371c2eac30db61239e3 |
+| 35 | BootTask.StackGuardEnabled | BootTaskStackGuardEnabled | high | init/main.c | start_kernel | start_kernel() line 909: smp_setup_processor_id(); | /* LKM_CHECKPOINT name=BootTask.StackGuardEnabled variant=BootTaskStackGuardEnabled fingerprint=sha256:dc165b2dc3413bb4adf245dd475b5e7c924be05f06149dfd8ef9cc7c9369c35c */ | sha256:dc165b2dc3413bb4adf245dd475b5e7c924be05f06149dfd8ef9cc7c9369c35c |
 | 70 | CorePreparePhase.Ready | CorePreparePhaseReady | medium | init/main.c | start_kernel | start_kernel() line 963: trap_init(); | /* LKM_CHECKPOINT name=CorePreparePhase.Ready variant=CorePreparePhaseReady fingerprint=sha256:37892ee857657d9ef3016c193b36096e02ecfd85b97751e280cc267f4a897168 */ | sha256:37892ee857657d9ef3016c193b36096e02ecfd85b97751e280cc267f4a897168 |
 | 96 | ExceptionType.Ready | ExceptionTypeReady | high | arch/riscv/kernel/head.S | _start | _start line 185: la a0, handle_exception | /* LKM_CHECKPOINT name=ExceptionType.Ready variant=ExceptionTypeReady fingerprint=sha256:73984e9dbc51a745cb111d4e6cf9494f4485104d99407371c2eac30db61239e3 */ | sha256:73984e9dbc51a745cb111d4e6cf9494f4485104d99407371c2eac30db61239e3 |
 | 97 | MmCoreInitPhase.Started | MmCoreInitPhaseStarted | high | init/main.c | start_kernel | start_kernel() line 964: mm_core_init(); | /* LKM_CHECKPOINT name=MmCoreInitPhase.Started variant=MmCoreInitPhaseStarted fingerprint=sha256:2be71d725747f29ee3c3c47fcb7f4ed459a30cc9014c5b72a7df8066d76a3332 */ | sha256:2be71d725747f29ee3c3c47fcb7f4ed459a30cc9014c5b72a7df8066d76a3332 |

@@ -45,6 +45,22 @@ TaskFlow boundary from Charter, Model, and Coding.
   `OnCpu/Online -> Offline -> Destroyed`. No terminal path republishes a
   resumable context.
 
+## Stack guard action
+
+- Model derivation keeps `BootTask.Action::EnableStackGuard` as the first
+  `BootInitFlow.Setup` child signal, leaves BootTask `OnCpu`, and publishes
+  `task_stack_guard_ready(BootTask, BootTask.stack)` without an InitStack
+  Online transition.
+- Runtime coverage checks the exact machine word at the Task-owned stack base,
+  the installed flag, read-only integrity query, and a repeated intact call.
+- Empty, reversed, smaller-than-one-word, unaligned, and recorded-range-mismatch
+  inputs must all fail before storage changes or the installed flag is set.
+- Corrupting an installed word must make the integrity query fail; a repeated
+  Enable reports corruption and leaves the corrupted value unchanged.
+- The observable completion is `BootTask.StackGuardEnabled`.
+  `InitStack.Online` must be absent from the checkpoint inventory; Linux
+  mapping remains a separate cross-reference responsibility.
+
 ## Effective-flow and trap coverage
 
 - A TaskFlow action is executable only while its owner is the CPU's current

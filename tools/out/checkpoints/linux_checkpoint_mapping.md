@@ -1,8 +1,8 @@
 # Linux Checkpoint Mapping
 
-- exact: 102
+- exact: 103
 - range: 21
-- unmapped: 351
+- unmapped: 350
 
 | checkpoint_index | checkpoint_name | checkpoint_variant | mapping_kind | confidence | linux_file | linux_symbol | linux_anchor | notes |
 | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -41,7 +41,7 @@
 | 32 | KernelImage.Online | KernelImageOnline | exact | medium | arch/riscv/kernel/head.S | relocate_enable_mmu | relocate_enable_mmu line 114: load_global_pointer | RISC-V64 relocation boundary after virtual addressing is active; object equivalence is partial. |
 | 33 | TrapType.Ready | TrapTypeReady | exact | high | arch/riscv/kernel/head.S | _start | _start line 185: la a0, handle_exception | RISC-V64 formal trap-vector target in .Lsetup_trap_vector. |
 | 34 | InitStack.Ready | InitStackReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 35 | InitStack.Online | InitStackOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 35 | BootTask.StackGuardEnabled | BootTaskStackGuardEnabled | exact | high | init/main.c | start_kernel | start_kernel() line 909: smp_setup_processor_id(); | Boundary immediately after the unconditional init_task stack-end guard installation and before the next start_kernel step. |
 | 36 | Soc.Prepared | SocPrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 37 | EarlyDtb.Prepared | EarlyDtbPrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 38 | EarlyDtb.Ready | EarlyDtbReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |

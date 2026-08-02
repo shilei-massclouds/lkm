@@ -47,7 +47,7 @@ Ready。所有保留的叶子 parent 均直接是 BootInitFlow；物理目录中
 
 | # | Linux 顶层函数 | 对应系统/对象 | sibling `.config` / 实际路径 | Charter / Model 当前处理 |
 | --- | --- | --- | --- | --- |
-| 1 | `set_task_stack_end_magic()` | `InitStack` / `BootTask.stack` guard | 无条件真实调用 | formal：`BootTask.EnableStackGuard` |
+| 1 | `set_task_stack_end_magic()` | `Task`（`BootTask` 实例） | 无条件真实调用 | formal：Setup 第一项调用 `BootTask.EnableStackGuard`；Action 语义由 Task owner 定义 |
 | 2 | `smp_setup_processor_id()` | `PlatformCpuInfo` / BootCPU identity | `CONFIG_SMP=y`，选择 RISC-V 实现 | formal：写入保存的 boot hartid，建立启动 CPU 平台身份 |
 | 3 | `debug_objects_early_init()` | `DebugObjects` | `CONFIG_DEBUG_OBJECTS=n`，inline 空实现 | **trimmed**：`boot_init_setup.004`，处理一致 |
 | 4 | `init_vmlinux_build_id()` | `KernelBuildId` | `CONFIG_STACKTRACE_BUILD_ID=n` 且 `CONFIG_VMCORE_INFO` 未启用，inline 空实现 | **trimmed**：`boot_init_setup.002`，不建立 build-id 发布责任 |

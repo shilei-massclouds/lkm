@@ -121,6 +121,17 @@
     "anchor_fingerprint": "sha256:73984e9dbc51a745cb111d4e6cf9494f4485104d99407371c2eac30db61239e3"
   },
   {
+    "checkpoint_index": 35,
+    "checkpoint_name": "BootTask.StackGuardEnabled",
+    "checkpoint_variant": "BootTaskStackGuardEnabled",
+    "linux_file": "init/main.c",
+    "linux_symbol": "start_kernel",
+    "linux_anchor": "start_kernel() line 909: smp_setup_processor_id();",
+    "confidence": "high",
+    "marker": "/* LKM_CHECKPOINT name=BootTask.StackGuardEnabled variant=BootTaskStackGuardEnabled fingerprint=sha256:dc165b2dc3413bb4adf245dd475b5e7c924be05f06149dfd8ef9cc7c9369c35c */",
+    "anchor_fingerprint": "sha256:dc165b2dc3413bb4adf245dd475b5e7c924be05f06149dfd8ef9cc7c9369c35c"
+  },
+  {
     "checkpoint_index": 70,
     "checkpoint_name": "CorePreparePhase.Ready",
     "checkpoint_variant": "CorePreparePhaseReady",

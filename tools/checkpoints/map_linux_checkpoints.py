@@ -575,6 +575,14 @@ def default_mapping_rules() -> dict[str, MappingRule]:
             confidence="high",
             notes="RISC-V64 head.S handoff from _start_kernel to Linux start_kernel().",
         ),
+        "BootTask.StackGuardEnabled": MappingRule(
+            mapping_kind="exact",
+            linux_file="init/main.c",
+            linux_symbol="start_kernel",
+            anchor_pattern=r"^[ \t]*smp_setup_processor_id\s*\(\s*\)\s*;",
+            confidence="high",
+            notes="Boundary immediately after the unconditional init_task stack-end guard installation and before the next start_kernel step.",
+        ),
         "KernelImage.Prepared": MappingRule(
             mapping_kind="range",
             linux_file="arch/riscv/kernel/head.S",

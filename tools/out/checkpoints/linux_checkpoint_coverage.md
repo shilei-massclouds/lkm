@@ -6,23 +6,23 @@
 
 | mapping_kind | count |
 | --- | ---: |
-| exact | 102 |
+| exact | 103 |
 | range | 21 |
-| unmapped | 351 |
+| unmapped | 350 |
 
 ## Confidence Counts
 
 | confidence | count |
 | --- | ---: |
-| none | 351 |
-| high | 62 |
+| none | 350 |
+| high | 63 |
 | medium | 61 |
 
 ## Mapped Linux File Counts
 
 | linux_file | count |
 | --- | ---: |
-| init/main.c | 52 |
+| init/main.c | 53 |
 | arch/riscv/kernel/head.S | 14 |
 | kernel/sched/core.c | 8 |
 | arch/riscv/mm/init.c | 7 |
@@ -64,7 +64,6 @@
 | Completion | 3 |
 | CorePreparePhase | 3 |
 | EarlyDtb | 3 |
-| InitStack | 3 |
 | InterruptType | 3 |
 | KernelAddrSpace | 3 |
 | KernelInitTask | 3 |
@@ -79,6 +78,7 @@
 | BootInitFlow | 2 |
 | CommandLine | 2 |
 | FinalizePhase | 2 |
+| InitStack | 2 |
 | InitcallPhase | 2 |
 | IrqChipInitTable | 2 |
 | IrqOpenPrepareTrimmedPaths | 2 |

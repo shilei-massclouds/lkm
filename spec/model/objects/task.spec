@@ -94,6 +94,7 @@ predicate task_runtime_state_is<T: Task>(task: T, state: TaskRuntimeState) -> bo
 predicate task_flag_no_setaffinity<T: Task>(task: T) -> bool;
 predicate task_cpumask_is<T: Task, C: CpuRef>(task: T, cpu_ref: C) -> bool;
 predicate task_stack_guard_ready<T: Task, S: Stack>(task: T, stack: S) -> bool;
+predicate task_stack_range_valid<T: Task, S: Stack>(task: T, stack: S) -> bool;
 predicate task_stack_is_static_initial_property<T: Task, S: Stack>(task: T, stack: S) -> bool;
 predicate task_stack_range_is<T: Task, S: Stack, A, B>(task: T, stack: S, start: A, end: B) -> bool;
 predicate task_has_unique_stack_attribute<T: Task>(task: T) -> bool;
@@ -170,6 +171,8 @@ type Task: ResourceObject {
                     task_sched_entity_initialized(self, scheduler);
                     task_state_new(self);
                     task_not_enqueued(self);
+                    task_has_unique_stack_attribute(self);
+                    task_stack_range_valid(self, self.stack);
                 }
             }
         }
@@ -276,9 +279,8 @@ type Task: ResourceObject {
         Action::EnableStackGuard {
             state_effect: StateEffect::None;
             depends_on {
-                self.state == State::OnCpu;
-                task_execution_authority_is(self, TaskExecutionAuthority::Live);
-                current_stack_binding_matches_task(CurrentCPU, self, self.stack);
+                task_has_unique_stack_attribute(self);
+                task_stack_range_valid(self, self.stack);
             }
             ensures { task_stack_guard_ready(self, self.stack); }
         }
@@ -395,6 +397,8 @@ object BootTask: Task {
             task_breakpoint_state_is(self, TaskBreakpointState::Invalid);
             boot_task_preemption_is_static_initial_property(self);
             task_stack_is_static_initial_property(self, self.stack);
+            task_has_unique_stack_attribute(self);
+            task_stack_range_valid(self, self.stack);
         }
         transitions {
             on Transition::Suspend -> State::Online {

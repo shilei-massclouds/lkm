@@ -75,6 +75,8 @@ void start_kernel(void)
 {
     char *command_line;
 
+    set_task_stack_end_magic(&init_task);
+    smp_setup_processor_id();
     setup_arch(&command_line);
     mm_core_init();
     sched_init();
@@ -1002,6 +1004,11 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
                 variant="TrapTypeReady",
                 name="TrapType.Ready",
             ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=44,
+                variant="BootTaskStackGuardEnabled",
+                name="BootTask.StackGuardEnabled",
+            ),
         ]
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -1019,6 +1026,14 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
         self.assertIn("create_kernel_page_table", by_name["EarlyVm.Ready"].linux_anchor)
         self.assertIn("csrw CSR_SATP, a2", by_name["EarlyVm.ActivatedOnCpu"].linux_anchor)
         self.assertIn("handle_exception", by_name["TrapType.Ready"].linux_anchor)
+        self.assertEqual(
+            by_name["BootTask.StackGuardEnabled"].linux_symbol,
+            "start_kernel",
+        )
+        self.assertIn(
+            "smp_setup_processor_id",
+            by_name["BootTask.StackGuardEnabled"].linux_anchor,
+        )
 
     def test_syscall_macro_parser_handles_wrappers_and_rejects_conditional_clone(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

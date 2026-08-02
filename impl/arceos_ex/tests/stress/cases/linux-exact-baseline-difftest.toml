@@ -71,7 +71,7 @@ checkpoint_scope = [
 [metadata]
 observation_mode = "baseline-paired-checkpoint-diff"
 baseline_role = "long-term-linux-exact"
-linux_exact_runtime_target_count = 102
+linux_exact_runtime_target_count = 103
 excluded_checkpoint_mapping_kinds = ["range", "unmapped"]
 cumulative_scope = "long-term stable same-semantic exact-mapped checkpoint intersection converged from pd-0005; architecture-front, early-byte-only, Linux C-entry timeline, and AP-repeatable head.S markers remain observed coverage outside this baseline hard gate; pd-0004 payload exec hard scope remains absorbed into the cumulative shell baseline"
 payload = "/bin/sh scripted /bin/ls twice then /sbin/poweroff -f on both basic tests"

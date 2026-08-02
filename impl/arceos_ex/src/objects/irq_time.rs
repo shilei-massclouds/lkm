@@ -4,12 +4,12 @@ use core::{
 };
 
 use super::{
+    boot_task::BootTask,
     config::Config,
     cpu_group::CpuGroup,
     device::DeviceRef,
     device_tree::{DeviceNodeRef, DevicePropertyRef, DeviceTree},
     fdt_reader::{read_be_u32, read_cells},
-    init_stack::InitStack,
     interrupt_type::InterruptType,
     ioremap::Ioremap,
     mm_core::{PageAllocator, PageMetadataMap, PageTableCaches, SlubSubsystem, VmallocAllocator},
@@ -7293,11 +7293,12 @@ impl BootStackCanary {
     pub fn setup(
         &mut self,
         randomness: &super::randomness::Randomness,
-        init_stack: &InitStack,
+        boot_task: &BootTask,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || randomness.state() != State::Ready
-            || init_stack.state() != State::Online
+            || !boot_task.task().stack_guard_installed()
+            || !boot_task.task().stack_guard_intact()
         {
             return failed_condition(
                 LifecycleEvent::Setup,

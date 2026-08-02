@@ -70,15 +70,6 @@ impl InitStack {
         )
     }
 
-    pub fn enable(&mut self) -> EventResult {
-        self.lifecycle.transition(
-            LifecycleEvent::Enable,
-            State::Ready,
-            State::Online,
-            Checkpoint::InitStackOnline,
-        )
-    }
-
     pub fn state(&self) -> State {
         self.lifecycle.state()
     }

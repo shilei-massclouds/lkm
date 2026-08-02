@@ -6687,6 +6687,7 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
             facts = set(saved["snapshot"]["facts"])
             for fact in (
                 "task_stack_guard_ready(BootTask,BootTask.stack)",
+                "task_stack_range_valid(BootTask,BootTask.stack)",
                 "memblock_resize_allowed(MemBlock)",
                 "swapper_vm_translation_sync_complete(SwapperVm,BootCPURef)",
                 "device_tree_unflattened_from_raw_dtb(DeviceTree,RawDtb)",

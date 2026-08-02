@@ -946,6 +946,23 @@ class ModelToolTests(unittest.TestCase):
             self.assertEqual(objects["BootTask"]["initial_state"], "OnCpu")
             self.assertEqual(objects["BootTask"]["parent"], "Kernel")
             self.assertEqual(objects["BootInitFlow"]["parent"], "BootTask")
+            stack_guard = next(
+                process
+                for process in data["model"]["types"]["Task"]["processes"]
+                if process["name"] == "EnableStackGuard"
+            )
+            self.assertEqual(
+                [
+                    entry["text"]
+                    for member in stack_guard["body"]
+                    if member["kind"] == "depends_on"
+                    for entry in member["entries"]
+                ],
+                [
+                    "task_has_unique_stack_attribute(self)",
+                    "task_stack_range_valid(self, self.stack)",
+                ],
+            )
             self.assertEqual(
                 objects["BootInitFlow"]["children"],
                 [

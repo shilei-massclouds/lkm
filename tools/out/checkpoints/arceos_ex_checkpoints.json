@@ -246,8 +246,8 @@
   },
   {
     "index": 35,
-    "variant": "InitStackOnline",
-    "name": "InitStack.Online",
+    "variant": "BootTaskStackGuardEnabled",
+    "name": "BootTask.StackGuardEnabled",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },

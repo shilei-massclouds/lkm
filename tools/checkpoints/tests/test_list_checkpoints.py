@@ -131,6 +131,8 @@ class ListCheckpointsTests(unittest.TestCase):
         self.assertIn("Kernel.Started", by_name)
         self.assertIn("Kernel.Online", by_name)
         self.assertIn("BootTask.OnCpu", by_name)
+        self.assertIn("BootTask.StackGuardEnabled", by_name)
+        self.assertNotIn("InitStack.Online", by_name)
         self.assertIn("BootInitFlow.Started", by_name)
         self.assertNotIn("EntryPreludePhase.Started", by_name)
         self.assertIn("PayloadPreparePhase.Online", by_name)
@@ -139,6 +141,10 @@ class ListCheckpointsTests(unittest.TestCase):
         self.assertEqual(by_name["Kernel.Started"].variant, "KernelStarted")
         self.assertEqual(by_name["Kernel.Online"].early_byte, "L")
         self.assertEqual(by_name["BootTask.OnCpu"].early_byte, "T")
+        self.assertEqual(
+            by_name["BootTask.StackGuardEnabled"].variant,
+            "BootTaskStackGuardEnabled",
+        )
         self.assertEqual(by_name["BootInitFlow.Started"].early_byte, "O")
         self.assertFalse(any(name.startswith("EntrySuccessorPhase.") for name in by_name))
         for phase in (

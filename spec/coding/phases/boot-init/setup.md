@@ -17,7 +17,7 @@
 
 | # | Model drive | Impl |
 | --- | --- | --- |
-| 1 | `BootTask.Action::EnableStackGuard` | `ctx.init_stack.enable()` |
+| 1 | `BootTask.Action::EnableStackGuard` | `ctx.boot_task.task_mut().enable_stack_guard(ctx.lds.init_stack_start(), ctx.lds.init_stack_end())`；成功后发布 `BootTask.StackGuardEnabled` |
 | 2 | `EarlyDtb.Preset` | `ctx.early_dtb.preset(...)` |
 | 3 | `CurrentCPU.Enable` | `ctx.cpu_group.enable_boot_cpu()` |
 | 4 | `PrintkBuffer.Preset` | `printk::preset()`；随后 banner write action |
@@ -42,6 +42,9 @@
 
 完成第 23 项后必须立即回到 BootInitFlow Setup continuation，由 BootInitFlow 发送
 `CorePreparePhase.Preset`。不得在二者之间插入 Phase、Action、checkpoint 或公开函数边界。
+
+第一项不得用 `InitStack.Ready -> Online` lifecycle 迁移代替 Task Action。后续需要栈底保护的实现只
+查询 BootTask 的安装与只读完整性事实；`InitStack.Ready` 继续表示入口栈及其地址表示已准备完成。
 
 ## 边界 invariant
 

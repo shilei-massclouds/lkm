@@ -79,6 +79,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::stack_depot::run,
     },
     SmokeCase {
+        name: "stack_guard",
+        run: cases::stack_guard::run,
+    },
+    SmokeCase {
         name: "swiotlb",
         run: cases::swiotlb::run,
     },

@@ -7,6 +7,7 @@ use super::{
 };
 
 pub const USER_TASK_SLOT_COUNT: usize = 8;
+pub const TASK_STACK_GUARD_VALUE: usize = 0x57AC6E9D;
 
 const TASK_SLOT_BOOT: u16 = 1;
 const TASK_SLOT_KERNEL_INIT: u16 = 2;
@@ -284,6 +285,7 @@ pub struct Task {
     core_save_pending_suspend: bool,
     affinity_cpu_id: usize,
     no_setaffinity: bool,
+    stack_guard_installed: bool,
     thread_context: TaskThreadContext,
     flow: TaskFlowRef,
 }
@@ -309,6 +311,7 @@ impl Task {
             core_save_pending_suspend: false,
             affinity_cpu_id: usize::MAX,
             no_setaffinity: false,
+            stack_guard_installed: false,
             thread_context: TaskThreadContext::new(),
             flow: TaskFlowRef::NONE,
         }
@@ -335,6 +338,7 @@ impl Task {
             core_save_pending_suspend: false,
             affinity_cpu_id: usize::MAX,
             no_setaffinity: false,
+            stack_guard_installed: false,
             thread_context: TaskThreadContext::new(),
             flow: TaskFlowRef::BOOT_INIT,
         }
@@ -362,6 +366,7 @@ impl Task {
             core_save_pending_suspend: false,
             affinity_cpu_id: usize::MAX,
             no_setaffinity: false,
+            stack_guard_installed: false,
             thread_context: TaskThreadContext::new(),
             flow: flow_ref,
         }
@@ -559,6 +564,65 @@ impl Task {
 
     pub const fn owns_flow(&self, flow_ref: TaskFlowRef) -> bool {
         self.flow.same_identity(flow_ref)
+    }
+
+    pub const fn stack_guard_installed(&self) -> bool {
+        self.stack_guard_installed
+    }
+
+    pub fn stack_guard_intact(&self) -> bool {
+        let base = self.kernel_stack_base();
+        let top = self.kernel_stack_top();
+        self.stack_guard_installed
+            && self.stack_guard_range_valid(base, top)
+            && unsafe { core::ptr::read_volatile(base as *const usize) == TASK_STACK_GUARD_VALUE }
+    }
+
+    pub fn enable_stack_guard(&mut self, base: usize, top: usize) -> EventResult {
+        if !self.stack_guard_range_valid(base, top) {
+            return self.stack_guard_failed("stack_range_invalid_or_not_owned");
+        }
+        if self.stack_guard_installed {
+            return if self.stack_guard_intact() {
+                Ok(())
+            } else {
+                self.stack_guard_failed("stack_guard_corrupted")
+            };
+        }
+
+        unsafe { core::ptr::write_volatile(base as *mut usize, TASK_STACK_GUARD_VALUE) };
+        self.stack_guard_installed = true;
+        Ok(())
+    }
+
+    fn stack_guard_range_valid(&self, base: usize, top: usize) -> bool {
+        let word_size = core::mem::size_of::<usize>();
+        let word_align = core::mem::align_of::<usize>();
+        base != 0
+            && top != 0
+            && top.checked_sub(base).is_some_and(|size| size >= word_size)
+            && base.is_multiple_of(word_align)
+            && top.is_multiple_of(word_align)
+            && self.kernel_stack_base() == base
+            && self.kernel_stack_top() == top
+    }
+
+    fn stack_guard_failed(&self, first_failed: &'static str) -> EventResult {
+        failed_condition(
+            LifecycleEvent::Setup,
+            self.lifecycle.state(),
+            self.lifecycle.state(),
+            self.lifecycle.state(),
+        )
+        .map_err(|error| {
+            error.with_diagnostic(FailureDiagnostic::new(
+                "Task",
+                "EnableStackGuard",
+                "Task.stack",
+                "owned valid range and intact installed guard",
+                first_failed,
+            ))
+        })
     }
 
     pub fn set_identity_metadata(
@@ -938,6 +1002,11 @@ impl Task {
     }
 
     pub fn set_kernel_stack_bounds(&mut self, base: usize, top: usize) -> bool {
+        if self.stack_guard_installed
+            && (self.kernel_stack_base() != base || self.kernel_stack_top() != top)
+        {
+            return false;
+        }
         let installed = self
             .thread_context
             .arch_mut()

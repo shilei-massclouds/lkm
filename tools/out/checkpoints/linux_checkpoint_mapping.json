@@ -386,14 +386,14 @@
   },
   {
     "checkpoint_index": 35,
-    "checkpoint_name": "InitStack.Online",
-    "checkpoint_variant": "InitStackOnline",
-    "linux_file": null,
-    "linux_symbol": null,
-    "linux_anchor": null,
-    "mapping_kind": "unmapped",
-    "confidence": "none",
-    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+    "checkpoint_name": "BootTask.StackGuardEnabled",
+    "checkpoint_variant": "BootTaskStackGuardEnabled",
+    "linux_file": "init/main.c",
+    "linux_symbol": "start_kernel",
+    "linux_anchor": "start_kernel() line 909: smp_setup_processor_id();",
+    "mapping_kind": "exact",
+    "confidence": "high",
+    "notes": "Boundary immediately after the unconditional init_task stack-end guard installation and before the next start_kernel step."
   },
   {
     "checkpoint_index": 36,

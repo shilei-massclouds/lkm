@@ -37,7 +37,7 @@
 | 32 | KernelImageOnline | KernelImage.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 33 | TrapTypeReady | TrapType.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 34 | InitStackReady | InitStack.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
-| 35 | InitStackOnline | InitStack.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 35 | BootTaskStackGuardEnabled | BootTask.StackGuardEnabled | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 36 | SocPrepared | Soc.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 37 | EarlyDtbPrepared | EarlyDtb.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 38 | EarlyDtbReady | EarlyDtb.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |

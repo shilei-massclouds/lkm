@@ -136,7 +136,7 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
     ctx.irq_time_trimmed_paths
         .setup(&ctx.config, &ctx.randomness)?;
     ctx.boot_stack_canary
-        .setup(&ctx.randomness, &ctx.init_stack)?;
+        .setup(&ctx.randomness, &ctx.boot_task)?;
     ctx.perf_event_core.setup(&ctx.srcu_core, &ctx.cpu_group)?;
     ctx.profile_core
         .setup(&ctx.randomness, &ctx.perf_event_core)?;
