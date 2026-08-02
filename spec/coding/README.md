@@ -27,7 +27,7 @@ Markdown 中用于评审追踪，但不再是 pyveri predicate。根目录 `make
 3. `phase-paradigm.md`：Phase 的四状态、父子 continuation、`emits` 和 checkpoint 映射。
 4. `build.md`、`tools2.md`、`riscv64.md`、`rust.md`：构建、独立 Signal 工具链、架构和语言映射规则。
 5. `systems/*.md`：唯一顶层 System 树的规格、构造与启动映射。
-6. `phases/**/*.md`、`objects/**/*.md`：按 model 树读取对应主题映射。
+6. `flows/**/*.md`、`phases/**/*.md`、`objects/**/*.md`：按 model 树读取对应主题映射。
 7. `arceos_ex.md`：当前目标内核的 coding 索引。
 8. `arceos_ex-implementation.md`：当前实现说明、命令和阶段性取舍；它不得覆盖前述映射。
 
@@ -49,8 +49,8 @@ coding。
 
 ## 目录层次
 
-`spec/coding/` 保留 `systems/`、`phases/`、`objects/` 三类对象层次目录，
-与 `spec/model/` 和 `spec/charter/` 的公共层次对齐。现有 `mapping/`、`build/`、`riscv64/`、
+`spec/coding/` 保留 `systems/`、`phases/`、`objects/` 三类对象层次目录，并以显式例外保留
+`flows/boot_init_flow/`，与 `spec/model/` 和 `spec/charter/` 的同径 owner 目录对齐。现有 `mapping/`、`build/`、`riscv64/`、
 `rust/` 等通用编码规格继续由本目录根入口承载；目标内核专题规则按系统、阶段和对象拆入
 上述子目录。后续新增或拆分的专题约束，若主要约束系统、阶段或对象之一，应落入对应目录；构建
 专题保留在本目录根级文件。

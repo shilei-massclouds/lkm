@@ -1,11 +1,8 @@
-/*
- * BootInitFlow directly owns the boot execution leaves.  The former
- * BootPhase and InterruptPhase wrapper lifecycles are intentionally absent.
- */
+/* BootInitFlow model entry and complete root object. */
 
 include "preset.spec";
 include "setup.spec";
-include "rest-init/main.spec";
+include "enable.spec";
 
 object BootInitFlow: TaskFlow {
     lifecycle_override: true;
@@ -497,14 +494,3 @@ object BootInitFlow: TaskFlow {
         }
     }
 }
-
-predicate boot_cpu_hartid_recorded_for_later_use(hartid: HartId) -> bool;
-
-predicate boot_init_flow_switch_precommit_ready<B, S, T, K>(
-    boot_init: B,
-    scheduler: S,
-    boot_task: T,
-    kernel_init_task: K
-) -> bool;
-
-predicate boot_init_flow_schedule_returned<B, S>(boot_init: B, scheduler: S) -> bool;

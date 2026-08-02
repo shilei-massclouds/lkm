@@ -6224,10 +6224,10 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
                 boundary["call_span"],
                 {
                     "end_column": 1,
-                    "end_line": 169,
-                    "source_file": "spec/model/phases/boot-init/phase.spec",
+                    "end_line": 166,
+                    "source_file": "spec/model/flows/boot_init_flow/main.spec",
                     "start_column": 1,
-                    "start_line": 168,
+                    "start_line": 165,
                 },
             )
             self.assertEqual(boundary["snapshot"], derivation["signals"][19]["after_snapshot"])
@@ -6446,14 +6446,14 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
             self.assertEqual(snapshot.read_bytes(), BOOT_INIT_SETUP_SCENARIO.read_bytes())
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "3c3cf9cccbcbbd8338e66be5bf55ce9b3115c05ceea49fff999e255f6768cf6d",
+                "bd8f82a57de7fec4c9a90bc98a245e90180a65673ea8021ee382580b83a8f257",
             )
             self.assertEqual(
                 {
                     derivation["model_fingerprint"], model["model_fingerprint"],
                     view["model_fingerprint"], saved["model_fingerprint"],
                 },
-                {"sha256:28696ae42d7e7af5884f37f9aab70c6db86016474036f42cb3d1d110be2b58cd"},
+                {"sha256:d68a339631ec34d17e403b5875a1d8b6a75723305bc77fd0c3fa7c1460b34af4"},
             )
             with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
                 compact_text = render_text(view)
@@ -6792,7 +6792,7 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
             )
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "fcbd2a5276481b4f62734177866ae137ba264fe13e480c29312eb1f412275a0f",
+                "f8b901553678c8c02265486a326fb7c0761084027804ab5574ff80353c72e02e",
             )
             model = self.prepared_model_document
             assert view is not None
@@ -6804,7 +6804,7 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
                     view["model_fingerprint"],
                     saved["model_fingerprint"],
                 },
-                {"sha256:28696ae42d7e7af5884f37f9aab70c6db86016474036f42cb3d1d110be2b58cd"},
+                {"sha256:d68a339631ec34d17e403b5875a1d8b6a75723305bc77fd0c3fa7c1460b34af4"},
             )
 
     def test_main_model_boot_init_entry_stops_at_first_missing_guard(self) -> None:

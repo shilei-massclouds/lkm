@@ -48,3 +48,5 @@ object BootCpuRegisters: HardwareObject {
         }
     }
 }
+
+predicate boot_cpu_hartid_recorded_for_later_use(hartid: HartId) -> bool;

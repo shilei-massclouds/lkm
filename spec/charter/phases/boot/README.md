@@ -4,7 +4,7 @@
 声明 `Boot`、`BootPhase`、wrapper lifecycle 或 checkpoint。
 
 `BootInitFlow` 的实例级 Charter 唯一位于
-[`../boot-init-flow.md`](../boot-init-flow.md)。当前三个叶阶段尚无独立 Charter 文件；在后续
+[`../../flows/boot_init_flow/README.md`](../../flows/boot_init_flow/README.md)。当前三个叶阶段尚无独立 Charter 文件；在后续
 charter-first 校准各叶阶段时，才分别建立与实际 PhaseObject 同名的文件，不预先创建空规格：
 
 - `CorePreparePhase`；

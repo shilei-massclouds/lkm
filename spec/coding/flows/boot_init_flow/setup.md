@@ -7,7 +7,7 @@
 ## Linux 顶层函数映射
 
 实现和审查必须以 Charter
-[`start_kernel()` 到 `setup_arch()` 返回的顶层函数/系统清单](../../../charter/phases/boot-init-flow.md#start_kernel-到-setup_arch-返回的顶层函数系统清单)
+[`start_kernel()` 到 `setup_arch()` 返回的顶层函数/系统清单](../../../charter/flows/boot_init_flow/setup.md#start_kernel-到-setup_arch-返回的顶层函数系统清单)
 为权威顺序。每个顶层函数映射到明确系统/对象；trimmed/deferred 函数保留结构化位置事实，不生成
 虚构 lifecycle。`setup_arch()` 只代表 BootInitFlow 的嵌套编排范围。
 

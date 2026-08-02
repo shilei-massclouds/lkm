@@ -76,11 +76,11 @@ instance。
 
 ### rest_init 与首轮 task handoff
 
-权威映射：[`phases/boot-init/rest-init.md`](phases/boot-init/rest-init.md)、
+权威映射：[`flows/boot_init_flow/enable.md`](flows/boot_init_flow/enable.md)、
 [`objects/effective-context.md`](objects/effective-context.md) 和 [`riscv64.md`](riscv64.md)。
 
-实现分布在 `impl/arceos_ex/src/flows/boot_init_flow/`、`impl/arceos_ex/src/flows/boot_idle_flow/`、
-scheduler/task/context 对象与 RISC-V switch lowering。BootTask 保留静态 boot stack；KernelInitTask/KthreaddTask 使用新分配的 vmalloc
+实现分布在 `impl/arceos_ex/src/flows/boot_init_flow/` 内的 `enable.rs`、三个子 PhaseObject 文件和私有
+`idle.rs` carrier，以及 scheduler/task/context 对象与 RISC-V switch lowering。BootTask 保留静态 boot stack；KernelInitTask/KthreaddTask 使用新分配的 vmalloc
 stack。最终线性启动 handoff 保存 BootTask context、恢复 KernelInitTask stack，由
 `kernel_init_entry()` 继续 SmpRuntime/Payload。BootIdle continuation 进入 `schedule_idle()`，
 KthreaddTask 当前进入简化调度循环。完整 kthreadd 请求消费、通用 scheduler class/fairness 和更完整

@@ -4,6 +4,8 @@ use crate::{
     objects::{
         earlycon, printk,
         state::{EventResult, LifecycleEvent, State, failed_condition},
+        task::Task,
+        task_flow::task_flow_execution_guard_satisfied,
     },
 };
 use core::sync::atomic::{AtomicU8, Ordering};
@@ -16,6 +18,96 @@ const TRIMMED_PAGE_ADDRESS_INIT: u8 = 1 << 1;
 const START_KERNEL_POSITION_PRESERVED: u8 = 1 << 2;
 const REQUIRED_FACTS: u8 =
     TRIMMED_VMLINUX_BUILD_ID | TRIMMED_PAGE_ADDRESS_INIT | START_KERNEL_POSITION_PRESERVED;
+
+impl super::BootInitFlow {
+    pub fn setup(&mut self, owner: &Task, checkpoint: Checkpoint) -> EventResult {
+        self.flow.setup(owner, Some(checkpoint))
+    }
+}
+
+/// Starts BootInitFlow.Setup with its first direct leaf.
+#[unsafe(no_mangle)]
+pub extern "C" fn start_kernel() -> ! {
+    let result = if start_kernel_entry_guard_satisfied() {
+        Ok(())
+    } else {
+        super::phase_failure(LifecycleEvent::Setup, State::Prepared, State::Ready)
+    };
+    crate::phases::shutdown_on_error(result, "arceos_ex start_kernel guard failed\n");
+    run(crate::context::context())
+}
+
+pub fn setup_after_core_prepare() -> ! {
+    require_setup_leaf(
+        crate::phases::boot::core_prepare::is_online(),
+        "core prepare",
+    );
+    crate::phases::boot::mm_core_init::preset(crate::context::context())
+}
+
+pub fn setup_after_mm_core_init() -> ! {
+    require_setup_leaf(
+        crate::phases::boot::mm_core_init::is_online(),
+        "mm core init",
+    );
+    crate::phases::boot::sched_init::preset(crate::context::context())
+}
+
+pub fn setup_after_sched_init() -> ! {
+    require_setup_leaf(crate::phases::boot::sched_init::is_online(), "sched init");
+    crate::phases::interrupt::irq_time_init::preset(crate::context::context())
+}
+
+pub fn setup_after_irq_time_init() -> ! {
+    require_setup_leaf(
+        crate::phases::interrupt::irq_time_init::is_online(),
+        "irq time init",
+    );
+    crate::phases::interrupt::local_irq_enable::preset(crate::context::context())
+}
+
+pub fn setup_after_local_irq_enable() -> ! {
+    require_setup_leaf(
+        crate::phases::interrupt::local_irq_enable::is_online(),
+        "local irq enable",
+    );
+    crate::phases::interrupt::irq_open_prepare::preset(crate::context::context())
+}
+
+pub fn setup_after_irq_open_prepare() -> ! {
+    require_setup_leaf(
+        crate::phases::interrupt::irq_open_prepare::is_online(),
+        "irq open prepare",
+    );
+    crate::phases::interrupt::process_prepare::preset(crate::context::context())
+}
+
+pub fn setup_after_process_prepare() -> ! {
+    require_setup_leaf(
+        crate::phases::interrupt::process_prepare::is_online(),
+        "process prepare",
+    );
+    super::rest_init::preset(crate::context::context())
+}
+
+/// Completes BootInitFlow.Setup after the final direct leaf reaches Online.
+pub fn setup_after_boot_init_rest_init() -> ! {
+    let dependencies_ready = super::setup_leaves_online() && super::rest_init::is_online();
+    let ctx = crate::context::context();
+    let result = if dependencies_ready {
+        ctx.boot_init_flow
+            .setup(ctx.boot_task.task(), Checkpoint::BootInitFlowReady)
+    } else {
+        failed_condition(
+            LifecycleEvent::Setup,
+            ctx.boot_init_flow.state(),
+            State::Prepared,
+            State::Ready,
+        )
+    };
+    crate::phases::shutdown_on_error(result, "arceos_ex boot init setup failed\n");
+    super::enable()
+}
 
 pub(super) fn run(ctx: &mut Context) -> ! {
     crate::phases::shutdown_on_error(
@@ -231,4 +323,41 @@ fn record_start_kernel_facts() {
 
 fn start_kernel_facts_ready() -> bool {
     BOOT_INIT_SETUP_FACTS.load(Ordering::Relaxed) == REQUIRED_FACTS
+}
+
+fn require_setup_leaf(child_online: bool, child: &str) {
+    let result = if child_online
+        && super::require_guarded_state(LifecycleEvent::Setup, State::Prepared, State::Ready)
+            .is_ok()
+    {
+        Ok(())
+    } else {
+        super::phase_failure(LifecycleEvent::Setup, State::Prepared, State::Ready)
+    };
+    let message = match child {
+        "core prepare" => "arceos_ex boot init after core prepare failed\n",
+        "mm core init" => "arceos_ex boot init after mm core init failed\n",
+        "sched init" => "arceos_ex boot init after sched init failed\n",
+        "irq time init" => "arceos_ex boot init after irq time init failed\n",
+        "local irq enable" => "arceos_ex boot init after local irq enable failed\n",
+        "irq open prepare" => "arceos_ex boot init after irq open prepare failed\n",
+        _ => "arceos_ex boot init after process prepare failed\n",
+    };
+    crate::phases::shutdown_on_error(result, message)
+}
+
+fn start_kernel_entry_guard_satisfied() -> bool {
+    let ctx = crate::context::context_ref();
+    let flow = ctx.boot_init_flow.core();
+    let cpu_ref = ctx.boot_init_flow.cpu_ref();
+    crate::systems::kernel::enable_in_progress()
+        && ctx.boot_init_flow.state() == State::Prepared
+        && super::boot_task_on_cpu_and_canonical()
+        && ctx.boot_task.task().flow().same_identity(flow.flow_ref())
+        && task_flow_execution_guard_satisfied(flow, ctx.boot_task.task())
+        && cpu_ref.is_some()
+        && cpu_ref == ctx.cpu_group.boot_cpu_ref()
+        && ctx
+            .current_cpu()
+            .is_ok_and(|current| Some(current.cpu_ref()) == cpu_ref)
 }

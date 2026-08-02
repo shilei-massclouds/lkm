@@ -364,7 +364,7 @@ model、coding、适用 compose、实现和 testing 按 authority 顺序一致�
 
 - [系统 Signal 语义](../system-signal.md)
 - [tools2 Signal 动画章程](signal-animation.md)
-- [BootInitFlow](../phases/boot-init-flow.md)
+- [BootInitFlow](../flows/boot_init_flow/README.md)
 - [KernelInitFlow 的 SMP/runtime 叶子阶段](../phases/smp-runtime.md)
 - [KernelInitFlow 的 payload 准备与提交](../phases/payload.md)
 - [运行期实例声明](../objects/dynamic-instance-declaration.md)

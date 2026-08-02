@@ -27,7 +27,7 @@ parse 1.095 秒、model 0.723 秒、到 `Kernel.Enable` 发送前的 derive/chec
 
 测试现在由独立 `MainModelIntegrationTests` 承载。会话级 fixture 只 parse/model 一次，以
 `spec/model/main.spec` 和 Model fingerprint
-`sha256:28696ae42d7e7af5884f37f9aab70c6db86016474036f42cb3d1d110be2b58cd` 标识；AST/Model 文件设为
+`sha256:d68a339631ec34d17e403b5875a1d8b6a75723305bc77fd0c3fa7c1460b34af4` 标识；AST/Model 文件设为
 只读，并在每个 prepared case 前后校验 hash/fingerprint。每个 derive 都使用独立初态、scenario、
 输出目录和 Engine 可变状态，并输出阶段计时、cache-hit、Signal/event/inventory/obligation 数量及测试
 摘要大小。
@@ -79,10 +79,10 @@ Signal 结果由 prepared case 验证。stale fingerprint 仍用错误 fixture �
 46.098 / 46.697 / 46.917 秒，中位数 46.697 秒，低于 60 秒目标，较第一轮 89.124 秒中位数再缩短
 47.6%。未增加固定 CI timeout，也未引入生产缓存、并行完整 derive 或可变 snapshot 复用。
 
-三个已提交 canonical snapshot bytes 保持不变：`Kernel.Enable` SHA-256 为
-`a77578cab11977fe9a41bda0bbdbeab868962adf605b9ef58d822127e6bdf9e0`，`BootInitFlow.Setup` 为
-`3c3cf9cccbcbbd8338e66be5bf55ce9b3115c05ceea49fff999e255f6768cf6d`，`Cpu0Scheduler.Schedule` 为
-`fcbd2a5276481b4f62734177866ae137ba264fe13e480c29312eb1f412275a0f`；AST/Model/Derive/Check/View/Snapshot
+当前三个已提交 canonical snapshot bytes 为：`Kernel.Enable` SHA-256 为
+`18ef873bf620122df2a7896053370a9d677f3ebb74b33652356025033db017ba`，`BootInitFlow.Setup` 为
+`bd8f82a57de7fec4c9a90bc98a245e90180a65673ea8021ee382580b83a8f257`，`Cpu0Scheduler.Schedule` 为
+`f8b901553678c8c02265486a326fb7c0761084027804ab5574ff80353c72e02e`；AST/Model/Derive/Check/View/Snapshot
 协议继续全部为 v10。101 项测试和全部严格拒绝覆盖均保留，没有调用旧工具、并行完整 derive、复用
 可变 snapshot 或放宽断言来取得性能数字。
 

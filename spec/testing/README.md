@@ -127,13 +127,13 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
 - 提交的 `tools2/scenarios/BootInitFlow.Setup.snapshot.json` 必须与从模型初态执行
   `tools2/bin/pyveri -u BootInitFlow.Setup --snapshot-out /tmp/boot-init-flow-setup-presend.snapshot.json`
   得到的 canonical bytes 逐字节一致，并从仓库根与其它 cwd 重建出相同结果。当前正式模型下其
-  SHA-256 固定为 `6cef789b1c982ab1140122350caa5ed6a9f1bb105309d8631b7e56b2858cacb2`，model
-  fingerprint 固定为 `sha256:166be68c705b6f52158c34ff3b64209cd0b4453fecfb4ee987ba5eb8a94bce06`。
+  SHA-256 固定为 `bd8f82a57de7fec4c9a90bc98a245e90180a65673ea8021ee382580b83a8f257`，model
+  fingerprint 固定为 `sha256:d68a339631ec34d17e403b5875a1d8b6a75723305bc77fd0c3fa7c1460b34af4`。
   `tools2/bin/pyveri -t BootInitFlow.Setup` 必须自动采用该第 3 组入口 scenario；显式 `-s` 仍优先，
   其它模型必须因 stale fingerprint 拒绝，缺失 canonical scenario 必须在 derive 前返回 2。
 - 提交的 `tools2/scenarios/Cpu0Scheduler.Schedule.snapshot.json` 必须与从模型初态执行
   `tools2/bin/pyveri -u Cpu0Scheduler.Schedule` 得到的 canonical bytes 逐字节一致；SHA-256 固定为
-  `517416a77d0a57bf744b94fc7641c4cdd471a29eccbb2b987b9b4504f6a1f8b1`，model fingerprint 与上述
+  `f8b901553678c8c02265486a326fb7c0761084027804ab5574ff80353c72e02e`，model fingerprint 与上述
   Setup scenario 相同。该 before-send 边界的真实 sender 必须是 `BootInitFlow`，delivery 为
   `yields`；边界处 BootInitFlow=Online、BootTask=OnCpu、Cpu0Scheduler=Online、
   Cpu1Scheduler..Cpu7Scheduler=Ready，且 8 个
@@ -173,7 +173,7 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
   校验再 adoption，不能晚发 Started。该检查还必须固定 Bind/CurrentCPU/Interrupt/Trap/Vm 顺序、
   Vm-owned KernelAddrSpace.Preset、`start_kernel` 的 Kernel Ready/Enable acceptance 门禁，以及既有
   sie→sip、sie-only adoption、Setup 首次清 SIE 和非链接 tail ABI。
-- `BootInitFlow.Setup` 发送前 boundary 必须来自 `spec/model/phases/boot-init/phase.spec` 中
+- `BootInitFlow.Setup` 发送前 boundary 必须来自 `spec/model/flows/boot_init_flow/main.spec` 中
   BootInitFlow.Preset 成功提交后的真实 completion event，source/target 为
   `BootInitFlow -> BootInitFlow`、delivery 为 emits、cause 为 0020、FIFO position 为 1，snapshot
   精确等于 0020 after snapshot。Kernel 必须只创建 BootInitFlow.Preset 并保持 Ready，BootInitFlow 必须为 Prepared；入口关键对象

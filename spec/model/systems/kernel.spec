@@ -2,7 +2,7 @@
 
 include "../phases/boot/main.spec";
 include "../phases/interrupt/main.spec";
-include "../phases/boot-init/main.spec";
+include "../flows/boot_init_flow/main.spec";
 include "../phases/smp-runtime/main.spec";
 include "../phases/payload/main.spec";
 

@@ -54,7 +54,7 @@ Model 到代码表示的约束。两个具体实现之间的静态对照、差�
 ## 当前 TaskFlow 直接子阶段拓扑
 
 当前 topology 的权威定义位于 [`objects/task-flow.md`](objects/task-flow.md)、
-[`phases/boot-init-flow.md`](phases/boot-init-flow.md)、[`phases/smp-runtime.md`](phases/smp-runtime.md) 和
+[`flows/boot_init_flow/README.md`](flows/boot_init_flow/README.md)、[`phases/smp-runtime.md`](phases/smp-runtime.md) 和
 [`phases/payload.md`](phases/payload.md)。`BootPhase`、`InterruptPhase`、`SmpRuntimePhase` 与原
 `PayloadPhase` 已删除；本文后续保留的旧名称只用于记录历史分析目录/批次，不再定义对象、parent、
 lifecycle 或 checkpoint。
@@ -1350,7 +1350,7 @@ EarlyDtb、SwapperVM/VM，以及 `setup_arch()` 后半段的正式平台对象�
 系统/对象责任，不能只以 wrapper 名称代替。
 
 BootInitFlow.Setup 是父 Flow 对系统/对象过程的直接编排。完整的逐项权威清单位于
-[`phases/boot-init-flow.md`](phases/boot-init-flow.md#start_kernel-到-setup_arch-返回的顶层函数系统清单)：
+[`flows/boot_init_flow/setup.md`](flows/boot_init_flow/setup.md#start_kernel-到-setup_arch-返回的顶层函数系统清单)：
 从 `set_task_stack_end_magic()`、`smp_setup_processor_id()` 开始，逐项列到
 `setup_arch()` 内最后的 `riscv_user_isa_enable()`，并为每个 Linux 顶层函数指定系统/对象和
 formal/deferred/trimmed/checkpoint 处理。

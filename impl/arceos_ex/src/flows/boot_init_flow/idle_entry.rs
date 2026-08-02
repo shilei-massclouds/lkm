@@ -252,7 +252,7 @@ fn phase_ready(ctx: &Context) -> bool {
 }
 
 fn restore_ready(ctx: &Context) -> bool {
-    crate::flows::boot_init_flow::rest_init_facts_stable(ctx)
+    super::enable::rest_init_facts_stable(ctx)
         && crate::flows::boot_init_flow::is_online()
         && ctx.scheduler().schedule_passes() != 0
         && ctx.scheduler().current_runqueue_resolve_passes() != 0

@@ -19,12 +19,12 @@ by the repository `coding-spec-check` gate.
 - `interrupt/irq-open-prepare.md`
 - `interrupt/process-prepare.md`
 
-## BootInitFlow
+## BootInitFlow owner
 
-- [`boot-init.md`](boot-init.md) — BootInitFlow Phase 父 transition 驱动映射
-- `boot-init/preset.md`
-- `boot-init/setup.md`
-- `boot-init/rest-init.md`
+- [`../flows/boot_init_flow/README.md`](../flows/boot_init_flow/README.md) — BootInitFlow 总体 lowering 约束
+- `../flows/boot_init_flow/preset.md`
+- `../flows/boot_init_flow/setup.md`
+- `../flows/boot_init_flow/enable.md`
 
 ## KernelInitFlow execution phases
 

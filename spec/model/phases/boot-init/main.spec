@@ -1,5 +1,3 @@
-/*
- * BootInitFlow Enable Model Entry
- */
+/* BootInitFlow child PhaseObject namespace entry. */
 
-include "phase.spec";
+include "rest-init/main.spec";

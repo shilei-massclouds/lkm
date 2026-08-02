@@ -1,8 +1,8 @@
 # BootInitFlow.Preset Coding
 
 `BootInitFlow.Preset` 直接承载 BP 入口前导编排，不再 lowering 为独立 PhaseObject。model 来源为
-[`preset.spec`](../../../model/phases/boot-init/preset.spec) 与
-[`phase.spec`](../../../model/phases/boot-init/phase.spec)，实现落点为
+[`preset.spec`](../../../model/flows/boot_init_flow/preset.spec) 与
+[`main.spec`](../../../model/flows/boot_init_flow/main.spec)，实现落点为
 `impl/arceos_ex/src/flows/boot_init_flow/preset.rs`。
 
 ## 入口例外与 adoption

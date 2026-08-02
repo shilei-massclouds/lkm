@@ -10,10 +10,93 @@ use crate::{
         cpu::TranslationController,
         soc::Soc,
         state::{EventResult, LifecycleEvent, State, failed_condition},
-        task::TaskRef,
-        task_flow::TaskFlowRef,
+        task::{Task, TaskRef},
+        task_flow::{TaskFlowRef, task_flow_execution_guard_satisfied},
     },
 };
+
+global_asm!(
+    r#"
+    .section .text.boot_init_flow_preset_completion, "ax"
+    .align 2
+    .globl boot_init_flow_preset_completion
+    .type boot_init_flow_preset_completion, @function
+boot_init_flow_preset_completion:
+    .option push
+    .option norelax
+    tail start_kernel
+    .option pop
+    .size boot_init_flow_preset_completion, . - boot_init_flow_preset_completion
+"#,
+);
+
+unsafe extern "C" {
+    fn boot_init_flow_preset_completion() -> !;
+}
+
+impl super::BootInitFlow {
+    pub fn accept_initial_start_signal(&self, owner: &Task) -> EventResult {
+        if self.core().state() != State::Base
+            || !owner.flow().same_identity(self.core().flow_ref())
+            || !owner.owns_flow(self.core().flow_ref())
+            || !task_flow_execution_guard_satisfied(self.core(), owner)
+        {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.core().state(),
+                State::Base,
+                State::Prepared,
+            );
+        }
+        Ok(())
+    }
+
+    pub fn preset(&mut self, owner: &Task, checkpoint: Checkpoint) -> EventResult {
+        self.flow.preset(owner, Some(checkpoint))
+    }
+}
+
+/// Adopts the BootInitFlow Preset boundary emitted by `_start`.
+pub fn adopt_head_preset_start() -> EventResult {
+    let ctx = crate::context::context();
+    let state = ctx.boot_init_flow.state();
+    if state != State::Base
+        || ctx.boot_task.state() != State::OnCpu
+        || ctx.boot_task.task_ref() != TaskRef::BOOT
+        || ctx.boot_task.pid() != 0
+        || ctx.boot_task.task().entry() != crate::objects::task::TaskEntry::None
+        || ctx.boot_task.task().kind() != crate::objects::task::TaskKind::None
+        || !ctx
+            .boot_task
+            .task()
+            .flow()
+            .same_identity(TaskFlowRef::BOOT_INIT)
+    {
+        return failed_condition(LifecycleEvent::Preset, state, State::Base, State::Prepared);
+    }
+    ctx.boot_init_flow
+        .accept_initial_start_signal(ctx.boot_task.task())
+}
+
+/// Completes BootInitFlow.Preset after all direct entry-object drives finish.
+fn preset_after_entry_objects() -> ! {
+    let dependencies_ready = super::boot_task_on_cpu_and_canonical()
+        && entry_objects_ready(crate::context::context_ref());
+    let ctx = crate::context::context();
+    let result = if dependencies_ready {
+        ctx.boot_init_flow
+            .preset(ctx.boot_task.task(), Checkpoint::BootInitFlowPrepared)
+    } else {
+        failed_condition(
+            LifecycleEvent::Preset,
+            ctx.boot_init_flow.state(),
+            State::Base,
+            State::Prepared,
+        )
+    };
+    crate::phases::shutdown_on_error(result, "arceos_ex boot init preset failed\n");
+    unsafe { boot_init_flow_preset_completion() }
+}
 
 #[unsafe(link_section = ".data.phase")]
 static BOOT_TASK_ENTRY_PREEMPTION_INITIALIZED: AtomicBool = AtomicBool::new(false);
@@ -544,7 +627,7 @@ extern "C" fn after_vm_setup_continuation() -> ! {
         after_vm_setup(ctx),
         "arceos_ex boot init preset tail failed\n",
     );
-    super::preset_after_entry_objects()
+    preset_after_entry_objects()
 }
 
 /// Finishes `BootInitFlow.Preset` after `Vm.Setup` has switched address

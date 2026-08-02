@@ -17,5 +17,5 @@
 ## 引用
 
 - [阶段范式](../phase-paradigm.md)
-- [BootInitFlow](boot-init-flow.md)
+- [BootInitFlow](../flows/boot_init_flow/README.md)
 - [interrupt leaf model](../../model/phases/interrupt/)
