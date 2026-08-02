@@ -75,6 +75,7 @@
 | `P2` | 待办 | arceos_ex/console | 用户态标准输入输出机制 | `irq_time.011` | [user boot coding](../spec/coding/objects/user-boot.md) |
 | `P1` | 待办 | trace/view | 收口 trace/SVG 输出体验 | 改善 depends_on 长线、图高、标签、事实展示和 action 展开深度。 | [pyveri DEVELOPMENT](../tools/pyveri/DEVELOPMENT.md#step-c1-收口-trace-输出和注释数据流) |
 | `P1` | 本轮闭合 | charter/model/tools2/signal | tools2 Signal 与通用 yields | 独立工具链统一为 v10 AST/Model/Derive/Check/View/Snapshot 与 animation v4；通用 yields、YieldToken、TaskFlowLane resume、严格旧协议互拒和根 verify 入口已闭合。完整 SMP schedule artifact/arbiter/replay 保持 P2。 | [专题](roadmap/signal-driven-tools2.md) |
+| `P1` | 待办 | tools2/testing/performance | tools2 主模型集成测试去重与阶段复用 | 保留 canonical pre-send、模型初态完整闭包、snapshot 恢复完整闭包及所有严格拒绝语义；以可复现分段计时定位重复 parse/model/derive，复用不可变阶段产物并消除第三次等价完整闭包。当前单项约 110.6 秒、tools2 Python 全套约 175.4 秒。 | [专题与验收基线](roadmap/signal-driven-tools2.md#待办主模型集成测试时长优化) |
 | `P2` | 延期 | charter/model/tools2/scheduler/smp | tools2 确定性 TaskFlow/CpuLane 与 SMP schedule replay | 未来按 charter-first 建立 Schedule-return TaskFlow lane、确定性 GlobalArbiter/CpuLane、cross-CPU mailbox、迁移事务和可重放 schedule artifact；不扩大当前 P1 tools2 启动语义校准边界，通用 Signal pending/timeout/cancel 仍属独立后续语义。 | [专题](roadmap/deterministic-smp-lanes.md) |
 | `P1` | 待办 | trace/view | 优化 trace context 框显示 | 优化 context 高度、文本锚定、跨行标签和视觉层级。 | [pyveri DEVELOPMENT](../tools/pyveri/DEVELOPMENT.md#view) |
 | `P2` | 待办 | validation/stress/arceos_ex | `stress-mem` 共享内存后端 | 先用 host-backed shared memory 与 FDT 描述固定 ABI；doorbell/IRQ/专用设备后置。 | 本文档 |

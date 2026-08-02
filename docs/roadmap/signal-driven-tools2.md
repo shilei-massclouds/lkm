@@ -11,6 +11,41 @@
 实现协议见 [`../../spec/coding/tools2.md`](../../spec/coding/tools2.md)。本文只记录里程碑和实施证据，
 不覆盖上述规格。
 
+## 待办：主模型集成测试时长优化
+
+2026-08-02 在同一工作树、主机和 warm filesystem cache 下复测，
+`test_main_model_default_request_reaches_kernel_presend_and_snapshot_resumes` 单项耗时约 110.6 秒，
+`make -C tools2 test` 的 101 项 Python 测试总耗时约 175.4 秒。对代表性 driver 调用单独计时：从模型
+初态到 `Kernel.Enable` 发送前为 2.51 秒；从模型初态完成闭包为 26.67 秒；从已提交
+`Kernel.Enable` snapshot 恢复并完成闭包为 26.72 秒。当前单项在约十次独立 `pyveri` 调用中重复
+执行 parse、model、derive、check 和 view，并包含模型初态、显式 snapshot 恢复及自动 canonical
+scenario 三次近似等价的完整闭包；主要耗时来自重复完整推导及每次重新构建前置阶段产物，不来自本轮
+Deferred/Trimmed 分类断言。
+
+该优化属于 Testing/工具性能责任，不改变 Charter、Model、Coding、Signal 协议、canonical snapshot
+或旧 `tools/` 的 shadow 责任。实施与验收要求如下：
+
+1. 先为测试内每次 driver 调用和 parse/model/derive/check/view 阶段记录可复现耗时、输入 fingerprint、
+   cache 命中情况和产物尺寸；以同一主机 warm-cache 连续三次的中位数作为前后基线，不以一次偶然
+   波动归因。
+2. 拆分 canonical 生成、模型初态完整闭包、snapshot 恢复等价性、自动 scenario/source 选择和严格
+   拒绝负例，使每项失败能直接定位责任；拆分不得通过从默认 suite 移除测试来缩短总时长。
+3. 在测试会话内复用按 source + model fingerprint 标识的不可变 AST/Model 产物，或提供等价的阶段入口；
+   每个 derive 必须获得隔离的初态/场景和输出目录，禁止跨 case 复用可变 snapshot、队列或 occurrence。
+4. 至少保留一次从模型初态完成的完整闭包和一次从真实 canonical snapshot 恢复完成的完整闭包，并逐项
+   比较关键 Signal 顺序、状态、facts、boundary inventory、obligation 和最终 verdict。自动 canonical
+   scenario 选择不得再触发第三次等价完整闭包；其 provenance、source 和文件选择协议改用不削弱语义的
+   focused 路径验证。
+5. 绕过上游、重复 `Kernel.Enable`、陈旧 fingerprint、错误模型初态、缺失/不匹配 canonical scenario
+   和显式 source override 等负例必须全部保留，且继续检查原退出码、结构化 reason 和失败发生边界。
+6. 优化后 committed canonical snapshot bytes、Model fingerprint、协议版本和完整推导语义必须保持不变；
+   `make -C tools2 test` 仍须全通过。以相同三次中位数口径，目标是该 110.6 秒单项降至不超过 65 秒、
+   Python 全套由 175.4 秒降至不超过 130 秒；计时只作为优化验收证据，暂不建立易受机器负载影响的
+   固定 CI timeout 门禁。
+
+旧 `tools/` 没有 tools2 的 pre-send snapshot、canonical provenance/fingerprint、恢复续跑及严格 Signal
+拒绝协议，因此不要求补建同形测试，也不得通过调用旧工具或降低 tools2 协议检查来达到性能目标。
+
 ## 已完成：Deferred / Trimmed / Obligation 处理闭环
 
 2026-07-30 对照检查确认：`tools2` 能在 AST 和 Model handler body 中保留结构化
