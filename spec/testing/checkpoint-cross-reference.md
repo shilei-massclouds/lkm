@@ -64,6 +64,9 @@ coverage 审阅只从已提交 mapping JSON 聚合数量、confidence、Linux �
 
 paired checkpoint difftest 的 `checkpoint_scope` 是 case-local 硬比较集，不代表所有 exact mapping 已纳入比较。
 启用 coverage 的 case 必须把每个必需 checkpoint 归入 scope，或用稳定理由列入 `accounted_outside_scope`；未归类项必须在 dry-run/QEMU 前导致配置失败。
+仓库内正式 Linux paired case 的 `checkpoint_scope` 只能包含当前 mapping 中的 `exact` checkpoint；
+`range`、`unmapped` 或 mapping 中不存在的 checkpoint 只能保留为 scope 外观察项。mapping 分类变化后，
+复合配置单测必须在 QEMU 前拒绝仍把非 exact checkpoint 留在硬比较集的 stale case。
 
 ## Marker patch
 

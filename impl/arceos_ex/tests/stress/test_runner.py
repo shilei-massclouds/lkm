@@ -131,6 +131,27 @@ class CompositeConfigTests(unittest.TestCase):
         self.assertEqual(len(loaded), 10)
         self.assertTrue(all(case["mode"] in {"stress", "difftest"} for case in loaded))
 
+    def test_checked_in_difftest_scopes_use_exact_linux_mappings(self) -> None:
+        mapping_path = self.repo_root / "tools/out/checkpoints/linux_checkpoint_mapping.json"
+        mapping = json.loads(mapping_path.read_text())
+        mapping_kinds = {
+            row["checkpoint_name"]: row["mapping_kind"]
+            for row in mapping
+        }
+        exact_total = sum(kind == "exact" for kind in mapping_kinds.values())
+        cases_dir = self.repo_root / "impl/arceos_ex/tests/stress/cases"
+        for path in sorted(cases_dir.glob("*difftest.toml")):
+            raw = tomllib.loads(path.read_text())
+            non_exact = {
+                name: mapping_kinds.get(name)
+                for name in raw["checkpoint_scope"]
+                if mapping_kinds.get(name) != "exact"
+            }
+            self.assertEqual(non_exact, {}, path)
+            target = raw.get("metadata", {}).get("linux_exact_runtime_target_count")
+            if target is not None:
+                self.assertEqual(target, exact_total, path)
+
     def test_rc_local_timeout_case_is_default_and_uses_canonical_basic(self) -> None:
         path = (
             self.repo_root

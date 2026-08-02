@@ -10,7 +10,6 @@ right_label = "linux"
 checkpoint_scope = [
   "TrapType.Prepared",
   "ExceptionType.Prepared",
-  "CorePreparePhase.Started",
   "CorePreparePhase.Ready",
   "MmCoreInitPhase.Started",
   "MmCoreInitPhase.Ready",
