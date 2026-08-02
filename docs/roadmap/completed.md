@@ -8,6 +8,7 @@
 | --- | --- | --- |
 | model/tools2/animate | tools2 Signal 交互式离线 HTML 动画 v1 | [交互式 model trace HTML 动画](interactive-model-animation.md) |
 | model/tools2/validation | tools2 Deferred / Trimmed / Obligation v9 语义闭环 | [Signal-driven tools2 完成证据](signal-driven-tools2.md#deferred--trimmed--obligation-v9-完成证据) |
+| tools2/testing/performance | tools2 主模型集成测试去重与阶段复用 | [Signal-driven tools2 完成证据](signal-driven-tools2.md#主模型集成测试时长优化完成证据) |
 | model/tools/docs | Deferred / Trimmed 结构化治理与 legacy inventory 全量审计 | [Deferred / Trimmed 结构化治理审计](deferred-trimmed-audit.md) |
 | validation/arceos_ex | 全量 Clippy 与 clean-build warning 收口 | [当前上下文归档](current-context.md) |
 | validation/trace | nightly/压力缺陷复现流水线首轮建立 | [当前上下文归档](current-context.md) |

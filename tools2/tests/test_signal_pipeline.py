@@ -7,14 +7,19 @@ import io
 import json
 import os
 from pathlib import Path
+import runpy
 import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 from unittest import mock
 
 from check_tool.__main__ import main as check_main
+from check_tool.policy import check_derivation
+from animate_tool.builder import build_animation
+from animate_tool.html import render_html
 from derive_tool.__main__ import main as derive_main
 from derive_tool.engine import derive
 from model_tool.__main__ import main as model_main
@@ -37,8 +42,10 @@ from tools2_common import (
     VIEW_SCHEMA,
     VIEW_VERSION,
     read_json,
+    write_json,
 )
 from view_tool.__main__ import main as view_main
+from view_tool.builder import build_view
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -49,9 +56,34 @@ BOOT_INIT_SETUP_SCENARIO = TOOLS2 / "scenarios" / "BootInitFlow.Setup.snapshot.j
 CPU0_SCHEDULER_SCHEDULE_SCENARIO = (
     TOOLS2 / "scenarios" / "Cpu0Scheduler.Schedule.snapshot.json"
 )
+SHORTCUT_MAIN = runpy.run_path(
+    str(TOOLS2 / "bin" / "pyveri"), run_name="tools2_test_shortcut"
+)["main"]
 
 
-class SignalPipelineTests(unittest.TestCase):
+class _ShortcutTestSupport:
+    def run_shortcut_focused(
+        self, arguments: list[str], *, downstream_exit: int = 0
+    ) -> tuple[int, list[str] | None, str, str]:
+        downstream_arguments = None
+
+        def downstream(values: list[str]) -> int:
+            nonlocal downstream_arguments
+            downstream_arguments = values
+            return downstream_exit
+
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with mock.patch("pyveri.__main__.main", side_effect=downstream), \
+             contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            try:
+                result = SHORTCUT_MAIN(arguments)
+            except SystemExit as error:
+                result = int(error.code)
+        return result, downstream_arguments, stdout.getvalue(), stderr.getvalue()
+
+
+class SignalPipelineTests(_ShortcutTestSupport, unittest.TestCase):
     def run_source(
         self,
         source: str,
@@ -4406,12 +4438,397 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(bounded.returncode, 1)
             self.assertIn("verdict: bounded", bounded.stdout)
 
+    def test_pyveri_default_scenario_missing_override_and_path_safety(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            missing_work = root / "missing-work"
+            missing, missing_args, _, missing_stderr = self.run_shortcut_focused(
+                [
+                    "-t",
+                    "Computer.Startup",
+                    "--work-dir",
+                    str(missing_work),
+                ]
+            )
+            self.assertEqual(missing, 2)
+            self.assertIsNone(missing_args)
+            self.assertIn("canonical signal Computer.Preset", missing_stderr)
+            self.assertIn(
+                "tools2/scenarios/Computer.Preset.snapshot.json", missing_stderr
+            )
+            self.assertFalse(missing_work.exists())
+
+            empty_scenario = root / "empty-scenario.json"
+            empty_scenario.write_text("{}\n", encoding="utf-8")
+            override_work = root / "override-work"
+            override, override_args, _, override_stderr = self.run_shortcut_focused(
+                [
+                    "-f",
+                    str(PIPELINE),
+                    "-t",
+                    "Root.Start",
+                    "-s",
+                    str(empty_scenario),
+                    "--work-dir",
+                    str(override_work),
+                ]
+            )
+            self.assertEqual(override, 0, override_stderr)
+            self.assertEqual(
+                override_args,
+                [
+                    str(PIPELINE),
+                    "--source",
+                    "Human",
+                    "--max-depth",
+                    "all",
+                    "--max-breadth",
+                    "all",
+                    "--signal",
+                    "Root.Start",
+                    "--scenario",
+                    str(empty_scenario),
+                    "--work-dir",
+                    str(override_work),
+                ],
+            )
+
+            malformed = TOOLS2 / "scenarios" / "Malformed.Start.snapshot.json"
+            self.addCleanup(malformed.unlink, missing_ok=True)
+            malformed_cases = (
+                ("missing boundary provenance", {}),
+                (
+                    "boundary signal does not match",
+                    {
+                        "provenance": {
+                            "boundary": {
+                                "normalized_signal": "Other.Start",
+                                "source": "Harness",
+                            }
+                        }
+                    },
+                ),
+                (
+                    "boundary source is missing or invalid",
+                    {
+                        "provenance": {
+                            "boundary": {
+                                "normalized_signal": "Malformed.Start",
+                                "source": "",
+                            }
+                        }
+                    },
+                ),
+            )
+            for expected, extra in malformed_cases:
+                with self.subTest(default_snapshot=expected):
+                    value = {
+                        "schema": SNAPSHOT_SCHEMA,
+                        "version": SNAPSHOT_VERSION,
+                        "producer": PRODUCER,
+                        "model_fingerprint": "sha256:not-reached",
+                        "snapshot": {},
+                        **extra,
+                    }
+                    malformed.write_text(json.dumps(value), encoding="utf-8")
+                    malformed_work = root / expected.replace(" ", "-")
+                    result, result_args, _, result_stderr = self.run_shortcut_focused(
+                        [
+                            "-f",
+                            str(PIPELINE),
+                            "-t",
+                            "Malformed.Start",
+                            "--work-dir",
+                            str(malformed_work),
+                        ]
+                    )
+                    self.assertEqual(result, 2)
+                    self.assertIsNone(result_args)
+                    self.assertIn(expected, result_stderr)
+                    self.assertFalse(malformed_work.exists())
+
+            outside = root / "outside.snapshot.json"
+            outside.write_text("{}\n", encoding="utf-8")
+            symlink = TOOLS2 / "scenarios" / "Escape.Preset.snapshot.json"
+            symlink.symlink_to(outside)
+            self.addCleanup(symlink.unlink, missing_ok=True)
+            for signal in ("../outside.Preset", str(outside.with_suffix(".Preset")), "Escape.Preset"):
+                with self.subTest(signal=signal):
+                    unsafe, unsafe_args, _, unsafe_stderr = self.run_shortcut_focused(
+                        ["-f", str(PIPELINE), "-t", signal]
+                    )
+                    self.assertEqual(unsafe, 2)
+                    self.assertIsNone(unsafe_args)
+                    self.assertTrue(
+                        "unsafe default scenario" in unsafe_stderr
+                        or "argument -t/--trigger" in unsafe_stderr,
+                        unsafe_stderr,
+                    )
+
+
+
+class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
+    """Main-model integration coverage with one immutable prepared Model per run."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        cls._fixture_temporary = tempfile.TemporaryDirectory(
+            prefix="lkm-tools2-main-model-tests-"
+        )
+        cls.fixture_root = Path(cls._fixture_temporary.name)
+        cls.fixture_ast = cls.fixture_root / "ast.json"
+        cls.fixture_model = cls.fixture_root / "model.json"
+        cls.fixture_cases = cls.fixture_root / "cases"
+        cls.fixture_cases.mkdir()
+        cls.fixture_evidence: list[dict] = []
+        cls._prepared_run_count = 0
+
+        started = time.monotonic()
+        if parse_main(
+            [str(ROOT / "spec" / "model" / "main.spec"), "-o", str(cls.fixture_ast)]
+        ) != 0:
+            raise RuntimeError("failed to prepare main-model AST fixture")
+        parse_seconds = time.monotonic() - started
+
+        started = time.monotonic()
+        if model_main([str(cls.fixture_ast), "-o", str(cls.fixture_model)]) != 0:
+            raise RuntimeError("failed to prepare main-model Model fixture")
+        model_seconds = time.monotonic() - started
+
+        cls.prepared_model_document = read_json(cls.fixture_model)
+        cls.fixture_model_fingerprint = cls.prepared_model_document["model_fingerprint"]
+        cls.fixture_source_hash = hashlib.sha256(
+            (ROOT / "spec" / "model" / "main.spec").read_bytes()
+        ).hexdigest()
+        cls.fixture_ast_hash = hashlib.sha256(cls.fixture_ast.read_bytes()).hexdigest()
+        cls.fixture_model_hash = hashlib.sha256(cls.fixture_model.read_bytes()).hexdigest()
+        cls.fixture_document_hash = hashlib.sha256(
+            json.dumps(
+                cls.prepared_model_document,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        cls.fixture_ast.chmod(0o444)
+        cls.fixture_model.chmod(0o444)
+        cls.fixture_evidence.append(
+            {
+                "case": "prepared-main-model",
+                "cache_hit": False,
+                "source": cls.prepared_model_document["source"],
+                "source_sha256": cls.fixture_source_hash,
+                "model_fingerprint": cls.prepared_model_document["model_fingerprint"],
+                "phases_seconds": {
+                    "parse": round(parse_seconds, 6),
+                    "model": round(model_seconds, 6),
+                },
+                "artifact_bytes": {
+                    "ast": cls.fixture_ast.stat().st_size,
+                    "model": cls.fixture_model.stat().st_size,
+                },
+            }
+        )
+        cls._assert_fixture_integrity(check_document=True)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        try:
+            cls._assert_fixture_integrity(check_document=True)
+            print(
+                "tools2-main-model-test-evidence: "
+                + json.dumps(cls.fixture_evidence, sort_keys=True),
+                file=sys.stderr,
+            )
+        finally:
+            cls._fixture_temporary.cleanup()
+            super().tearDownClass()
+
+    @classmethod
+    def _assert_fixture_integrity(cls, *, check_document: bool = False) -> None:
+        if check_document and (
+            hashlib.sha256(
+                (ROOT / "spec" / "model" / "main.spec").read_bytes()
+            ).hexdigest()
+            != cls.fixture_source_hash
+        ):
+            raise AssertionError("shared main-model source changed")
+        if hashlib.sha256(cls.fixture_ast.read_bytes()).hexdigest() != cls.fixture_ast_hash:
+            raise AssertionError("shared main-model AST fixture changed")
+        if hashlib.sha256(cls.fixture_model.read_bytes()).hexdigest() != cls.fixture_model_hash:
+            raise AssertionError("shared main-model Model fixture changed")
+        if (
+            hashlib.sha256(
+                json.dumps(
+                    cls.prepared_model_document,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
+            ).hexdigest()
+            != cls.fixture_document_hash
+        ):
+            raise AssertionError("shared in-memory main-model fixture changed")
+        if (
+            cls.prepared_model_document["model_fingerprint"]
+            != cls.fixture_model_fingerprint
+        ):
+            raise AssertionError("shared main-model fingerprint changed")
+
+    def setUp(self) -> None:
+        self._assert_fixture_integrity(check_document=True)
+
+    def tearDown(self) -> None:
+        self._assert_fixture_integrity(check_document=True)
+
+    def record_cli_pipeline(self, label: str, seconds: float, work: Path) -> None:
+        self.fixture_evidence.append(
+            {
+                "case": label,
+                "cache_hit": False,
+                "model_fingerprint": read_json(work / "model.json")["model_fingerprint"],
+                "phases_seconds": {"complete_cli": round(seconds, 6)},
+                "artifact_bytes": {
+                    name.removesuffix(".json").removesuffix(".txt"): (work / name).stat().st_size
+                    for name in (
+                        "ast.json",
+                        "model.json",
+                        "derive.json",
+                        "check.json",
+                        "view.json",
+                        "trace.txt",
+                    )
+                },
+            }
+        )
+
+    def run_prepared(
+        self,
+        label: str,
+        *,
+        signal: str | None = None,
+        source: str = "Human",
+        until: str | None = None,
+        scenario: str | Path | None = None,
+        max_depth: int | None = None,
+        max_breadth: int | None = None,
+        include_view: bool = False,
+    ) -> tuple[dict, dict, dict | None, Path]:
+        self._assert_fixture_integrity()
+        type(self)._prepared_run_count += 1
+        case_root = self.fixture_cases / f"{self._prepared_run_count:02d}-{label}"
+        case_root.mkdir()
+
+        started = time.monotonic()
+        derived = derive(
+            self.prepared_model_document,
+            signal=signal,
+            source=source,
+            until=until,
+            scenario=scenario,
+            max_depth=max_depth,
+            max_breadth=max_breadth,
+        )
+        derive_seconds = time.monotonic() - started
+        derivation = {
+            "schema": DERIVE_SCHEMA,
+            "version": DERIVE_VERSION,
+            "producer": PRODUCER,
+            "source": self.prepared_model_document["source"],
+            **derived,
+        }
+
+        started = time.monotonic()
+        checked_result = check_derivation(derivation)
+        checked = {
+            "schema": CHECK_SCHEMA,
+            "version": CHECK_VERSION,
+            "producer": PRODUCER,
+            "source": derivation["source"],
+            **checked_result,
+        }
+        check_seconds = time.monotonic() - started
+
+        view = None
+        view_seconds = None
+        if include_view:
+            started = time.monotonic()
+            view = {
+                "schema": VIEW_SCHEMA,
+                "version": VIEW_VERSION,
+                "producer": PRODUCER,
+                "source": derivation["source"],
+                **build_view(derivation),
+            }
+            view_seconds = time.monotonic() - started
+        summary_path = case_root / "summary.json"
+        write_json(
+            summary_path,
+            {
+                "model_fingerprint": derivation["model_fingerprint"],
+                "verdict": derivation["verdict"],
+                "allowed": checked["allowed"],
+                "signals": len(derivation["signals"]),
+                "events": len(derivation["events"]),
+                "boundary_inventory": len(derivation["boundary_inventory"]),
+                "obligations": len(derivation["obligations"]),
+                "view_signals": None if view is None else len(view["signals"]),
+            },
+        )
+        self.fixture_evidence.append(
+            {
+                "case": label,
+                "cache_hit": True,
+                "model_fingerprint": derivation["model_fingerprint"],
+                "phases_seconds": {
+                    "derive": round(derive_seconds, 6),
+                    "check": round(check_seconds, 6),
+                    "view": None if view_seconds is None else round(view_seconds, 6),
+                },
+                "artifact_size": {
+                    "summary_bytes": summary_path.stat().st_size,
+                    "signals": len(derivation["signals"]),
+                    "events": len(derivation["events"]),
+                    "boundary_inventory": len(derivation["boundary_inventory"]),
+                    "obligations": len(derivation["obligations"]),
+                    "view_signals": None if view is None else len(view["signals"]),
+                },
+            }
+        )
+        self.assertEqual(
+            derivation["model_fingerprint"],
+            self.prepared_model_document["model_fingerprint"],
+        )
+        self._assert_fixture_integrity()
+        return derivation, checked, view, case_root
+
+    def write_snapshot(self, path: Path, derivation: dict) -> None:
+        write_json(
+            path,
+            {
+                "schema": SNAPSHOT_SCHEMA,
+                "version": SNAPSHOT_VERSION,
+                "producer": PRODUCER,
+                "source": derivation["source"],
+                "model_fingerprint": derivation["model_fingerprint"],
+                "snapshot": derivation["last_stable_snapshot"],
+                "provenance": {
+                    "verdict": derivation["verdict"],
+                    "root_request": derivation["root_request"],
+                    "until_request": derivation["until_request"],
+                    "boundary": derivation["boundary"],
+                },
+            },
+        )
+
     def test_main_model_default_request_reaches_kernel_presend_and_snapshot_resumes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             shortcut = TOOLS2 / "bin" / "pyveri"
             work = root / "kernel-boundary"
             snapshot = root / "kernel-boundary.snapshot.json"
+            cli_started = time.monotonic()
             reached = subprocess.run(
                 [
                     str(shortcut),
@@ -4422,12 +4839,15 @@ class SignalPipelineTests(unittest.TestCase):
                     "--snapshot-out",
                     str(snapshot),
                 ],
-                cwd=root,
+                cwd=ROOT,
                 text=True,
                 capture_output=True,
                 check=False,
             )
             self.assertEqual(reached.returncode, 0, reached.stderr)
+            self.record_cli_pipeline(
+                "canonical-presend-cli", time.monotonic() - cli_started, work
+            )
             derivation = read_json(work / "derive.json")
             self.assertEqual(derivation["verdict"], "reached")
             self.assertEqual(
@@ -4666,7 +5086,7 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(saved["producer"], PRODUCER)
             self.assertEqual(saved["source"], "spec/model/main.spec")
             self.assertEqual(saved["model_fingerprint"], derivation["model_fingerprint"])
-            model_data = read_json(work / "model.json")
+            model_data = self.prepared_model_document
             view_data = read_json(work / "view.json")
             systems = model_data["model"]["systems"]
             self.assertEqual(
@@ -4781,40 +5201,7 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertIn(
                 "task_ref_targets(BootTaskRef,BootTask)", saved["snapshot"]["facts"]
             )
-            exact_snapshot = root / "kernel-presend-exact.snapshot.json"
-            exact = subprocess.run(
-                [
-                    str(shortcut),
-                    "-u",
-                    "Kernel.Enable",
-                    "--snapshot-out",
-                    str(exact_snapshot),
-                ],
-                cwd=ROOT,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            self.assertEqual(exact.returncode, 0, exact.stderr)
-            self.assertEqual(exact_snapshot.read_bytes(), KERNEL_ENABLE_SCENARIO.read_bytes())
-
-            normal_work = root / "normal-closure"
-            normal = subprocess.run(
-                [
-                    str(shortcut),
-                    "--work-dir",
-                    str(normal_work),
-                    "-o",
-                    str(root / "normal-closure.txt"),
-                ],
-                cwd=root,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            self.assertEqual(normal.returncode, 0, normal.stderr)
-            normal_data = read_json(normal_work / "derive.json")
-            normal_checked = read_json(normal_work / "check.json")
+            normal_data, normal_checked, _, _ = self.run_prepared("initial-closure")
             self.assertEqual(normal_data["verdict"], "complete")
             self.assertEqual(normal_checked["verdict"], "complete")
             self.assertEqual(normal_checked["exit_code"], 0)
@@ -5037,30 +5424,14 @@ class SignalPipelineTests(unittest.TestCase):
                 },
             )
 
-            resumed_work = root / "kernel-resumed"
             completed_snapshot = root / "kernel-online.snapshot.json"
-            resumed = subprocess.run(
-                [
-                    str(shortcut),
-                    "-t",
-                    "Kernel.Enable",
-                    "-s",
-                    str(snapshot),
-                    "--max-depth",
-                    "all",
-                    "--work-dir",
-                    str(resumed_work),
-                    "--snapshot-out",
-                    str(completed_snapshot),
-                ],
-                cwd=root,
-                text=True,
-                capture_output=True,
-                check=False,
+            resumed_data, resumed_checked, _, _ = self.run_prepared(
+                "canonical-snapshot-closure",
+                signal="Kernel.Enable",
+                source="OpenSBI",
+                scenario=snapshot,
             )
-            self.assertEqual(resumed.returncode, 0, resumed.stderr)
-            resumed_data = read_json(resumed_work / "derive.json")
-            resumed_checked = read_json(resumed_work / "check.json")
+            self.write_snapshot(completed_snapshot, resumed_data)
             self.assertEqual(resumed_data["verdict"], "complete")
             self.assertEqual(resumed_checked["verdict"], "complete")
             self.assertEqual(resumed_checked["exit_code"], 0)
@@ -5091,6 +5462,44 @@ class SignalPipelineTests(unittest.TestCase):
                 ("Kernel", "Enable"),
             )
             self.assertIsNone(resumed_data["until_request"])
+
+            def semantic_signal_sequence(items: list[dict]) -> list[tuple]:
+                return [
+                    (
+                        item["source"],
+                        item["target"],
+                        item["name"],
+                        "entry" if index == 0 else item["delivery"],
+                        item["handler"]["kind"],
+                        item["handler"]["id"],
+                        item["outcome"],
+                    )
+                    for index, item in enumerate(items)
+                ]
+
+            self.assertEqual(
+                semantic_signal_sequence(normal_data["signals"][15:]),
+                semantic_signal_sequence(resumed_data["signals"]),
+            )
+            for field in (
+                "states",
+                "facts",
+                "references",
+                "instances",
+            ):
+                self.assertEqual(
+                    normal_data["last_stable_snapshot"][field],
+                    resumed_data["last_stable_snapshot"][field],
+                    field,
+                )
+            self.assertEqual(
+                normal_data["boundary_inventory"], resumed_data["boundary_inventory"]
+            )
+            self.assertEqual(normal_data["obligations"], resumed_data["obligations"])
+            self.assertEqual(
+                (normal_data["verdict"], normal_checked["verdict"]),
+                (resumed_data["verdict"], resumed_checked["verdict"]),
+            )
             interrupt_preset = next(
                 item
                 for item in resumed_data["signals"]
@@ -5120,65 +5529,71 @@ class SignalPipelineTests(unittest.TestCase):
                 interrupt_facts,
             )
 
-            bypass_work = root / "kernel-bypass-lower-flow"
-            bypass = subprocess.run(
-                [
-                    str(shortcut),
-                    "-t",
-                    "BootInitFlow.Preset",
-                    "-s",
-                    str(snapshot),
-                    "--work-dir",
-                    str(bypass_work),
-                ],
-                cwd=root,
-                text=True,
-                capture_output=True,
-                check=False,
+            bypass_data, bypass_checked, _, _ = self.run_prepared(
+                "bypass-kernel-enable",
+                signal="BootInitFlow.Preset",
+                scenario=snapshot,
             )
-            self.assertEqual(bypass.returncode, 1)
-            bypass_data = read_json(bypass_work / "derive.json")
+            self.assertEqual(bypass_checked["exit_code"], 1)
             self.assertEqual(bypass_data["signals"][0]["outcome"], "rejected")
             self.assertIn("kernel_enable_accepted", bypass_data["signals"][0]["reason"])
 
-            duplicate_work = root / "kernel-duplicate-enable"
-            duplicate = subprocess.run(
-                [
-                    str(shortcut),
-                    "-t",
-                    "Kernel.Enable",
-                    "-s",
-                    str(completed_snapshot),
-                    "--work-dir",
-                    str(duplicate_work),
-                ],
-                cwd=root,
-                text=True,
-                capture_output=True,
-                check=False,
+            duplicate_data, duplicate_checked, _, _ = self.run_prepared(
+                "duplicate-kernel-enable",
+                signal="Kernel.Enable",
+                scenario=completed_snapshot,
             )
-            self.assertEqual(duplicate.returncode, 1)
-            duplicate_data = read_json(duplicate_work / "derive.json")
+            self.assertEqual(duplicate_checked["exit_code"], 1)
             self.assertEqual(duplicate_data["signals"][0]["outcome"], "rejected")
 
             default_work = root / "kernel-default-enable"
-            default_result = subprocess.run(
-                [str(shortcut), "-t", "Kernel.Enable", "--work-dir", str(default_work)],
-                cwd=ROOT,
-                text=True,
-                capture_output=True,
-                check=False,
+            default_result, default_args, _, default_stderr = self.run_shortcut_focused(
+                [
+                    "-t",
+                    "Kernel.Enable",
+                    "-u",
+                    "BootInitFlow.Preset",
+                    "--work-dir",
+                    str(default_work),
+                ]
             )
-            self.assertEqual(default_result.returncode, 0, default_result.stderr)
-            default_data = read_json(default_work / "derive.json")
+            self.assertEqual(default_result, 0, default_stderr)
+            self.assertEqual(
+                default_args,
+                [
+                    str(ROOT / "spec" / "model" / "main.spec"),
+                    "--source",
+                    "OpenSBI",
+                    "--max-depth",
+                    "all",
+                    "--max-breadth",
+                    "all",
+                    "--signal",
+                    "Kernel.Enable",
+                    "--scenario",
+                    str(KERNEL_ENABLE_SCENARIO.resolve()),
+                    "--until",
+                    "BootInitFlow.Preset",
+                    "--work-dir",
+                    str(default_work),
+                ],
+            )
+            default_data, default_checked, _, _ = self.run_prepared(
+                "canonical-kernel-auto-source",
+                signal="Kernel.Enable",
+                source="OpenSBI",
+                until="BootInitFlow.Preset",
+                scenario=KERNEL_ENABLE_SCENARIO,
+            )
+            self.assertEqual(default_checked["exit_code"], 0)
             self.assertEqual(default_data["initial_snapshot"], saved["snapshot"])
             self.assertEqual(default_data["root_request"]["source"], "OpenSBI")
             self.assertEqual(default_data["signals"][0]["name"], "Enable")
+            self.assertEqual(default_data["verdict"], "reached")
 
             explicit_source_work = root / "kernel-explicit-source"
-            explicit_source = subprocess.run(
+            explicit_source, explicit_args, _, explicit_stderr = self.run_shortcut_focused(
                 [
-                    str(shortcut),
                     "-t",
                     "Kernel.Enable",
                     "-u",
@@ -5187,17 +5602,38 @@ class SignalPipelineTests(unittest.TestCase):
                     "Human",
                     "--work-dir",
                     str(explicit_source_work),
-                ],
-                cwd=ROOT,
-                text=True,
-                capture_output=True,
-                check=False,
+                ]
             )
-            self.assertEqual(explicit_source.returncode, 0, explicit_source.stderr)
+            self.assertEqual(explicit_source, 0, explicit_stderr)
             self.assertEqual(
-                read_json(explicit_source_work / "derive.json")["root_request"]["source"],
-                "Human",
+                explicit_args,
+                [
+                    str(ROOT / "spec" / "model" / "main.spec"),
+                    "--source",
+                    "Human",
+                    "--max-depth",
+                    "all",
+                    "--max-breadth",
+                    "all",
+                    "--signal",
+                    "Kernel.Enable",
+                    "--scenario",
+                    str(KERNEL_ENABLE_SCENARIO.resolve()),
+                    "--until",
+                    "BootInitFlow.Preset",
+                    "--work-dir",
+                    str(explicit_source_work),
+                ],
             )
+            explicit_data, explicit_checked, _, _ = self.run_prepared(
+                "canonical-kernel-explicit-source",
+                signal="Kernel.Enable",
+                source="Human",
+                until="BootInitFlow.Preset",
+                scenario=KERNEL_ENABLE_SCENARIO,
+            )
+            self.assertEqual(explicit_checked["exit_code"], 0)
+            self.assertEqual(explicit_data["root_request"]["source"], "Human")
 
             stale = subprocess.run(
                 [str(shortcut), "-f", str(PIPELINE), "-t", "Kernel.Enable"],
@@ -5209,51 +5645,25 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(stale.returncode, 2)
             self.assertIn("snapshot model fingerprint does not match", stale.stderr)
 
-            direct_work = root / "kernel-direct-model-initial"
-            with contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(
-                    driver_main(
-                        [
-                            str(ROOT / "spec" / "model" / "main.spec"),
-                            "--signal",
-                            "Kernel.Enable",
-                            "--max-depth",
-                            "all",
-                            "--max-breadth",
-                            "all",
-                            "--work-dir",
-                            str(direct_work),
-                        ]
-                    ),
-                    1,
-                )
-            direct_data = read_json(direct_work / "derive.json")
+            direct_data, direct_checked, _, _ = self.run_prepared(
+                "wrong-model-initial-state", signal="Kernel.Enable", include_view=True
+            )
+            self.assertEqual(direct_checked["exit_code"], 1)
             self.assertNotEqual(direct_data["initial_snapshot"], saved["snapshot"])
             self.assertEqual(direct_data["signals"][0]["outcome"], "rejected")
 
     def test_main_model_real_opensbi_handoff_stops_before_boot_init_preset(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            shortcut = TOOLS2 / "bin" / "pyveri"
-            work = root / "boot-init-boundary"
             snapshot = root / "boot-init-boundary.snapshot.json"
-            reached = subprocess.run(
-                [
-                    str(shortcut),
-                    "-u",
-                    "BootInitFlow.Preset",
-                    "--work-dir",
-                    str(work),
-                    "--snapshot-out",
-                    str(snapshot),
-                ],
-                cwd=root,
-                text=True,
-                capture_output=True,
-                check=False,
+            derivation, checked, view_data, _ = self.run_prepared(
+                "opensbi-handoff",
+                until="BootInitFlow.Preset",
+                include_view=True,
             )
-            self.assertEqual(reached.returncode, 0, reached.stderr)
-            derivation = read_json(work / "derive.json")
+            self.assertEqual(checked["exit_code"], 0)
+            self.assertIsNotNone(view_data)
+            self.write_snapshot(snapshot, derivation)
             self.assertEqual(derivation["verdict"], "reached")
             self.assertEqual(
                 (
@@ -5489,8 +5899,8 @@ class SignalPipelineTests(unittest.TestCase):
             saved = read_json(snapshot)
             self.assertEqual(saved["snapshot"], boundary["snapshot"])
             self.assertEqual(saved["provenance"]["boundary"], boundary)
-            model_data = read_json(work / "model.json")
-            view_data = read_json(work / "view.json")
+            model_data = self.prepared_model_document
+            assert view_data is not None
             self.assertEqual(
                 {
                     derivation["model_fingerprint"],
@@ -5533,25 +5943,15 @@ class SignalPipelineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             shortcut = TOOLS2 / "bin" / "pyveri"
-            work = root / "boot-init-setup-boundary"
             snapshot = root / "BootInitFlow.Setup.snapshot.json"
-            reached = subprocess.run(
-                [
-                    str(shortcut),
-                    "-u",
-                    "BootInitFlow.Setup",
-                    "--work-dir",
-                    str(work),
-                    "--snapshot-out",
-                    str(snapshot),
-                ],
-                cwd=root,
-                text=True,
-                capture_output=True,
-                check=False,
+            derivation, checked, view, _ = self.run_prepared(
+                "boot-init-setup-boundary",
+                until="BootInitFlow.Setup",
+                include_view=True,
             )
-            self.assertEqual(reached.returncode, 0, reached.stderr)
-            derivation = read_json(work / "derive.json")
+            self.assertEqual(checked["exit_code"], 0)
+            self.assertIsNotNone(view)
+            self.write_snapshot(snapshot, derivation)
             self.assertEqual(derivation["verdict"], "reached")
             self.assertEqual(
                 derivation["summary"],
@@ -6012,8 +6412,8 @@ class SignalPipelineTests(unittest.TestCase):
             )
 
             saved = read_json(snapshot)
-            model = read_json(work / "model.json")
-            view = read_json(work / "view.json")
+            model = self.prepared_model_document
+            assert view is not None
             boot_init_setup_inventory = {
                 item["id"]: item["status"]
                 for item in model["model"]["boundary_inventory"]
@@ -6087,30 +6487,41 @@ class SignalPipelineTests(unittest.TestCase):
                 verbose_text,
             )
 
-            rebuilt = root / "rebuilt.snapshot.json"
-            exact = subprocess.run(
-                [str(shortcut), "-u", "BootInitFlow.Setup", "--snapshot-out", str(rebuilt)],
-                cwd=ROOT,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            self.assertEqual(exact.returncode, 0, exact.stderr)
-            self.assertEqual(rebuilt.read_bytes(), BOOT_INIT_SETUP_SCENARIO.read_bytes())
-
             default_work = root / "default-setup"
-            default = subprocess.run(
+            default, default_args, _, default_stderr = self.run_shortcut_focused(
                 [
-                    str(shortcut), "-t", "BootInitFlow.Setup", "--max-depth", "0",
+                    "-t", "BootInitFlow.Setup", "--max-depth", "0",
                     "--work-dir", str(default_work),
                 ],
-                cwd=root,
-                text=True,
-                capture_output=True,
-                check=False,
+                downstream_exit=1,
             )
-            self.assertEqual(default.returncode, 1)
-            default_data = read_json(default_work / "derive.json")
+            self.assertEqual(default, 1, default_stderr)
+            self.assertEqual(
+                default_args,
+                [
+                    str(ROOT / "spec" / "model" / "main.spec"),
+                    "--source",
+                    "BootInitFlow",
+                    "--max-depth",
+                    "0",
+                    "--max-breadth",
+                    "all",
+                    "--signal",
+                    "BootInitFlow.Setup",
+                    "--scenario",
+                    str(BOOT_INIT_SETUP_SCENARIO.resolve()),
+                    "--work-dir",
+                    str(default_work),
+                ],
+            )
+            default_data, default_checked, _, _ = self.run_prepared(
+                "canonical-setup-bounded",
+                signal="BootInitFlow.Setup",
+                source="BootInitFlow",
+                scenario=BOOT_INIT_SETUP_SCENARIO,
+                max_depth=0,
+            )
+            self.assertEqual(default_checked["exit_code"], 1)
             self.assertEqual(default_data["initial_snapshot"], saved["snapshot"])
             self.assertEqual(
                 (
@@ -6124,19 +6535,13 @@ class SignalPipelineTests(unittest.TestCase):
                 any(item["outcome"] == "truncated" for item in default_data["signals"])
             )
 
-            duplicate_work = root / "duplicate-preset"
-            duplicate = subprocess.run(
-                [
-                    str(shortcut), "-t", "BootInitFlow.Preset", "-s",
-                    str(BOOT_INIT_SETUP_SCENARIO), "--work-dir", str(duplicate_work),
-                ],
-                cwd=root,
-                text=True,
-                capture_output=True,
-                check=False,
+            duplicate_data, duplicate_checked, _, _ = self.run_prepared(
+                "duplicate-boot-init-preset",
+                signal="BootInitFlow.Preset",
+                scenario=BOOT_INIT_SETUP_SCENARIO,
             )
-            self.assertEqual(duplicate.returncode, 1)
-            self.assertEqual(read_json(duplicate_work / "derive.json")["signals"][0]["outcome"], "rejected")
+            self.assertEqual(duplicate_checked["exit_code"], 1)
+            self.assertEqual(duplicate_data["signals"][0]["outcome"], "rejected")
 
             stale = subprocess.run(
                 [str(shortcut), "-f", str(PIPELINE), "-t", "BootInitFlow.Setup"],
@@ -6148,46 +6553,30 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(stale.returncode, 2)
             self.assertIn("snapshot model fingerprint does not match", stale.stderr)
 
-            missing = subprocess.run(
-                [str(shortcut), "-t", "BootInitFlow.Enable"],
-                cwd=root,
-                text=True,
-                capture_output=True,
-                check=False,
+            missing, missing_args, _, missing_stderr = self.run_shortcut_focused(
+                ["-t", "BootInitFlow.Enable"]
             )
-            self.assertEqual(missing.returncode, 2)
-            self.assertIn("tools2/scenarios/BootInitFlow.Enable.snapshot.json", missing.stderr)
+            self.assertEqual(missing, 2)
+            self.assertIsNone(missing_args)
+            self.assertIn(
+                "tools2/scenarios/BootInitFlow.Enable.snapshot.json", missing_stderr
+            )
 
     def test_main_model_boot_init_setup_stops_at_setup_arch_return(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            work = root / "setup-arch-return"
             snapshot = root / "CorePreparePhase.Preset.snapshot.json"
-            text_output = root / "setup-arch-return.txt"
-            html_output = root / "setup-arch-return.html"
-            reached = subprocess.run(
-                [
-                    str(TOOLS2 / "bin" / "pyveri"),
-                    "-t",
-                    "BootInitFlow.Setup",
-                    "-u",
-                    "CorePreparePhase.Preset",
-                    "--work-dir",
-                    str(work),
-                    "--snapshot-out",
-                    str(snapshot),
-                    "-o",
-                    str(text_output),
-                    "--html-out",
-                    str(html_output),
-                ],
-                cwd=root,
-                text=True,
-                capture_output=True,
-                check=False,
+            derivation, checked, view, _ = self.run_prepared(
+                "setup-arch-return",
+                signal="BootInitFlow.Setup",
+                source="BootInitFlow",
+                until="CorePreparePhase.Preset",
+                scenario=BOOT_INIT_SETUP_SCENARIO,
+                include_view=True,
             )
-            self.assertEqual(reached.returncode, 0, reached.stderr)
-            derivation = read_json(work / "derive.json")
+            self.assertEqual(checked["exit_code"], 0)
+            self.assertIsNotNone(view)
+            self.write_snapshot(snapshot, derivation)
             self.assertEqual(derivation["verdict"], "reached")
             self.assertEqual(
                 derivation["summary"],
@@ -6310,33 +6699,28 @@ class SignalPipelineTests(unittest.TestCase):
             ):
                 self.assertIn(fact, facts)
 
+            assert view is not None
+            rendered_text = render_text(view)
+            rendered_html = render_html(
+                build_animation(self.prepared_model_document, view)
+            )
             serialized = json.dumps(derivation, sort_keys=True)
             self.assertNotIn("EntrySuccessorPhase", serialized)
-            self.assertNotIn("EntrySuccessorPhase", text_output.read_text(encoding="utf-8"))
-            self.assertNotIn("EntrySuccessorPhase", html_output.read_text(encoding="utf-8"))
+            self.assertNotIn("EntrySuccessorPhase", rendered_text)
+            self.assertNotIn("EntrySuccessorPhase", rendered_html)
 
     def test_main_model_schedule_presend_has_unique_cpu_schedulers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            work = root / "cpu0-scheduler-schedule-boundary"
             snapshot = root / "Cpu0Scheduler.Schedule.snapshot.json"
-            reached = subprocess.run(
-                [
-                    str(TOOLS2 / "bin" / "pyveri"),
-                    "-u",
-                    "Cpu0Scheduler.Schedule",
-                    "--work-dir",
-                    str(work),
-                    "--snapshot-out",
-                    str(snapshot),
-                ],
-                cwd=root,
-                text=True,
-                capture_output=True,
-                check=False,
+            derivation, checked, view, _ = self.run_prepared(
+                "cpu0-scheduler-schedule-boundary",
+                until="Cpu0Scheduler.Schedule",
+                include_view=True,
             )
-            self.assertEqual(reached.returncode, 0, reached.stderr)
-            derivation = read_json(work / "derive.json")
+            self.assertEqual(checked["exit_code"], 0)
+            self.assertIsNotNone(view)
+            self.write_snapshot(snapshot, derivation)
             self.assertEqual(derivation["verdict"], "reached")
             self.assertEqual(
                 derivation["summary"],
@@ -6409,8 +6793,8 @@ class SignalPipelineTests(unittest.TestCase):
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
                 "fcbd2a5276481b4f62734177866ae137ba264fe13e480c29312eb1f412275a0f",
             )
-            model = read_json(work / "model.json")
-            view = read_json(work / "view.json")
+            model = self.prepared_model_document
+            assert view is not None
             saved = read_json(snapshot)
             self.assertEqual(
                 {
@@ -6425,7 +6809,6 @@ class SignalPipelineTests(unittest.TestCase):
     def test_main_model_boot_init_entry_stops_at_first_missing_guard(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            shortcut = TOOLS2 / "bin" / "pyveri"
 
             def scenario_without(fact: str, name: str) -> Path:
                 scenario = deepcopy(read_json(KERNEL_ENABLE_SCENARIO))
@@ -6435,20 +6818,12 @@ class SignalPipelineTests(unittest.TestCase):
                 return path
 
             def derive_case(name: str, scenario: Path) -> dict:
-                work = root / name
-                result = subprocess.run(
-                    [
-                        str(shortcut), "-t", "Kernel.Enable", "-s", str(scenario),
-                        "--max-depth", "all", "--max-breadth", "all",
-                        "--work-dir", str(work),
-                    ],
-                    cwd=root,
-                    text=True,
-                    capture_output=True,
-                    check=False,
+                data, checked, _, _ = self.run_prepared(
+                    name,
+                    signal="Kernel.Enable",
+                    scenario=scenario,
                 )
-                self.assertEqual(result.returncode, 1, result.stderr)
-                data = read_json(work / "derive.json")
+                self.assertEqual(checked["exit_code"], 1)
                 self.assertEqual(data["last_stable_snapshot"]["states"]["Kernel"], "Ready")
                 self.assertEqual(data["last_stable_snapshot"]["states"]["BootInitFlow"], "Base")
                 self.assertNotIn("task_flow_started(BootInitFlow)", data["last_stable_snapshot"]["facts"])
@@ -6460,19 +6835,12 @@ class SignalPipelineTests(unittest.TestCase):
                 )
                 return data
 
-            bypass_work = root / "bypass"
-            bypass = subprocess.run(
-                [
-                    str(shortcut), "-t", "BootInitFlow.Preset", "-s",
-                    str(KERNEL_ENABLE_SCENARIO), "--work-dir", str(bypass_work),
-                ],
-                cwd=root,
-                text=True,
-                capture_output=True,
-                check=False,
+            bypass_data, bypass_checked, _, _ = self.run_prepared(
+                "bypass-boot-init-entry",
+                signal="BootInitFlow.Preset",
+                scenario=KERNEL_ENABLE_SCENARIO,
             )
-            self.assertEqual(bypass.returncode, 1)
-            bypass_data = read_json(bypass_work / "derive.json")
+            self.assertEqual(bypass_checked["exit_code"], 1)
             self.assertEqual(len(bypass_data["signals"]), 1)
             self.assertEqual(bypass_data["signals"][0]["outcome"], "rejected")
             self.assertIn("kernel_enable_accepted", bypass_data["signals"][0]["reason"])
@@ -6522,140 +6890,9 @@ class SignalPipelineTests(unittest.TestCase):
                             )
                         )
 
-    def test_pyveri_default_scenario_missing_override_and_path_safety(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            shortcut = TOOLS2 / "bin" / "pyveri"
-            missing_work = root / "missing-work"
-            missing = subprocess.run(
-                [
-                    str(shortcut),
-                    "-t",
-                    "Computer.Startup",
-                    "--work-dir",
-                    str(missing_work),
-                ],
-                cwd=root,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            self.assertEqual(missing.returncode, 2)
-            self.assertIn("canonical signal Computer.Preset", missing.stderr)
-            self.assertIn(
-                "tools2/scenarios/Computer.Preset.snapshot.json", missing.stderr
-            )
-            self.assertFalse(missing_work.exists())
-
-            empty_scenario = root / "empty-scenario.json"
-            empty_scenario.write_text("{}\n", encoding="utf-8")
-            override_work = root / "override-work"
-            override = subprocess.run(
-                [
-                    str(shortcut),
-                    "-f",
-                    str(PIPELINE),
-                    "-t",
-                    "Root.Start",
-                    "-s",
-                    str(empty_scenario),
-                    "--work-dir",
-                    str(override_work),
-                ],
-                cwd=root,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            self.assertEqual(override.returncode, 0, override.stderr)
-            self.assertEqual(
-                read_json(override_work / "derive.json")["root_request"]["source"],
-                "Human",
-            )
-
-            malformed = TOOLS2 / "scenarios" / "Malformed.Start.snapshot.json"
-            self.addCleanup(malformed.unlink, missing_ok=True)
-            malformed_cases = (
-                ("missing boundary provenance", {}),
-                (
-                    "boundary signal does not match",
-                    {
-                        "provenance": {
-                            "boundary": {
-                                "normalized_signal": "Other.Start",
-                                "source": "Harness",
-                            }
-                        }
-                    },
-                ),
-                (
-                    "boundary source is missing or invalid",
-                    {
-                        "provenance": {
-                            "boundary": {
-                                "normalized_signal": "Malformed.Start",
-                                "source": "",
-                            }
-                        }
-                    },
-                ),
-            )
-            for expected, extra in malformed_cases:
-                with self.subTest(default_snapshot=expected):
-                    value = {
-                        "schema": SNAPSHOT_SCHEMA,
-                        "version": SNAPSHOT_VERSION,
-                        "producer": PRODUCER,
-                        "model_fingerprint": "sha256:not-reached",
-                        "snapshot": {},
-                        **extra,
-                    }
-                    malformed.write_text(json.dumps(value), encoding="utf-8")
-                    malformed_work = root / expected.replace(" ", "-")
-                    result = subprocess.run(
-                        [
-                            str(shortcut),
-                            "-f",
-                            str(PIPELINE),
-                            "-t",
-                            "Malformed.Start",
-                            "--work-dir",
-                            str(malformed_work),
-                        ],
-                        cwd=root,
-                        text=True,
-                        capture_output=True,
-                        check=False,
-                    )
-                    self.assertEqual(result.returncode, 2)
-                    self.assertIn(expected, result.stderr)
-                    self.assertFalse(malformed_work.exists())
-
-            outside = root / "outside.snapshot.json"
-            outside.write_text("{}\n", encoding="utf-8")
-            symlink = TOOLS2 / "scenarios" / "Escape.Preset.snapshot.json"
-            symlink.symlink_to(outside)
-            self.addCleanup(symlink.unlink, missing_ok=True)
-            for signal in ("../outside.Preset", str(outside.with_suffix(".Preset")), "Escape.Preset"):
-                with self.subTest(signal=signal):
-                    unsafe = subprocess.run(
-                        [str(shortcut), "-f", str(PIPELINE), "-t", signal],
-                        cwd=root,
-                        text=True,
-                        capture_output=True,
-                        check=False,
-                    )
-                    self.assertEqual(unsafe.returncode, 2)
-                    self.assertTrue(
-                        "unsafe default scenario" in unsafe.stderr
-                        or "argument -t/--trigger" in unsafe.stderr,
-                        unsafe.stderr,
-                    )
-
     def test_main_model_enable_chain_rejects_missing_prerequisites_strictly(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            shortcut = TOOLS2 / "bin" / "pyveri"
             cases = [
                 (
                     "Computer.Enable",
@@ -6697,25 +6934,13 @@ class SignalPipelineTests(unittest.TestCase):
             for index, (signal, scenario, missing) in enumerate(cases):
                 with self.subTest(signal=signal):
                     scenario_path = root / f"scenario-{index}.json"
-                    work = root / f"work-{index}"
                     scenario_path.write_text(json.dumps(scenario), encoding="utf-8")
-                    result = subprocess.run(
-                        [
-                            str(shortcut),
-                            "-t",
-                            signal,
-                            "-s",
-                            str(scenario_path),
-                            "--work-dir",
-                            str(work),
-                        ],
-                        cwd=root,
-                        text=True,
-                        capture_output=True,
-                        check=False,
+                    data, checked, _, _ = self.run_prepared(
+                        f"missing-enable-prerequisite-{index}",
+                        signal=signal,
+                        scenario=scenario_path,
                     )
-                    self.assertEqual(result.returncode, 1, result.stderr)
-                    data = read_json(work / "derive.json")
+                    self.assertEqual(checked["exit_code"], 1)
                     self.assertEqual(data["verdict"], "failed")
                     self.assertEqual(data["signals"][0]["outcome"], "rejected")
                     self.assertEqual(
@@ -6734,24 +6959,12 @@ class SignalPipelineTests(unittest.TestCase):
             missing_abi_scenario.write_text(
                 json.dumps(golden_without_fact(missing_abi_fact)), encoding="utf-8"
             )
-            missing_abi_work = root / "kernel-missing-satp"
-            missing_abi = subprocess.run(
-                [
-                    str(shortcut),
-                    "-t",
-                    "Kernel.Enable",
-                    "-s",
-                    str(missing_abi_scenario),
-                    "--work-dir",
-                    str(missing_abi_work),
-                ],
-                cwd=root,
-                text=True,
-                capture_output=True,
-                check=False,
+            missing_abi_data, missing_abi_checked, _, _ = self.run_prepared(
+                "kernel-missing-satp",
+                signal="Kernel.Enable",
+                scenario=missing_abi_scenario,
             )
-            self.assertEqual(missing_abi.returncode, 1, missing_abi.stderr)
-            missing_abi_data = read_json(missing_abi_work / "derive.json")
+            self.assertEqual(missing_abi_checked["exit_code"], 1)
             self.assertEqual(missing_abi_data["signals"][0]["outcome"], "rejected")
             self.assertEqual(
                 missing_abi_data["signals"][0]["reason"],
@@ -6766,24 +6979,12 @@ class SignalPipelineTests(unittest.TestCase):
             missing_accept_scenario.write_text(
                 json.dumps(golden_without_fact(accept_fact)), encoding="utf-8"
             )
-            missing_accept_work = root / "kernel-missing-accept"
-            missing_accept = subprocess.run(
-                [
-                    str(shortcut),
-                    "-t",
-                    "Kernel.Enable",
-                    "-s",
-                    str(missing_accept_scenario),
-                    "--work-dir",
-                    str(missing_accept_work),
-                ],
-                cwd=root,
-                text=True,
-                capture_output=True,
-                check=False,
+            missing_accept_data, missing_accept_checked, _, _ = self.run_prepared(
+                "kernel-missing-accept",
+                signal="Kernel.Enable",
+                scenario=missing_accept_scenario,
             )
-            self.assertEqual(missing_accept.returncode, 1, missing_accept.stderr)
-            missing_accept_data = read_json(missing_accept_work / "derive.json")
+            self.assertEqual(missing_accept_checked["exit_code"], 1)
             self.assertEqual(
                 [
                     (item["target"], item["name"], item["outcome"])
@@ -6810,27 +7011,16 @@ class SignalPipelineTests(unittest.TestCase):
                 any(item["target"] == "BootInitFlow" for item in missing_accept_data["signals"])
             )
 
-            alias_work = root / "startup-alias"
             (root / "empty-scenario.json").write_text("{}\n", encoding="utf-8")
-            alias = subprocess.run(
-                [
-                    str(shortcut),
-                    "-t",
-                    "Computer.Startup",
-                    "-s",
-                    str(root / "empty-scenario.json"),
-                    "--work-dir",
-                    str(alias_work),
-                ],
-                cwd=root,
-                text=True,
-                capture_output=True,
-                check=False,
+            alias_data, alias_checked, _, _ = self.run_prepared(
+                "startup-alias",
+                signal="Computer.Startup",
+                scenario=root / "empty-scenario.json",
             )
-            self.assertEqual(alias.returncode, 0, alias.stderr)
-            alias_data = read_json(alias_work / "derive.json")
+            self.assertEqual(alias_checked["exit_code"], 0)
             self.assertEqual(alias_data["root_request"]["signal"], "Preset")
             self.assertEqual(alias_data["signals"][0]["outcome"], "completed")
+
 
 
 if __name__ == "__main__":

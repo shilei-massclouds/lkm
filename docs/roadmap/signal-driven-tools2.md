@@ -11,40 +11,80 @@
 实现协议见 [`../../spec/coding/tools2.md`](../../spec/coding/tools2.md)。本文只记录里程碑和实施证据，
 不覆盖上述规格。
 
-## 待办：主模型集成测试时长优化
+## 主模型集成测试时长优化完成证据
 
-2026-08-02 在同一工作树、主机和 warm filesystem cache 下复测，
-`test_main_model_default_request_reaches_kernel_presend_and_snapshot_resumes` 单项耗时约 110.6 秒，
-`make -C tools2 test` 的 101 项 Python 测试总耗时约 175.4 秒。对代表性 driver 调用单独计时：从模型
-初态到 `Kernel.Enable` 发送前为 2.51 秒；从模型初态完成闭包为 26.67 秒；从已提交
-`Kernel.Enable` snapshot 恢复并完成闭包为 26.72 秒。当前单项在约十次独立 `pyveri` 调用中重复
-执行 parse、model、derive、check 和 view，并包含模型初态、显式 snapshot 恢复及自动 canonical
-scenario 三次近似等价的完整闭包；主要耗时来自重复完整推导及每次重新构建前置阶段产物，不来自本轮
-Deferred/Trimmed 分类断言。
+2026-08-02 在同一主机和 warm filesystem cache 下完成 Testing/工具性能优化。最高受影响责任为
+Testing；Charter、Model、Coding、Impl 依次审查为“无需修改”，Compose 与正式 Testing 语义也审查为
+“无需修改”。生产 `tools2/bin/pyveri`、JSON schema、协议版本、canonical snapshot、Model fingerprint、
+生产缓存策略和旧 `tools/` 的 shadow 责任均未改变。
 
-该优化属于 Testing/工具性能责任，不改变 Charter、Model、Coding、Signal 协议、canonical snapshot
-或旧 `tools/` 的 shadow 责任。实施与验收要求如下：
+修改前连续三次 focused test 为 111.646 / 112.016 / 111.693 秒，中位数 111.693 秒；
+`make -C tools2 test` 的 101 项为 171.990 / 174.399 / 175.432 秒，中位数 174.399 秒。独立阶段诊断显示：
+parse 1.095 秒、model 0.723 秒、到 `Kernel.Enable` 发送前的 derive/check/view 为
+0.723 / 0.012 / 0.022 秒；模型初态完整闭包为 10.327 / 3.566 / 7.946 秒，canonical snapshot 恢复闭包
+为 9.942 / 3.469 / 8.145 秒。完整闭包每次还分别序列化约 450 MB derive JSON 和 450 MB view JSON，
+确认热点是三次近似等价闭包及重复大产物读写，而不是边界断言。
 
-1. 先为测试内每次 driver 调用和 parse/model/derive/check/view 阶段记录可复现耗时、输入 fingerprint、
-   cache 命中情况和产物尺寸；以同一主机 warm-cache 连续三次的中位数作为前后基线，不以一次偶然
-   波动归因。
-2. 拆分 canonical 生成、模型初态完整闭包、snapshot 恢复等价性、自动 scenario/source 选择和严格
-   拒绝负例，使每项失败能直接定位责任；拆分不得通过从默认 suite 移除测试来缩短总时长。
-3. 在测试会话内复用按 source + model fingerprint 标识的不可变 AST/Model 产物，或提供等价的阶段入口；
-   每个 derive 必须获得隔离的初态/场景和输出目录，禁止跨 case 复用可变 snapshot、队列或 occurrence。
-4. 至少保留一次从模型初态完成的完整闭包和一次从真实 canonical snapshot 恢复完成的完整闭包，并逐项
-   比较关键 Signal 顺序、状态、facts、boundary inventory、obligation 和最终 verdict。自动 canonical
-   scenario 选择不得再触发第三次等价完整闭包；其 provenance、source 和文件选择协议改用不削弱语义的
-   focused 路径验证。
-5. 绕过上游、重复 `Kernel.Enable`、陈旧 fingerprint、错误模型初态、缺失/不匹配 canonical scenario
-   和显式 source override 等负例必须全部保留，且继续检查原退出码、结构化 reason 和失败发生边界。
-6. 优化后 committed canonical snapshot bytes、Model fingerprint、协议版本和完整推导语义必须保持不变；
-   `make -C tools2 test` 仍须全通过。以相同三次中位数口径，目标是该 110.6 秒单项降至不超过 65 秒、
-   Python 全套由 175.4 秒降至不超过 130 秒；计时只作为优化验收证据，暂不建立易受机器负载影响的
-   固定 CI timeout 门禁。
+测试现在由独立 `MainModelIntegrationTests` 承载。会话级 fixture 只 parse/model 一次，以
+`spec/model/main.spec` 和 Model fingerprint
+`sha256:28696ae42d7e7af5884f37f9aab70c6db86016474036f42cb3d1d110be2b58cd` 标识；AST/Model 文件设为
+只读，并在每个 prepared case 前后校验 hash/fingerprint。每个 derive 都使用独立初态、scenario、
+输出目录和 Engine 可变状态，并输出阶段计时、cache-hit、Signal/event/inventory/obligation 数量及测试
+摘要大小。
 
-旧 `tools/` 没有 tools2 的 pre-send snapshot、canonical provenance/fingerprint、恢复续跑及严格 Signal
-拒绝协议，因此不要求补建同形测试，也不得通过调用旧工具或降低 tools2 协议检查来达到性能目标。
+保留的完整闭包只有两次：模型初态闭包和真实 `Kernel.Enable` canonical snapshot 恢复闭包。二者在
+入口 carrier 规范化后逐项比较后续 Signal/source/target/delivery/handler/outcome，并比较最终
+states、facts、references、instances、boundary inventory、obligations 和 verdict。一次真实 CLI 纵切
+仍从仓库根执行 spec -> AST -> Model -> Derive -> Check -> View -> Render，生成 pre-send snapshot 并与
+已提交 bytes 比较；自动 canonical scenario/source、显式 source override、bypass、duplicate enable、
+错误初态和 stale fingerprint 都停在最近边界，后者仍走独立的错误模型 parse/model 路径。
+
+修改后连续三次 focused test 为 26.915 / 26.850 / 26.966 秒，中位数 26.915 秒，较修改前缩短 75.9%；
+101 项 Python suite 为 89.571 / 89.124 / 88.690 秒，中位数 89.124 秒，缩短 48.9%。focused 中位数低于
+65 秒、suite 中位数低于 130 秒，两个目标均完成。prepared fixture 的三次中位数约为 parse 1.083 秒、
+model 0.766 秒、CLI pre-send 纵切 2.624 秒、模型初态 derive 6.355 秒、snapshot 恢复 derive 6.422 秒；
+focused cases 的 derive 均低于 0.55 秒。计时只保留为同机验收证据，没有加入固定 CI timeout。
+
+### 第二轮：七项主模型测试统一复用
+
+第一轮结束后，`MainModelIntegrationTests` 中的一项共享 fixture 测试约 26.9 秒，另外六项
+`test_main_model_*` 仍留在 `SignalPipelineTests` 并各自执行完整 CLI；本轮开始时复现七项合计
+83.540 秒，其中六项重复路径合计 56.036 秒，单项约 2.9–15.2 秒。这些路径反复 parse/model、写入
+derive/view/HTML 大产物，并为同一个边界同时承担 wrapper 协议和 Model 语义验证，是第二轮热点。
+
+七项测试现在都直接归入 `MainModelIntegrationTests`，共享一次只读 AST/Model fixture。每个 prepared
+case 仍独立创建 scenario、Engine 推导状态和摘要输出目录，并在前后校验主规格 source、AST、Model
+文件 hash 与 Model fingerprint；每个 unittest 的 setup/teardown 另校验完整内存 Model hash，防止
+case 污染共享内容。唯一真实 CLI 纵切继续从仓库根覆盖 spec -> AST -> Model -> Derive -> Check ->
+View -> Render 和 `Kernel.Enable` canonical bytes；另外两个 canonical snapshot 由同一 prepared Model
+重建并逐字节比较。setup_arch 的 HTML 断言仍通过 prepared view 的 animation v4 投影生成，既有两项
+独立主模型动画测试保持不变。
+
+wrapper 参数协议与模型语义分开验证：canonical scenario/source 自动选择、显式 source override、
+缺失/畸形/越界路径由真实 shortcut 参数解析配合隔离的 downstream 调用验证，不再重跑主模型；对应
+Signal 结果由 prepared case 验证。stale fingerprint 仍用错误 fixture 独立执行 parse/model，错误模型
+初态仍从共享 Model 的真实初态推导，二者都不能误用 fixture scenario。
+
+测试矩阵审计结论如下：
+
+- 必须保留两次完整闭包、三份 canonical snapshot bytes、OpenSBI/BootInit/setup_arch/Scheduler 主要
+  边界、严格 prerequisite/guard 拒绝、canonical resolver 安全性和 animation v4 投影；本轮均继续覆盖。
+- 多个边界语义、bypass、缺失 guard、duplicate enable 和缺失 prerequisite 可以共享 prepared Model，
+  但仍以独立 test/subtest、scenario 和断言定位失败。
+- 不必让每份 snapshot 都执行完整 CLI，不必让每个负例重新 parse/model，也不必为同一边界重复生成
+  等价完整流水线；这些重复成本已移除，没有删测试或放宽断言。
+
+最终 `MainModelIntegrationTests` 连续三次为 38.449 / 38.429 / 37.879 秒，中位数 38.429 秒，低于
+45 秒目标，较本轮 83.540 秒基线缩短 54.0%；`make -C tools2 test` 的 101 项连续三次为
+46.098 / 46.697 / 46.917 秒，中位数 46.697 秒，低于 60 秒目标，较第一轮 89.124 秒中位数再缩短
+47.6%。未增加固定 CI timeout，也未引入生产缓存、并行完整 derive 或可变 snapshot 复用。
+
+三个已提交 canonical snapshot bytes 保持不变：`Kernel.Enable` SHA-256 为
+`a77578cab11977fe9a41bda0bbdbeab868962adf605b9ef58d822127e6bdf9e0`，`BootInitFlow.Setup` 为
+`3c3cf9cccbcbbd8338e66be5bf55ce9b3115c05ceea49fff999e255f6768cf6d`，`Cpu0Scheduler.Schedule` 为
+`fcbd2a5276481b4f62734177866ae137ba264fe13e480c29312eb1f412275a0f`；AST/Model/Derive/Check/View/Snapshot
+协议继续全部为 v10。101 项测试和全部严格拒绝覆盖均保留，没有调用旧工具、并行完整 derive、复用
+可变 snapshot 或放宽断言来取得性能数字。
 
 ## 已完成：Deferred / Trimmed / Obligation 处理闭环
 
