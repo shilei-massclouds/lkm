@@ -34,7 +34,7 @@ unsafe extern "C" {
     fn boot_init_flow_preset_completion() -> !;
 }
 
-fn accept_initial_start_signal(owner: &Task) -> EventResult {
+fn accept_direct_preset_entry(owner: &Task) -> EventResult {
     let flow = owner.embedded_flow();
     if flow.state() != State::Base
         || !owner.flow().same_identity(flow.flow_ref())
@@ -52,7 +52,7 @@ fn accept_initial_start_signal(owner: &Task) -> EventResult {
 }
 
 /// Adopts the BootInitFlow Preset boundary emitted by `_start`.
-pub fn adopt_head_preset_start() -> EventResult {
+pub fn adopt_head_preset_entry() -> EventResult {
     let ctx = crate::context::context();
     let state = ctx.boot_task.task().flow_state();
     if state != State::Base
@@ -69,7 +69,7 @@ pub fn adopt_head_preset_start() -> EventResult {
     {
         return failed_condition(LifecycleEvent::Preset, state, State::Base, State::Prepared);
     }
-    accept_initial_start_signal(ctx.boot_task.task())
+    accept_direct_preset_entry(ctx.boot_task.task())
 }
 
 /// Completes BootInitFlow.Preset after all direct entry-object drives finish.
@@ -452,8 +452,8 @@ extern "C" fn boot_init_flow_preset_rust_entry(hartid: usize, dtb_pa: usize) -> 
         "arceos_ex physical translation activation failed\n",
     );
     crate::phases::shutdown_on_error(
-        super::adopt_head_preset_start(),
-        "arceos_ex boot init preset start failed\n",
+        super::adopt_head_preset_entry(),
+        "arceos_ex boot init preset entry failed\n",
     );
     crate::phases::shutdown_on_error(
         adopt_preset_dependencies(&boot_args),

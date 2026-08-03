@@ -69,9 +69,9 @@ def _snapshot(value: dict[str, Any]) -> dict[str, Any]:
             key: deepcopy(item)
             for key, item in sorted(value.get("task_flow_lanes", {}).items())
         },
-        "initial_context_entries": {
+        "context_continuations": {
             key: deepcopy(item)
-            for key, item in sorted(value.get("initial_context_entries", {}).items())
+            for key, item in sorted(value.get("context_continuations", {}).items())
         },
         "yield_tokens": {
             key: deepcopy(item)
@@ -188,12 +188,12 @@ def load_scenario(
         for key, item in task_flow_lanes.items()
     ):
         raise ProtocolError("scenario task_flow_lanes must map lane identities to objects")
-    initial_context_entries = value.get("initial_context_entries", {})
-    if not isinstance(initial_context_entries, dict) or not all(
+    context_continuations = value.get("context_continuations", {})
+    if not isinstance(context_continuations, dict) or not all(
         isinstance(key, str) and isinstance(item, dict)
-        for key, item in initial_context_entries.items()
+        for key, item in context_continuations.items()
     ):
-        raise ProtocolError("scenario initial_context_entries must map Flow identities to objects")
+        raise ProtocolError("scenario context_continuations must map Flow identities to objects")
     yield_tokens = value.get("yield_tokens", {})
     if not isinstance(yield_tokens, dict) or not all(
         isinstance(key, str) and isinstance(item, dict)
@@ -272,7 +272,7 @@ def load_scenario(
         result["instances"] = deepcopy(instances)
     result["contextual_bindings"] = deepcopy(contextual_bindings)
     result["task_flow_lanes"] = deepcopy(task_flow_lanes)
-    result["initial_context_entries"] = deepcopy(initial_context_entries)
+    result["context_continuations"] = deepcopy(context_continuations)
     result["yield_tokens"] = deepcopy(yield_tokens)
     return _snapshot(result)
 
@@ -431,7 +431,11 @@ class Engine:
             "declared_type": declared_type,
             "parent": metadata.get("parent"),
             "initial_state": lifecycle["initial_state"],
-            "properties": {},
+            "properties": {
+                key: value
+                for declaration in reversed(self._type_chain(declared_type))
+                for key, value in declaration.get("properties", {}).items()
+            },
             "fields": fields,
             "reference_types": {
                 item["name"]: item["type"]
@@ -1332,6 +1336,7 @@ class Engine:
             signal["handler"]["description"] = (
                 "在正式 scheduler switch commit 将 CurrentTask binding 切换到 next Task。"
             )
+        continuation = candidate.get("context_continuations", {}).get(effective_flow, {})
         current_task_bindings[cpu] = {
             "task": task,
             "task_ref": task_ref,
@@ -1339,6 +1344,8 @@ class Engine:
             "source_cpu_ref": cpu_ref,
             "address_view": address_view,
             "revision": revision,
+            "context_epoch": int(continuation.get("context_epoch", 0)),
+            "dispatch_ordinal": int(continuation.get("dispatch_ordinal", 0)),
         }
 
         if action in {"BindTask", "BindTaskStack", "RefreshTaskStack"}:
@@ -2776,6 +2783,264 @@ class Engine:
             raise DerivationProblem("current Task context_epoch must be a non-negative integer")
         return f"{cpu}/{flow}", cpu, task, epoch
 
+    def _flow_generation(self, flow: str, snapshot: dict[str, Any]) -> int:
+        metadata = snapshot.get("instances", {}).get(flow, {})
+        generation = metadata.get("generation", 1)
+        if not isinstance(generation, int) or isinstance(generation, bool) or generation <= 0:
+            raise DerivationProblem(f"invalid_context_generation: {flow}")
+        return generation
+
+    def _context_task_ref(
+        self, task: str, cpu: str, snapshot: dict[str, Any]
+    ) -> str:
+        binding = (
+            snapshot.get("contextual_bindings", {})
+            .get("current_task", {})
+            .get(cpu, {})
+        )
+        if binding.get("task") == task and isinstance(binding.get("task_ref"), str):
+            return str(binding["task_ref"])
+        try:
+            return self._unique_live_task_ref(task)
+        except DerivationProblem:
+            return task
+
+    def _context_identity(
+        self, flow: str, snapshot: dict[str, Any]
+    ) -> tuple[str, str, str, int]:
+        task = str(self.systems.get(flow, {}).get("parent") or flow)
+        cpu = "UnboundCPU"
+        cpu_ref = snapshot.get("references", {}).get(f"{flow}.cpu_ref")
+        if cpu_ref is not None:
+            resolved = self._deref(cpu_ref)
+            if resolved in self.systems:
+                cpu = str(resolved)
+        task_ref = self._context_task_ref(task, cpu, snapshot)
+        return cpu, task, task_ref, self._flow_generation(flow, snapshot)
+
+    @staticmethod
+    def _initial_context_action(system: dict[str, Any]) -> str | None:
+        value = system.get("properties", {}).get("initial_context")
+        if not isinstance(value, str):
+            return None
+        match = re.fullmatch(r"Action::([A-Za-z_][A-Za-z0-9_]*)", value)
+        return match.group(1) if match is not None else None
+
+    def _publish_initial_context(
+        self,
+        *,
+        flow: str,
+        signal: dict[str, Any],
+        candidate: dict[str, Any],
+    ) -> None:
+        action = self._initial_context_action(self.systems[flow])
+        if action is None:
+            return
+        handlers = [
+            item
+            for item in self.systems[flow].get("handlers_by_name", {}).get(action, [])
+            if item.get("kind") == "Action"
+        ]
+        if len(handlers) != 1:
+            raise DerivationProblem(f"invalid_initial_context_handler: {flow}.{action}")
+        continuations = candidate.setdefault("context_continuations", {})
+        if flow in continuations:
+            raise DerivationProblem(f"duplicate_initial_context_publish: {flow}")
+        cpu, _task, task_ref, generation = self._context_identity(flow, candidate)
+        continuations[flow] = {
+            "flow": flow,
+            "lane": f"{cpu}/{flow}",
+            "cpu": cpu,
+            "task_ref": task_ref,
+            "generation": generation,
+            "context_epoch": 1,
+            "dispatch_ordinal": 0,
+            "kind": "handler",
+            "coordinate": {
+                "action": action,
+                "handler": handlers[0]["id"],
+            },
+            "status": "available",
+            "dispatch_proof": None,
+            "published_by": signal["id"],
+        }
+
+    def _refresh_continuation_cpu(
+        self, *, flow: str, candidate: dict[str, Any]
+    ) -> None:
+        record = candidate.get("context_continuations", {}).get(flow)
+        if not isinstance(record, dict):
+            return
+        cpu, _task, task_ref, generation = self._context_identity(flow, candidate)
+        record.update(
+            {
+                "lane": f"{cpu}/{flow}",
+                "cpu": cpu,
+                "task_ref": task_ref,
+                "generation": generation,
+            }
+        )
+
+    def _save_context_coordinate(
+        self,
+        *,
+        task: str,
+        signal: dict[str, Any],
+        candidate: dict[str, Any],
+    ) -> None:
+        flow = candidate.get("references", {}).get(f"{task}.flow")
+        if not isinstance(flow, str) or flow not in self.systems:
+            raise DerivationProblem(f"task_save_has_no_fixed_flow: {task}")
+        existing = candidate.get("context_continuations", {}).get(flow, {})
+        cpu, _owner, task_ref, generation = self._context_identity(flow, candidate)
+        old_epoch = existing.get("context_epoch", 0)
+        if not isinstance(old_epoch, int) or isinstance(old_epoch, bool) or old_epoch < 0:
+            raise DerivationProblem(f"invalid_context_epoch: {flow}")
+        context_epoch = old_epoch + 1
+        tokens = [
+            token
+            for token in candidate.get("yield_tokens", {}).values()
+            if token.get("status") == "awaiting-resume"
+            and token.get("flow_ref") == flow
+        ]
+        if len(tokens) > 1:
+            raise DerivationProblem(f"ambiguous_context_yield_coordinate: {flow}")
+        if tokens:
+            token = tokens[0]
+            token["cpu"] = cpu
+            token["task_ref"] = task_ref
+            token["generation"] = generation
+            token["context_epoch"] = context_epoch
+            lane = candidate.get("task_flow_lanes", {}).get(token.get("lane"))
+            if isinstance(lane, dict):
+                lane.update(
+                    {
+                        "cpu": cpu,
+                        "task_ref": task_ref,
+                        "generation": generation,
+                        "context_epoch": context_epoch,
+                    }
+                )
+            kind = "yield"
+            coordinate = {
+                "token_id": token["id"],
+                "resume": deepcopy(token.get("resume_coordinate", {})),
+            }
+        else:
+            kind = "machine"
+            coordinate = {
+                "task": task,
+                "save_signal_id": signal["id"],
+            }
+        candidate.setdefault("context_continuations", {})[flow] = {
+            "flow": flow,
+            "lane": f"{cpu}/{flow}",
+            "cpu": cpu,
+            "task_ref": task_ref,
+            "generation": generation,
+            "context_epoch": context_epoch,
+            "dispatch_ordinal": int(existing.get("dispatch_ordinal", 0)),
+            "kind": kind,
+            "coordinate": coordinate,
+            "status": "available",
+            "dispatch_proof": None,
+            "published_by": signal["id"],
+        }
+
+    def _publish_dispatch_proof(
+        self,
+        *,
+        task: str,
+        signal: dict[str, Any],
+        candidate: dict[str, Any],
+    ) -> None:
+        flow = candidate.get("references", {}).get(f"{task}.flow")
+        record = candidate.get("context_continuations", {}).get(flow)
+        if not isinstance(flow, str) or not isinstance(record, dict):
+            raise DerivationProblem(f"dispatch_has_no_context_continuation: {task}")
+        cpu, _owner, task_ref, generation = self._context_identity(flow, candidate)
+        if any(
+            record.get(field) != value
+            for field, value in (
+                ("flow", flow),
+                ("cpu", cpu),
+                ("task_ref", task_ref),
+                ("generation", generation),
+            )
+        ):
+            raise DerivationProblem(f"dispatch_context_identity_mismatch: {flow}")
+        ordinal = int(record.get("dispatch_ordinal", 0)) + 1
+        proof = {
+            "flow": flow,
+            "cpu": cpu,
+            "task_ref": task_ref,
+            "generation": generation,
+            "context_epoch": int(record.get("context_epoch", 0)),
+            "dispatch_ordinal": ordinal,
+            "consumed": False,
+            "signal_id": signal["id"],
+        }
+        record["dispatch_ordinal"] = ordinal
+        record["dispatch_proof"] = proof
+        binding = (
+            candidate.setdefault("contextual_bindings", {})
+            .setdefault("current_task", {})
+            .get(cpu)
+        )
+        if isinstance(binding, dict) and binding.get("task") == task:
+            binding["context_epoch"] = proof["context_epoch"]
+            binding["dispatch_ordinal"] = ordinal
+
+    def _apply_context_continuation_metadata(
+        self,
+        *,
+        handler: dict[str, Any],
+        signal: dict[str, Any],
+        candidate: dict[str, Any],
+    ) -> None:
+        target = signal["target"]
+        is_flow = target in self.systems and _matches_system_type(
+            self.model, target, "TaskFlow"
+        )
+        is_task = target in self.systems and _matches_system_type(
+            self.model, target, "Task"
+        )
+        if (
+            is_flow
+            and handler.get("kind") == "Transition"
+            and handler.get("name") == "Enable"
+            and handler.get("target_state") == "Online"
+        ):
+            self._publish_initial_context(
+                flow=target, signal=signal, candidate=candidate
+            )
+        if is_flow and handler.get("name") == "AssignCpuRef":
+            self._refresh_continuation_cpu(flow=target, candidate=candidate)
+        if is_task and handler.get("name") == "SaveCoreContext":
+            self._save_context_coordinate(
+                task=target, signal=signal, candidate=candidate
+            )
+        if (
+            is_task
+            and handler.get("kind") == "Transition"
+            and handler.get("name") == "Dispatch"
+        ):
+            self._publish_dispatch_proof(
+                task=target, signal=signal, candidate=candidate
+            )
+        if is_flow and handler.get("kind") == "Action":
+            record = candidate.get("context_continuations", {}).get(target)
+            action = self._initial_context_action(self.systems[target])
+            if (
+                isinstance(record, dict)
+                and record.get("kind") == "handler"
+                and action == handler.get("name")
+                and record.get("coordinate", {}).get("action") == action
+            ):
+                record["status"] = "running"
+                record["body_signal_id"] = signal["id"]
+                record["direct_architecture_entry"] = record.get("consumed_by") is None
+
     def _mark_yield_resumed(
         self,
         token_id: str,
@@ -3290,7 +3555,7 @@ class Engine:
                 fifo_position=len(self.queue),
             )
 
-    def _resume_yield_for_contextual_entry(
+    def _resume_context_continuation(
         self, signal: dict[str, Any], handler: dict[str, Any]
     ) -> None:
         if self._handler_property(handler, "contextual_entry") != "true" or signal.get("outcome") in {
@@ -3299,103 +3564,110 @@ class Engine:
             "truncated",
         }:
             return
-        awaiting = [
-            token
-            for token in self.current.get("yield_tokens", {}).values()
-            if token.get("status") == "awaiting-resume"
-        ]
-        for token in awaiting:
-            lane = self.current.get("task_flow_lanes", {}).get(token.get("lane"))
-            if not isinstance(lane, dict) or any(
-                lane.get(field) != token.get(field)
-                for field in ("cpu", "flow_ref", "task_ref", "context_epoch")
-            ):
+        flow = signal["target"]
+        record = self.current.get("context_continuations", {}).get(flow)
+        if not isinstance(record, dict):
+            raise DerivationProblem(f"missing_context_continuation: {flow}")
+        proof = record.get("dispatch_proof")
+        if not isinstance(proof, dict):
+            raise DerivationProblem(f"missing_dispatch_proof: {flow}")
+        if proof.get("consumed") is True:
+            raise DerivationProblem(f"duplicate_contextual_enter: {flow}")
+        cpu, _task, task_ref, generation = self._context_identity(flow, self.current)
+        expected = {
+            "flow": flow,
+            "cpu": cpu,
+            "task_ref": task_ref,
+            "generation": generation,
+            "context_epoch": record.get("context_epoch"),
+            "dispatch_ordinal": record.get("dispatch_ordinal"),
+        }
+        for field, value in expected.items():
+            if record.get(field) != value:
                 raise DerivationProblem(
-                    f"yield_token_lane_mismatch: {token.get('id')}"
+                    f"context_continuation_{field}_mismatch: {flow}"
                 )
-        for token in awaiting:
-            token["contextual_entry_occurrences"] = int(
-                token.get("contextual_entry_occurrences", 0)
-            ) + 1
-        target_tokens = [token for token in awaiting if token.get("flow_ref") == signal["target"]]
-        if not target_tokens:
-            _lane_id, cpu, task_ref, context_epoch = self._yield_lane_identity(signal)
-            consumed = [
-                lane
-                for lane in self.current.get("task_flow_lanes", {}).values()
-                if isinstance(lane, dict)
-                and lane.get("flow_ref") == signal["target"]
-                and lane.get("cpu") == cpu
-                and lane.get("task_ref") == task_ref
-                and lane.get("last_consumed_context_epoch") == context_epoch
-                and lane.get("last_consumed_token") is not None
+            if proof.get(field) != value:
+                raise DerivationProblem(f"dispatch_proof_{field}_mismatch: {flow}")
+        proof["consumed"] = True
+        proof["consumed_by"] = signal["id"]
+        record["status"] = "entering"
+        record["consumed_by"] = signal["id"]
+        signal["context_continuation"] = {
+            "kind": record["kind"],
+            "coordinate": deepcopy(record["coordinate"]),
+        }
+        self.current = _snapshot(self.current)
+        self.event(
+            "context_continuation_consumed",
+            signal_id=signal["id"],
+            flow=flow,
+            continuation_kind=record["kind"],
+            coordinate=deepcopy(record["coordinate"]),
+            dispatch_ordinal=record["dispatch_ordinal"],
+            snapshot=_snapshot(self.current),
+        )
+
+        if record["kind"] == "handler":
+            action = record.get("coordinate", {}).get("action")
+            candidates = [
+                item
+                for item in self.systems[flow].get("handlers_by_name", {}).get(action, [])
+                if item.get("kind") == "Action"
             ]
-            if consumed:
-                raise DerivationProblem(
-                    f"duplicate_yield_resume: {consumed[-1].get('last_consumed_token')}"
-                )
-            self.current = _snapshot(self.current)
-            self._enter_initial_context_once(signal)
+            if len(candidates) != 1:
+                raise DerivationProblem(f"stale_handler_coordinate: {flow}.{action}")
+            child = self.new_signal(
+                source=flow,
+                target=flow,
+                name=str(action),
+                raw_arguments=[],
+                delivery="drives",
+                cause_id=signal["id"],
+                coordinate=self.coordinate(flow, flow, signal["coordinate"]),
+                compat_process_kind="Action",
+                call_span=candidates[0].get("span"),
+            )
+            child["_effective_flow"] = flow
+            self.deliver(child)
+            if child.get("outcome") != "completed":
+                raise DerivationProblem(f"handler_coordinate_failed: {child['id']}")
             return
-        if len(target_tokens) != 1:
-            raise DerivationProblem("ambiguous_yield_resume_token")
-        token = target_tokens[0]
+        if record["kind"] == "machine":
+            self.current["context_continuations"][flow]["status"] = "running"
+            self.current = _snapshot(self.current)
+            self.event(
+                "machine_coordinate_resumed",
+                signal_id=signal["id"],
+                flow=flow,
+                coordinate=deepcopy(record["coordinate"]),
+            )
+            return
+        if record["kind"] != "yield":
+            raise DerivationProblem(f"unknown_context_coordinate_kind: {record['kind']}")
+        token_id = record.get("coordinate", {}).get("token_id")
+        token = self.current.get("yield_tokens", {}).get(token_id)
+        if not isinstance(token, dict) or token.get("status") != "awaiting-resume":
+            raise DerivationProblem(f"stale_yield_coordinate: {token_id}")
+        token["contextual_entry_occurrences"] = int(
+            token.get("contextual_entry_occurrences", 0)
+        ) + 1
         token_id = token["id"]
         lane = self.current["task_flow_lanes"].get(token.get("lane"))
         if not isinstance(lane, dict) or lane.get("yield_token") != token_id:
             raise DerivationProblem(f"stale_yield_lane: {token.get('lane')}")
-        generation = int(
-            self.current.get("instances", {})
-            .get(signal["target"], {})
-            .get("generation", 1)
-        )
-        if generation != token.get("generation"):
-            raise DerivationProblem(f"stale_yield_generation: {token_id}")
-        _lane_id, cpu, task_ref, context_epoch = self._yield_lane_identity(signal)
-        if (
-            cpu != token.get("cpu")
-            or task_ref != token.get("task_ref")
-            or context_epoch != token.get("context_epoch")
-            or lane.get("flow_ref") != token.get("flow_ref")
-        ):
-            raise DerivationProblem(f"yield_resume_context_mismatch: {token_id}")
+        for field in ("cpu", "flow_ref", "task_ref", "generation", "context_epoch"):
+            expected_value = flow if field == "flow_ref" else record.get(field)
+            if token.get(field) != expected_value or lane.get(field) != expected_value:
+                raise DerivationProblem(f"yield_resume_{field}_mismatch: {token_id}")
         self._mark_yield_resumed(
             token_id, resume_signal_id=signal["id"], identity=False
         )
+        record = self.current["context_continuations"][flow]
+        record["status"] = "running"
+        self.current = _snapshot(self.current)
         if token_id not in self.active_yield_tokens:
             self._complete_resumed_source(token_id, resume_signal=signal)
-
-    def _enter_initial_context_once(self, signal: dict[str, Any]) -> None:
-        flow = signal["target"]
-        record = self.current.get("initial_context_entries", {}).get(flow)
-        if isinstance(record, dict) and record.get("consumed"):
-            return
-        candidates = [
-            handler
-            for handler in self.systems[flow].get("handlers_by_name", {}).get("Start", [])
-            if self._handler_property(handler, "initial_context_entry") == "true"
-        ]
-        if not candidates:
-            return
-        if len(candidates) != 1:
-            raise DerivationProblem(f"ambiguous_initial_context_entry: {flow}")
-        child = self.new_signal(
-            source=flow,
-            target=flow,
-            name="Start",
-            raw_arguments=[],
-            delivery="drives",
-            cause_id=signal["id"],
-            coordinate=self.coordinate(flow, flow, signal["coordinate"]),
-            compat_process_kind="Action",
-            call_span=candidates[0].get("span"),
-        )
-        child["_effective_flow"] = flow
-        self.event("contextual_initial_entry_started", signal_id=signal["id"], child_id=child["id"])
-        self.deliver(child)
-        if child.get("outcome") != "completed":
-            raise DerivationProblem(f"initial_context_entry_failed: {child['id']}")
-        self.event("contextual_initial_entry_finished", signal_id=signal["id"], child_id=child["id"])
 
     def _execute_members(
         self,
@@ -3610,16 +3882,8 @@ class Engine:
         }
         if self._handler_property(handler, "contextual_entry") == "true":
             signal["handler"]["contextual_entry"] = True
-        if self._handler_property(handler, "initial_context_entry") == "true":
-            signal["handler"]["initial_context_entry"] = True
         if handler.get("description") is not None:
             signal["handler"]["description"] = handler["description"]
-        if self._handler_property(handler, "initial_context_entry") == "true":
-            entry_record = self.current.get("initial_context_entries", {}).get(signal["target"])
-            if isinstance(entry_record, dict) and entry_record.get("consumed"):
-                self.fail(signal, f"duplicate_initial_context_entry: {signal['target']}")
-                self.active_requests.discard(request_key)
-                return
         try:
             bindings = self.bind_payload(signal, handler)
         except DerivationProblem as exc:
@@ -3691,12 +3955,11 @@ class Engine:
                 bindings=bindings,
                 candidate=candidate,
             )
-            if self._handler_property(handler, "initial_context_entry") == "true":
-                candidate.setdefault("initial_context_entries", {})[signal["target"]] = {
-                    "consumed": True,
-                    "signal_id": signal["id"],
-                    "handler": handler["id"],
-                }
+            self._apply_context_continuation_metadata(
+                handler=handler,
+                signal=signal,
+                candidate=candidate,
+            )
             self._apply_scheduler_stack_commit(
                 signal=signal,
                 handler=handler,
@@ -3750,7 +4013,7 @@ class Engine:
                 if token is not None or not self._yield_token_was_consumed(token_id):
                     raise DerivationProblem(f"yield token did not resume exactly once: {token_id}")
             self.current = _snapshot(candidate)
-            self._resume_yield_for_contextual_entry(signal, handler)
+            self._resume_context_continuation(signal, handler)
             signal["after_snapshot"] = _snapshot(self.current)
             signal["outcome"] = "completed"
             self.event(
@@ -3993,7 +4256,7 @@ def initial_snapshot(model: dict[str, Any]) -> dict[str, Any]:
         "contextual_bindings": {},
         "instances": {},
         "task_flow_lanes": {},
-        "initial_context_entries": {},
+        "context_continuations": {},
         "yield_tokens": {},
     }
 

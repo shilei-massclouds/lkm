@@ -26,13 +26,14 @@ KernelInitFlow, KthreaddFlow and UserTaskFlow are moved to `Online` before their
 
 `TaskFlow::enter_contextual` accepts only the private proof produced by its owner Task's Dispatch. It
 validates TaskRef, FlowRef/generation, CpuRef, context epoch, dispatch record, CurrentTask/CurrentStack and
-effective-flow execution, then records consumption so duplicate Enter fails deterministically. It contains
-no fixed-entry branch. It resumes a matching YieldToken; on the first prepared context it consumes the
-Setup-bound `Start` coordinate exactly once; otherwise execution continues at the saved coordinate.
+effective-flow execution, then consumes the proof so duplicate Enter fails deterministically. It contains
+no first/resume or concrete-Flow branch and owns no one-shot entry state. The already restored
+`ContextCoordinate` selects a handler body, YieldToken resume coordinate, or machine continuation.
 
 `Task` exposes paired internal operations for Setup/Enable, Save/Suspend, Dispatch/Enter and teardown so
 the embedded Flow never requires a self-referential pointer or unsafe alias. Concrete Flows do not
-override `Enter`; their unique `Start` action owns only the first-entry body.
+override `Enter`; their `initial_context` declaration names an Online `StateEffect::None` body Action.
+There is no `TaskFlow::Exit`: Save/Suspend represents switching out and Disable/Cleanup represents termination.
 
 Trap, interrupt and exception handlers temporarily change the CPU effective-flow stack. A regular
 TaskFlow action may execute only when it is the effective Flow. A trap may schedule without changing the

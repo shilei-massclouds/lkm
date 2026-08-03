@@ -200,7 +200,7 @@ def check_adoption_sources(source_root: Path) -> None:
     accept_enable = rust_entry.find("accept_enable_at_entry")
     assign_cpu_ref = rust_entry.find("bind_flow_cpu_ref")
     physical_direct = rust_entry.find("adopt_head_physical_on_cpu")
-    preset_accept = rust_entry.find("adopt_head_preset_start")
+    preset_accept = rust_entry.find("adopt_head_preset_entry")
     if not 0 <= receipt_check < accept_enable < assign_cpu_ref < physical_direct < preset_accept:
         raise AssertionError(
             "Rust entry must validate receipts then adopt AcceptEnable -> AssignCpuRef -> PhysicalDirect -> Preset"

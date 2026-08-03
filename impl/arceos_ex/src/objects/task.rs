@@ -706,10 +706,6 @@ impl Task {
         self.flow.enable_owned(self.task_ref, Some(checkpoint))
     }
 
-    pub(crate) fn consume_direct_flow_start(&mut self) -> bool {
-        self.flow.consume_direct_initial_context_entry()
-    }
-
     pub fn cleanup_embedded_flow(&mut self) -> EventResult {
         self.flow.cleanup_owned(self.task_ref)
     }
@@ -1249,7 +1245,6 @@ impl Task {
             .init(entry, stack_base, stack_top);
         if !self.on_cpu && self.lifecycle.state() == State::Prepared {
             self.thread_context.prepare();
-            let _ = self.flow.prepare_initial_context_entry();
         }
     }
 
@@ -1257,7 +1252,6 @@ impl Task {
         self.thread_context.arch_mut().init_with_dummy();
         if !self.on_cpu && self.lifecycle.state() == State::Prepared {
             self.thread_context.prepare();
-            let _ = self.flow.prepare_initial_context_entry();
         }
     }
 

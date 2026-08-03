@@ -9,7 +9,7 @@ pub(crate) use idle::IdleRuntime;
 
 #[allow(unused_imports)]
 pub use enable::{boot_task_restored, enable, enable_after_boot_init_schedule_handoff};
-pub use preset::adopt_head_preset_start;
+pub use preset::adopt_head_preset_entry;
 #[allow(unused_imports)]
 pub use setup::{
     setup_after_boot_init_rest_init, setup_after_core_prepare, setup_after_irq_open_prepare,

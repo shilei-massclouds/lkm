@@ -129,7 +129,7 @@ pub fn run() -> SmokeResult {
             || ctx.cpu_start_provider.hsm_start_task_ref(logical_id) != TaskRef::ap_idle(logical_id)
             || ctx.cpu_start_provider.hsm_start_flow_ref(logical_id)
                 != TaskFlowRef::ap_idle(logical_id)
-            || !crate::objects::smp_bringup::ap_initial_start_consumed(logical_id)
+            || !crate::objects::smp_bringup::ap_initial_body_active(logical_id)
             || ctx.cpu_group.cpu(logical_id).is_none_or(|cpu| {
                 let trap = cpu.trap();
                 let entry = trap.entry_context();

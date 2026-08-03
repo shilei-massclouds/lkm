@@ -289,8 +289,8 @@ schedule 返回点后执行。
 
 首次 dispatch 必须显式保存 BootTask context并 Suspend；真实栈切换后 Scheduler 恢复 PID 1 context、
 提交 CurrentTask/CurrentStack、drives KernelInitTask.Dispatch，再向已 Online 的固定 KernelInitFlow
-交付 contextual Enter。首个 context 从 `kernel_init_entry()` 验证 PID 1 vmalloc stack后执行
-`KernelInitFlow.Start`，并驱动全部
+交付 contextual Enter。初始 context coordinate 从 `kernel_init_entry()` 验证 PID 1 vmalloc stack后执行
+`KernelInitFlow.RunKernelInit`，并驱动全部
 PreSMP/SMP/runtime/rootfs/finalize/payload 叶子。
 
 #### PreSmpInitPhase

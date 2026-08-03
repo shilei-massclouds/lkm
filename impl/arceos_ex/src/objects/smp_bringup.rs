@@ -209,14 +209,6 @@ impl ApIdleTaskRecord {
             );
         }
         self.task.activate_hsm_authority()?;
-        if !self.task.consume_direct_flow_start() {
-            return failed_condition(
-                LifecycleEvent::Dispatch,
-                self.task.state(),
-                State::OnCpu,
-                State::OnCpu,
-            );
-        }
         Ok(())
     }
 }
@@ -614,13 +606,16 @@ pub(crate) fn activate_ap_idle_entry_execution(logical_id: usize) -> EventResult
 }
 
 #[cfg(app_smoke)]
-pub(crate) fn ap_initial_start_consumed(logical_id: usize) -> bool {
+pub(crate) fn ap_initial_body_active(logical_id: usize) -> bool {
     if logical_id == 0 || logical_id >= MAX_CPUS {
         return false;
     }
     let record = unsafe { &*core::ptr::addr_of!(AP_IDLE_TASKS[logical_id]) };
-    record.task.embedded_flow().initial_context_entry_consumed()
-        && !record.task.embedded_flow().initial_context_entry_pending()
+    record.task.state() == State::OnCpu
+        && record.task.execution_authority() == TaskExecutionAuthority::Live
+        && record.task.breakpoint_state() == TaskBreakpointState::Invalid
+        && record.task.flow_state() == State::Online
+        && record.task.embedded_flow().cpu_id() == logical_id
 }
 
 fn ap_stack_top_virt(logical_id: usize) -> Option<usize> {

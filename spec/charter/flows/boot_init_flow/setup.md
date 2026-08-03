@@ -65,7 +65,7 @@ CorePreparePhase 仍为 Base。PerCpuStorage、普通 Boot/Payload 参数解析�
 `BootInitRestInitPhase` 完整创建、发布 `KernelInitTask`/`KernelInitFlow` 和
 `KthreaddTask`/`KthreaddFlow`。Task 发布时已是 Online/None/Valid，固定 Flow 也已 Online；首次派发不再
 发送 Startup 或 Activate，而是恢复其首个 TaskThreadContext、提交 Task.Dispatch，再交付 contextual
-TaskFlow.Enter，由 Setup 绑定的 Start 坐标开始。
+TaskFlow.Enter，由 Setup 绑定的具名正文 Action coordinate 开始。
 
 ## 引用
 

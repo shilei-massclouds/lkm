@@ -45,9 +45,9 @@ Task 还保存两组正交状态：
 - `TaskExecutionAuthority::{None, Reserved, Live}`：普通 Online Task 为 None，OnCpu Task 为 Live；
   Reserved 只用于已成为 AP `rq->idle/rq->curr`、但尚未收到 HSM 执行权的 idle Task。
 - `TaskBreakpointState::{Invalid, Prepared, Valid}`：Setup 构造 Prepared context，建立初始 `ra/sp`、
-  固定 FlowRef/generation、context epoch、dispatch record，并把该 Flow 实例唯一的 `Start` 坐标绑定为
-  首次恢复坐标；Enable 只把 context 永久绑定到 `flow` 并发布 Valid；Dispatch 只从 Online 校验并消费
-  Valid context，提交
+  固定 FlowRef/generation、context epoch、dispatch record，并把该 Flow 的 `initial_context` 正文 Action
+  绑定为抽象 `ContextCoordinate`；Enable 原子验证并发布首个 Valid breakpoint；Dispatch 只从 Online
+  校验并消费 Valid context，提交
   `OnCpu/Live/Invalid`；Suspend 只从 OnCpu 保存 context 并发布 `Online/None/Valid`。
 
 首次入口与恢复入口使用同一个 Dispatch/Enter 路径。Scheduler 不保存 first/resume dispatch kind，也不根据
@@ -62,14 +62,17 @@ Task lifecycle 方法。
 
 每个 `ApIdleTask` 在 BP 预建完成时为 `OnCpu/Reserved/Invalid`。HSM 入口验证 boot data、原子建立
 CurrentTask/CurrentStack 并把 authority 激活为 Live，不改变 Task lifecycle；它首次切出时才产生
-Valid context，之后使用普通 Dispatch/Suspend。HSM 架构入口直接调用 `ApIdleFlow.Start`，不发送
+Valid context，之后使用普通 Dispatch/Suspend。HSM 架构入口直接进入 `ApIdleFlow.RunIdle` 正文坐标，不发送
 Task.Dispatch 或 TaskFlow.Enter。
 
 ## TaskThreadContext
 
-`TaskThreadContext` 固定保存长期 Task continuation 的核心寄存器集合、breakpoint state、不可变
-`TaskFlowRef`、Flow generation、context epoch、dispatch record、可选 root `TrapFlowRef` 和真实
-save/restore 观察计数。Valid context 必须绑定 Task 的唯一 `flow`；Prepared/Invalid context 不可恢复。
+`TaskThreadContext` 固定保存长期 Task continuation 的核心寄存器集合、抽象 `ContextCoordinate`、
+breakpoint state、不可变 `TaskFlowRef`、Flow generation、context epoch、dispatch record、可选 root
+`TrapFlowRef` 和真实 save/restore 观察计数。`ContextCoordinate` 是现有 `ra/sp`、YieldToken 与保存点的
+模型值，不是新 ResourceObject、导出 ABI 字段或额外汇编布局。首次 coordinate 指向具名正文 Action；
+后续 Save 写入 YieldToken/机器 continuation 坐标。Valid context 必须绑定 Task 的唯一 `flow`；
+Prepared/Invalid context 不可恢复。
 FlowRef、generation 或 epoch 不匹配必须在提交前拒绝。
 
 root TrapFlowRef 通过短期 child FlowRef 链定位当前 Trap/Interrupt/Exception leaf；不存在活动陷入时
@@ -100,14 +103,15 @@ Action 在向低地址增长的内核栈底安装固定保护值并建立 `task_
 
 普通 Task.Preset 建立 fresh identity、TaskRef、不可变 Flow association、Flow owner/parent 和 clone
 specification。Setup 消费 `TaskCreationCore` 的 copy-process 事实，建立 PID、stack、首个寄存器字节、
-Prepared context、scheduler entity 和 New/not-enqueued 状态。Enable 在 wake/runqueue publication 后
-把 Prepared context 绑定固定 FlowRef，原子发布 `Online/None/Valid`；同时要求该 TaskFlow 已按所属
-类型完成发布并为 Online。Enable 不执行 Flow 主体。
+固定 FlowRef/generation、epoch、抽象初始 coordinate、Prepared context、scheduler entity 和
+New/not-enqueued 状态。Flow.Enable 验证该初始 context 完整并发布 Flow Online；Task.Enable 在
+wake/runqueue publication 后把 Prepared context 原子发布为 `Online/None/Valid`。两者都不在创建者栈
+执行 Flow 主体。
 
 `BootInitRestInitPhase` 完整驱动 PID 1 与 kthreadd 的创建和发布。它们首次真正被选择时与以后恢复时
 完全相同：Scheduler 恢复 context、提交 CurrentTask/CurrentStack，再 drives Task.Dispatch，随后向固定
-Flow 交付 contextual `Action::Enter`。首次 Enter 后由 Setup 绑定的坐标执行实例 `Start`；后续 Enter
-只恢复保存坐标。
+Flow 交付 contextual `Action::Enter`。Enter 不识别首次或恢复：它只消费本轮 Dispatch proof 和当前
+coordinate；初始 coordinate 落到正文 Action，保存后的 coordinate 落到 YieldToken 或机器 continuation。
 
 `TaskCreationCore.CopyProcess` 的 source 必须是当前 `OnCpu/Live` Task；其固定 Flow 必须是 effective
 TaskFlow，TaskRef 必须与 CurrentTaskRef 一致。Online、Reserved、非 current 或 stale reference 在修改
@@ -130,8 +134,8 @@ non-identity switch 必须由 Scheduler 显式完成：
 3. Task.Suspend(prev)，提交 `OnCpu/Live/Invalid -> Online/None/Valid`；
 4. RestoreCoreContext(next)，并原子提交 CurrentTask/CurrentStack 和固定 Flow 的 CpuRef；
 5. 在 next stack 上完成 finish；
-6. Task.Dispatch(next)，提交 `Online/None/Valid -> OnCpu/Live/Invalid` 并生成不可伪造、一次性的私有
-   Enter proof；
+6. Task.Dispatch(next)，提交 `Online/None/Valid -> OnCpu/Live/Invalid` 并生成包含 CPU、TaskRef、
+   FlowRef/generation、context epoch 与 dispatch ordinal 的不可伪造、一次性私有 Enter proof；
 7. 用该 proof 向 next 的固定 Flow 交付 contextual `Action::Enter`。
 
 Schedule 目标处理结束时，prev 的执行绑定已经改变，因此 prev 的 YieldToken 保持 pending。未来同一

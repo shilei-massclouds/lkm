@@ -429,8 +429,6 @@ fn task_breakpoint_contract_smoke() -> bool {
             crate::objects::cpu::CpuRef::new(1),
         )
         || task.dispatch_and_enter_for_test().is_err()
-        || task.embedded_flow().initial_context_entry_pending()
-        || !task.embedded_flow().initial_context_entry_consumed()
         || !task.duplicate_enter_rejected_for_test()
         || task.switch_in_ready()
         || !crate::objects::task_flow::task_flow_execution_guard_satisfied(
@@ -459,8 +457,6 @@ fn task_breakpoint_contract_smoke() -> bool {
         || task.breakpoint_matches(stale_flow)
         || task.wake_for_scheduler_enqueue().is_err()
         || task.dispatch_and_enter_for_test().is_err()
-        || task.embedded_flow().initial_context_entry_pending()
-        || !task.embedded_flow().initial_context_entry_consumed()
         || task.cleanup_embedded_flow().is_err()
         || task.disable().is_err()
         || task.state() != State::Offline

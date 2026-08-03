@@ -285,6 +285,11 @@ object SecondaryIdleTaskSet: TaskSet {
                         ApIdleTask,
                         TaskBreakpointState::Invalid
                     );
+                    task_thread_context_core_register_set(ApIdleTask.thread_context);
+                    task_context_coordinate_ready(ApIdleTask.thread_context);
+                    task_context_flow_ref_is_fixed(ApIdleTask, ApIdleFlow);
+                    task_initial_context_coordinate_bound(ApIdleTask, ApIdleFlow);
+                    task_initial_context_complete(ApIdleTask, ApIdleFlow);
                     task_fixed_flow_is(ApIdleTask, ApIdleFlow);
                     task_fixed_flow_is(ApIdleTask, ApIdleFlow);
                     task_flow_owner_is(ApIdleFlow, ApIdleTask);
@@ -475,7 +480,7 @@ object CpuStartProvider: HardwareObject {
                     ApIdleFlow.Transition::Preset;
                     ApIdleFlow.Transition::Setup;
                     ApIdleFlow.Transition::Enable;
-                    ApIdleFlow.Action::Start;
+                    ApIdleFlow.Action::RunIdle;
                 }
             }
         }

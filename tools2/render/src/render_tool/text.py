@@ -34,6 +34,16 @@ def _snapshot_delta(before: dict[str, Any] | None, after: dict[str, Any] | None)
                     f"contextual binding {kind}[{key}]: "
                     f"{json.dumps(old, sort_keys=True)} -> {json.dumps(new, sort_keys=True)}"
                 )
+    before_continuations = before.get("context_continuations", {})
+    after_continuations = after.get("context_continuations", {})
+    for flow in sorted(set(before_continuations) | set(after_continuations)):
+        old = before_continuations.get(flow)
+        new = after_continuations.get(flow)
+        if old != new:
+            lines.append(
+                f"context continuation {flow}: "
+                f"{json.dumps(old, sort_keys=True)} -> {json.dumps(new, sort_keys=True)}"
+            )
     return lines
 
 
@@ -149,8 +159,12 @@ def _render_verbose(view: dict[str, Any]) -> str:
             lines.append(f"{indent}  handler: {signal['handler']['id']}")
             if signal["handler"].get("contextual_entry"):
                 lines.append(f"{indent}  contextual entry: restores the selected TaskFlow lane")
-            if signal["handler"].get("initial_context_entry"):
-                lines.append(f"{indent}  initial context entry: consumed exactly once")
+            continuation = signal.get("context_continuation")
+            if continuation:
+                lines.append(
+                    f"{indent}  continuation: {continuation['kind']} "
+                    f"coordinate={json.dumps(continuation['coordinate'], sort_keys=True)}"
+                )
         if signal.get("payload"):
             rendered = ", ".join(
                 f"{item['name']}:{item['type']}={json.dumps(item['value'], ensure_ascii=False)}"

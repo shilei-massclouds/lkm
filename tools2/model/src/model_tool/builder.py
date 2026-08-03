@@ -831,6 +831,15 @@ def _handler_property(handler: dict[str, Any], name: str) -> str | None:
     return None
 
 
+def _effective_declaration_properties(
+    types: dict[str, dict[str, Any]], declared_type: str | None
+) -> dict[str, str]:
+    properties: dict[str, str] = {}
+    for declaration in reversed(_type_chain(types, declared_type)):
+        properties.update(declaration.get("properties", {}))
+    return properties
+
+
 def _check_handler_extension(
     inherited: dict[str, Any],
     extension: dict[str, Any],
@@ -1209,13 +1218,15 @@ def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
             initial_invariants.extend(deepcopy(states[initial_state]["invariant"]))
         initial_invariants.extend(_expression(item) for item in declaration.get("initial_facts", []))
 
+        effective_properties = _effective_declaration_properties(types, declared_type)
+        effective_properties.update(declaration.get("properties", {}))
         systems[name] = {
             "name": name,
             "declaration_kind": declaration["declaration_kind"],
             "declared_type": declared_type,
             "parent": parent,
             "initial_state": initial_state,
-            "properties": deepcopy(declaration.get("properties", {})),
+            "properties": deepcopy(effective_properties),
             "fields": fields,
             "reference_types": reference_types,
             "references": references,
@@ -1318,7 +1329,9 @@ def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
                 "declared_type": child_type,
                 "parent": owner_name,
                 "initial_state": initial_state,
-                "properties": {},
+                "properties": deepcopy(
+                    _effective_declaration_properties(types, child_type)
+                ),
                 "fields": {
                     kind: _type_fields(types, child_type, kind)
                     for kind in sorted(
@@ -1454,16 +1467,19 @@ def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
         owner: str,
         declared_type: str | None,
         handlers: list[dict[str, Any]],
+        properties: dict[str, str],
+        owner_span: dict[str, Any],
     ) -> None:
         task_flow_owner = _is_subtype(types, declared_type, "TaskFlow")
-        initial_entries: list[dict[str, Any]] = []
         seen: set[str] = set()
+        unique_handlers: list[dict[str, Any]] = []
         for handler in handlers:
             if handler["id"] in seen:
                 continue
             seen.add(handler["id"])
+            unique_handlers.append(handler)
             contextual = _handler_property(handler, "contextual_entry")
-            initial = _handler_property(handler, "initial_context_entry")
+            removed_initial = _handler_property(handler, "initial_context_entry")
             if contextual is not None and contextual != "true":
                 _diagnostic(
                     diagnostics,
@@ -1483,34 +1499,81 @@ def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
                     f"StateEffect::None Action: {handler['id']}",
                     handler["span"],
                 )
-            if initial is not None and initial != "true":
+            if removed_initial is not None:
                 _diagnostic(
                     diagnostics,
                     "error",
-                    f"initial_context_entry on {handler['id']} must be true when present",
+                    "initial_context_entry has been removed; declare "
+                    f"initial_context: Action::<Name> on the TaskFlow: {handler['id']}",
                     handler["span"],
                 )
-            if initial == "true":
-                initial_entries.append(handler)
-                if (
-                    not task_flow_owner
-                    or handler.get("kind") != "Action"
-                    or handler.get("name") != "Start"
-                    or _handler_property(handler, "state_effect") != "StateEffect::None"
-                ):
-                    _diagnostic(
-                        diagnostics,
-                        "error",
-                        "initial_context_entry is allowed only on a TaskFlow "
-                        f"StateEffect::None Action::Start: {handler['id']}",
-                        handler["span"],
-                    )
-        if len(initial_entries) > 1:
+            if _handler_property(handler, "initial_context") is not None:
+                _diagnostic(
+                    diagnostics,
+                    "error",
+                    "initial_context is a TaskFlow declaration property, not a handler property: "
+                    f"{handler['id']}",
+                    handler["span"],
+                )
+
+        initial_context = properties.get("initial_context")
+        if initial_context is None:
+            return
+        if not task_flow_owner:
             _diagnostic(
                 diagnostics,
                 "error",
-                f"TaskFlow {owner} has more than one initial_context_entry Action::Start",
-                initial_entries[1]["span"],
+                f"initial_context is allowed only on a TaskFlow declaration: {owner}",
+                owner_span,
+            )
+            return
+        match = re.fullmatch(r"Action::([A-Za-z_][A-Za-z0-9_]*)", initial_context)
+        if match is None:
+            _diagnostic(
+                diagnostics,
+                "error",
+                f"initial_context on {owner} must be Action::<Name>, got {initial_context}",
+                owner_span,
+            )
+            return
+        action_name = match.group(1)
+        candidates = [
+            handler
+            for handler in unique_handlers
+            if handler.get("kind") == "Action" and handler.get("name") == action_name
+        ]
+        if len(candidates) != 1:
+            _diagnostic(
+                diagnostics,
+                "error",
+                f"initial_context on {owner} must resolve to exactly one Action::{action_name} "
+                "owned by the same TaskFlow",
+                owner_span,
+            )
+            return
+        candidate = candidates[0]
+        online_condition = any(
+            member.get("kind") == "depends_on"
+            and any(
+                entry.get("text", "").replace(" ", "")
+                == "self.state==State::Online"
+                for entry in member.get("entries", [])
+            )
+            for member in candidate.get("body", [])
+        )
+        if (
+            _handler_property(candidate, "state_effect") != "StateEffect::None"
+            or (
+                candidate.get("source_state") != "Online"
+                and not (candidate.get("source_state") is None and online_condition)
+            )
+        ):
+            _diagnostic(
+                diagnostics,
+                "error",
+                f"initial_context on {owner} must target an Online-eligible "
+                f"StateEffect::None Action::{action_name}",
+                candidate["span"],
             )
 
     for type_name, declaration in types.items():
@@ -1525,6 +1588,8 @@ def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
                     for handler in state.get("handlers", [])
                 ],
             ],
+            declaration.get("properties", {}),
+            declaration["span"],
         )
 
     for system_name, system in systems.items():
@@ -1536,6 +1601,8 @@ def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
                 for handlers in system.get("handlers_by_name", {}).values()
                 for handler in handlers
             ],
+            system.get("properties", {}),
+            system["span"],
         )
 
     seen_handlers: set[str] = set()

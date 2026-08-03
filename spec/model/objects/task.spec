@@ -18,6 +18,7 @@ type TaskSet: ResourceObject { }
 type RegisterValue { }
 type ContextEpoch { }
 type DispatchRecord { }
+type ContextCoordinate { }
 
 type TaskThreadContext {
     ra: RegisterValue;
@@ -34,6 +35,7 @@ type TaskThreadContext {
     s9: RegisterValue;
     s10: RegisterValue;
     s11: RegisterValue;
+    coordinate: ContextCoordinate;
     breakpoint_state: TaskBreakpointState;
     flow_ref: TaskFlowRef;
     root_trap_flow_ref: OptionalTrapFlowRef;
@@ -62,6 +64,8 @@ predicate task_thread_context_owned<T: Task, C: TaskThreadContext>(task: T, cont
 predicate task_thread_context_core_register_set<C: TaskThreadContext>(context: C) -> bool;
 predicate task_thread_context_core_saved<C: TaskThreadContext>(context: C) -> bool;
 predicate task_thread_context_core_restored<C: TaskThreadContext>(context: C) -> bool;
+predicate task_context_coordinate_ready<C: TaskThreadContext>(context: C) -> bool;
+predicate task_context_coordinate_saved<T: Task, C: TaskThreadContext>(task: T, context: C) -> bool;
 predicate task_context_flow_ref_is_fixed<T: Task, F: TaskFlow>(task: T, flow: F) -> bool;
 predicate task_context_epoch_advanced<T: Task>(task: T) -> bool;
 predicate task_dispatch_record_committed<T: Task>(task: T) -> bool;
@@ -81,7 +85,8 @@ predicate task_breakpoint_published_on_enable<T: Task, F: TaskFlow>(task: T, flo
 predicate task_breakpoint_published_on_suspend<T: Task, F: TaskFlow>(task: T, flow: F) -> bool;
 predicate task_breakpoint_consumed_on_dispatch<T: Task>(task: T) -> bool;
 predicate task_dispatch_sent_only_by_scheduler<T: Task>(task: T) -> bool;
-predicate task_initial_context_start_bound<T: Task, F: TaskFlow>(task: T, flow: F) -> bool;
+predicate task_initial_context_coordinate_bound<T: Task, F: TaskFlow>(task: T, flow: F) -> bool;
+predicate task_initial_context_complete<T: Task, F: TaskFlow>(task: T, flow: F) -> bool;
 predicate task_dispatch_enter_proof_created<T: Task, F: TaskFlow>(task: T, flow: F) -> bool;
 predicate task_suspend_sent_only_by_scheduler<T: Task>(task: T) -> bool;
 predicate task_online_has_recoverable_context<T: Task>(task: T) -> bool;
@@ -167,8 +172,10 @@ type Task: ResourceObject {
                     task_thread_context_ready(self);
                     task_thread_context_owned(self, self.thread_context);
                     task_thread_context_core_register_set(self.thread_context);
+                    task_context_coordinate_ready(self.thread_context);
                     task_context_flow_ref_is_fixed(self, flow);
-                    task_initial_context_start_bound(self, flow);
+                    task_initial_context_coordinate_bound(self, flow);
+                    task_initial_context_complete(self, flow);
                     task_breakpoint_state_is(self, TaskBreakpointState::Prepared);
                     task_execution_authority_is(self, TaskExecutionAuthority::None);
                     task_sched_entity_initialized(self, scheduler);
@@ -331,6 +338,7 @@ type Task: ResourceObject {
             }
             ensures {
                 task_thread_context_core_saved(self.thread_context);
+                task_context_coordinate_saved(self, self.thread_context);
                 task_context_epoch_advanced(self);
                 task_dispatch_record_committed(self);
             }

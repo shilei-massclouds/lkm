@@ -85,6 +85,8 @@ type TaskFlow: PhaseObject {
                 task_flow_ref_generation_valid(self);
                 task_flow_context_epoch_matches_dispatch(self);
                 task_flow_contextual_enter_received(self);
+                task_flow_dispatch_proof_consumed_exactly_once(self);
+                task_flow_current_coordinate_consumed(self);
                 task_flow_machine_entry_comes_from_context(self);
                 task_flow_pending_yield_resumed_exactly_once_or_absent(self);
             }
@@ -103,6 +105,8 @@ predicate task_flow_cpu_ref_read_only_while_executing<F: TaskFlow>(flow: F) -> b
 predicate task_flow_effective_execution_guard<F: TaskFlow>(flow: F) -> bool;
 predicate task_flow_context_epoch_matches_dispatch<F: TaskFlow>(flow: F) -> bool;
 predicate task_flow_contextual_enter_received<F: TaskFlow>(flow: F) -> bool;
+predicate task_flow_dispatch_proof_consumed_exactly_once<F: TaskFlow>(flow: F) -> bool;
+predicate task_flow_current_coordinate_consumed<F: TaskFlow>(flow: F) -> bool;
 predicate task_flow_machine_entry_comes_from_context<F: TaskFlow>(flow: F) -> bool;
 predicate task_flow_pending_yield_resumed_exactly_once_or_absent<F: TaskFlow>(flow: F) -> bool;
 predicate task_flow_published_with_task<F: TaskFlow, T: Task>(flow: F, task: T) -> bool;
@@ -168,16 +172,16 @@ predicate user_app_runtime_not_shared<R: UserAppRuntime>(runtime: R) -> bool;
 
 type UserTaskFlow: TaskFlow {
     lifecycle_override: true;
+    initial_context: Action::EnterPreparedUserContext;
     owned { runtime: UserAppRuntime; }
     processes {
-        Action::Start {
+        Action::EnterPreparedUserContext {
             state_effect: StateEffect::None;
-            initial_context_entry: true;
             depends_on {
                 self.state == State::Online;
                 self.parent.state == State::OnCpu;
             }
-            ensures { task_flow_initial_start_consumed_exactly_once(self); }
+            ensures { user_task_flow_prepared_user_context_entered(self); }
         }
 
         Action::Bind(owner_task: Task, runtime: UserAppRuntime) {
@@ -221,6 +225,7 @@ type UserTaskFlow: TaskFlow {
                 self.state == State::Ready;
                 self.parent.state == State::Ready;
                 self.runtime.state == State::Online;
+                task_initial_context_complete(self.parent, self);
             }
             ensures { task_flow_published_with_task(self, self.parent); }
         }
@@ -282,17 +287,18 @@ object KernelInitApplicationInstance: ApplicationInstance {
 predicate kernel_init_entry_stack_verified<T: Task>(task: T) -> bool;
 predicate kernel_init_flow_first_leaf<F: TaskFlow, P>(flow: F, phase: P) -> bool;
 predicate kernel_init_entry_reaches_kernel_init_flow<T: Task, F: TaskFlow>(task: T, flow: F) -> bool;
-predicate kernel_init_flow_start_runs_on_verified_stack<F: TaskFlow, T: Task>(flow: F, task: T) -> bool;
+predicate kernel_init_flow_run_kernel_init_on_verified_stack<F: TaskFlow, T: Task>(flow: F, task: T) -> bool;
 predicate kernel_init_flow_payload_handoff_committed<F: TaskFlow>(flow: F) -> bool;
 predicate kthreadd_entry_reaches_schedule_loop<T: Task, S: Scheduler>(task: T, scheduler: S) -> bool;
 predicate kthreadd_schedule_loop_ready<T: Task, S: Scheduler>(task: T, scheduler: S) -> bool;
 predicate kthreadd_schedule_loop_active<T: Task, S: Scheduler>(task: T, scheduler: S) -> bool;
 predicate ap_idle_flow_key_matches_task<F: TaskFlow, T: Task>(flow: F, task: T) -> bool;
 predicate ap_idle_flow_pointwise_phases_complete<F: TaskFlow>(flow: F) -> bool;
-predicate task_flow_initial_start_consumed_exactly_once<F: TaskFlow>(flow: F) -> bool;
+predicate user_task_flow_prepared_user_context_entered<F: TaskFlow>(flow: F) -> bool;
 
 object KernelInitFlow: TaskFlow {
     lifecycle_override: true;
+    initial_context: Action::RunKernelInit;
     initial_state: State::Base;
     parent: KernelInitTask;
     owned { runtime: UserAppRuntime; }
@@ -318,16 +324,18 @@ object KernelInitFlow: TaskFlow {
     state State::Ready {
         transitions {
             on Transition::Enable -> State::Online {
-                depends_on { KernelInitTask.state == State::Ready; }
+                depends_on {
+                    KernelInitTask.state == State::Ready;
+                    task_initial_context_complete(KernelInitTask, self);
+                }
                 ensures { task_flow_published_with_task(self, KernelInitTask); }
             }
         }
     }
     state State::Online {
         actions {
-            on Action::Start {
+            on Action::RunKernelInit {
                 state_effect: StateEffect::None;
-                initial_context_entry: true;
                 depends_on {
                     KernelInitTask.state == State::OnCpu;
                     kernel_init_entry_stack_verified(KernelInitTask);
@@ -345,7 +353,7 @@ object KernelInitFlow: TaskFlow {
                 }
                 ensures {
                     kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, self);
-                    kernel_init_flow_start_runs_on_verified_stack(self, KernelInitTask);
+                    kernel_init_flow_run_kernel_init_on_verified_stack(self, KernelInitTask);
                 }
             }
 
@@ -390,6 +398,7 @@ object KernelInitFlow: TaskFlow {
 
 object KthreaddFlow: TaskFlow {
     lifecycle_override: true;
+    initial_context: Action::RunScheduleLoop;
     initial_state: State::Base;
     parent: KthreaddTask;
     state State::Base {
@@ -406,15 +415,15 @@ object KthreaddFlow: TaskFlow {
     state State::Ready {
         transitions {
             on Transition::Enable -> State::Online {
+                depends_on { task_initial_context_complete(KthreaddTask, self); }
                 ensures { task_flow_published_with_task(self, KthreaddTask); }
             }
         }
     }
     state State::Online {
         actions {
-            on Action::Start {
+            on Action::RunScheduleLoop {
                 state_effect: StateEffect::None;
-                initial_context_entry: true;
                 depends_on { KthreaddTask.state == State::OnCpu; }
                 ensures {
                     kthreadd_entry_reaches_schedule_loop(KthreaddTask, Cpu0Scheduler);
@@ -428,6 +437,7 @@ object KthreaddFlow: TaskFlow {
 
 object ApIdleFlow: TaskFlow {
     lifecycle_override: true;
+    initial_context: Action::RunIdle;
     initial_state: State::Base;
     parent: ApIdleTask;
     state State::Base {
@@ -444,15 +454,15 @@ object ApIdleFlow: TaskFlow {
     state State::Ready {
         transitions {
             on Transition::Enable -> State::Online {
+                depends_on { task_initial_context_complete(ApIdleTask, self); }
                 ensures { task_flow_published_with_task(self, ApIdleTask); }
             }
         }
     }
     state State::Online {
         actions {
-            on Action::Start {
+            on Action::RunIdle {
                 state_effect: StateEffect::None;
-                initial_context_entry: true;
                 depends_on { ApIdleTask.state == State::OnCpu; }
                 drives {
                     ApEntryPreludePhase.Transition::Preset;

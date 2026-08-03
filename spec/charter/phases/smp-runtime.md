@@ -7,7 +7,7 @@
 `KernelInitTask` 发布时已为 Online/None/Valid，KernelInitFlow 也已 Online。首次真实 dispatch 与恢复
 统一由 Scheduler 恢复 TaskThreadContext、提交 CurrentTask/CurrentStack、drives Task.Dispatch，再向
 KernelInitFlow 交付 contextual Enter。首个 context 令 Enter 转到 `kernel_init_entry()` 对应的
-`KernelInitFlow.Start`；保存
+`KernelInitFlow.RunKernelInit` 正文坐标；保存
 context 则回到相应 continuation。不存在 Activate/Startup 分支。
 
 runtime lowering 必须在 PID 1 vmalloc stack 上执行，不能在 BootTask 栈预执行。叶子完成后
@@ -16,8 +16,8 @@ CommitPayloadHandoff。exec 只替换 Flow-owned UserAppRuntime 内的 Applicati
 
 `ApIdleFlow[logical_id]` 与 `ApIdleTask[logical_id]` pointwise 固定。BP 发布 Linux
 `{task_ptr, stack_ptr}` boot data并异步发出 keyed HSM entry；AP 验证后建立 tp/sp、激活 Live authority，
-再由架构入口直接调用已经 Online 的固定 Flow 的 Start。ApEntryPrelude、ApSmpCallin、ApOnlineIdle
-由该 `Start` 承载。AP 首次架构直入不发送 Dispatch/Enter；首次切出才保存 context 并进入 Online，
+再由架构入口直接进入已经 Online 的固定 Flow 的 `RunIdle` 正文坐标。ApEntryPrelude、ApSmpCallin、
+ApOnlineIdle 由该 Action 承载。AP 首次架构直入不发送 Dispatch/Enter；首次切出才保存 context 并进入 Online，
 以后恢复使用普通 Dispatch/Enter/Suspend。
 
 stopped AP 的 active translation controller 必须 absent。AP 入口按 PhysicalDirect → TrampolineVm →

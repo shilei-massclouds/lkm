@@ -12,7 +12,7 @@ Task carrier、TaskRef、TaskThreadContext 和 Task lifecycle 见 [`Task`](task.
 - `BootInitFlow` 终身属于 `BootTask`，从 `_start` 编排 boot，Online 后继续承载 idle setup、首次
   Schedule 的返回 continuation、`BootIdleEntryPhase` 和 idle loop；不创建第二个长期 boot Flow。
 - `KernelInitFlow` 终身属于 `KernelInitTask`。Task 发布时 Flow 已 Online；首次及后续 dispatch 都以
-  contextual Enter 进入；首次 Enter 转到 Setup 绑定的 `KernelInitFlow.Start`。successful exec 不替换它。
+  contextual Enter 进入；首次 Enter 消费 Setup 绑定的 `RunKernelInit` 正文坐标。successful exec 不替换它。
 - `KthreaddFlow` 终身属于 `KthreaddTask`，发布和派发规则相同。
 - 每次 fork/clone 创建 fresh child Task 与 fresh `UserTaskFlow`；child exec 不创建后继 Flow。
 - `ApIdleFlow[logical_id]` 与 `ApIdleTask[logical_id]` pointwise 固定，在 HSM 交付前完成不可调度的
@@ -34,11 +34,14 @@ scheduler switch 或未来正式 migration commit 可以写 cpu_ref，普通 Flo
 仍保留最后归属；prepare 不得预写 next。`CurrentCPU` 从 effective Flow 的 cpu_ref 解引用，同步 drives
 子树继承解析来源，emits 不继承。
 
-## Online、contextual Enter 与 Start
+## Online、contextual Enter 与正文坐标
 
 普通可调度 Flow 在所属 Task 发布前完成 Preset/Setup/Enable 并保持 Online；运行主体不是再次启动的
 lifecycle Transition，而是可挂起 Online Action。BootInitFlow 和 ApIdleFlow 允许在不可被 Scheduler
 切走的架构前初始化中推进到 Online；它们随后也只用 Online Actions 承载可调度 continuation。
+`TaskFlow.Online` 表示该 Flow 的逻辑执行生命期已经开始且尚未终止，既包括实际在 CPU 上执行，也包括
+持有可恢复 continuation 而挂起；当前实际拥有 CPU 只由 parent `Task.OnCpu` 与
+`TaskExecutionAuthority::Live` 表达，存在下一次可消费上下文只由 `TaskBreakpoint::Valid` 表达。
 
 所有首次与恢复派发统一接受：
 
@@ -48,16 +51,18 @@ TaskFlow.State::Online / Action::Enter
 
 Enter 是带 `contextual_entry: true` 的 contextual Action。receiver 是 Task 固定 FlowRef；机器入口与
 可能嵌套的 Trap leaf 来自 Scheduler 已恢复的 TaskThreadContext。Signal 不携带 PC、SP、寄存器、函数名、
-entry role、checkpoint 或 first/resume 枚举。若 FlowLane 有 pending YieldToken，Enter 必须先用 CPU、
-TaskRef、FlowRef、generation、dispatch record 与 context epoch 校验它，再从模型 resume coordinate
-精确一次继续；若无 token 且首次 context 尚待进入，则转到 Setup 绑定、带
-`initial_context_entry: true` 的实例唯一 `Start` Action；其它恢复从已保存坐标继续。Enter 本身不得按
-具体 Flow 类型、函数或固定入口分支。
+entry role、checkpoint 或 first/resume 枚举。每次派发统一为
+`Restore -> Dispatch -> Enter -> resume current coordinate`：Enter 必须用 CPU、TaskRef、FlowRef、
+generation、dispatch ordinal 与 context epoch 校验并精确一次消费本轮 Dispatch proof，再消费
+TaskThreadContext 的当前 `ContextCoordinate`。初始 coordinate 指向 Flow 以 `initial_context` 声明绑定的
+Online、`StateEffect::None` 正文 Action；保存后的 coordinate 指向 YieldToken 或机器 continuation 的恢复
+坐标。Scheduler 与 Enter 都不得按 first/resume、具体 Flow 类型、函数或固定入口分支。
 
-`KernelInitFlow.Start` 驱动 kernel-init 阶段链；`KthreaddFlow.Start` 进入调度循环；
-`UserTaskFlow.Start` 进入已准备的用户上下文。`ApIdleFlow.Start` 由 HSM 架构入口直接调用。
-BootInitFlow 继续由 `_start` 驱动 Preset/Setup/Enable，不制造首次 Enter 或虚假 Start；BootTask 与 AP
-idle 只有首次真实切出后的恢复才走通用 Dispatch/Enter。
+`KernelInitFlow.RunKernelInit` 驱动 kernel-init 阶段链；`KthreaddFlow.RunScheduleLoop` 进入调度循环；
+`UserTaskFlow.EnterPreparedUserContext` 进入已准备的用户上下文；`ApIdleFlow.RunIdle` 承载 AP idle 正文。
+这些都是普通正文 Action，不携带一次性属性。BootInitFlow 继续由 `_start` 驱动 Preset/Setup/Enable，
+不制造首次 Enter；BootTask 与 AP idle 的首次架构直入不伪造 Dispatch/Enter，只有首次真实切出后的恢复
+才走通用 Dispatch/Enter。
 
 除声明期 Bind 和明确的 Boot/AP 架构入口例外，普通 lifecycle/action 每次执行都即时要求：固定 parent
 Task 为 OnCpu/Live、Flow 为该 Task 的唯一 flow、FlowRef/generation 有效、CpuRef 与 CPU-local
@@ -92,15 +97,17 @@ TaskFlow、CurrentTask、CurrentStack、CpuRef、runqueue、锁或中断状态�
 - identity：Schedule handler 没改变 source execution binding，目标完成后的默认 resume attempt
   立即消费 token，从 `yields` 后返回；不交付 Dispatch/Enter。
 - non-identity：Scheduler handler 显式 Save/Suspend/Restore/commit/Dispatch/Enter，source binding 已改变，
-  token 保持 pending；未来匹配的 contextual TaskFlow.Enter 恢复它。
+  token 保持 pending；Save 发布其 resume coordinate，未来匹配的 contextual TaskFlow.Enter 恢复它。
 
 目标 Signal 不进入 emits FIFO。preflight rejection 不创建 token；post-commit failure、stale、错误绑定
 或重复 resume 终止失败，不回滚、不重试。
 
 ## lifecycle 与 teardown
 
-TaskFlow 必须显式经历 Preset/Setup/Enable/Disable/Cleanup。Enable 建立 Online 服务事实但不等于执行
-主体已经派发；Enter 才执行 contextual continuation，Start 对每个实例至多一次。Disable 只允许 terminal 路径，要求无活动
+TaskFlow 必须显式经历 Preset/Setup/Enable/Disable/Cleanup。Enable 必须验证所属 Task 的初始
+TaskThreadContext 已具备完整寄存器、固定 FlowRef/generation、epoch 与 `initial_context` 正文坐标，然后
+发布 Online；它不在创建者栈执行正文。Enter 才消费当前 contextual continuation。切出固定由
+`Task.Save -> Task.Suspend` 表达；不定义 `TaskFlow.Exit`。Disable 只允许 terminal 路径，要求无活动
 Trap child、无 pending YieldToken、Runtime 已完成退出；Cleanup 从 Offline 回收到 Destroyed。
 
 Task terminal Disable 前固定 Flow 必须不再 Online；Task Cleanup 前 Flow 必须 Destroyed。storage 或

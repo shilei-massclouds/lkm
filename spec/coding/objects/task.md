@@ -17,8 +17,10 @@ Flow storage, Flow list, predecessor, handoff slot, dispatch-kind field, or repl
 
 Every ordinary published Task owns one `TaskThreadContext` containing the architectural
 `TaskSwitchContext`, breakpoint state, fixed FlowRef, optional root TrapFlowRef, context epoch and private
-dispatch record. `Setup` installs the initial `ra/sp`, FlowRef/generation, epoch and the embedded Flow's
-`Start` coordinate before `Enable` publishes a Valid breakpoint. The boot Task starts `OnCpu` with an
+dispatch record. `ContextCoordinate` is model metadata realized by the existing `ra/sp`, YieldToken and
+save point; it adds no Rust field or assembly ABI slot. `Setup` installs the initial `ra/sp`,
+FlowRef/generation, epoch and the embedded Flow's `initial_context` body coordinate before Flow Enable
+validates and publishes Online and Task Enable publishes a Valid breakpoint. The boot Task starts `OnCpu` with an
 Invalid breakpoint and initializes the architectural save area only on its first real switch out.
 
 A UserTask binds the actual shared kernel carrier-stack range during `Setup`; a dummy or zero range cannot
@@ -63,12 +65,12 @@ The non-identity switch order is fixed:
 4. restore `next` architectural core context;
 5. commit CPU-local CurrentTask and CurrentStack to `next`;
 6. consume the Valid breakpoint and commit `next` from `Online` to `OnCpu` through `Dispatch`, creating a
-   private, single-use Enter proof from the preflight Flow identity and context epoch;
+   private, single-use Enter proof from CPU, TaskRef, FlowRef/generation, context epoch and dispatch ordinal;
 7. pass that proof to embedded `next.flow.Action::Enter`.
 
-First dispatch and later dispatch use the same code. `Enter` consumes a matching YieldToken, otherwise
-uses the Setup-bound `Start` coordinate exactly once, and otherwise resumes the saved coordinate. Machine
-entry is selected only by the restored context. Identity scheduling sends neither Dispatch nor Enter.
+First dispatch and later dispatch use the same code. `Enter` consumes the current coordinate without
+classifying it: the initial coordinate reaches the declared body Action, while saved yield/machine
+coordinates resume their continuation. Machine entry is selected only by the restored context. Identity scheduling sends neither Dispatch nor Enter.
 Trap entry does not change Task lifecycle; the optional root TrapFlowRef in the context restores the
 effective trap leaf before the underlying TaskFlow continuation.
 

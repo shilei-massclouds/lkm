@@ -77,7 +77,7 @@ snapshot 缺失、损坏或其 boundary source 不可用时必须在 derive 前�
 | 2. Kernel 与 BootInit 入口 | `Kernel.Enable` 在 Ready 内同步驱动 `BootInitFlow.Preset`，以及 BootInit 最早入口对象建立 | `Kernel.Enable` 发送前 | `BootInitFlow.Setup` 发送前，Kernel 保持 Ready 且 BootInitFlow 已到 Prepared |
 | 3. BootInit 引导、中断与进程准备 | BootInitFlow 直接编排到 `setup_arch()` 返回，随后为 `CorePreparePhase`、`MmCoreInitPhase`、`SchedInitPhase`、`IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、`ProcessPreparePhase` | `BootInitFlow.Setup` 发送前 | 渐进校准；首阶段到 `CorePreparePhase.Preset` 发送前，最终到 `BootInitRestInitPhase.Preset` 发送前 |
 | 4. rest-init 与首次调度切换 | PID 1/kthreadd 及固定 Flow 发布、BootInitFlow idle/schedule 预检、BootTask 到 KernelInitTask 的真实 switch | `BootInitRestInitPhase.Preset` 发送前 | 首个 `KernelInitFlow.Enter` 前，PID 1 已真实 OnCpu 且执行权完成迁移 |
-| 5. PID 1 内核初始化 | `PreSmpInitPhase`、`SmpBringupPhase`、`RuntimeCorePhase`、`InitcallPhase`、`RootfsPhase`、`FinalizePhase` 和 `PayloadPreparePhase` | 首个 `KernelInitFlow.Start` 前 | `PayloadHandoffPreparePhase` 前述叶子全部完成，KernelInitFlow 保持 Online |
+| 5. PID 1 内核初始化 | `PreSmpInitPhase`、`SmpBringupPhase`、`RuntimeCorePhase`、`InitcallPhase`、`RootfsPhase`、`FinalizePhase` 和 `PayloadPreparePhase` | 首个 `KernelInitFlow.RunKernelInit` 前 | `PayloadHandoffPreparePhase` 前述叶子全部完成，KernelInitFlow 保持 Online |
 | 6. payload 预提交与交接 | `PayloadHandoffPreparePhase`、Kernel Online、由 Kernel 发出的 `CommitPayloadHandoff`，以及 Hello/Smoke/UserBoot 各自的 no-return 或 ApplicationInstance replacement 边界 | `PayloadHandoffPreparePhase` 发送前 | `KernelInitFlow.PayloadHandoffCommitted` 或对应确定失败边界；失败时 Kernel 保持 Online、根结果 failed |
 
 每组先验收粗粒度主干，再按 canonical Signal 顺序细分；表中的结束边界不是允许忽略组内子阶段的

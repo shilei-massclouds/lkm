@@ -77,8 +77,8 @@ Kernel.Enable accepts
   -> Scheduler.schedule(): save BootTask context, BootTask.Suspend, current/context commit
   -> physical switch to KernelInitTask
   -> KernelInitTask.Dispatch
-  -> embedded KernelInitFlow contextual Enter verifies actual SP and consumes Start
-  -> KernelInitFlow.Start actions: PreSmpInit, SmpBringup, RuntimeCore,
+  -> embedded KernelInitFlow contextual Enter verifies actual SP and consumes current coordinate
+  -> KernelInitFlow.RunKernelInit actions: PreSmpInit, SmpBringup, RuntimeCore,
      Initcall, Rootfs, Finalize, PayloadPrepare, PayloadHandoffPrepare
   -> Kernel.Online
   -> Kernel emits KernelInitFlow.CommitPayloadHandoff
@@ -88,7 +88,7 @@ Kernel.Enable accepts
 但这些边界在逻辑上都由同一个 Kernel.Enable 驱动，不得另建 pending/continuation lifecycle 状态。
 Scheduler 是 Task Suspend/Dispatch 的唯一发送者，不得在 BootTask 栈上提前处理 next
 Dispatch/Enter 或运行 KernelInitFlow 叶阶段。`kernel_init_entry()` 在 next 栈的
-`finish_task_switch()` 完成 Dispatch/Enter 后验证 PID 1 实际 SP 并调用具名 Start 主体；后者验证
+`finish_task_switch()` 完成 Dispatch/Enter 后验证 PID 1 实际 SP 并进入具名 `RunKernelInit` 主体；后者验证
 Kernel Ready 且 Enable 已接受、BootInitFlow Online、KernelInitTask OnCpu、CurrentTask
 identity 和 entry count，再执行 KernelInitFlow 的第一个叶阶段。
 

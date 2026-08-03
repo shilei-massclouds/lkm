@@ -72,8 +72,6 @@ pub struct TaskFlow {
     disabled: bool,
     cleaned: bool,
     cpu_ref: CpuRef,
-    initial_context_entry_pending: bool,
-    initial_context_entry_consumed: bool,
     last_entered_context_epoch: u64,
     last_entered_dispatch_ordinal: u64,
 }
@@ -90,8 +88,6 @@ impl TaskFlow {
             disabled: false,
             cleaned: false,
             cpu_ref: CpuRef::invalid(),
-            initial_context_entry_pending: false,
-            initial_context_entry_consumed: false,
             last_entered_context_epoch: 0,
             last_entered_dispatch_ordinal: 0,
         }
@@ -108,8 +104,6 @@ impl TaskFlow {
             disabled: false,
             cleaned: false,
             cpu_ref: CpuRef::invalid(),
-            initial_context_entry_pending: false,
-            initial_context_entry_consumed: false,
             last_entered_context_epoch: 0,
             last_entered_dispatch_ordinal: 0,
         }
@@ -130,8 +124,6 @@ impl TaskFlow {
             disabled: false,
             cleaned: false,
             cpu_ref: CpuRef::invalid(),
-            initial_context_entry_pending: false,
-            initial_context_entry_consumed: false,
             last_entered_context_epoch: 0,
             last_entered_dispatch_ordinal: 0,
         }
@@ -178,39 +170,6 @@ impl TaskFlow {
         self.cpu_ref.logical_id()
     }
 
-    #[cfg(app_smoke)]
-    pub const fn initial_context_entry_pending(&self) -> bool {
-        self.initial_context_entry_pending
-    }
-
-    #[cfg(app_smoke)]
-    pub const fn initial_context_entry_consumed(&self) -> bool {
-        self.initial_context_entry_consumed
-    }
-
-    pub(crate) fn prepare_initial_context_entry(&mut self) -> bool {
-        if !self.declared
-            || !self.owner.is_valid()
-            || self.initial_context_entry_pending
-            || self.initial_context_entry_consumed
-        {
-            return false;
-        }
-        self.initial_context_entry_pending = true;
-        true
-    }
-
-    /// Boot/AP architecture entry consumes Start without inventing a
-    /// scheduler Dispatch/Enter occurrence.
-    pub(crate) fn consume_direct_initial_context_entry(&mut self) -> bool {
-        if self.initial_context_entry_consumed || !self.declared || !self.owner.is_valid() {
-            return false;
-        }
-        self.initial_context_entry_pending = false;
-        self.initial_context_entry_consumed = true;
-        true
-    }
-
     pub(crate) fn enter_contextual(
         &mut self,
         owner_ref: TaskRef,
@@ -226,7 +185,7 @@ impl TaskFlow {
             || self.cpu_ref != cpu_ref
             || context_epoch == 0
             || dispatch_ordinal == 0
-            || self.last_entered_dispatch_ordinal == dispatch_ordinal
+            || self.last_entered_dispatch_ordinal >= dispatch_ordinal
             || self.last_entered_context_epoch > context_epoch
         {
             return failed_condition(
@@ -238,18 +197,6 @@ impl TaskFlow {
         }
         self.last_entered_context_epoch = context_epoch;
         self.last_entered_dispatch_ordinal = dispatch_ordinal;
-        if self.initial_context_entry_pending {
-            if self.initial_context_entry_consumed {
-                return failed_condition(
-                    LifecycleEvent::Dispatch,
-                    self.lifecycle.state(),
-                    State::Online,
-                    State::Online,
-                );
-            }
-            self.initial_context_entry_pending = false;
-            self.initial_context_entry_consumed = true;
-        }
         Ok(())
     }
 
@@ -295,8 +242,6 @@ impl TaskFlow {
         self.disabled = false;
         self.cleaned = false;
         self.cpu_ref = CpuRef::invalid();
-        self.initial_context_entry_pending = false;
-        self.initial_context_entry_consumed = false;
         self.last_entered_context_epoch = 0;
         self.last_entered_dispatch_ordinal = 0;
         Ok(())

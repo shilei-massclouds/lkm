@@ -32,15 +32,19 @@ def check_derivation(derivation: dict[str, Any]) -> dict[str, Any]:
     for snapshot in snapshots:
         if snapshot is None:
             continue
-        entries = snapshot.get("initial_context_entries")
+        entries = snapshot.get("context_continuations")
         if not isinstance(entries, dict) or not all(
             isinstance(flow, str)
             and isinstance(record, dict)
-            and record.get("consumed") is True
-            and isinstance(record.get("signal_id"), str)
+            and record.get("flow") == flow
+            and record.get("kind") in {"handler", "yield", "machine"}
+            and record.get("status") in {"available", "entering", "running"}
+            and isinstance(record.get("generation"), int)
+            and isinstance(record.get("context_epoch"), int)
+            and isinstance(record.get("dispatch_ordinal"), int)
             for flow, record in entries.items()
         ):
-            raise ValueError("derivation initial_context_entries are inconsistent")
+            raise ValueError("derivation context_continuations are inconsistent")
     summary = derivation.get("summary")
     if not isinstance(summary, dict) or summary.get("unresolved_obligations") != len(unresolved):
         raise ValueError("derivation unresolved obligation summary is inconsistent")

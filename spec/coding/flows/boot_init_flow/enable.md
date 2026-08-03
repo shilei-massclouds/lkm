@@ -15,8 +15,8 @@ call. On eventual return, the same BootInitFlow continuation prepares and runs B
 
 KernelInitFlow and KthreaddFlow are already Online before their first dispatch. Scheduler restores the
 prepared TaskThreadContext, commits Task Dispatch, and calls the same contextual Flow Enter used for all
-later dispatches. The first Enter consumes the Setup-bound Start coordinate; later Enter resumes the saved
-coordinate and never repeats Start.
+later dispatches. Enter consumes only the current coordinate: the initial coordinate names the declared
+body Action, while a saved coordinate resumes its YieldToken or machine continuation.
 
 BootInitFlow 本身的 Enable、首次 `schedule_current()`、恢复 continuation 和 Online 状态检查落在
 `impl/arceos_ex/src/flows/boot_init_flow/enable.rs`。`idle.rs` 继续只承载私有 Online runtime state。

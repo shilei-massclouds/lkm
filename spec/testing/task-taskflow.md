@@ -31,7 +31,7 @@ TaskFlow boundary from Charter, Model, and Coding.
   later entry differ only in the architectural context contents.
 - Contextual Enter carries no PC, SP, register, function name, or
   checkpoint. Tests cross-check its YieldToken/dispatch record against the
-  TaskThreadContext epoch without copying either representation into the
+  TaskThreadContext epoch and dispatch ordinal without copying either representation into the
   other.
 - Real fork/wait handoff coverage checks that UserTask Setup binds the prepared
   user kernel trap-stack carrier used by contextual Enter; retaining the
@@ -41,8 +41,8 @@ TaskFlow boundary from Charter, Model, and Coding.
   source YieldToken through the generic target-completion resume attempt.
 - A real switch explicitly orders SaveCoreContext, prev `Suspend` to Online,
   RestoreCoreContext and CPU-local binding commit, next `Dispatch` to OnCpu,
-  and contextual Flow Enter. First Enter consumes the Setup-bound Start once;
-  resume Enter consumes a matching YieldToken or saved coordinate and never repeats Start. Blocked and wakeup tests use the same Task
+  and contextual Flow Enter. Enter does not classify first/resume: it consumes the current handler,
+  YieldToken or machine coordinate. Blocked and wakeup tests use the same Task
   states; runqueue membership, not a second lifecycle state, distinguishes
   them.
 - Terminal paths order Flow `Online -> Offline -> Destroyed` and Task
@@ -93,7 +93,8 @@ TaskFlow boundary from Charter, Model, and Coding.
 - KernelInitTask and KthreaddTask Flow state is Online before either Task is
   eligible for its first dispatch.
 - BootTask and AP idle first architecture entries send no Dispatch/Enter;
-  after their first real switch out, restoration uses the common path.
+  AP enters its prepared RunIdle body coordinate directly, and after either Task's first real switch out,
+  restoration uses the common path.
 - Representation tests cover Boot, KernelInit, Kthreadd, User, AP idle and
   smoke aggregates and reject old Flow wrapper or Task-parallel Flow storage.
 - PID 1 multiple-exec smoke preserves KernelInitTask, KernelInitFlow, and

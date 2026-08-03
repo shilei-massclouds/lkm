@@ -661,13 +661,13 @@ Type body 中的 `key: ValueType;` 是 Type 属性声明，必须被 parse/model
 - `StateEffect::Conditional`：`Success` 提交时依据扩展状态、计数、等待队列或目标对象状态选择迁移；迁移表必须写在该 Type process 内。
 - `StateEffect::None`：`Success` 不推进被建模状态；这类 process 应归为 `Action::Name`。
 
-TaskFlow context entry 使用两个受控 handler 属性：
+TaskFlow context entry 使用一个受控 handler 属性和一个受控声明属性：
 
 - `contextual_entry: true` 只允许出现在 `TaskFlow` 的 `StateEffect::None` Action 上。derive 以该属性
-  恢复匹配 YieldToken，不再根据 Action 名称猜测恢复语义。
-- `initial_context_entry: true` 只允许标记具体 TaskFlow 实例唯一的 `Action::Start`。首次 contextual
-  Enter 在没有 pending token 时消费该 Start 坐标，快照记录该实例已消费；恢复 Enter 不得重复 Start。
-  BootInitFlow 没有首次 Start；ApIdleFlow 的 Start 由 HSM 架构入口直接消费。
+  消费当前 ContextCoordinate，不再根据 Action 名称猜测恢复语义。
+- `initial_context: Action::Name` 只允许声明在 TaskFlow type 或具体实例上，且必须唯一指向同一
+  TaskFlow 的 Online、`StateEffect::None` Action。它把 Task.Setup 建立的首个 coordinate 绑定到具名正文，
+  不向 Scheduler 或 Enter 暴露 first/resume kind。旧 `initial_context_entry` 属性已移除，必须诊断为错误。
 
 `StateEffect` 已在正式规格中以 enum 建模；当前工具保留该声明和 Type process 块，但尚未解析、类型检查或推导 process 内部的 `state_effect`。因此它已经是正式规格术语，不再只是说明性文字；工具执行语义仍在后续扩展范围内。
 
@@ -718,18 +718,22 @@ Flow 历史集合、当前/初始双重 binding 或 successor chain。
 UserAppRuntime。PID 1 的 Runtime 属于 KernelInitFlow。exec 保持 Task、Flow、FlowRef 和 Runtime
 identity，只替换 Runtime 内部 ApplicationInstance；不同 Task/Flow 不共享 Runtime。
 
-Task 物理拥有 TaskThreadContext，其寄存器区是 `ra/sp/s0..s11`，并保存 breakpoint validity、固定
-TaskFlowRef/generation、context epoch、dispatch record、可选 root TrapFlowRef 与 save/restore 计数。
+Task 物理拥有 TaskThreadContext，其寄存器区是 `ra/sp/s0..s11`，并保存抽象 ContextCoordinate、
+breakpoint validity、固定 TaskFlowRef/generation、context epoch、dispatch record、可选 root TrapFlowRef
+与 save/restore 计数。ContextCoordinate 是现有寄存器、YieldToken 和保存点的模型值，不是新对象或 ABI。
 CPU-local CurrentTask/CurrentStack、CpuRef、runqueue、锁和中断状态不属于可恢复寄存器现场。普通 Task
-Setup 构造 Prepared context；Enable 把它绑定固定 Flow并发布 `Online/None/Valid`。Suspend 保存当前
+Setup 构造 Prepared context 和 `initial_context` 正文坐标；Flow.Enable 验证初始上下文完整并发布
+Flow Online，Task.Enable 原子发布 `Online/None/Valid`。Suspend 保存当前
 机器 continuation并提交 `OnCpu/Live/Invalid -> Online/None/Valid`；Dispatch 对首次与恢复统一消费
 Valid context并提交 `Online/None/Valid -> OnCpu/Live/Invalid`。
 
 Task.Online 只表示已发布且当前不在 CPU；runnable/on-rq/blocked 与 lifecycle 正交。Task.OnCpu 是 CPU
-唯一 current carrier，并需 authority Live。普通 TaskFlow 在 Task 发布前已经 Online；每次 dispatch
-只向固定 receiver 交付带 `contextual_entry: true` 的 TaskFlow.Action::Enter，首个还是保存入口由已恢复的
-TaskThreadContext 决定。首次 context 转到 Setup 绑定、带 `initial_context_entry: true` 的唯一 Start；
-恢复 context 不重复 Start。Signal 不携带机器入口或 first/resume kind。
+唯一 current carrier，并需 authority Live。TaskFlow.Online 则表示逻辑执行生命期已开始且未终止，
+无论其 Task 当前运行还是持有 continuation 挂起。每次 dispatch 只向固定 receiver 交付带
+`contextual_entry: true` 的 TaskFlow.Action::Enter。首次与恢复统一执行
+`Restore -> Dispatch -> Enter -> resume current coordinate`；Enter 交叉校验 CPU、TaskRef、FlowRef、
+generation、context epoch 和 dispatch ordinal，精确一次消费本轮 proof 与当前 coordinate。Signal 不携带
+机器入口或 first/resume kind。
 
 BootTask 初态为 OnCpu/Live/Invalid，不经 Scheduler 获得首次执行权；首次切出时才保存 context。
 BootInitFlow 经 Preset/Setup/Enable 到 Online 后，继续以 Online Action 承载 idle setup、
@@ -742,6 +746,8 @@ effective-flow 栈叠加到 Trap/Interrupt/Exception leaf。若陷入内切出�
 
 普通 Task terminal exit 要先使固定 Flow Offline并清理 Runtime/Trap/token，Task 再从 OnCpu 直接
 Disable 到 Offline，由 next stack Cleanup。Task.Cleanup 要求固定 Flow Destroyed；BootTask 不退出。
+模型不定义 `TaskFlow.Exit`：non-identity 切出只能由 Task.SaveCoreContext 后接 Task.Suspend 表达，
+终止只能由 TaskFlow.Disable/Cleanup 表达。
 
 `TaskRuntimeState` 是 `Task` 的扩展运行态，不是对象 lifecycle state。因此，设置任务运行态应建模为 `Task.Transition::SetRuntimeState(state: TaskRuntimeState)` 这样的运行期 transition，而不是 `Action::SetTaskState`。当前实现先使用简单的 `StateEffect::Conditional` 和普通 fact 表达运行态提交；后续引入状态机模型后，每次进入特定 `TaskRuntimeState` 时应执行 transition guard、leave-state check 和 enter-state consistency check，例如确认调度实体、runqueue 选择、锁/抢占/中断上下文和跨对象不变量。
 
@@ -822,8 +828,9 @@ SwitchTo，不改变 lifecycle/context/CurrentTask；Schedule handler 完成后�
 CPU-local binding 与后续容量，再按
 `prev.SaveCoreContext -> prev.Suspend -> next.RestoreCoreContext + CurrentTask/CurrentStack commit ->
 next-stack finish -> next.Task.Dispatch -> next.flow.Action::Enter` 显式推进。Scheduler 不保存首次/恢复
-dispatch kind。next Flow Enter 的机器入口由已恢复 context 决定；若 lane 有 pending YieldToken，
-还必须交叉校验 dispatch record/context epoch 后精确一次恢复。
+dispatch kind。Task.Dispatch 为本轮生成单次 Enter proof；next Flow Enter 的机器入口由已恢复的当前
+coordinate 决定，并交叉校验 dispatch ordinal/record、CPU、TaskRef、FlowRef/generation 和 context epoch
+后精确一次消费。handler coordinate 进入正文 Action，yield/machine coordinate 恢复保存点。
 
 non-identity Schedule 目标完成时 prev binding 已改变，所以 source token 保持 pending；未来 A→B→A
 切回时由 contextual Enter 恢复。MM、FPU/vector、`last` 返回值、完整 hooks、fairness、bandwidth、

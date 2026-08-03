@@ -141,6 +141,66 @@ class SignalPipelineTests(_ShortcutTestSupport, unittest.TestCase):
             rendered += "\nmodel diagnostics: " + json.dumps(model_diagnostics, sort_keys=True)
         return read_json(derivation), checked_data, rendered
 
+    @staticmethod
+    def dispatch_context(snapshot: dict, flow: str) -> dict:
+        dispatched = deepcopy(snapshot)
+        record = dispatched["context_continuations"][flow]
+        ordinal = int(record.get("dispatch_ordinal", 0)) + 1
+        record["dispatch_ordinal"] = ordinal
+        record["dispatch_proof"] = {
+            "flow": flow,
+            "cpu": record["cpu"],
+            "task_ref": record["task_ref"],
+            "generation": record["generation"],
+            "context_epoch": record["context_epoch"],
+            "dispatch_ordinal": ordinal,
+            "consumed": False,
+            "signal_id": "test-dispatch",
+        }
+        return dispatched
+
+    @classmethod
+    def save_and_dispatch_yield_context(cls, snapshot: dict, flow: str) -> dict:
+        saved = deepcopy(snapshot)
+        tokens = [
+            token
+            for token in saved["yield_tokens"].values()
+            if token.get("flow_ref") == flow
+            and token.get("status") == "awaiting-resume"
+        ]
+        if len(tokens) != 1:
+            raise AssertionError(f"expected one pending yield token for {flow}")
+        token = tokens[0]
+        epoch = int(token.get("context_epoch", 0)) + 1
+        token["context_epoch"] = epoch
+        lane = saved["task_flow_lanes"][token["lane"]]
+        lane.update(
+            {
+                "cpu": token["cpu"],
+                "task_ref": token["task_ref"],
+                "generation": token["generation"],
+                "context_epoch": epoch,
+            }
+        )
+        saved["context_continuations"][flow] = {
+            "flow": flow,
+            "lane": token["lane"],
+            "cpu": token["cpu"],
+            "task_ref": token["task_ref"],
+            "generation": token["generation"],
+            "context_epoch": epoch,
+            "dispatch_ordinal": 0,
+            "kind": "yield",
+            "coordinate": {
+                "token_id": token["id"],
+                "resume": deepcopy(token["resume_coordinate"]),
+            },
+            "status": "available",
+            "dispatch_proof": None,
+            "published_by": "test-save",
+        }
+        return cls.dispatch_context(saved, flow)
+
     def test_drives_and_emits_order(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             work = Path(tmp) / "work"
@@ -312,20 +372,28 @@ class SignalPipelineTests(_ShortcutTestSupport, unittest.TestCase):
                     actions {
                         on Action::Schedule {
                             state_effect: StateEffect::None;
-                            drives {
-                                FlowA.Transition::Park;
-                                FlowA.Action::Enter;
-                            }
+                            drives { FlowA.Transition::Park; }
                         }
                     }
                 }
             }
         """
-        derivation, checked, rendered = self.run_source(source, "FlowA.Run")
+        yielded, yielded_check, rendered = self.run_source(source, "FlowA.Run")
+        self.assertEqual(yielded_check["verdict"], "yielded", rendered)
+        self.assertEqual(
+            [item["delivery"] for item in yielded["signals"]],
+            ["root", "yields", "drives"],
+        )
+        dispatched = self.save_and_dispatch_yield_context(
+            yielded["last_stable_snapshot"], "FlowA"
+        )
+        derivation, checked, rendered = self.run_source(
+            source, "FlowA.Enter", scenario=dispatched
+        )
         self.assertEqual(checked["verdict"], "complete", rendered)
         self.assertEqual(
             [item["delivery"] for item in derivation["signals"]],
-            ["root", "yields", "drives", "drives", "drives"],
+            ["root", "drives"],
         )
         self.assertEqual(derivation["last_stable_snapshot"]["yield_tokens"], {})
         token = next(
@@ -344,79 +412,94 @@ class SignalPipelineTests(_ShortcutTestSupport, unittest.TestCase):
             1,
         )
 
-    def test_contextual_enter_consumes_initial_start_once_by_handler_attributes(self) -> None:
+    def test_contextual_enter_consumes_declared_initial_handler_coordinate_once(self) -> None:
         source = """
-            predicate start_consumed<F>(flow: F) -> bool;
+            predicate kernel_init_body_running<F>(flow: F) -> bool;
             type TaskFlow: PhaseObject { }
             system Flow: TaskFlow {
-                initial_state: State::Online;
+                initial_context: Action::RunKernelInit;
+                initial_state: State::Ready;
+                state State::Ready {
+                    transitions {
+                        on Transition::Enable -> State::Online { }
+                    }
+                }
                 state State::Online {
                     actions {
                         on Action::Enter {
                             state_effect: StateEffect::None;
                             contextual_entry: true;
                         }
-                        on Action::Start {
+                        on Action::RunKernelInit {
                             state_effect: StateEffect::None;
-                            initial_context_entry: true;
-                            ensures { start_consumed(self); }
+                            ensures { kernel_init_body_running(self); }
                         }
                     }
                 }
             }
         """
-        first, first_check, rendered = self.run_source(source, "Flow.Enter")
+        enabled, enabled_check, rendered = self.run_source(source, "Flow.Enable")
+        self.assertEqual(enabled_check["verdict"], "complete", rendered)
+        continuation = enabled["last_stable_snapshot"]["context_continuations"]["Flow"]
+        self.assertEqual(
+            (continuation["kind"], continuation["coordinate"]["action"]),
+            ("handler", "RunKernelInit"),
+        )
+
+        dispatched = self.dispatch_context(enabled["last_stable_snapshot"], "Flow")
+        first, first_check, rendered = self.run_source(
+            source, "Flow.Enter", scenario=dispatched
+        )
         self.assertEqual(first_check["verdict"], "complete", rendered)
         self.assertEqual(
             [(item["name"], item["delivery"]) for item in first["signals"]],
-            [("Enter", "root"), ("Start", "drives")],
+            [("Enter", "root"), ("RunKernelInit", "drives")],
         )
         self.assertTrue(first["signals"][0]["handler"]["contextual_entry"])
-        self.assertTrue(first["signals"][1]["handler"]["initial_context_entry"])
-        self.assertEqual(
-            first["last_stable_snapshot"]["initial_context_entries"]["Flow"]["signal_id"],
-            "sig-0002",
-        )
-
-        resumed, resumed_check, _ = self.run_source(
-            source, "Flow.Enter", scenario=first["last_stable_snapshot"]
-        )
-        self.assertEqual(resumed_check["verdict"], "complete")
-        self.assertEqual([item["name"] for item in resumed["signals"]], ["Enter"])
-        self.assertEqual(
-            resumed["last_stable_snapshot"]["initial_context_entries"]["Flow"]["signal_id"],
-            "sig-0002",
+        self.assertIn(
+            "kernel_init_body_running(Flow)",
+            first["last_stable_snapshot"]["facts"],
         )
 
         duplicate, duplicate_check, _ = self.run_source(
-            source, "Flow.Start", scenario=first["last_stable_snapshot"]
+            source, "Flow.Enter", scenario=first["last_stable_snapshot"]
         )
         self.assertEqual(duplicate_check["verdict"], "failed")
-        self.assertIn("duplicate_initial_context_entry", duplicate["failure"]["reason"])
+        self.assertIn("duplicate_contextual_enter", duplicate["failure"]["reason"])
 
-    def test_context_entry_attributes_are_taskflow_action_only(self) -> None:
+    def test_context_entry_declaration_and_handler_constraints(self) -> None:
         cases = {
             "non-taskflow": (
-                "system Flow",
-                "on Action::Enter { state_effect: StateEffect::None; contextual_entry: true; }",
-                "contextual_entry is allowed only on a TaskFlow",
+                "system Flow { initial_context: Action::Boot;",
+                "on Action::Boot { state_effect: StateEffect::None; }",
+                "initial_context is allowed only on a TaskFlow declaration",
             ),
             "wrong-effect": (
-                "type TaskFlow: PhaseObject { } system Flow: TaskFlow",
-                "on Action::Enter { state_effect: StateEffect::Conditional; contextual_entry: true; }",
-                "contextual_entry is allowed only on a TaskFlow StateEffect::None Action",
+                "type TaskFlow: PhaseObject { } system Flow: TaskFlow { initial_context: Action::Boot;",
+                "on Action::Boot { state_effect: StateEffect::Conditional; }",
+                "must target an Online-eligible StateEffect::None Action::Boot",
             ),
-            "wrong-start-name": (
-                "type TaskFlow: PhaseObject { } system Flow: TaskFlow",
+            "removed-handler-property": (
+                "type TaskFlow: PhaseObject { } system Flow: TaskFlow {",
                 "on Action::Boot { state_effect: StateEffect::None; initial_context_entry: true; }",
-                "initial_context_entry is allowed only on a TaskFlow StateEffect::None Action::Start",
+                "initial_context_entry has been removed; declare initial_context: Action::<Name>",
+            ),
+            "handler-property": (
+                "type TaskFlow: PhaseObject { } system Flow: TaskFlow {",
+                "on Action::Boot { state_effect: StateEffect::None; initial_context: Action::Boot; }",
+                "initial_context is a TaskFlow declaration property, not a handler property",
+            ),
+            "missing-local-action": (
+                "type TaskFlow: PhaseObject { } system Flow: TaskFlow { initial_context: Action::Missing;",
+                "on Action::Boot { state_effect: StateEffect::None; }",
+                "must resolve to exactly one Action::Missing owned by the same TaskFlow",
             ),
         }
         for name, (declaration, handler, message) in cases.items():
             with self.subTest(name=name):
                 _derived, _checked, rendered = self.run_source(
                     f"""
-                    {declaration} {{
+                    {declaration}
                         initial_state: State::Online;
                         state State::Online {{ actions {{ {handler} }} }}
                     }}
@@ -548,7 +631,14 @@ class SignalPipelineTests(_ShortcutTestSupport, unittest.TestCase):
         self.assertNotIn("source_tail_done", failed["last_stable_snapshot"]["facts"])
 
         duplicate = """
-            type TaskFlow: PhaseObject { }
+            type TaskFlow: PhaseObject {
+                processes {
+                    Action::Enter {
+                        state_effect: StateEffect::None;
+                        contextual_entry: true;
+                    }
+                }
+            }
             system Source: TaskFlow {
                 initial_state: State::Online;
                 state State::Online {
@@ -557,10 +647,14 @@ class SignalPipelineTests(_ShortcutTestSupport, unittest.TestCase):
                             state_effect: StateEffect::None;
                             yields { Target.Action::Work; }
                         }
-                        on Action::Enter {
-                            state_effect: StateEffect::None;
-                            contextual_entry: true;
-                        }
+                    }
+                    transitions {
+                        on Transition::Park -> State::Ready { }
+                    }
+                }
+                state State::Ready {
+                    transitions {
+                        on Transition::Restore -> State::Online { }
                     }
                 }
             }
@@ -570,15 +664,26 @@ class SignalPipelineTests(_ShortcutTestSupport, unittest.TestCase):
                     actions {
                         on Action::Work {
                             state_effect: StateEffect::None;
-                            emits { Source.Action::Enter; }
+                            drives { Source.Transition::Park; }
                         }
                     }
                 }
             }
         """
-        repeated, repeated_check, _ = self.run_source(duplicate, "Source.Run")
+        yielded, yielded_check, _ = self.run_source(duplicate, "Source.Run")
+        self.assertEqual(yielded_check["verdict"], "yielded")
+        dispatched = self.save_and_dispatch_yield_context(
+            yielded["last_stable_snapshot"], "Source"
+        )
+        resumed, resumed_check, _ = self.run_source(
+            duplicate, "Source.Enter", scenario=dispatched
+        )
+        self.assertEqual(resumed_check["verdict"], "complete", resumed.get("failure"))
+        repeated, repeated_check, _ = self.run_source(
+            duplicate, "Source.Enter", scenario=resumed["last_stable_snapshot"]
+        )
         self.assertEqual(repeated_check["verdict"], "failed")
-        self.assertIn("duplicate_yield_resume", repeated["failure"]["reason"])
+        self.assertIn("duplicate_contextual_enter", repeated["failure"]["reason"])
 
     def test_yield_token_snapshot_round_trip_and_terminal_resume_errors(self) -> None:
         source = """
@@ -629,7 +734,9 @@ class SignalPipelineTests(_ShortcutTestSupport, unittest.TestCase):
             ("yielded", True),
             yielded.get("failure"),
         )
-        snapshot = yielded["last_stable_snapshot"]
+        snapshot = self.save_and_dispatch_yield_context(
+            yielded["last_stable_snapshot"], "FlowA"
+        )
         token_id = next(iter(snapshot["yield_tokens"]))
         self.assertEqual(snapshot["yield_tokens"][token_id]["outcome"], "yielded")
 
@@ -642,19 +749,23 @@ class SignalPipelineTests(_ShortcutTestSupport, unittest.TestCase):
             "source_tail_completed(FlowA)", resumed["last_stable_snapshot"]["facts"]
         )
 
-        for field, value, expected in (
-            ("generation", 99, "stale_yield_generation"),
-            ("context_epoch", 1, "yield_token_lane_mismatch"),
-            ("cpu", "WrongCPU", "yield_token_lane_mismatch"),
-            ("flow_ref", "FlowB", "yield_token_lane_mismatch"),
+        for container, field, value, expected in (
+            ("record", "generation", 99, "context_continuation_generation_mismatch"),
+            ("record", "cpu", "WrongCPU", "context_continuation_cpu_mismatch"),
+            ("proof", "flow", "FlowB", "dispatch_proof_flow_mismatch"),
+            ("proof", "context_epoch", 99, "dispatch_proof_context_epoch_mismatch"),
+            ("proof", "dispatch_ordinal", 99, "dispatch_proof_dispatch_ordinal_mismatch"),
+            ("proof", "task_ref", "WrongTaskRef", "dispatch_proof_task_ref_mismatch"),
         ):
             damaged = deepcopy(snapshot)
-            damaged["yield_tokens"][token_id][field] = value
+            record = damaged["context_continuations"]["FlowA"]
+            target = record if container == "record" else record["dispatch_proof"]
+            target[field] = value
             failed, failed_check, _ = self.run_source(
                 source, "FlowA.Enter", scenario=damaged
             )
-            self.assertEqual(failed_check["verdict"], "failed", field)
-            self.assertIn(expected, failed["failure"]["reason"], field)
+            self.assertEqual(failed_check["verdict"], "failed", (container, field))
+            self.assertIn(expected, failed["failure"]["reason"], (container, field))
 
     def test_yields_model_constraints_and_precommit_rejection(self) -> None:
         cases = {
@@ -6251,6 +6362,8 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
                 first_binding,
                 {
                     "address_view": "TranslationControllerKind::PhysicalDirect",
+                    "context_epoch": 0,
+                    "dispatch_ordinal": 0,
                     "revision": 1,
                     "source_cpu_ref": "BootCPURef",
                     "source_flow": "BootInitFlow",
@@ -6535,14 +6648,14 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
             self.assertEqual(snapshot.read_bytes(), BOOT_INIT_SETUP_SCENARIO.read_bytes())
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "df20208824fa01a2e3c6b79b76dadb22d1d9df3bf8f9232070b394820687ea97",
+                "f52b224441fa1d6dec464b5565530b12654f26f3140e0def373a68f2cb57d455",
             )
             self.assertEqual(
                 {
                     derivation["model_fingerprint"], model["model_fingerprint"],
                     view["model_fingerprint"], saved["model_fingerprint"],
                 },
-                {"sha256:03ae30e225a8b07e551e6419d540727dada566454365b036b64b547e88dd4166"},
+                {"sha256:ead1048315ec8563113a6188b864b392d8f1decbbc2cae8301b7993e14aecef8"},
             )
             with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
                 compact_text = render_text(view)
@@ -6881,7 +6994,7 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
             )
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "1b039f63c507d05681658e9f9b3460309f9006a46986ee605789f332ffb830d3",
+                "2aba19d510db011fbd5d6ff3b3cf71f058f74f6c0b75d916235ac38e1bccba55",
             )
             model = self.prepared_model_document
             assert view is not None
@@ -6893,7 +7006,7 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
                     view["model_fingerprint"],
                     saved["model_fingerprint"],
                 },
-                {"sha256:03ae30e225a8b07e551e6419d540727dada566454365b036b64b547e88dd4166"},
+                {"sha256:ead1048315ec8563113a6188b864b392d8f1decbbc2cae8301b7993e14aecef8"},
             )
 
     def test_main_model_boot_init_entry_stops_at_first_missing_guard(self) -> None:
