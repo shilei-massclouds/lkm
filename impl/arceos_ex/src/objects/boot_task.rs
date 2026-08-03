@@ -13,6 +13,7 @@ use super::{
 /// `init_task_storage`; this wrapper never mirrors them.
 pub struct BootTask {
     idle_role_bound: bool,
+    pub(crate) idle: crate::flows::boot_init_flow::IdleRuntime,
 }
 
 #[allow(dead_code)]
@@ -20,6 +21,7 @@ impl BootTask {
     pub const fn new() -> Self {
         Self {
             idle_role_bound: false,
+            idle: crate::flows::boot_init_flow::IdleRuntime::new(),
         }
     }
 
@@ -75,10 +77,6 @@ impl BootTask {
         unsafe { &mut *Self::task_ptr() }.suspend_from_cpu()
     }
 
-    pub(crate) fn continue_on_cpu(&mut self) -> EventResult {
-        unsafe { &mut *Self::task_ptr() }.continue_on_cpu()
-    }
-
     pub(crate) fn suspend_canonical() -> EventResult {
         unsafe { &mut *Self::task_ptr() }.suspend_from_cpu()
     }
@@ -91,10 +89,6 @@ impl BootTask {
         unsafe { &mut *Self::task_ptr() }.suspend_after_core_context_save()
     }
 
-    pub(crate) fn continue_canonical() -> EventResult {
-        unsafe { &mut *Self::task_ptr() }.continue_on_cpu()
-    }
-
     pub(crate) fn canonical_prepare_prev_runnable() -> bool {
         unsafe { &mut *Self::task_ptr() }.prepare_prev_runnable()
     }
@@ -105,6 +99,10 @@ impl BootTask {
 
     pub(crate) fn canonical_task() -> &'static Task {
         unsafe { &*Self::task_ptr() }
+    }
+
+    pub(crate) fn canonical_task_mut() -> &'static mut Task {
+        unsafe { &mut *Self::task_ptr() }
     }
 
     pub fn switch_context(&self) -> &TaskSwitchContext {

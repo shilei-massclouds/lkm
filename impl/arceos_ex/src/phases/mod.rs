@@ -15,7 +15,7 @@ pub fn shutdown_on_error(result: EventResult, message: &str) {
     }
 }
 
-fn print_event_error(error: EventError) {
+pub(crate) fn print_event_error(error: EventError) {
     use crate::arch::riscv64::sbi;
 
     if let Some(diagnostic) = error.diagnostic() {

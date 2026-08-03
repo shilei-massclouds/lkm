@@ -61,8 +61,7 @@ impl TaskFlowRef {
     }
 }
 
-/// Independently-lived Flow core shared by boot, kernel, user, AP and smoke
-/// role wrappers.
+/// The lifetime Flow core physically embedded by its unique owning Task.
 pub struct TaskFlow {
     lifecycle: Lifecycle,
     flow_ref: TaskFlowRef,
@@ -73,6 +72,10 @@ pub struct TaskFlow {
     disabled: bool,
     cleaned: bool,
     cpu_ref: CpuRef,
+    initial_context_entry_pending: bool,
+    initial_context_entry_consumed: bool,
+    last_entered_context_epoch: u64,
+    last_entered_dispatch_ordinal: u64,
 }
 
 impl TaskFlow {
@@ -87,6 +90,10 @@ impl TaskFlow {
             disabled: false,
             cleaned: false,
             cpu_ref: CpuRef::invalid(),
+            initial_context_entry_pending: false,
+            initial_context_entry_consumed: false,
+            last_entered_context_epoch: 0,
+            last_entered_dispatch_ordinal: 0,
         }
     }
 
@@ -101,25 +108,41 @@ impl TaskFlow {
             disabled: false,
             cleaned: false,
             cpu_ref: CpuRef::invalid(),
+            initial_context_entry_pending: false,
+            initial_context_entry_consumed: false,
+            last_entered_context_epoch: 0,
+            last_entered_dispatch_ordinal: 0,
         }
     }
 
     pub const fn new_dynamic(storage_slot: u16) -> Self {
+        Self::new_dynamic_with_generation(storage_slot, 0)
+    }
+
+    pub const fn new_dynamic_with_generation(storage_slot: u16, generation: u32) -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
             flow_ref: TaskFlowRef::NONE,
             storage_slot,
-            generation: 0,
+            generation,
             declared: false,
             owner: TaskRef::NONE,
             disabled: false,
             cleaned: false,
             cpu_ref: CpuRef::invalid(),
+            initial_context_entry_pending: false,
+            initial_context_entry_consumed: false,
+            last_entered_context_epoch: 0,
+            last_entered_dispatch_ordinal: 0,
         }
     }
 
     pub const fn new_user(task_slot: usize) -> Self {
         Self::new_dynamic(FLOW_SLOT_USER_BASE + task_slot as u16)
+    }
+
+    pub const fn new_user_with_generation(task_slot: usize, generation: u32) -> Self {
+        Self::new_dynamic_with_generation(FLOW_SLOT_USER_BASE + task_slot as u16, generation)
     }
 
     pub const fn state(&self) -> State {
@@ -153,6 +176,81 @@ impl TaskFlow {
 
     pub const fn cpu_id(&self) -> usize {
         self.cpu_ref.logical_id()
+    }
+
+    #[cfg(app_smoke)]
+    pub const fn initial_context_entry_pending(&self) -> bool {
+        self.initial_context_entry_pending
+    }
+
+    #[cfg(app_smoke)]
+    pub const fn initial_context_entry_consumed(&self) -> bool {
+        self.initial_context_entry_consumed
+    }
+
+    pub(crate) fn prepare_initial_context_entry(&mut self) -> bool {
+        if !self.declared
+            || !self.owner.is_valid()
+            || self.initial_context_entry_pending
+            || self.initial_context_entry_consumed
+        {
+            return false;
+        }
+        self.initial_context_entry_pending = true;
+        true
+    }
+
+    /// Boot/AP architecture entry consumes Start without inventing a
+    /// scheduler Dispatch/Enter occurrence.
+    pub(crate) fn consume_direct_initial_context_entry(&mut self) -> bool {
+        if self.initial_context_entry_consumed || !self.declared || !self.owner.is_valid() {
+            return false;
+        }
+        self.initial_context_entry_pending = false;
+        self.initial_context_entry_consumed = true;
+        true
+    }
+
+    pub(crate) fn enter_contextual(
+        &mut self,
+        owner_ref: TaskRef,
+        flow_ref: TaskFlowRef,
+        cpu_ref: CpuRef,
+        context_epoch: u64,
+        dispatch_ordinal: u64,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Online
+            || !owner_ref.is_valid()
+            || !self.owner.same_identity(owner_ref)
+            || !self.flow_ref.same_identity(flow_ref)
+            || self.cpu_ref != cpu_ref
+            || context_epoch == 0
+            || dispatch_ordinal == 0
+            || self.last_entered_dispatch_ordinal == dispatch_ordinal
+            || self.last_entered_context_epoch > context_epoch
+        {
+            return failed_condition(
+                LifecycleEvent::Dispatch,
+                self.lifecycle.state(),
+                State::Online,
+                State::Online,
+            );
+        }
+        self.last_entered_context_epoch = context_epoch;
+        self.last_entered_dispatch_ordinal = dispatch_ordinal;
+        if self.initial_context_entry_pending {
+            if self.initial_context_entry_consumed {
+                return failed_condition(
+                    LifecycleEvent::Dispatch,
+                    self.lifecycle.state(),
+                    State::Online,
+                    State::Online,
+                );
+            }
+            self.initial_context_entry_pending = false;
+            self.initial_context_entry_consumed = true;
+        }
+        Ok(())
     }
 
     /// Entry/runqueue binding boundary for a Flow that has not yet acquired
@@ -197,15 +295,19 @@ impl TaskFlow {
         self.disabled = false;
         self.cleaned = false;
         self.cpu_ref = CpuRef::invalid();
+        self.initial_context_entry_pending = false;
+        self.initial_context_entry_consumed = false;
+        self.last_entered_context_epoch = 0;
+        self.last_entered_dispatch_ordinal = 0;
         Ok(())
     }
 
-    pub fn bind(&mut self, owner: &mut Task) -> EventResult {
+    pub(crate) fn bind_owner(&mut self, owner_ref: TaskRef) -> EventResult {
         if !self.declared
             || !self.flow_ref.is_valid()
             || self.lifecycle.state() != State::Base
             || self.owner.is_valid()
-            || !owner.task_ref().is_valid()
+            || !owner_ref.is_valid()
         {
             return failed_condition(
                 LifecycleEvent::Preset,
@@ -214,17 +316,19 @@ impl TaskFlow {
                 State::Base,
             );
         }
-        owner.bind_flow_ref(self.flow_ref)?;
-        self.owner = owner.task_ref();
+        self.owner = owner_ref;
         Ok(())
     }
 
-    pub fn preset(&mut self, owner: &Task, checkpoint: Option<Checkpoint>) -> EventResult {
+    pub(crate) fn preset_owned(
+        &mut self,
+        owner_ref: TaskRef,
+        checkpoint: Option<Checkpoint>,
+    ) -> EventResult {
         if !self.declared
             || !self.flow_ref.is_valid()
             || self.lifecycle.state() != State::Base
-            || self.owner != owner.task_ref()
-            || !owner.owns_flow(self.flow_ref)
+            || self.owner != owner_ref
         {
             return failed_condition(
                 LifecycleEvent::Preset,
@@ -248,8 +352,12 @@ impl TaskFlow {
         }
     }
 
-    pub fn setup(&mut self, owner: &Task, checkpoint: Option<Checkpoint>) -> EventResult {
-        if self.owner != owner.task_ref() || !owner.flow().same_identity(self.flow_ref) {
+    pub(crate) fn setup_owned(
+        &mut self,
+        owner_ref: TaskRef,
+        checkpoint: Option<Checkpoint>,
+    ) -> EventResult {
+        if self.owner != owner_ref {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
@@ -272,11 +380,12 @@ impl TaskFlow {
         }
     }
 
-    pub fn enable(&mut self, owner: &Task, checkpoint: Option<Checkpoint>) -> EventResult {
-        if self.lifecycle.state() != State::Ready
-            || self.owner != owner.task_ref()
-            || owner.flow() != self.flow_ref
-        {
+    pub(crate) fn enable_owned(
+        &mut self,
+        owner_ref: TaskRef,
+        checkpoint: Option<Checkpoint>,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Ready || self.owner != owner_ref {
             return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
@@ -298,11 +407,8 @@ impl TaskFlow {
         }
     }
 
-    pub fn disable(&mut self, owner: &Task, checkpoint: Option<Checkpoint>) -> EventResult {
-        if self.lifecycle.state() != State::Online
-            || self.owner != owner.task_ref()
-            || owner.flow() != self.flow_ref
-        {
+    pub(crate) fn cleanup_owned(&mut self, owner_ref: TaskRef) -> EventResult {
+        if self.lifecycle.state() != State::Online || self.owner != owner_ref {
             return failed_condition(
                 LifecycleEvent::Disable,
                 self.lifecycle.state(),
@@ -311,23 +417,8 @@ impl TaskFlow {
             );
         }
         self.disabled = true;
-        match checkpoint {
-            Some(checkpoint) => self.lifecycle.transition(
-                LifecycleEvent::Disable,
-                State::Online,
-                State::Offline,
-                checkpoint,
-            ),
-            None => self.lifecycle.adopt_transition(
-                LifecycleEvent::Disable,
-                State::Online,
-                State::Offline,
-            ),
-        }
-    }
-
-    pub fn cleanup_for_exit(&mut self, owner: &Task) -> EventResult {
-        self.disable(owner, None)?;
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Disable, State::Online, State::Offline)?;
         self.cleaned = true;
         self.declared = false;
         self.lifecycle

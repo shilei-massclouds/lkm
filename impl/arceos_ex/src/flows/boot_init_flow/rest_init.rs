@@ -71,8 +71,8 @@ fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
     preset_kernel_init_task(ctx)?;
     setup_kernel_init_task(ctx)?;
     crate::checkpoint::dispatch(Checkpoint::KernelInitTaskReady, ctx);
-    ctx.kernel_init_flow.bind_fixed(&mut ctx.kernel_init_task)?;
-    ctx.kernel_init_flow.publish(&ctx.kernel_init_task)?;
+    ctx.kernel_init_task.bind_fixed_flow()?;
+    ctx.kernel_init_task.publish_flow()?;
     ctx.kernel_init_task_pi_lock.setup()?;
     wake_and_enable_kernel_init_task(ctx)?;
     crate::checkpoint::dispatch(Checkpoint::KernelInitTaskOnline, ctx);
@@ -87,8 +87,8 @@ fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
     pin_kernel_init_to_boot_cpu(ctx, boot_cpu.logical_id())?;
     preset_kthreadd_task(ctx)?;
     setup_kthreadd_task(ctx)?;
-    ctx.kthreadd_flow.bind_fixed(&mut ctx.kthreadd_task)?;
-    ctx.kthreadd_flow.publish(&ctx.kthreadd_task)?;
+    ctx.kthreadd_task.bind_fixed_flow()?;
+    ctx.kthreadd_task.publish_flow()?;
     ctx.kthreadd_task_pi_lock
         .setup_with_checkpoint(Checkpoint::KthreaddTaskPiLockReady)?;
     wake_and_enable_kthreadd_task(ctx)?;
@@ -401,7 +401,7 @@ fn wake_and_enable_kernel_init_task(ctx: &mut Context) -> EventResult {
                 State::Online,
             );
         };
-        if !ctx.kernel_init_flow.commit_cpu_ref(selected_cpu_ref) {
+        if !ctx.kernel_init_task.commit_flow_cpu_ref(selected_cpu_ref) {
             return failed_condition(
                 LifecycleEvent::Enable,
                 ctx.kernel_init_task.state(),
@@ -424,7 +424,7 @@ fn wake_and_enable_kernel_init_task(ctx: &mut Context) -> EventResult {
 fn pin_kernel_init_to_boot_cpu(ctx: &mut Context, cpu_id: usize) -> EventResult {
     if ctx.kernel_init_task.state() != State::Online
         || ctx.kernel_init_task.pid() != KERNEL_INIT_PID
-        || ctx.kernel_init_flow.cpu_id() != cpu_id
+        || ctx.kernel_init_task.flow_cpu_id() != cpu_id
         || ctx.root_pid_namespace.state() != State::Ready
         || ctx.scheduler().boot_idle_rcu_read_side().state() != State::Prepared
     {
@@ -640,7 +640,7 @@ fn wake_and_enable_kthreadd_task(ctx: &mut Context) -> EventResult {
                 State::Online,
             );
         };
-        if !ctx.kthreadd_flow.commit_cpu_ref(selected_cpu_ref) {
+        if !ctx.kthreadd_task.commit_flow_cpu_ref(selected_cpu_ref) {
             return failed_condition(
                 LifecycleEvent::Enable,
                 ctx.kthreadd_task.state(),
@@ -813,7 +813,7 @@ fn boot_init_rest_init_phase_ready(ctx: &Context) -> bool {
         && !ctx.kernel_init_task.released_for_pre_smp_init()
         && ctx.kernel_init_task.pinned_to_boot_cpu()
         && ctx.kernel_init_task.pf_no_setaffinity()
-        && ctx.kernel_init_flow.cpu_id() == boot_cpu.logical_id()
+        && ctx.kernel_init_task.flow_cpu_id() == boot_cpu.logical_id()
         && ctx.kthreadd_task.state() == State::Online
         && ctx.kthreadd_task.pid() == 2
         && ctx.kthreadd_task.entry() == TaskEntry::Kthreadd
@@ -826,7 +826,7 @@ fn boot_init_rest_init_phase_ready(ctx: &Context) -> bool {
         && ctx.kthreadd_task.thread_context_ready()
         && ctx.kthreadd_task.sched_entity_ready()
         && ctx.kthreadd_task.running()
-        && ctx.kthreadd_flow.cpu_id() == boot_cpu.logical_id()
+        && ctx.kthreadd_task.flow().cpu_id() == boot_cpu.logical_id()
         && ctx.scheduler().selected_runqueue_task_id() == ctx.kthreadd_task.pid()
         && boot_scheduler_view.runqueue_contains_task_id(ctx.kthreadd_task.pid())
         && ctx.kthreadd_task_pi_lock.state() == State::Ready
@@ -889,7 +889,7 @@ pub(super) fn facts_stable(ctx: &Context) -> bool {
         && ctx.kernel_init_task_pi_lock.irqrestore_exited_count() != 0
         && ctx.kernel_init_task.pinned_to_boot_cpu()
         && ctx.kernel_init_task.pf_no_setaffinity()
-        && ctx.kernel_init_flow.cpu_id() == boot_cpu.logical_id()
+        && ctx.kernel_init_task.flow_cpu_id() == boot_cpu.logical_id()
         && ctx.kthreadd_task.state() == State::Online
         && ctx.kthreadd_task.pid() == 2
         && ctx.kthreadd_task.entry() == TaskEntry::Kthreadd
@@ -902,7 +902,7 @@ pub(super) fn facts_stable(ctx: &Context) -> bool {
         && ctx.kthreadd_task.thread_context_ready()
         && ctx.kthreadd_task.sched_entity_ready()
         && ctx.kthreadd_task.running()
-        && ctx.kthreadd_flow.cpu_id() == boot_cpu.logical_id()
+        && ctx.kthreadd_task.flow().cpu_id() == boot_cpu.logical_id()
         && boot_scheduler_view.runqueue_contains_task_id(ctx.kthreadd_task.pid())
         && ctx.kthreadd_task_pi_lock.state() == State::Ready
         && !ctx.kthreadd_task_pi_lock.locked()

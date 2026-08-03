@@ -21,11 +21,12 @@
   snapshot。目标 handler post-commit failure、stale、错误 CPU/Flow/context epoch 或重复恢复均为
   terminal failure，不回滚、不重试。
 - identity 允许 class 记账，但不得 Save/Restore context、改变 Task lifecycle/authority/breakpoint 或
-  CPU-local binding，也不得投递 contextual Continue；目标正常完成后的通用 resume attempt 精确消费
+  CPU-local binding，也不得投递 Dispatch/Enter；目标正常完成后的通用 resume attempt 精确消费
   source token。
 - non-identity 的显式顺序为 PreparePrev/Pick → SaveCoreContext → prev
   `OnCpu --Suspend--> Online` → RestoreCoreContext 与 CurrentTask/CurrentStack commit → next
-  `Online --Continue--> OnCpu` → fixed TaskFlow contextual Continue。首次和恢复派发不得分支。
+  `Online --Dispatch--> OnCpu` → embedded TaskFlow contextual Enter。首次 Enter 消费 Setup 绑定的
+  Start；恢复 Enter 精确消费匹配 YieldToken 或已保存坐标，不得重复 Start。
 - A→B→A 与嵌套 Schedule occurrence 必须证明 B 的 switch 不会错误消费 A 的 token；恢复 A 时用
   dispatch record、CPU、TaskRef、FlowRef、generation 与 context epoch 精确一次恢复 source lane。
 

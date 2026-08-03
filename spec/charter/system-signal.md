@@ -112,7 +112,7 @@ FIFO。
 目标 handler 正常完成后，引擎必须执行一次默认 resume attempt：若 token ownership、source
 generation、lane binding 和 execution eligibility 仍有效，则立即、精确一次地消费 token，并从
 `yields` 后继续；若目标通过显式模型效果改变了执行 lane，token 保持 pending，直到未来匹配的
-contextual `TaskFlow.Continue`。嵌套 yields 按最内层目标到最外层 source 的顺序恢复。preflight
+带 `contextual_entry: true` 的 `TaskFlow.Enter`。嵌套 yields 按最内层目标到最外层 source 的顺序恢复。preflight
 rejection 不创建 token或改变 source lane；目标提交后失败、stale、错误 CPU/Flow/context epoch 或
 重复恢复都是终止失败，不回滚、不重试。
 
@@ -149,7 +149,7 @@ Signal 推导工具采用下列兼容边界：
   查找和截至匹配前规范化，正式 DSL 和 handler 仍只使用 `Transition::Preset`。
 - 有效 parent 只定义推导传播的层级坐标和预算，不产生隐式冒泡、广播或 handler 继承。
 - 当前里程碑不引入显式 `signal`/`on Signal` 语法，也不把 handler 改名为 `OnName`；只增加由
-  `yields` 和 contextual Continue 闭合的可序列化 handler continuation，不实现任意条件等待器。
+  `yields` 和 contextual Enter 闭合的可序列化 handler continuation，不实现任意条件等待器。
 
 响应结果必须使用明确分类：
 

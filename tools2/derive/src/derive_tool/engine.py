@@ -69,6 +69,10 @@ def _snapshot(value: dict[str, Any]) -> dict[str, Any]:
             key: deepcopy(item)
             for key, item in sorted(value.get("task_flow_lanes", {}).items())
         },
+        "initial_context_entries": {
+            key: deepcopy(item)
+            for key, item in sorted(value.get("initial_context_entries", {}).items())
+        },
         "yield_tokens": {
             key: deepcopy(item)
             for key, item in sorted(value.get("yield_tokens", {}).items())
@@ -184,6 +188,12 @@ def load_scenario(
         for key, item in task_flow_lanes.items()
     ):
         raise ProtocolError("scenario task_flow_lanes must map lane identities to objects")
+    initial_context_entries = value.get("initial_context_entries", {})
+    if not isinstance(initial_context_entries, dict) or not all(
+        isinstance(key, str) and isinstance(item, dict)
+        for key, item in initial_context_entries.items()
+    ):
+        raise ProtocolError("scenario initial_context_entries must map Flow identities to objects")
     yield_tokens = value.get("yield_tokens", {})
     if not isinstance(yield_tokens, dict) or not all(
         isinstance(key, str) and isinstance(item, dict)
@@ -262,6 +272,7 @@ def load_scenario(
         result["instances"] = deepcopy(instances)
     result["contextual_bindings"] = deepcopy(contextual_bindings)
     result["task_flow_lanes"] = deepcopy(task_flow_lanes)
+    result["initial_context_entries"] = deepcopy(initial_context_entries)
     result["yield_tokens"] = deepcopy(yield_tokens)
     return _snapshot(result)
 
@@ -2930,7 +2941,7 @@ class Engine:
             "bindings": deepcopy(bindings),
             "pending_effects": deepcopy(pending_effects),
             "pending_emits": deepcopy(pending_emits),
-            "continue_occurrences": 0,
+            "contextual_entry_occurrences": 0,
         }
         self.current["yield_tokens"][token_id] = token
         self.current["task_flow_lanes"][lane_id] = {
@@ -2980,7 +2991,7 @@ class Engine:
                 signal_id=signal["id"],
                 child_id=child["id"],
                 token_id=token_id,
-                resume="contextual-continue",
+                resume="contextual-enter",
             )
             return
         eligible, eligibility_reason = self._yield_default_resume_eligible(token)
@@ -3279,8 +3290,10 @@ class Engine:
                 fifo_position=len(self.queue),
             )
 
-    def _resume_yield_for_continue(self, signal: dict[str, Any]) -> None:
-        if signal.get("name") != "Continue" or signal.get("outcome") in {
+    def _resume_yield_for_contextual_entry(
+        self, signal: dict[str, Any], handler: dict[str, Any]
+    ) -> None:
+        if self._handler_property(handler, "contextual_entry") != "true" or signal.get("outcome") in {
             "failed",
             "rejected",
             "truncated",
@@ -3301,7 +3314,9 @@ class Engine:
                     f"yield_token_lane_mismatch: {token.get('id')}"
                 )
         for token in awaiting:
-            token["continue_occurrences"] = int(token.get("continue_occurrences", 0)) + 1
+            token["contextual_entry_occurrences"] = int(
+                token.get("contextual_entry_occurrences", 0)
+            ) + 1
         target_tokens = [token for token in awaiting if token.get("flow_ref") == signal["target"]]
         if not target_tokens:
             _lane_id, cpu, task_ref, context_epoch = self._yield_lane_identity(signal)
@@ -3320,6 +3335,7 @@ class Engine:
                     f"duplicate_yield_resume: {consumed[-1].get('last_consumed_token')}"
                 )
             self.current = _snapshot(self.current)
+            self._enter_initial_context_once(signal)
             return
         if len(target_tokens) != 1:
             raise DerivationProblem("ambiguous_yield_resume_token")
@@ -3348,6 +3364,38 @@ class Engine:
         )
         if token_id not in self.active_yield_tokens:
             self._complete_resumed_source(token_id, resume_signal=signal)
+
+    def _enter_initial_context_once(self, signal: dict[str, Any]) -> None:
+        flow = signal["target"]
+        record = self.current.get("initial_context_entries", {}).get(flow)
+        if isinstance(record, dict) and record.get("consumed"):
+            return
+        candidates = [
+            handler
+            for handler in self.systems[flow].get("handlers_by_name", {}).get("Start", [])
+            if self._handler_property(handler, "initial_context_entry") == "true"
+        ]
+        if not candidates:
+            return
+        if len(candidates) != 1:
+            raise DerivationProblem(f"ambiguous_initial_context_entry: {flow}")
+        child = self.new_signal(
+            source=flow,
+            target=flow,
+            name="Start",
+            raw_arguments=[],
+            delivery="drives",
+            cause_id=signal["id"],
+            coordinate=self.coordinate(flow, flow, signal["coordinate"]),
+            compat_process_kind="Action",
+            call_span=candidates[0].get("span"),
+        )
+        child["_effective_flow"] = flow
+        self.event("contextual_initial_entry_started", signal_id=signal["id"], child_id=child["id"])
+        self.deliver(child)
+        if child.get("outcome") != "completed":
+            raise DerivationProblem(f"initial_context_entry_failed: {child['id']}")
+        self.event("contextual_initial_entry_finished", signal_id=signal["id"], child_id=child["id"])
 
     def _execute_members(
         self,
@@ -3560,8 +3608,18 @@ class Engine:
                 handler.get("composed_type_processes", [])
             ),
         }
+        if self._handler_property(handler, "contextual_entry") == "true":
+            signal["handler"]["contextual_entry"] = True
+        if self._handler_property(handler, "initial_context_entry") == "true":
+            signal["handler"]["initial_context_entry"] = True
         if handler.get("description") is not None:
             signal["handler"]["description"] = handler["description"]
+        if self._handler_property(handler, "initial_context_entry") == "true":
+            entry_record = self.current.get("initial_context_entries", {}).get(signal["target"])
+            if isinstance(entry_record, dict) and entry_record.get("consumed"):
+                self.fail(signal, f"duplicate_initial_context_entry: {signal['target']}")
+                self.active_requests.discard(request_key)
+                return
         try:
             bindings = self.bind_payload(signal, handler)
         except DerivationProblem as exc:
@@ -3633,6 +3691,12 @@ class Engine:
                 bindings=bindings,
                 candidate=candidate,
             )
+            if self._handler_property(handler, "initial_context_entry") == "true":
+                candidate.setdefault("initial_context_entries", {})[signal["target"]] = {
+                    "consumed": True,
+                    "signal_id": signal["id"],
+                    "handler": handler["id"],
+                }
             self._apply_scheduler_stack_commit(
                 signal=signal,
                 handler=handler,
@@ -3686,7 +3750,7 @@ class Engine:
                 if token is not None or not self._yield_token_was_consumed(token_id):
                     raise DerivationProblem(f"yield token did not resume exactly once: {token_id}")
             self.current = _snapshot(candidate)
-            self._resume_yield_for_continue(signal)
+            self._resume_yield_for_contextual_entry(signal, handler)
             signal["after_snapshot"] = _snapshot(self.current)
             signal["outcome"] = "completed"
             self.event(
@@ -3723,7 +3787,7 @@ class Engine:
                 )
         except YieldPending as suspended:
             signal["outcome"] = "yielded"
-            signal["reason"] = "awaiting_contextual_continue"
+            signal["reason"] = "awaiting_contextual_enter"
             signal["after_snapshot"] = _snapshot(self.current)
             self.event(
                 "response_yielded",
@@ -3929,6 +3993,7 @@ def initial_snapshot(model: dict[str, Any]) -> dict[str, Any]:
         "contextual_bindings": {},
         "instances": {},
         "task_flow_lanes": {},
+        "initial_context_entries": {},
         "yield_tokens": {},
     }
 

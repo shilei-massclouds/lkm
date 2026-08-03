@@ -143,13 +143,13 @@ fn phase_ready(ctx: &Context) -> bool {
         && ctx
             .current_task_ref()
             .is_ok_and(|task_ref| task_ref.same_identity(ctx.boot_task.task_ref()))
-        && ctx.boot_init_flow.state() == State::Ready
-        && ctx.boot_init_flow.core().owner() == ctx.boot_task.task_ref()
+        && ctx.boot_task.task().flow_state() == State::Ready
+        && ctx.boot_task.task().embedded_flow().owner() == ctx.boot_task.task_ref()
         && ctx
             .boot_task
             .task()
-            .owns_flow(ctx.boot_init_flow.core().flow_ref())
-        && ctx.boot_task.task().flow() == ctx.boot_init_flow.core().flow_ref()
+            .owns_flow(ctx.boot_task.task().embedded_flow().flow_ref())
+        && ctx.boot_task.task().flow() == ctx.boot_task.task().embedded_flow().flow_ref()
         && ctx.kthreadd_ready_gate.completion().complete_committed()
         && runtime_services_still_deferred(&ctx.workqueue, &ctx.rcu_core, &ctx.cpu_group)
 }

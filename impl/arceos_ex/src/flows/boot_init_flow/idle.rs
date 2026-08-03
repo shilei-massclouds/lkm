@@ -1,14 +1,14 @@
 use super::idle_entry as entry;
 
 use crate::objects::{
-    boot_task::BootTask,
     cpu_group::{CpuGroup, CurrentCpu},
     current_task::CurrentTask,
     interrupt_type::InterruptType,
-    rest_init::{KernelInitFlow, KernelInitTask, KthreaddFlow, KthreaddReadyGate, KthreaddTask},
+    rest_init::{KernelInitTask, KthreaddReadyGate, KthreaddTask},
     scheduler::{Scheduler, SchedulerTestTasks},
     scheduler_task_access::SchedulerTaskAccess,
     state::{EventResult, LifecycleEvent, State, failed_condition},
+    task::Task,
     task::TaskRef,
     task_flow::TaskFlow,
     user_boot::UserTaskSet,
@@ -298,7 +298,7 @@ impl IdleRuntime {
     pub fn setup(
         &mut self,
         boot_flow: &TaskFlow,
-        boot_task: &BootTask,
+        boot_task: &Task,
         scheduler: &Scheduler,
         kernel_init_task: &KernelInitTask,
         kthreadd_task: &KthreaddTask,
@@ -308,7 +308,7 @@ impl IdleRuntime {
         if boot_task.state() != State::OnCpu
             || boot_task.task_ref() != TaskRef::BOOT
             || boot_task.pid() != 0
-            || !boot_task.task().flow().same_identity(boot_flow.flow_ref())
+            || !boot_task.flow().same_identity(boot_flow.flow_ref())
             || boot_flow.owner() != boot_task.task_ref()
             || boot_flow.state() != State::Ready
             || scheduler.state() != State::Online
@@ -368,15 +368,12 @@ impl IdleRuntime {
     pub fn prepare_idle_entry(
         &mut self,
         boot_flow: &TaskFlow,
-        boot_task: &BootTask,
+        boot_task: &Task,
         scheduler: &Scheduler,
         cpu_group: &CpuGroup,
     ) -> EventResult {
         if boot_flow.state() != State::Online
-            || !crate::objects::task_flow::task_flow_execution_guard_satisfied(
-                boot_flow,
-                boot_task.task(),
-            )
+            || !crate::objects::task_flow::task_flow_execution_guard_satisfied(boot_flow, boot_task)
             || scheduler.state() != State::Online
             || scheduler.schedule_passes() == 0
             || scheduler.kernel_init_stack_switch_started_count() != 1
@@ -406,20 +403,15 @@ impl IdleRuntime {
         current_task: CurrentTask,
         current_cpu: CurrentCpu,
         kernel_init_task: &mut KernelInitTask,
-        kernel_init_flow: &mut KernelInitFlow,
         kthreadd_task: &mut KthreaddTask,
-        kthreadd_flow: &mut KthreaddFlow,
         user_task_set: &mut UserTaskSet,
-        boot_task: &BootTask,
+        boot_task: &Task,
         local_interrupt: &mut InterruptType,
     ) -> EventResult {
         if boot_flow.state() != State::Online
             || !self.idle_entry_prepared
             || scheduler.state() != State::Online
-            || !crate::objects::task_flow::task_flow_execution_guard_satisfied(
-                boot_flow,
-                boot_task.task(),
-            )
+            || !crate::objects::task_flow::task_flow_execution_guard_satisfied(boot_flow, boot_task)
         {
             return self.failed_ready_action();
         }
@@ -431,9 +423,7 @@ impl IdleRuntime {
             current_task,
             current_cpu,
             kernel_init_task,
-            kernel_init_flow,
             kthreadd_task,
-            kthreadd_flow,
             user_task_set,
             boot_task,
             local_interrupt,
@@ -452,20 +442,15 @@ impl IdleRuntime {
         current_task: CurrentTask,
         current_cpu: CurrentCpu,
         kernel_init_task: &mut KernelInitTask,
-        kernel_init_flow: &mut KernelInitFlow,
         kthreadd_task: &mut KthreaddTask,
-        kthreadd_flow: &mut KthreaddFlow,
         user_task_set: &mut UserTaskSet,
-        boot_task: &BootTask,
+        boot_task: &Task,
         local_interrupt: &mut InterruptType,
     ) -> EventResult {
         if boot_flow.state() != State::Online
             || !self.idle_entry_prepared
             || scheduler.state() != State::Online
-            || !crate::objects::task_flow::task_flow_execution_guard_satisfied(
-                boot_flow,
-                boot_task.task(),
-            )
+            || !crate::objects::task_flow::task_flow_execution_guard_satisfied(boot_flow, boot_task)
         {
             return self.failed_ready_action();
         }
@@ -480,9 +465,7 @@ impl IdleRuntime {
             current_task,
             current_cpu,
             kernel_init_task,
-            kernel_init_flow,
             kthreadd_task,
-            kthreadd_flow,
             user_task_set,
             boot_task,
             local_interrupt,
@@ -496,16 +479,13 @@ impl IdleRuntime {
     fn wait_while_no_need_resched(
         &mut self,
         boot_flow: &TaskFlow,
-        boot_task: &BootTask,
+        boot_task: &Task,
         local_interrupt: &mut InterruptType,
     ) -> EventResult {
         if boot_flow.state() != State::Online
             || !self.idle_entry_prepared
             || local_interrupt.local_state() != State::Ready
-            || !crate::objects::task_flow::task_flow_execution_guard_satisfied(
-                boot_flow,
-                boot_task.task(),
-            )
+            || !crate::objects::task_flow::task_flow_execution_guard_satisfied(boot_flow, boot_task)
         {
             return self.failed_ready_action();
         }
@@ -539,15 +519,12 @@ impl IdleRuntime {
         Ok(())
     }
 
-    fn observe_need_resched(&mut self, boot_flow: &TaskFlow, boot_task: &BootTask) -> EventResult {
+    fn observe_need_resched(&mut self, boot_flow: &TaskFlow, boot_task: &Task) -> EventResult {
         if boot_flow.state() != State::Online
             || !self.idle_entry_prepared
             || !self.idle_wait_committed
             || !self.need_resched_clear_before_wait
-            || !crate::objects::task_flow::task_flow_execution_guard_satisfied(
-                boot_flow,
-                boot_task.task(),
-            )
+            || !crate::objects::task_flow::task_flow_execution_guard_satisfied(boot_flow, boot_task)
         {
             return self.failed_ready_action();
         }
@@ -571,11 +548,9 @@ impl IdleRuntime {
         current_task: CurrentTask,
         current_cpu: CurrentCpu,
         kernel_init_task: &mut KernelInitTask,
-        kernel_init_flow: &mut KernelInitFlow,
         kthreadd_task: &mut KthreaddTask,
-        kthreadd_flow: &mut KthreaddFlow,
         user_task_set: &mut UserTaskSet,
-        boot_task: &BootTask,
+        boot_task: &Task,
         local_interrupt: &mut InterruptType,
     ) -> EventResult {
         if boot_flow.state() != State::Online
@@ -585,25 +560,15 @@ impl IdleRuntime {
             || scheduler.state() != State::Online
             || scheduler.schedule_passes() == 0
             || !current_task.task_ref().same_identity(TaskRef::BOOT)
-            || !crate::objects::task_flow::task_flow_execution_guard_satisfied(
-                boot_flow,
-                boot_task.task(),
-            )
+            || !crate::objects::task_flow::task_flow_execution_guard_satisfied(boot_flow, boot_task)
         {
             return self.failed_ready_action();
         }
 
         self.idle_schedule_requested = true;
         let sender_flow_ref = boot_flow.flow_ref();
-        let mut task_access = SchedulerTaskAccess::new(
-            kernel_init_task,
-            kernel_init_flow,
-            kthreadd_task,
-            kthreadd_flow,
-            boot_flow,
-            user_task_set,
-            test_tasks,
-        );
+        let mut task_access =
+            SchedulerTaskAccess::new(kernel_init_task, kthreadd_task, user_task_set, test_tasks);
         scheduler.schedule_idle(
             sender_flow_ref,
             current_task.task_ref(),

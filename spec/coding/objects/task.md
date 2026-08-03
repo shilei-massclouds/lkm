@@ -3,22 +3,31 @@
 ## Layer closure
 
 - Charter: changed for the lifetime one-to-one Task/TaskFlow boundary.
-- Model: changed to the single `Online --Continue--> OnCpu --Suspend--> Online` protocol.
+- Model: changed to the single `Online --Dispatch--> OnCpu --Suspend--> Online` protocol.
 - Coding: changed here.
 - Impl: must use the representation and commit order below.
 - Compose and Testing: reviewed separately; both require updated fixed-Flow evidence.
 
 ## Representation
 
-`Task` stores exactly one immutable `TaskFlowRef` named `flow`. The association is installed while the
-Task is created and remains valid until the Task and its Flow are destroyed. There is no Flow list,
-predecessor, handoff slot, dispatch-kind field, or replacement operation in `Task`.
+`Task` physically embeds exactly one lifetime `TaskFlow` named `flow`; `flow_ref()` is derived from that
+instance rather than stored as a second Task field. The association is installed while the Task is
+created and remains valid until the aggregate is destroyed. There is no concrete Flow wrapper, parallel
+Flow storage, Flow list, predecessor, handoff slot, dispatch-kind field, or replacement operation.
 
 Every ordinary published Task owns one `TaskThreadContext` containing the architectural
-`TaskSwitchContext`, breakpoint state, fixed FlowRef, optional root TrapFlowRef, context epoch and dispatch
-record. A newly published ordinary Task already has an initialized architectural context and a Valid
-breakpoint bound to `flow`. The boot Task starts `OnCpu` with an Invalid breakpoint and initializes the
-architectural save area only on its first real switch out.
+`TaskSwitchContext`, breakpoint state, fixed FlowRef, optional root TrapFlowRef, context epoch and private
+dispatch record. `Setup` installs the initial `ra/sp`, FlowRef/generation, epoch and the embedded Flow's
+`Start` coordinate before `Enable` publishes a Valid breakpoint. The boot Task starts `OnCpu` with an
+Invalid breakpoint and initializes the architectural save area only on its first real switch out.
+
+A UserTask binds the actual shared kernel carrier-stack range during `Setup`; a dummy or zero range cannot
+satisfy contextual `Enter`'s CurrentStack check. On the real user exception path this is the prepared user
+kernel trap-stack range on which the simulated user-to-user handoff and contextual Enter execute, not the
+KernelInitTask stack from which user entry was originally prepared. A smoke-only handoff may instead bind
+the KernelInitTask range when that is the stack on which the simulated Enter actually executes. This range
+is companion state inside the UserTask aggregate, not a new context specification object and not a
+parallel TaskFlow owner.
 
 ## Stack guard representation
 
@@ -43,7 +52,7 @@ cannot satisfy this flag or integrity query.
 ## Lifecycle and scheduler ownership
 
 Ordinary Task lifecycle is `Base -> Prepared -> Ready -> Online -> OnCpu -> Online`, with terminal
-`OnCpu -> Offline -> Destroyed`. Only Scheduler code may invoke `Continue`, `SaveCoreContext`, `Suspend`,
+`OnCpu -> Offline -> Destroyed`. Only Scheduler code may invoke `Dispatch`, `SaveCoreContext`, `Suspend`,
 or `RestoreCoreContext`.
 
 The non-identity switch order is fixed:
@@ -53,15 +62,21 @@ The non-identity switch order is fixed:
 3. commit `prev` from `OnCpu` to `Online` with a Valid breakpoint;
 4. restore `next` architectural core context;
 5. commit CPU-local CurrentTask and CurrentStack to `next`;
-6. commit `next` from `Online` to `OnCpu` through `Continue`;
-7. deliver contextual `next.flow.Action::Continue`.
+6. consume the Valid breakpoint and commit `next` from `Online` to `OnCpu` through `Dispatch`, creating a
+   private, single-use Enter proof from the preflight Flow identity and context epoch;
+7. pass that proof to embedded `next.flow.Action::Enter`.
 
-First dispatch and later dispatch use the same code. Machine entry is selected only by the restored
-context. Trap entry does not change Task lifecycle; the optional root TrapFlowRef in the context restores
-the effective trap leaf before the underlying TaskFlow continuation.
+First dispatch and later dispatch use the same code. `Enter` consumes a matching YieldToken, otherwise
+uses the Setup-bound `Start` coordinate exactly once, and otherwise resumes the saved coordinate. Machine
+entry is selected only by the restored context. Identity scheduling sends neither Dispatch nor Enter.
+Trap entry does not change Task lifecycle; the optional root TrapFlowRef in the context restores the
+effective trap leaf before the underlying TaskFlow continuation.
+
+The initial BootTask and AP-idle architecture entries call their Flow actions directly without a false
+Dispatch/Enter. After either Task has really switched out, every restoration uses the common proof path.
 
 ## Teardown
 
-The Flow disables and cleans up first. Any Flow-owned UserAppRuntime and current ApplicationInstance are
-quiesced before Flow cleanup. Task disable and cleanup follow; the fixed FlowRef is never rebound during
-this sequence.
+The embedded Flow disables and cleans up first. Any logically Flow-owned UserAppRuntime and current
+ApplicationInstance are companion storage inside the Task aggregate and are quiesced before Flow cleanup.
+Task disable and cleanup follow; the FlowRef is never rebound during this sequence.

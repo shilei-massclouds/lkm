@@ -419,8 +419,8 @@ fn run_selected_payload_handoff(
         && crate::phases::payload::handoff_prepare::is_online()
         && crate::systems::kernel::state() == State::Ready
         && crate::systems::kernel::enable_in_progress()
-        && ctx.kernel_init_flow.state() == State::Online
-        && ctx.kernel_init_flow.owner_bound()
+        && ctx.kernel_init_task.flow_state() == State::Online
+        && ctx.kernel_init_task.flow().owner().is_valid()
         && handoff.state() == State::Online
         && handoff.kind() == ctx.config.selected_payload_kind()
         && handoff.kind_bound()
@@ -462,7 +462,7 @@ fn run_payload_handoff_committed(
     let name = "kernel_init_flow.payload_handoff_committed";
     sink.start_case(total, "", name, checkpoint);
     if crate::systems::kernel::is_online()
-        && ctx.kernel_init_flow.payload_handoff_committed()
+        && ctx.selected_payload_handoff.committed()
         && committed_variant_state_valid(ctx)
     {
         sink.pass(total, "", name);
@@ -473,8 +473,8 @@ fn run_payload_handoff_committed(
 
 #[cfg(app_user_boot)]
 fn committed_variant_state_valid(ctx: &Context) -> bool {
-    ctx.kernel_init_flow.state() == State::Online
-        && ctx.kernel_init_flow.owner_bound()
+    ctx.kernel_init_task.flow_state() == State::Online
+        && ctx.kernel_init_task.flow().owner().is_valid()
         && ctx.kernel_init_user_runtime.state() == State::Online
         && ctx.kernel_init_user_runtime.active_binding_committed()
         && ctx.kernel_init_task.application_committed()
@@ -483,8 +483,8 @@ fn committed_variant_state_valid(ctx: &Context) -> bool {
 
 #[cfg(not(app_user_boot))]
 fn committed_variant_state_valid(ctx: &Context) -> bool {
-    ctx.kernel_init_flow.state() == State::Online
-        && ctx.kernel_init_flow.owner_bound()
+    ctx.kernel_init_task.flow_state() == State::Online
+        && ctx.kernel_init_task.flow().owner().is_valid()
         && ctx.kernel_init_task.kernel_init_flow_owned()
 }
 

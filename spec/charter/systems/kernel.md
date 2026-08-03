@@ -117,9 +117,9 @@ Linux 6.12 `Documentation/arch/riscv/boot.rst` 与当前 RV64 Image contract 提
   translation controller。只有这三项均成功后，同一个 Enable handler 才顺序驱动 BootInitFlow 的
   Preset/Setup/Enable。BootInitFlow Online 后，它的 Online Action 对 CPU0 Scheduler 执行无 payload 的
   `yields Schedule()`。首次 non-identity switch 由 Scheduler 显式保存 BootTask context、Suspend
-  BootTask、恢复 KernelInitTask context并提交 CurrentTask/CurrentStack、drives Task.Continue，再向固定
-  KernelInitFlow 交付 contextual Continue。KernelInitFlow 在 Task 发布时已经 Online；首个 context 令
-  Continue 从 `kernel_init_entry()` 执行 runtime/payload 叶子。该跨栈 continuation 仍承载同一个
+  BootTask、恢复 KernelInitTask context并提交 CurrentTask/CurrentStack、drives Task.Dispatch，再向固定
+  KernelInitFlow 交付 contextual Enter。KernelInitFlow 在 Task 发布时已经 Online；首个 context 令
+  Enter 转到 `kernel_init_entry()`，由 `KernelInitFlow.Start` 执行 runtime/payload 叶子。该跨栈 continuation 仍承载同一个
   Kernel.Enable 响应的后续执行，但 Kernel 不是 Schedule 的 sender。PayloadHandoffPreparePhase.Online
   证明 selected payload 的可逆预提交与应用运行环境准备完成；随后 Kernel.Enable 才提交 Online。
 
@@ -180,11 +180,11 @@ lifecycle，也不暴露公开 `BindStack` Signal。后续 `BootTask.EnableStack
 首次调度真实切换先通过 CurrentTask 选择器确认 BootTask，随后提交 context-switch prepare 事实并
 完成物理栈切换；next 栈上的 finish 原子保存/发布 BootTask 断点、消费 KernelInitTask 断点、提交
 OnCpu/Live，并由外层 switch commit 把 `BindTask(KernelInitTask)` 的 `tp` 更新与架构恢复的 `sp` 一起
-发布为匹配的 CurrentTask/CurrentStack pair。随后统一的 Task.Continue 与 contextual
-KernelInitFlow.Continue 从首个 context 的 `kernel_init_entry()` 开始；不回调 Kernel Setup/Enable，也
+发布为匹配的 CurrentTask/CurrentStack pair。随后统一的 Task.Dispatch 与 contextual
+KernelInitFlow.Enter 转到首个 context 的 `kernel_init_entry()`，由 `KernelInitFlow.Start` 开始；不回调 Kernel Setup/Enable，也
 不发送 Startup。
 
-KernelInitFlow 的首个 Online Continue 直接驱动 `PreSmpInitPhase`、`SmpBringupPhase`、
+KernelInitFlow 的唯一 Start 直接驱动 `PreSmpInitPhase`、`SmpBringupPhase`、
 `RuntimeCorePhase`、`InitcallPhase`、`RootfsPhase`、`FinalizePhase`、`PayloadPreparePhase` 与
 `PayloadHandoffPreparePhase`。这些内部过程不要求 Kernel 已 Online。准备完成后 Kernel.Enable 提交
 Online 并 emits CommitPayloadHandoff；UserBoot 只替换固定 Flow-owned UserAppRuntime 内的

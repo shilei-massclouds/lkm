@@ -5,7 +5,7 @@ use crate::{
         printk,
         state::State,
         task::{Task, TaskRef},
-        task_flow::{TaskFlow, TaskFlowRef},
+        task_flow::TaskFlowRef,
     },
     phases,
 };
@@ -13,9 +13,7 @@ use crate::{
 pub fn run() -> SmokeResult {
     let ctx = context();
 
-    if !phases::smp_runtime::smp_bringup::is_online()
-        || !ctx.kernel_init_flow.payload_handoff_committed()
-    {
+    if !phases::smp_runtime::smp_bringup::is_online() || !ctx.selected_payload_handoff.committed() {
         printk::write_str("smp bringup phase is not ready\n");
         return SmokeResult::Failed;
     }
@@ -131,6 +129,7 @@ pub fn run() -> SmokeResult {
             || ctx.cpu_start_provider.hsm_start_task_ref(logical_id) != TaskRef::ap_idle(logical_id)
             || ctx.cpu_start_provider.hsm_start_flow_ref(logical_id)
                 != TaskFlowRef::ap_idle(logical_id)
+            || !crate::objects::smp_bringup::ap_initial_start_consumed(logical_id)
             || ctx.cpu_group.cpu(logical_id).is_none_or(|cpu| {
                 let trap = cpu.trap();
                 let entry = trap.entry_context();
@@ -178,14 +177,11 @@ pub fn run() -> SmokeResult {
 fn reserved_ap_fixed_flow_is_online() -> bool {
     let task_ref = TaskRef::ap_idle(1);
     let flow_ref = TaskFlowRef::ap_idle(1);
-    let task = Task::new_ap_idle_reserved(task_ref, flow_ref, 1);
-    let mut flow = TaskFlow::new_static_bound(flow_ref, task_ref);
-    flow.bind_cpu_ref(crate::objects::cpu::CpuRef::new(1))
-        && flow.preset(&task, None).is_ok()
-        && flow.setup(&task, None).is_ok()
-        && flow.enable(&task, None).is_ok()
+    let mut task = Task::new_ap_idle_reserved(task_ref, flow_ref, 1);
+    task.bind_flow_cpu_ref(crate::objects::cpu::CpuRef::new(1))
+        && task.publish_embedded_flow().is_ok()
         && task.state() == State::OnCpu
-        && task.flow() == flow.flow_ref()
-        && flow.owner() == task.task_ref()
-        && flow.state() == State::Online
+        && task.flow() == task.embedded_flow().flow_ref()
+        && task.embedded_flow().owner() == task.task_ref()
+        && task.flow_state() == State::Online
 }

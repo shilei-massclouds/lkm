@@ -2,39 +2,9 @@ use crate::{
     checkpoint::Checkpoint,
     objects::{
         boot_task::BootTask,
-        cpu_group::CpuGroup,
-        rest_init::{KernelInitTask, KthreaddReadyGate, KthreaddTask},
-        scheduler::Scheduler,
-        state::{EventResult, LifecycleEvent, State, failed_condition},
-        task::Task,
+        state::{LifecycleEvent, State, failed_condition},
     },
 };
-
-impl super::BootInitFlow {
-    pub fn prepare_idle_runtime(
-        &mut self,
-        boot_task: &BootTask,
-        scheduler: &Scheduler,
-        kernel_init_task: &KernelInitTask,
-        kthreadd_task: &KthreaddTask,
-        kthreadd_ready_gate: &KthreaddReadyGate,
-        cpu_group: &CpuGroup,
-    ) -> EventResult {
-        self.idle.setup(
-            &self.flow,
-            boot_task,
-            scheduler,
-            kernel_init_task,
-            kthreadd_task,
-            kthreadd_ready_gate,
-            cpu_group,
-        )
-    }
-
-    pub fn enable(&mut self, owner: &Task, checkpoint: Checkpoint) -> EventResult {
-        self.flow.enable(owner, Some(checkpoint))
-    }
-}
 
 /// BootInitFlow.Enable drives only the reversible schedule-handoff leaf.
 pub fn enable() -> ! {
@@ -60,7 +30,6 @@ pub fn enable_after_boot_init_schedule_handoff() -> ! {
     let ctx = crate::context::context();
     let result = if dependencies_ready {
         let crate::context::Context {
-            boot_init_flow,
             boot_task,
             cpu_group,
             kernel_init_task,
@@ -69,9 +38,12 @@ pub fn enable_after_boot_init_schedule_handoff() -> ! {
             ..
         } = ctx;
         if let Some(scheduler) = cpu_group.boot_scheduler() {
-            boot_init_flow
-                .prepare_idle_runtime(
-                    boot_task,
+            let canonical_boot_task = BootTask::canonical_task();
+            boot_task
+                .idle
+                .setup(
+                    canonical_boot_task.embedded_flow(),
+                    canonical_boot_task,
                     scheduler,
                     kernel_init_task,
                     kthreadd_task,
@@ -79,7 +51,9 @@ pub fn enable_after_boot_init_schedule_handoff() -> ! {
                     cpu_group,
                 )
                 .and_then(|()| {
-                    boot_init_flow.enable(boot_task.task(), Checkpoint::BootInitFlowOnline)
+                    boot_task
+                        .task_mut()
+                        .enable_embedded_flow(Checkpoint::BootInitFlowOnline)
                 })
         } else {
             failed_condition(
@@ -92,7 +66,7 @@ pub fn enable_after_boot_init_schedule_handoff() -> ! {
     } else {
         failed_condition(
             LifecycleEvent::Enable,
-            ctx.boot_init_flow.state(),
+            ctx.boot_task.task().flow_state(),
             State::Ready,
             State::Online,
         )

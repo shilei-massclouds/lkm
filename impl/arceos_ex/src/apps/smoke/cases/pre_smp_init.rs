@@ -23,7 +23,7 @@ pub fn run() -> SmokeResult {
         || ctx.kernel_init_task.waiting_for_kthreadd_done()
         || !ctx.kernel_init_task.observed_kthreadd_done_release()
         || !ctx.kernel_init_task.released_for_pre_smp_init()
-        || ctx.boot_init_flow.state() != State::Online
+        || ctx.boot_task.task().flow_state() != State::Online
     {
         printk::write_str("pre-smp fork boundary invalid\n");
         return SmokeResult::Failed;

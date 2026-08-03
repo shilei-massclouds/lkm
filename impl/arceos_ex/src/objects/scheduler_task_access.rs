@@ -1,10 +1,10 @@
 use super::{
     boot_task::BootTask,
     cpu::CpuRef,
-    rest_init::{KernelInitFlow, KernelInitTask, KthreaddFlow, KthreaddTask},
+    rest_init::{KernelInitTask, KthreaddTask},
     scheduler::SchedulerTestTasks,
     state::{EventResult, State},
-    task::{Task, TaskExecutionAuthority, TaskRef},
+    task::{Task, TaskExecutionAuthority, TaskFlowEnterProof, TaskRef},
     task_flow::TaskFlowRef,
     user_boot::UserTaskSet,
 };
@@ -14,14 +14,41 @@ use crate::arch::riscv64::task_switch::TaskSwitchContext;
 /// stores this value across the physical stack switch and must dispatch the
 /// exact Task/Flow pair recorded here.
 #[derive(Clone, Copy, Eq, PartialEq)]
+enum DispatchStackBinding {
+    TaskOwned,
+    SimulatedUserCarrier,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub struct NextDispatch {
     task_ref: TaskRef,
     flow_ref: TaskFlowRef,
+    cpu_ref: CpuRef,
+    context_epoch: u64,
+    stack_base: usize,
+    stack_top: usize,
+    stack_binding: DispatchStackBinding,
 }
 
 impl NextDispatch {
-    const fn new(task_ref: TaskRef, flow_ref: TaskFlowRef) -> Self {
-        Self { task_ref, flow_ref }
+    const fn new(
+        task_ref: TaskRef,
+        flow_ref: TaskFlowRef,
+        cpu_ref: CpuRef,
+        context_epoch: u64,
+        stack_base: usize,
+        stack_top: usize,
+        stack_binding: DispatchStackBinding,
+    ) -> Self {
+        Self {
+            task_ref,
+            flow_ref,
+            cpu_ref,
+            context_epoch,
+            stack_base,
+            stack_top,
+            stack_binding,
+        }
     }
 
     pub const fn task_ref(self) -> TaskRef {
@@ -31,37 +58,42 @@ impl NextDispatch {
     pub const fn flow_ref(self) -> TaskFlowRef {
         self.flow_ref
     }
+
+    pub const fn cpu_ref(self) -> CpuRef {
+        self.cpu_ref
+    }
+
+    pub const fn context_epoch(self) -> u64 {
+        self.context_epoch
+    }
+
+    fn with_simulated_user_carrier(mut self, stack_base: usize, stack_top: usize) -> Self {
+        self.stack_base = stack_base;
+        self.stack_top = stack_top;
+        self.stack_binding = DispatchStackBinding::SimulatedUserCarrier;
+        self
+    }
 }
 
 /// Resolves stable scheduler references into task/flow carriers owned by the
 /// surrounding Context. Scheduler itself never owns or names those carriers.
 pub struct SchedulerTaskAccess<'a> {
     kernel_init_task: &'a mut KernelInitTask,
-    kernel_init_flow: &'a mut KernelInitFlow,
     kthreadd_task: &'a mut KthreaddTask,
-    kthreadd_flow: &'a mut KthreaddFlow,
-    boot_flow: &'a super::task_flow::TaskFlow,
     user_task_set: &'a mut UserTaskSet,
     test_tasks: &'a mut SchedulerTestTasks,
 }
 
 impl<'a> SchedulerTaskAccess<'a> {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         kernel_init_task: &'a mut KernelInitTask,
-        kernel_init_flow: &'a mut KernelInitFlow,
         kthreadd_task: &'a mut KthreaddTask,
-        kthreadd_flow: &'a mut KthreaddFlow,
-        boot_flow: &'a super::task_flow::TaskFlow,
         user_task_set: &'a mut UserTaskSet,
         test_tasks: &'a mut SchedulerTestTasks,
     ) -> Self {
         Self {
             kernel_init_task,
-            kernel_init_flow,
             kthreadd_task,
-            kthreadd_flow,
-            boot_flow,
             user_task_set,
             test_tasks,
         }
@@ -69,9 +101,9 @@ impl<'a> SchedulerTaskAccess<'a> {
 
     pub fn effective_cpu_ref(&self, task_ref: TaskRef) -> Option<CpuRef> {
         match task_ref {
-            TaskRef::BOOT => self.boot_flow.cpu_ref(),
-            TaskRef::KERNEL_INIT => self.kernel_init_flow.cpu_ref(),
-            TaskRef::KTHREADD => self.kthreadd_flow.cpu_ref(),
+            TaskRef::BOOT => BootTask::canonical_task().flow_cpu_ref(),
+            TaskRef::KERNEL_INIT => self.kernel_init_task.task().flow_cpu_ref(),
+            TaskRef::KTHREADD => self.kthreadd_task.task().flow_cpu_ref(),
             TaskRef::SMOKE_SCHEDULER => self.test_tasks.smoke_scheduler_task().cpu_ref(),
             TaskRef::SMOKE_MUTEX => self.test_tasks.smoke_mutex_task().cpu_ref(),
             TaskRef::SMOKE_RWSEM => self.test_tasks.smoke_rwsem_task().cpu_ref(),
@@ -112,15 +144,15 @@ impl<'a> SchedulerTaskAccess<'a> {
         match task_ref {
             TaskRef::BOOT => Some(super::current_task::CurrentTaskCandidate {
                 task: BootTask::canonical_task(),
-                flow: self.boot_flow,
+                flow: BootTask::canonical_task().embedded_flow(),
             }),
             TaskRef::KERNEL_INIT => Some(super::current_task::CurrentTaskCandidate {
                 task: self.kernel_init_task.task(),
-                flow: self.kernel_init_flow.core(),
+                flow: self.kernel_init_task.task().embedded_flow(),
             }),
             TaskRef::KTHREADD => Some(super::current_task::CurrentTaskCandidate {
                 task: self.kthreadd_task.task(),
-                flow: self.kthreadd_flow.core(),
+                flow: self.kthreadd_task.task().embedded_flow(),
             }),
             TaskRef::SMOKE_SCHEDULER
             | TaskRef::SMOKE_MUTEX
@@ -277,7 +309,32 @@ impl<'a> SchedulerTaskAccess<'a> {
             && task.breakpoint_matches(flow_ref)
             && flow.state() == State::Online
             && cpu_matches)
-            .then_some(NextDispatch::new(task_ref, flow_ref))
+            .then_some(NextDispatch::new(
+                task_ref,
+                flow_ref,
+                cpu_ref,
+                task.context_epoch(),
+                task.kernel_stack_base(),
+                task.kernel_stack_top(),
+                DispatchStackBinding::TaskOwned,
+            ))
+    }
+
+    pub fn preflight_next_dispatch_on_user_carrier(
+        &self,
+        task_ref: TaskRef,
+        cpu_ref: CpuRef,
+    ) -> Option<NextDispatch> {
+        if !task_ref.is_user() && !task_ref.same_identity(TaskRef::KERNEL_INIT) {
+            return None;
+        }
+        let (stack_base, stack_top) = self.user_task_set.carrier_stack_bounds()?;
+        let live_sp = crate::arch::riscv64::csr::read_sp();
+        if live_sp < stack_base || live_sp > stack_top {
+            return None;
+        }
+        self.preflight_next_dispatch(task_ref, cpu_ref)
+            .map(|dispatch| dispatch.with_simulated_user_carrier(stack_base, stack_top))
     }
 
     pub fn first_boot_handoff_preflight_ready(&self, dispatch: NextDispatch) -> bool {
@@ -286,7 +343,7 @@ impl<'a> SchedulerTaskAccess<'a> {
             && dispatch.task_ref().same_identity(TaskRef::KERNEL_INIT)
             && dispatch
                 .flow_ref()
-                .same_identity(self.kernel_init_flow.flow_ref())
+                .same_identity(self.kernel_init_task.task().flow_ref())
     }
 
     pub fn task_on_cpu_identity_matches(&self, task_ref: TaskRef, identity: usize) -> bool {
@@ -423,83 +480,81 @@ impl<'a> SchedulerTaskAccess<'a> {
         }
     }
 
-    pub fn accept_task_continue(&mut self, dispatch: NextDispatch) -> Option<EventResult> {
-        let task_ref = dispatch.task_ref();
+    fn task_mut_for_dispatch(&mut self, task_ref: TaskRef) -> Option<&mut Task> {
         match task_ref {
-            TaskRef::BOOT => Some(BootTask::continue_canonical()),
-            TaskRef::KERNEL_INIT => Some(self.kernel_init_task.continue_on_cpu()),
-            TaskRef::KTHREADD => Some(self.kthreadd_task.continue_on_cpu()),
-            TaskRef::SMOKE_SCHEDULER => Some(
-                self.test_tasks
-                    .smoke_scheduler_task_mut()
-                    .accept_task_continue(),
-            ),
-            TaskRef::SMOKE_MUTEX => Some(
-                self.test_tasks
-                    .smoke_mutex_task_mut()
-                    .accept_task_continue(),
-            ),
-            TaskRef::SMOKE_RWSEM => Some(
-                self.test_tasks
-                    .smoke_rwsem_task_mut()
-                    .accept_task_continue(),
-            ),
-            TaskRef::SMOKE_RWLOCK => Some(
-                self.test_tasks
-                    .smoke_rwlock_task_mut()
-                    .accept_task_continue(),
-            ),
-            _ if task_ref.is_user() => Some(self.user_task_set.accept_task_continue(task_ref)),
+            TaskRef::BOOT => Some(BootTask::canonical_task_mut()),
+            TaskRef::KERNEL_INIT => Some(self.kernel_init_task.task_mut()),
+            TaskRef::KTHREADD => Some(self.kthreadd_task.task_mut()),
+            TaskRef::SMOKE_SCHEDULER => Some(self.test_tasks.smoke_scheduler_task_mut().task_mut()),
+            TaskRef::SMOKE_MUTEX => Some(self.test_tasks.smoke_mutex_task_mut().task_mut()),
+            TaskRef::SMOKE_RWSEM => Some(self.test_tasks.smoke_rwsem_task_mut().task_mut()),
+            TaskRef::SMOKE_RWLOCK => Some(self.test_tasks.smoke_rwlock_task_mut().task_mut()),
+            _ if task_ref.is_user() => self.user_task_set.task_mut_by_ref(task_ref),
             _ => None,
         }
     }
 
-    pub fn emit_flow_continue(&self, dispatch: NextDispatch) -> Option<EventResult> {
-        let task_ref = dispatch.task_ref();
-        let flow_ref = dispatch.flow_ref();
-        match task_ref {
-            TaskRef::BOOT if flow_ref.same_identity(self.boot_flow.flow_ref()) => Some(
-                (BootTask::canonical_task().flow().same_identity(flow_ref))
-                    .then_some(())
-                    .ok_or_else(|| {
-                        super::state::EventError::failed(
-                            super::state::EventErrorCode::ConditionFailed,
-                            super::state::LifecycleEvent::Continue,
-                            self.boot_flow.state(),
-                            State::Online,
-                            State::Online,
-                        )
-                    }),
-            ),
-            TaskRef::KERNEL_INIT if flow_ref.same_identity(self.kernel_init_flow.flow_ref()) => {
-                Some(self.kernel_init_flow.continue_flow(self.kernel_init_task))
-            }
-            TaskRef::KTHREADD if flow_ref.same_identity(self.kthreadd_flow.flow_ref()) => {
-                Some(self.kthreadd_flow.continue_flow(self.kthreadd_task))
-            }
-            TaskRef::SMOKE_SCHEDULER
-                if flow_ref.same_identity(self.test_tasks.smoke_scheduler_task().flow_ref()) =>
-            {
-                Some(self.test_tasks.smoke_scheduler_task().continue_flow())
-            }
-            TaskRef::SMOKE_MUTEX
-                if flow_ref.same_identity(self.test_tasks.smoke_mutex_task().flow_ref()) =>
-            {
-                Some(self.test_tasks.smoke_mutex_task().continue_flow())
-            }
-            TaskRef::SMOKE_RWSEM
-                if flow_ref.same_identity(self.test_tasks.smoke_rwsem_task().flow_ref()) =>
-            {
-                Some(self.test_tasks.smoke_rwsem_task().continue_flow())
-            }
-            TaskRef::SMOKE_RWLOCK
-                if flow_ref.same_identity(self.test_tasks.smoke_rwlock_task().flow_ref()) =>
-            {
-                Some(self.test_tasks.smoke_rwlock_task().continue_flow())
-            }
-            _ if task_ref.is_user() => Some(self.user_task_set.continue_flow(task_ref)),
-            _ => None,
+    pub fn accept_task_dispatch(
+        &mut self,
+        dispatch: NextDispatch,
+    ) -> Option<Result<TaskFlowEnterProof, super::state::EventError>> {
+        let task = self.task_mut_for_dispatch(dispatch.task_ref())?;
+        Some(task.dispatch_on_cpu(
+            dispatch.flow_ref(),
+            dispatch.context_epoch(),
+            dispatch.cpu_ref(),
+        ))
+    }
+
+    pub fn enter_task_flow(
+        &mut self,
+        dispatch: NextDispatch,
+        proof: TaskFlowEnterProof,
+    ) -> Option<EventResult> {
+        // Resolve both bindings again after Dispatch. Together with the TP
+        // check at finish_task_switch, these are the actual selected aggregate
+        // and its embedded effective Flow, not copies from NextDispatch.
+        let (current_task_ref, effective_flow_ref, current_stack_matches) = {
+            let candidate = self.current_task_candidate(dispatch.task_ref())?;
+            let stack_binding_matches = match dispatch.stack_binding {
+                DispatchStackBinding::TaskOwned => {
+                    dispatch.stack_base == candidate.task.kernel_stack_base()
+                        && dispatch.stack_top == candidate.task.kernel_stack_top()
+                        && candidate.task.current_stack_matches()
+                }
+                DispatchStackBinding::SimulatedUserCarrier => {
+                    (dispatch.task_ref().is_user()
+                        || dispatch.task_ref().same_identity(TaskRef::KERNEL_INIT))
+                        && self
+                            .user_task_set
+                            .carrier_stack_matches(dispatch.stack_base, dispatch.stack_top)
+                }
+            };
+            let live_sp = crate::arch::riscv64::csr::read_sp();
+            (
+                candidate.task.task_ref(),
+                candidate.flow.flow_ref(),
+                stack_binding_matches
+                    && live_sp >= dispatch.stack_base
+                    && live_sp <= dispatch.stack_top,
+            )
+        };
+        let task = self.task_mut_for_dispatch(dispatch.task_ref())?;
+        if !current_stack_matches {
+            let (live_sp, stack_base, stack_top) = task.current_stack_observation();
+            trace_contextual_enter_stack_mismatch(
+                dispatch.task_ref(),
+                live_sp,
+                stack_base,
+                stack_top,
+            );
         }
+        Some(task.enter_flow_contextual(
+            proof,
+            current_task_ref,
+            current_stack_matches,
+            effective_flow_ref,
+        ))
     }
 
     pub fn task_identity_ptr(&self, task_ref: TaskRef) -> Option<usize> {
@@ -560,5 +615,45 @@ impl<'a> SchedulerTaskAccess<'a> {
             TaskRef::SMOKE_RWLOCK => Some(self.test_tasks.smoke_rwlock_task().switch_context()),
             _ => None,
         }
+    }
+}
+
+fn trace_contextual_enter_stack_mismatch(
+    task_ref: TaskRef,
+    live_sp: usize,
+    stack_base: usize,
+    stack_top: usize,
+) {
+    use crate::arch::riscv64::sbi;
+
+    sbi::putstr("failure_context TaskFlow.Enter task=");
+    sbi::putstr(task_ref.name());
+    sbi::putstr(" live_sp=0x");
+    print_hex(live_sp);
+    sbi::putstr(" stack_base=0x");
+    print_hex(stack_base);
+    sbi::putstr(" stack_top=0x");
+    print_hex(stack_top);
+    #[cfg(app_user_boot)]
+    {
+        sbi::putstr(" user_trap_base=0x");
+        print_hex(super::user_boot::user_kernel_trap_stack_base());
+        sbi::putstr(" user_trap_top=0x");
+        print_hex(super::user_boot::user_kernel_trap_stack_top());
+    }
+    sbi::putchar(b'\n');
+}
+
+fn print_hex(value: usize) {
+    let mut shift = usize::BITS as usize;
+    while shift != 0 {
+        shift -= 4;
+        let nibble = ((value >> shift) & 0xf) as u8;
+        let byte = if nibble < 10 {
+            b'0' + nibble
+        } else {
+            b'a' + (nibble - 10)
+        };
+        crate::arch::riscv64::sbi::putchar(byte);
     }
 }

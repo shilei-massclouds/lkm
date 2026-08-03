@@ -34,32 +34,27 @@ unsafe extern "C" {
     fn boot_init_flow_preset_completion() -> !;
 }
 
-impl super::BootInitFlow {
-    pub fn accept_initial_start_signal(&self, owner: &Task) -> EventResult {
-        if self.core().state() != State::Base
-            || !owner.flow().same_identity(self.core().flow_ref())
-            || !owner.owns_flow(self.core().flow_ref())
-            || !task_flow_execution_guard_satisfied(self.core(), owner)
-        {
-            return failed_condition(
-                LifecycleEvent::Preset,
-                self.core().state(),
-                State::Base,
-                State::Prepared,
-            );
-        }
-        Ok(())
+fn accept_initial_start_signal(owner: &Task) -> EventResult {
+    let flow = owner.embedded_flow();
+    if flow.state() != State::Base
+        || !owner.flow().same_identity(flow.flow_ref())
+        || !owner.owns_flow(flow.flow_ref())
+        || !task_flow_execution_guard_satisfied(flow, owner)
+    {
+        return failed_condition(
+            LifecycleEvent::Preset,
+            flow.state(),
+            State::Base,
+            State::Prepared,
+        );
     }
-
-    pub fn preset(&mut self, owner: &Task, checkpoint: Checkpoint) -> EventResult {
-        self.flow.preset(owner, Some(checkpoint))
-    }
+    Ok(())
 }
 
 /// Adopts the BootInitFlow Preset boundary emitted by `_start`.
 pub fn adopt_head_preset_start() -> EventResult {
     let ctx = crate::context::context();
-    let state = ctx.boot_init_flow.state();
+    let state = ctx.boot_task.task().flow_state();
     if state != State::Base
         || ctx.boot_task.state() != State::OnCpu
         || ctx.boot_task.task_ref() != TaskRef::BOOT
@@ -74,8 +69,7 @@ pub fn adopt_head_preset_start() -> EventResult {
     {
         return failed_condition(LifecycleEvent::Preset, state, State::Base, State::Prepared);
     }
-    ctx.boot_init_flow
-        .accept_initial_start_signal(ctx.boot_task.task())
+    accept_initial_start_signal(ctx.boot_task.task())
 }
 
 /// Completes BootInitFlow.Preset after all direct entry-object drives finish.
@@ -84,12 +78,13 @@ fn preset_after_entry_objects() -> ! {
         && entry_objects_ready(crate::context::context_ref());
     let ctx = crate::context::context();
     let result = if dependencies_ready {
-        ctx.boot_init_flow
-            .preset(ctx.boot_task.task(), Checkpoint::BootInitFlowPrepared)
+        ctx.boot_task
+            .task_mut()
+            .preset_embedded_flow(Checkpoint::BootInitFlowPrepared)
     } else {
         failed_condition(
             LifecycleEvent::Preset,
-            ctx.boot_init_flow.state(),
+            ctx.boot_task.task().flow_state(),
             State::Base,
             State::Prepared,
         )
@@ -305,7 +300,7 @@ _start:
     li a0, {trace_init_stack_preset}
     call {head_checkpoint}
 
-    # Continue BootInitFlow.Preset in Rust with the original boot args.
+    # Resume BootInitFlow.Preset in Rust with the original boot args.
     mv a0, s0
     mv a1, s1
     tail {rust_entry}
@@ -446,7 +441,7 @@ extern "C" fn boot_init_flow_preset_rust_entry(hartid: usize, dtb_pa: usize) -> 
         crate::systems::kernel::accept_enable_at_entry(&boot_args),
         "arceos_ex kernel enable failed\n",
     );
-    if !ctx.boot_init_flow.bind_cpu_ref(boot_cpu_ref) {
+    if !ctx.boot_task.task_mut().bind_flow_cpu_ref(boot_cpu_ref) {
         crate::arch::riscv64::sbi::system_shutdown()
     }
     let Some(boot_cpu) = ctx.cpu_group.boot_cpu() else {
@@ -469,7 +464,7 @@ extern "C" fn boot_init_flow_preset_rust_entry(hartid: usize, dtb_pa: usize) -> 
 
 fn adopt_preset_dependencies(boot_args: &BootArgs) -> EventResult {
     let ctx = crate::context::context_ref();
-    let state = ctx.boot_init_flow.state();
+    let state = ctx.boot_task.task().flow_state();
     if state != State::Base
         || boot_args.state() != State::Online
         || !crate::phases::prepare::is_online()
@@ -562,7 +557,7 @@ fn adopt_head_prefix(ctx: &mut Context, boot_args: &BootArgs) -> EventResult {
     if !csr::kernel_fpu_vector_disabled() {
         return failed_condition(
             LifecycleEvent::Preset,
-            ctx.boot_init_flow.state(),
+            ctx.boot_task.task().flow_state(),
             State::Base,
             State::Prepared,
         );
@@ -761,7 +756,7 @@ fn bind_boot_task_entry_failed(code: u8) -> EventResult {
     crate::arch::riscv64::sbi::putchar(b'0' + code.min(9));
     crate::arch::riscv64::sbi::putchar(b'\n');
     failed_condition(
-        LifecycleEvent::Continue,
+        LifecycleEvent::Dispatch,
         State::OnCpu,
         State::OnCpu,
         State::OnCpu,
@@ -896,7 +891,7 @@ pub(super) fn entry_objects_ready(ctx: &Context) -> bool {
             .cpu_group
             .boot_cpu()
             .is_some_and(|cpu| ctx.vm.entry_prelude_ready_for(cpu))
-        && ctx.boot_init_flow.cpu_ref() == ctx.cpu_group.boot_cpu_ref()
+        && ctx.boot_task.task().flow_cpu_ref() == ctx.cpu_group.boot_cpu_ref()
         && ctx
             .cpu_group
             .boot_cpu_local_interrupt()

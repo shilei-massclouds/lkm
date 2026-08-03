@@ -157,6 +157,25 @@ pub struct TaskThreadContext {
     flow_ref: TaskFlowRef,
     core_saved_count: usize,
     core_restored_count: usize,
+    context_epoch: u64,
+    next_dispatch_ordinal: u64,
+    dispatch_record: Option<DispatchRecord>,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+struct DispatchRecord {
+    task_ref: TaskRef,
+    flow_ref: TaskFlowRef,
+    cpu_ref: super::cpu::CpuRef,
+    context_epoch: u64,
+    ordinal: u64,
+    entered: bool,
+}
+
+/// Single-use capability created only by `Task.Dispatch` and consumed by the
+/// immediately following contextual TaskFlow Enter.
+pub(crate) struct TaskFlowEnterProof {
+    record: DispatchRecord,
 }
 
 impl TaskThreadContext {
@@ -167,6 +186,9 @@ impl TaskThreadContext {
             flow_ref: TaskFlowRef::NONE,
             core_saved_count: 0,
             core_restored_count: 0,
+            context_epoch: 0,
+            next_dispatch_ordinal: 0,
+            dispatch_record: None,
         }
     }
 
@@ -202,9 +224,15 @@ impl TaskThreadContext {
         self.core_restored_count
     }
 
+    pub const fn context_epoch(&self) -> u64 {
+        self.context_epoch
+    }
+
     fn prepare(&mut self) {
         self.breakpoint_state = TaskBreakpointState::Prepared;
         self.flow_ref = TaskFlowRef::NONE;
+        self.context_epoch = 1;
+        self.dispatch_record = None;
     }
 
     fn publish(&mut self, flow_ref: TaskFlowRef) {
@@ -220,6 +248,27 @@ impl TaskThreadContext {
 
     fn record_save(&mut self) {
         self.core_saved_count = self.core_saved_count.wrapping_add(1);
+        self.context_epoch = self.context_epoch.wrapping_add(1).max(1);
+        self.dispatch_record = None;
+    }
+
+    fn create_dispatch_record(
+        &mut self,
+        task_ref: TaskRef,
+        flow_ref: TaskFlowRef,
+        cpu_ref: super::cpu::CpuRef,
+    ) -> DispatchRecord {
+        self.next_dispatch_ordinal = self.next_dispatch_ordinal.wrapping_add(1).max(1);
+        let record = DispatchRecord {
+            task_ref,
+            flow_ref,
+            cpu_ref,
+            context_epoch: self.context_epoch,
+            ordinal: self.next_dispatch_ordinal,
+            entered: false,
+        };
+        self.dispatch_record = Some(record);
+        record
     }
 
     fn root_trap_flow_resolves(&self) -> bool {
@@ -287,10 +336,28 @@ pub struct Task {
     no_setaffinity: bool,
     stack_guard_installed: bool,
     thread_context: TaskThreadContext,
-    flow: TaskFlowRef,
+    flow: TaskFlow,
 }
 
 impl Task {
+    const fn initial_flow(task_ref: TaskRef) -> TaskFlow {
+        match task_ref.slot {
+            TASK_SLOT_BOOT => TaskFlow::new_static_bound(TaskFlowRef::BOOT_INIT, task_ref),
+            TASK_SLOT_KERNEL_INIT => TaskFlow::new_static_bound(TaskFlowRef::KERNEL_INIT, task_ref),
+            TASK_SLOT_KTHREADD => TaskFlow::new_static_bound(TaskFlowRef::KTHREADD, task_ref),
+            TASK_SLOT_SMOKE_SCHEDULER => {
+                TaskFlow::new_static_bound(TaskFlowRef::smoke(0), task_ref)
+            }
+            TASK_SLOT_SMOKE_MUTEX => TaskFlow::new_static_bound(TaskFlowRef::smoke(1), task_ref),
+            TASK_SLOT_SMOKE_RWSEM => TaskFlow::new_static_bound(TaskFlowRef::smoke(2), task_ref),
+            TASK_SLOT_SMOKE_RWLOCK => TaskFlow::new_static_bound(TaskFlowRef::smoke(3), task_ref),
+            TASK_SLOT_USER_BASE..=39 => {
+                TaskFlow::new_user((task_ref.slot - TASK_SLOT_USER_BASE) as usize)
+            }
+            _ => TaskFlow::new_static(TaskFlowRef::NONE),
+        }
+    }
+
     pub const fn new() -> Self {
         Self::with_ref(TaskRef::NONE)
     }
@@ -313,8 +380,18 @@ impl Task {
             no_setaffinity: false,
             stack_guard_installed: false,
             thread_context: TaskThreadContext::new(),
-            flow: TaskFlowRef::NONE,
+            flow: Self::initial_flow(task_ref),
         }
+    }
+
+    pub const fn new_user(task_ref: TaskRef, flow_generation: u32) -> Self {
+        let mut task = Self::with_ref(task_ref);
+        let slot = match task_ref.user_slot() {
+            Some(slot) => slot,
+            None => 0,
+        };
+        task.flow = TaskFlow::new_user_with_generation(slot, flow_generation);
+        task
     }
 
     /// Boot-only image initializer for the pre-existing PID 0 carrier.
@@ -340,7 +417,7 @@ impl Task {
             no_setaffinity: false,
             stack_guard_installed: false,
             thread_context: TaskThreadContext::new(),
-            flow: TaskFlowRef::BOOT_INIT,
+            flow: TaskFlow::new_static_bound(TaskFlowRef::BOOT_INIT, TaskRef::BOOT),
         }
     }
 
@@ -368,7 +445,7 @@ impl Task {
             no_setaffinity: false,
             stack_guard_installed: false,
             thread_context: TaskThreadContext::new(),
-            flow: flow_ref,
+            flow: TaskFlow::new_static_bound(flow_ref, task_ref),
         }
     }
 
@@ -429,7 +506,7 @@ impl Task {
         if !effective_flow_ref.is_valid() || !self.owns_flow(effective_flow_ref) {
             return Err("task_effective_flow_invalid_or_not_owned");
         }
-        if !self.flow.same_identity(effective_flow_ref) {
+        if !self.flow.flow_ref().same_identity(effective_flow_ref) {
             return Err("task_effective_flow_not_fixed");
         }
         self.thread_context.bind_root_trap_flow(root_ref)
@@ -496,7 +573,7 @@ impl Task {
     pub(crate) fn post_pending_wake_signal(&mut self) -> EventResult {
         if self.lifecycle.state() != State::OnCpu || self.pending_wake_signal {
             return failed_condition(
-                LifecycleEvent::Continue,
+                LifecycleEvent::Dispatch,
                 self.state(),
                 State::OnCpu,
                 State::OnCpu,
@@ -537,7 +614,7 @@ impl Task {
     pub(crate) fn wake_for_scheduler_enqueue(&mut self) -> EventResult {
         if self.state() != State::Online || self.on_cpu || !self.scheduler_sleep_declared {
             return failed_condition(
-                LifecycleEvent::Continue,
+                LifecycleEvent::Dispatch,
                 self.state(),
                 State::Online,
                 State::Online,
@@ -559,11 +636,82 @@ impl Task {
     }
 
     pub const fn flow(&self) -> TaskFlowRef {
-        self.flow
+        self.flow.flow_ref()
     }
 
     pub const fn owns_flow(&self, flow_ref: TaskFlowRef) -> bool {
-        self.flow.same_identity(flow_ref)
+        self.flow.flow_ref().same_identity(flow_ref)
+            && self.flow.owner().same_identity(self.task_ref)
+    }
+
+    pub const fn embedded_flow(&self) -> &TaskFlow {
+        &self.flow
+    }
+
+    pub const fn flow_ref(&self) -> TaskFlowRef {
+        self.flow.flow_ref()
+    }
+
+    pub const fn flow_state(&self) -> State {
+        self.flow.state()
+    }
+
+    pub const fn flow_cpu_ref(&self) -> Option<super::cpu::CpuRef> {
+        self.flow.cpu_ref()
+    }
+
+    pub fn bind_flow_cpu_ref(&mut self, cpu_ref: super::cpu::CpuRef) -> bool {
+        self.flow.bind_cpu_ref(cpu_ref)
+    }
+
+    pub fn commit_flow_cpu_ref(&mut self, cpu_ref: super::cpu::CpuRef) -> bool {
+        self.flow.commit_cpu_ref(cpu_ref)
+    }
+
+    pub fn declare_and_bind_embedded_flow(&mut self) -> EventResult {
+        if !self.flow.declared() {
+            self.flow.declare()?;
+        }
+        if self.flow.owner().is_valid() {
+            return if self.flow.owner().same_identity(self.task_ref) {
+                Ok(())
+            } else {
+                failed_condition(
+                    LifecycleEvent::Preset,
+                    self.state(),
+                    self.state(),
+                    self.state(),
+                )
+            };
+        }
+        self.flow.bind_owner(self.task_ref)
+    }
+
+    pub fn publish_embedded_flow(&mut self) -> EventResult {
+        let owner_ref = self.task_ref;
+        self.flow.preset_owned(owner_ref, None)?;
+        self.flow.setup_owned(owner_ref, None)?;
+        self.flow.enable_owned(owner_ref, None)
+    }
+
+    pub fn preset_embedded_flow(&mut self, checkpoint: Checkpoint) -> EventResult {
+        self.flow.preset_owned(self.task_ref, Some(checkpoint))
+    }
+
+    pub fn setup_embedded_flow(&mut self, checkpoint: Checkpoint) -> EventResult {
+        self.flow.setup_owned(self.task_ref, Some(checkpoint))
+    }
+
+    pub fn enable_embedded_flow(&mut self, checkpoint: Checkpoint) -> EventResult {
+        self.flow.enable_owned(self.task_ref, Some(checkpoint))
+    }
+
+    pub(crate) fn consume_direct_flow_start(&mut self) -> bool {
+        self.flow.consume_direct_initial_context_entry()
+    }
+
+    pub fn cleanup_embedded_flow(&mut self) -> EventResult {
+        self.flow.cleanup_owned(self.task_ref)
     }
 
     pub const fn stack_guard_installed(&self) -> bool {
@@ -715,7 +863,8 @@ impl Task {
     pub fn enable(&mut self, checkpoint: Checkpoint) -> EventResult {
         if !self.running
             || !self.runqueue_published
-            || !self.flow.is_valid()
+            || !self.flow_ref().is_valid()
+            || !self.flow.owner().same_identity(self.task_ref)
             || self.execution_authority != TaskExecutionAuthority::None
             || self.thread_context.breakpoint_state() != TaskBreakpointState::Prepared
         {
@@ -732,12 +881,13 @@ impl Task {
             State::Online,
             checkpoint,
         )?;
-        self.thread_context.publish(self.flow);
+        self.thread_context.publish(self.flow_ref());
         Ok(())
     }
 
     pub fn adopt_enable(&mut self) -> EventResult {
-        if !self.flow.is_valid()
+        if !self.flow_ref().is_valid()
+            || !self.flow.owner().same_identity(self.task_ref)
             || self.execution_authority != TaskExecutionAuthority::None
             || self.thread_context.breakpoint_state() != TaskBreakpointState::Prepared
         {
@@ -752,7 +902,7 @@ impl Task {
         self.runqueue_published = true;
         self.lifecycle
             .adopt_transition(LifecycleEvent::Enable, State::Ready, State::Online)?;
-        self.thread_context.publish(self.flow);
+        self.thread_context.publish(self.flow_ref());
         Ok(())
     }
 
@@ -765,12 +915,12 @@ impl Task {
             || self.kind != TaskKind::Idle
             || !self.running
             || self.runqueue_published
-            || !self.flow.is_valid()
+            || !self.flow_ref().is_valid()
             || self.execution_authority != TaskExecutionAuthority::Reserved
             || self.thread_context.breakpoint_state() != TaskBreakpointState::Invalid
         {
             return failed_condition(
-                LifecycleEvent::Continue,
+                LifecycleEvent::Dispatch,
                 self.state(),
                 State::OnCpu,
                 State::OnCpu,
@@ -780,11 +930,14 @@ impl Task {
         Ok(())
     }
 
-    /// Scheduler-only acceptance of every `Task.Continue` delivery. First
-    /// entry and later resumes share this path; TaskThreadContext carries the
-    /// actual machine continuation.
-    pub(crate) fn continue_on_cpu(&mut self) -> EventResult {
-        let expected_flow = self.flow;
+    /// Scheduler-only acceptance of every `Task.Dispatch` delivery. The
+    /// returned capability can be consumed only by this Task's embedded Flow.
+    pub(crate) fn dispatch_on_cpu(
+        &mut self,
+        expected_flow: TaskFlowRef,
+        expected_context_epoch: u64,
+        cpu_ref: super::cpu::CpuRef,
+    ) -> Result<TaskFlowEnterProof, super::state::EventError> {
         let first_failed = if self.lifecycle.state() != State::Online {
             Some("lifecycle_online")
         } else if self.on_cpu {
@@ -801,12 +954,18 @@ impl Task {
             Some("owns_flow")
         } else if !self.thread_context.flow_ref().same_identity(expected_flow) {
             Some("breakpoint_flow_matches")
+        } else if self.thread_context.context_epoch() != expected_context_epoch {
+            Some("context_epoch_matches_preflight")
+        } else if self.flow.cpu_ref() != Some(cpu_ref) {
+            Some("flow_cpu_matches_dispatch_cpu")
+        } else if self.thread_context.dispatch_record.is_some() {
+            Some("no_unconsumed_dispatch_record")
         } else {
             None
         };
         if let Some(first_failed) = first_failed {
-            return failed_condition(
-                LifecycleEvent::Continue,
+            let error = failed_condition(
+                LifecycleEvent::Dispatch,
                 self.state(),
                 State::Online,
                 State::OnCpu,
@@ -814,21 +973,120 @@ impl Task {
             .map_err(|error| {
                 error.with_diagnostic(FailureDiagnostic::new(
                     "SchedulerTaskSwitch",
-                    "continue_task_after_switch",
+                    "dispatch_task_after_switch",
                     "Task",
-                    "Task.Continue prerequisites",
+                    "Task.Dispatch prerequisites",
                     first_failed,
                 ))
-            });
+            })
+            .unwrap_err();
+            return Err(error);
         }
         self.lifecycle.adopt_repeating_transition(
-            LifecycleEvent::Continue,
+            LifecycleEvent::Dispatch,
             State::Online,
             State::OnCpu,
         )?;
         self.on_cpu = true;
         self.execution_authority = TaskExecutionAuthority::Live;
         self.thread_context.consume();
+        let record =
+            self.thread_context
+                .create_dispatch_record(self.task_ref, expected_flow, cpu_ref);
+        Ok(TaskFlowEnterProof { record })
+    }
+
+    /// Transitional object-level helper used by focused tests while all
+    /// production scheduling goes through the explicit Dispatch/Enter pair.
+    #[cfg(app_smoke)]
+    pub(crate) fn dispatch_and_enter_for_test(&mut self) -> EventResult {
+        let flow_ref = self.flow_ref();
+        let cpu_ref = self.flow.cpu_ref().unwrap_or(super::cpu::CpuRef::invalid());
+        let proof = self.dispatch_on_cpu(flow_ref, self.context_epoch(), cpu_ref)?;
+        self.enter_flow_contextual(proof, self.task_ref, true, flow_ref)
+    }
+
+    #[cfg(app_smoke)]
+    pub(crate) fn dispatch_rejected_for_test(
+        &mut self,
+        flow_ref: TaskFlowRef,
+        context_epoch: u64,
+        cpu_ref: super::cpu::CpuRef,
+    ) -> bool {
+        self.dispatch_on_cpu(flow_ref, context_epoch, cpu_ref)
+            .is_err()
+    }
+
+    #[cfg(app_smoke)]
+    pub(crate) fn duplicate_enter_rejected_for_test(&mut self) -> bool {
+        let Some(mut record) = self.thread_context.dispatch_record else {
+            return false;
+        };
+        if !record.entered {
+            return false;
+        }
+        record.entered = false;
+        let task_ref = self.task_ref;
+        let flow_ref = self.flow_ref();
+        self.enter_flow_contextual(TaskFlowEnterProof { record }, task_ref, true, flow_ref)
+            .is_err()
+    }
+
+    pub(crate) fn enter_flow_contextual(
+        &mut self,
+        proof: TaskFlowEnterProof,
+        current_task_ref: TaskRef,
+        current_stack_matches: bool,
+        effective_flow_ref: TaskFlowRef,
+    ) -> EventResult {
+        let record = proof.record;
+        let first_failed = if !record.task_ref.same_identity(self.task_ref) {
+            Some("proof_task_ref")
+        } else if !record.flow_ref.same_identity(self.flow_ref()) {
+            Some("proof_flow_ref_generation")
+        } else if record.context_epoch != self.thread_context.context_epoch() {
+            Some("proof_context_epoch")
+        } else if !current_task_ref.same_identity(self.task_ref) {
+            Some("current_task_binding")
+        } else if !current_stack_matches {
+            Some("current_stack_binding")
+        } else if !effective_flow_ref.same_identity(self.flow_ref()) {
+            Some("effective_flow_binding")
+        } else if self.thread_context.dispatch_record != Some(record) {
+            Some("dispatch_record")
+        } else if record.entered {
+            Some("dispatch_record_not_entered")
+        } else {
+            None
+        };
+        if let Some(first_failed) = first_failed {
+            return failed_condition(
+                LifecycleEvent::Dispatch,
+                self.state(),
+                State::OnCpu,
+                State::OnCpu,
+            )
+            .map_err(|error| {
+                error.with_diagnostic(FailureDiagnostic::new(
+                    "SchedulerTaskSwitch",
+                    "enter_task_flow_after_dispatch",
+                    "TaskFlow",
+                    "contextual Enter proof and execution bindings",
+                    first_failed,
+                ))
+            });
+        }
+
+        self.flow.enter_contextual(
+            record.task_ref,
+            record.flow_ref,
+            record.cpu_ref,
+            record.context_epoch,
+            record.ordinal,
+        )?;
+        let mut entered_record = record;
+        entered_record.entered = true;
+        self.thread_context.dispatch_record = Some(entered_record);
         Ok(())
     }
 
@@ -858,7 +1116,7 @@ impl Task {
 
     /// Second half of the Scheduler SaveCoreContext -> Suspend protocol.
     pub(crate) fn suspend_after_core_context_save(&mut self) -> EventResult {
-        let flow_ref = self.flow;
+        let flow_ref = self.flow_ref();
         if self.lifecycle.state() != State::OnCpu
             || !self.on_cpu
             || self.execution_authority != TaskExecutionAuthority::Live
@@ -887,7 +1145,7 @@ impl Task {
     }
 
     pub fn disable(&mut self) -> EventResult {
-        if !self.flow.is_valid()
+        if !self.flow_ref().is_valid()
             || !self.on_cpu
             || self.execution_authority != TaskExecutionAuthority::Live
             || self.core_save_pending_suspend
@@ -940,7 +1198,7 @@ impl Task {
     }
 
     pub fn publish_runqueue_binding(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Ready || !self.running || !self.flow.is_valid() {
+        if self.lifecycle.state() != State::Ready || !self.running || !self.flow_ref().is_valid() {
             return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
@@ -991,6 +1249,7 @@ impl Task {
             .init(entry, stack_base, stack_top);
         if !self.on_cpu && self.lifecycle.state() == State::Prepared {
             self.thread_context.prepare();
+            let _ = self.flow.prepare_initial_context_entry();
         }
     }
 
@@ -998,6 +1257,7 @@ impl Task {
         self.thread_context.arch_mut().init_with_dummy();
         if !self.on_cpu && self.lifecycle.state() == State::Prepared {
             self.thread_context.prepare();
+            let _ = self.flow.prepare_initial_context_entry();
         }
     }
 
@@ -1026,12 +1286,29 @@ impl Task {
         self.thread_context.arch()
     }
 
+    pub const fn context_epoch(&self) -> u64 {
+        self.thread_context.context_epoch()
+    }
+
+    pub fn current_stack_matches(&self) -> bool {
+        let (stack_pointer, base, top) = self.current_stack_observation();
+        base != 0 && top > base && stack_pointer >= base && stack_pointer <= top
+    }
+
+    pub(crate) fn current_stack_observation(&self) -> (usize, usize, usize) {
+        (
+            crate::arch::riscv64::csr::read_sp(),
+            self.kernel_stack_base(),
+            self.kernel_stack_top(),
+        )
+    }
+
     pub fn switch_context_mut(&mut self) -> &mut TaskSwitchContext {
         self.thread_context.arch_mut()
     }
 
     pub fn switch_in_ready(&self) -> bool {
-        let expected_flow = self.flow;
+        let expected_flow = self.flow_ref();
         self.lifecycle.state() == State::Online
             && !self.on_cpu
             && self.execution_authority == TaskExecutionAuthority::None
@@ -1048,7 +1325,7 @@ impl Task {
             && self.execution_authority == TaskExecutionAuthority::Live
             && !self.core_save_pending_suspend
             && self.thread_context.breakpoint_state() == TaskBreakpointState::Invalid
-            && self.flow.is_valid()
+            && self.flow_ref().is_valid()
     }
 
     pub fn terminal_switch_out_ready(&self) -> bool {
@@ -1057,34 +1334,6 @@ impl Task {
             && self.execution_authority == TaskExecutionAuthority::Live
             && !self.core_save_pending_suspend
             && self.thread_context.breakpoint_state() == TaskBreakpointState::Invalid
-            && self.flow.is_valid()
-    }
-
-    pub(super) fn bind_flow_ref(&mut self, flow_ref: TaskFlowRef) -> EventResult {
-        if !flow_ref.is_valid() || (self.flow.is_valid() && !self.flow.same_identity(flow_ref)) {
-            return failed_condition(
-                LifecycleEvent::Preset,
-                self.lifecycle.state(),
-                self.lifecycle.state(),
-                self.lifecycle.state(),
-            );
-        }
-        self.flow = flow_ref;
-        Ok(())
-    }
-
-    pub fn bind_flow(&mut self, flow: &TaskFlow) -> EventResult {
-        if !self.flow.same_identity(flow.flow_ref())
-            || flow.owner() != self.task_ref
-            || flow.state() != State::Base
-        {
-            return failed_condition(
-                LifecycleEvent::Setup,
-                self.lifecycle.state(),
-                self.lifecycle.state(),
-                self.lifecycle.state(),
-            );
-        }
-        Ok(())
+            && self.flow_ref().is_valid()
     }
 }

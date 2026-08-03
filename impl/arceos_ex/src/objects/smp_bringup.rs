@@ -124,24 +124,18 @@ impl SbiHartBootData {
 #[repr(C, align(64))]
 struct ApIdleTaskRecord {
     task: Task,
-    flow: TaskFlow,
     logical_id: usize,
     hartid: usize,
     reserved_before_hsm: bool,
-    prepared_task_ref: TaskRef,
-    prepared_flow_ref: TaskFlowRef,
 }
 
 impl ApIdleTaskRecord {
     const fn empty() -> Self {
         Self {
             task: Task::new(),
-            flow: TaskFlow::new_static(TaskFlowRef::NONE),
             logical_id: usize::MAX,
             hartid: usize::MAX,
             reserved_before_hsm: false,
-            prepared_task_ref: TaskRef::NONE,
-            prepared_flow_ref: TaskFlowRef::NONE,
         }
     }
 
@@ -161,24 +155,21 @@ impl ApIdleTaskRecord {
         {
             return false;
         }
-        self.flow = TaskFlow::new_static_bound(flow_ref, task_ref);
-        if !self.flow.bind_cpu_ref(super::cpu::CpuRef::new(logical_id)) {
+        if !self
+            .task
+            .bind_flow_cpu_ref(super::cpu::CpuRef::new(logical_id))
+        {
             return false;
         }
         self.logical_id = logical_id;
         self.hartid = hartid;
-        if self.flow.preset(&self.task, None).is_err()
-            || self.flow.setup(&self.task, None).is_err()
-            || self.flow.enable(&self.task, None).is_err()
-        {
+        if self.task.publish_embedded_flow().is_err() {
             return false;
         }
         self.reserved_before_hsm = self.task.state() == State::OnCpu
             && self.task.execution_authority() == TaskExecutionAuthority::Reserved
             && self.task.breakpoint_state() == TaskBreakpointState::Invalid
-            && self.flow.state() == State::Online;
-        self.prepared_task_ref = self.task.task_ref();
-        self.prepared_flow_ref = self.flow.flow_ref();
+            && self.task.flow_state() == State::Online;
         self.unified_carrier_ready(logical_id)
     }
 
@@ -188,15 +179,13 @@ impl ApIdleTaskRecord {
             && self.task.state() == State::OnCpu
             && self.task.online()
             && self.task.breakpoint_state() == TaskBreakpointState::Invalid
-            && self.flow.cpu_id() == logical_id
+            && self.task.embedded_flow().cpu_id() == logical_id
             && self.task.running()
             && !self.task.runqueue_published()
-            && self.flow.owner() == self.task.task_ref()
-            && self.task.flow() == self.flow.flow_ref()
+            && self.task.embedded_flow().owner() == self.task.task_ref()
+            && self.task.flow() == self.task.embedded_flow().flow_ref()
             && self.reserved_before_hsm
-            && self.prepared_task_ref == self.task.task_ref()
-            && self.prepared_flow_ref == self.flow.flow_ref()
-            && self.flow.state() == State::Online
+            && self.task.flow_state() == State::Online
             && matches!(
                 self.task.execution_authority(),
                 TaskExecutionAuthority::Reserved | TaskExecutionAuthority::Live
@@ -209,17 +198,26 @@ impl ApIdleTaskRecord {
             || self.task.state() != State::OnCpu
             || self.task.execution_authority() != TaskExecutionAuthority::Reserved
             || self.task.breakpoint_state() != TaskBreakpointState::Invalid
-            || self.flow.state() != State::Online
-            || self.task.flow() != self.flow.flow_ref()
+            || self.task.flow_state() != State::Online
+            || self.task.flow() != self.task.embedded_flow().flow_ref()
         {
             return failed_condition(
-                LifecycleEvent::Continue,
+                LifecycleEvent::Dispatch,
                 self.task.state(),
                 State::Online,
                 State::OnCpu,
             );
         }
-        self.task.activate_hsm_authority()
+        self.task.activate_hsm_authority()?;
+        if !self.task.consume_direct_flow_start() {
+            return failed_condition(
+                LifecycleEvent::Dispatch,
+                self.task.state(),
+                State::OnCpu,
+                State::OnCpu,
+            );
+        }
+        Ok(())
     }
 }
 
@@ -570,7 +568,7 @@ pub(crate) fn ap_current_task_candidate_by_identity(
     let record = unsafe { &*core::ptr::addr_of!(AP_IDLE_TASKS[logical_id]) };
     Some(super::current_task::CurrentTaskCandidate {
         task: &record.task,
-        flow: &record.flow,
+        flow: record.task.embedded_flow(),
     })
 }
 
@@ -583,7 +581,7 @@ pub(crate) fn ap_current_task_candidate_by_ref(
         if record.task.task_ref().same_identity(task_ref) {
             return Some(super::current_task::CurrentTaskCandidate {
                 task: &record.task,
-                flow: &record.flow,
+                flow: record.task.embedded_flow(),
             });
         }
         logical_id += 1;
@@ -606,13 +604,23 @@ pub(crate) fn ap_task_mut_by_ref(task_ref: TaskRef) -> Option<&'static mut Task>
 pub(crate) fn activate_ap_idle_entry_execution(logical_id: usize) -> EventResult {
     if logical_id == 0 || logical_id >= MAX_CPUS {
         return failed_condition(
-            LifecycleEvent::Continue,
+            LifecycleEvent::Dispatch,
             State::Base,
             State::Online,
             State::OnCpu,
         );
     }
     unsafe { AP_IDLE_TASKS[logical_id].activate_entry_execution(logical_id) }
+}
+
+#[cfg(app_smoke)]
+pub(crate) fn ap_initial_start_consumed(logical_id: usize) -> bool {
+    if logical_id == 0 || logical_id >= MAX_CPUS {
+        return false;
+    }
+    let record = unsafe { &*core::ptr::addr_of!(AP_IDLE_TASKS[logical_id]) };
+    record.task.embedded_flow().initial_context_entry_consumed()
+        && !record.task.embedded_flow().initial_context_entry_pending()
 }
 
 fn ap_stack_top_virt(logical_id: usize) -> Option<usize> {

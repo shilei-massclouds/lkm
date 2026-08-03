@@ -79,8 +79,10 @@ predicate task_breakpoint_bound_to_flow_ref<T: Task, F: TaskFlow>(task: T, flow:
 predicate task_breakpoint_flow_ref_generation_valid<T: Task>(task: T) -> bool;
 predicate task_breakpoint_published_on_enable<T: Task, F: TaskFlow>(task: T, flow: F) -> bool;
 predicate task_breakpoint_published_on_suspend<T: Task, F: TaskFlow>(task: T, flow: F) -> bool;
-predicate task_breakpoint_consumed_on_continue<T: Task>(task: T) -> bool;
-predicate task_continue_sent_only_by_scheduler<T: Task>(task: T) -> bool;
+predicate task_breakpoint_consumed_on_dispatch<T: Task>(task: T) -> bool;
+predicate task_dispatch_sent_only_by_scheduler<T: Task>(task: T) -> bool;
+predicate task_initial_context_start_bound<T: Task, F: TaskFlow>(task: T, flow: F) -> bool;
+predicate task_dispatch_enter_proof_created<T: Task, F: TaskFlow>(task: T, flow: F) -> bool;
 predicate task_suspend_sent_only_by_scheduler<T: Task>(task: T) -> bool;
 predicate task_online_has_recoverable_context<T: Task>(task: T) -> bool;
 predicate task_online_eligibility_is_scheduler_owned<T: Task>(task: T) -> bool;
@@ -166,6 +168,7 @@ type Task: ResourceObject {
                     task_thread_context_owned(self, self.thread_context);
                     task_thread_context_core_register_set(self.thread_context);
                     task_context_flow_ref_is_fixed(self, flow);
+                    task_initial_context_start_bound(self, flow);
                     task_breakpoint_state_is(self, TaskBreakpointState::Prepared);
                     task_execution_authority_is(self, TaskExecutionAuthority::None);
                     task_sched_entity_initialized(self, scheduler);
@@ -211,7 +214,7 @@ type Task: ResourceObject {
             task_breakpoint_flow_ref_generation_valid(self);
         }
         transitions {
-            on Transition::Continue -> State::OnCpu {
+            on Transition::Dispatch -> State::OnCpu {
                 depends_on {
                     self.flow.state == State::Online;
                     task_execution_authority_is(self, TaskExecutionAuthority::None);
@@ -222,10 +225,11 @@ type Task: ResourceObject {
                 ensures {
                     task_on_cpu(self);
                     task_on_cpu_matches_current_task(self);
-                    task_continue_sent_only_by_scheduler(self);
+                    task_dispatch_sent_only_by_scheduler(self);
                     task_execution_authority_is(self, TaskExecutionAuthority::Live);
                     task_breakpoint_state_is(self, TaskBreakpointState::Invalid);
-                    task_breakpoint_consumed_on_continue(self);
+                    task_breakpoint_consumed_on_dispatch(self);
+                    task_dispatch_enter_proof_created(self, self.flow);
                 }
             }
         }
@@ -418,11 +422,11 @@ object BootTask: Task {
             task_breakpoint_bound_to_flow_ref(self, BootInitFlow);
         }
         transitions {
-            on Transition::Continue -> State::OnCpu {
+            on Transition::Dispatch -> State::OnCpu {
                 ensures {
                     task_execution_authority_is(self, TaskExecutionAuthority::Live);
                     task_breakpoint_state_is(self, TaskBreakpointState::Invalid);
-                    task_breakpoint_consumed_on_continue(self);
+                    task_breakpoint_consumed_on_dispatch(self);
                 }
             }
         }
@@ -451,12 +455,12 @@ object ApIdleTask: Task {
     }
     state State::Online {
         transitions {
-            on Transition::Continue -> State::OnCpu {
+            on Transition::Dispatch -> State::OnCpu {
                 depends_on { task_breakpoint_flow_ref_generation_valid(self); }
                 ensures {
                     task_execution_authority_is(self, TaskExecutionAuthority::Live);
                     task_breakpoint_state_is(self, TaskBreakpointState::Invalid);
-                    task_breakpoint_consumed_on_continue(self);
+                    task_breakpoint_consumed_on_dispatch(self);
                 }
             }
         }

@@ -35,7 +35,7 @@ impl SmokeScenario for ResolutionScenario {
         assertions.assert(
             "current cpu derives through effective flow",
             ctx.current_cpu().is_ok_and(|current_cpu| {
-                ctx.kernel_init_flow.core().cpu_ref() == Some(current_cpu.cpu_ref())
+                ctx.kernel_init_task.flow().cpu_ref() == Some(current_cpu.cpu_ref())
                     && current_cpu.logical_id() == 0
             }),
         );

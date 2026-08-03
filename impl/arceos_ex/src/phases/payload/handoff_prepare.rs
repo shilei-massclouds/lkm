@@ -21,7 +21,7 @@ pub fn preset() -> ! {
         if ctx.selected_payload_handoff.state() != State::Online
             || !ctx.selected_payload_handoff.variant_prepare_ready()
             || !ctx.selected_payload_handoff.no_return_entry_bound()
-            || ctx.kernel_init_flow.state() != State::Online
+            || ctx.kernel_init_task.flow_state() != State::Online
             || !super::mainline_ready(ctx)
         {
             return phase_failure(LifecycleEvent::Preset, State::Base, State::Prepared);
@@ -98,7 +98,7 @@ fn require_transition(
     if actual != expected
         || !super::prepare::is_online()
         || !super::mainline_ready(ctx)
-        || ctx.kernel_init_flow.state() != State::Online
+        || ctx.kernel_init_task.flow_state() != State::Online
         || !payload_boundary_ready
     {
         return failed_condition(event, actual, expected, target);

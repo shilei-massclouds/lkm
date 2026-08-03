@@ -12,7 +12,7 @@ Task carrier、TaskRef、TaskThreadContext 和 Task lifecycle 见 [`Task`](task.
 - `BootInitFlow` 终身属于 `BootTask`，从 `_start` 编排 boot，Online 后继续承载 idle setup、首次
   Schedule 的返回 continuation、`BootIdleEntryPhase` 和 idle loop；不创建第二个长期 boot Flow。
 - `KernelInitFlow` 终身属于 `KernelInitTask`。Task 发布时 Flow 已 Online；首次及后续 dispatch 都以
-  contextual Continue 进入。successful exec 不替换它。
+  contextual Enter 进入；首次 Enter 转到 Setup 绑定的 `KernelInitFlow.Start`。successful exec 不替换它。
 - `KthreaddFlow` 终身属于 `KthreaddTask`，发布和派发规则相同。
 - 每次 fork/clone 创建 fresh child Task 与 fresh `UserTaskFlow`；child exec 不创建后继 Flow。
 - `ApIdleFlow[logical_id]` 与 `ApIdleTask[logical_id]` pointwise 固定，在 HSM 交付前完成不可调度的
@@ -34,7 +34,7 @@ scheduler switch 或未来正式 migration commit 可以写 cpu_ref，普通 Flo
 仍保留最后归属；prepare 不得预写 next。`CurrentCPU` 从 effective Flow 的 cpu_ref 解引用，同步 drives
 子树继承解析来源，emits 不继承。
 
-## Online 与 contextual Continue
+## Online、contextual Enter 与 Start
 
 普通可调度 Flow 在所属 Task 发布前完成 Preset/Setup/Enable 并保持 Online；运行主体不是再次启动的
 lifecycle Transition，而是可挂起 Online Action。BootInitFlow 和 ApIdleFlow 允许在不可被 Scheduler
@@ -43,14 +43,21 @@ lifecycle Transition，而是可挂起 Online Action。BootInitFlow 和 ApIdleFl
 所有首次与恢复派发统一接受：
 
 ```text
-TaskFlow.State::Online / Action::Continue
+TaskFlow.State::Online / Action::Enter
 ```
 
-Continue 是 contextual Action。receiver 是 Task 固定 FlowRef；机器入口与可能嵌套的 Trap leaf 来自
-Scheduler 已恢复的 TaskThreadContext。Signal 不携带 PC、SP、寄存器、函数名、entry role、checkpoint
-或 first/resume 枚举。若 FlowLane 有 pending YieldToken，Continue 必须先用 CPU、TaskRef、FlowRef、
-generation、dispatch record 与 context epoch 校验它，再从模型 resume coordinate 精确一次继续；若无
-token，则从该 context 指定的首个/普通架构入口进入。
+Enter 是带 `contextual_entry: true` 的 contextual Action。receiver 是 Task 固定 FlowRef；机器入口与
+可能嵌套的 Trap leaf 来自 Scheduler 已恢复的 TaskThreadContext。Signal 不携带 PC、SP、寄存器、函数名、
+entry role、checkpoint 或 first/resume 枚举。若 FlowLane 有 pending YieldToken，Enter 必须先用 CPU、
+TaskRef、FlowRef、generation、dispatch record 与 context epoch 校验它，再从模型 resume coordinate
+精确一次继续；若无 token 且首次 context 尚待进入，则转到 Setup 绑定、带
+`initial_context_entry: true` 的实例唯一 `Start` Action；其它恢复从已保存坐标继续。Enter 本身不得按
+具体 Flow 类型、函数或固定入口分支。
+
+`KernelInitFlow.Start` 驱动 kernel-init 阶段链；`KthreaddFlow.Start` 进入调度循环；
+`UserTaskFlow.Start` 进入已准备的用户上下文。`ApIdleFlow.Start` 由 HSM 架构入口直接调用。
+BootInitFlow 继续由 `_start` 驱动 Preset/Setup/Enable，不制造首次 Enter 或虚假 Start；BootTask 与 AP
+idle 只有首次真实切出后的恢复才走通用 Dispatch/Enter。
 
 除声明期 Bind 和明确的 Boot/AP 架构入口例外，普通 lifecycle/action 每次执行都即时要求：固定 parent
 Task 为 OnCpu/Live、Flow 为该 Task 的唯一 flow、FlowRef/generation 有效、CpuRef 与 CPU-local
@@ -70,7 +77,7 @@ TaskFlowLane 的 source handler continuation 可以因 `yields` awaiting-resume�
 ApplicationInstance，因此不存在 successful-exec successor/predecessor Flow 例外。
 
 若陷入内发生真实 task switch，Scheduler 保存的 TaskThreadContext 指向当前短期 leaf。未来 Task
-Continue 后，contextual TaskFlow.Continue 先恢复 leaf 模型/架构 continuation；普通 IRQ 未切换 Task 时
+Dispatch 后，contextual TaskFlow.Enter 先恢复 leaf 模型/架构 continuation；普通 IRQ 未切换 Task 时
 Task lifecycle、Flow lifecycle 和 CPU binding 都不变。
 
 ## `yields` 与 Schedule
@@ -83,9 +90,9 @@ TaskFlow、CurrentTask、CurrentStack、CpuRef、runqueue、锁或中断状态�
 该通用原语的使用者而非语言特例：
 
 - identity：Schedule handler 没改变 source execution binding，目标完成后的默认 resume attempt
-  立即消费 token，从 `yields` 后返回；不交付 Continue。
-- non-identity：Scheduler handler 显式 Save/Suspend/Restore/commit/Continue，source binding 已改变，
-  token 保持 pending；未来匹配的 contextual TaskFlow.Continue 恢复它。
+  立即消费 token，从 `yields` 后返回；不交付 Dispatch/Enter。
+- non-identity：Scheduler handler 显式 Save/Suspend/Restore/commit/Dispatch/Enter，source binding 已改变，
+  token 保持 pending；未来匹配的 contextual TaskFlow.Enter 恢复它。
 
 目标 Signal 不进入 emits FIFO。preflight rejection 不创建 token；post-commit failure、stale、错误绑定
 或重复 resume 终止失败，不回滚、不重试。
@@ -93,7 +100,7 @@ TaskFlow、CurrentTask、CurrentStack、CpuRef、runqueue、锁或中断状态�
 ## lifecycle 与 teardown
 
 TaskFlow 必须显式经历 Preset/Setup/Enable/Disable/Cleanup。Enable 建立 Online 服务事实但不等于执行
-主体已经派发；Continue 才执行 contextual continuation。Disable 只允许 terminal 路径，要求无活动
+主体已经派发；Enter 才执行 contextual continuation，Start 对每个实例至多一次。Disable 只允许 terminal 路径，要求无活动
 Trap child、无 pending YieldToken、Runtime 已完成退出；Cleanup 从 Offline 回收到 Destroyed。
 
 Task terminal Disable 前固定 Flow 必须不再 Online；Task Cleanup 前 Flow 必须 Destroyed。storage 或

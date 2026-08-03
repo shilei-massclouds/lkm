@@ -6,9 +6,10 @@ between OnCpu and Online.
 
 Its Online actions own idle setup, the `schedule_current()` yield boundary, post-schedule idle entry and
 the idle loop. The call must return through the same Rust continuation when identity is selected and
-through the restored TaskThreadContext plus contextual Continue after a non-identity A->B->A sequence.
+through the restored TaskThreadContext plus contextual Enter after a non-identity A->B->A sequence.
 
-No separate idle Flow storage, FlowRef, checkpoint family or dispatch branch may exist. The Rust module
+No concrete BootInitFlow wrapper, separate idle Flow storage, FlowRef, checkpoint family or dispatch
+branch may exist. The BootTask aggregate embeds the TaskFlow and idle companion storage. The Rust module
 path remains `crate::flows::boot_init_flow`; the physical transition files do not create additional
 objects, lifecycles or public API namespaces.
 

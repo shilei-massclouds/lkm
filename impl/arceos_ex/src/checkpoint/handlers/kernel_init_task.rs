@@ -99,7 +99,7 @@ fn check_online(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> C
         || ctx.kernel_init_task.entry() != TaskEntry::KernelInit
         || !ctx.kernel_init_task.running()
         || !ctx.kernel_init_task.enqueued()
-        || ctx.kernel_init_flow.cpu_id() != boot_cpu.logical_id()
+        || ctx.kernel_init_task.flow_cpu_id() != boot_cpu.logical_id()
         || !boot_scheduler_view.runqueue_contains_task_id(ctx.kernel_init_task.pid())
         || boot_scheduler_view.runqueue_task_count() != 1
     {

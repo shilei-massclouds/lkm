@@ -304,21 +304,21 @@ impl UserCompletedChildRecord {
 
 struct UserTaskStorageSlot {
     generation: u32,
+    flow_generation: u32,
     occupied: bool,
     pid: usize,
     task: Task,
-    flow: TaskFlow,
     runtime: UserAppRuntime,
 }
 
 impl UserTaskStorageSlot {
-    const fn new(slot: usize) -> Self {
+    const fn new(_slot: usize) -> Self {
         Self {
             generation: 0,
+            flow_generation: 0,
             occupied: false,
             pid: 0,
             task: Task::new(),
-            flow: TaskFlow::new_user(slot),
             runtime: UserAppRuntime::new(),
         }
     }
@@ -3170,6 +3170,8 @@ pub struct UserTaskSet {
     parent_task_ref: TaskRef,
     pending_task_ref: TaskRef,
     last_exited_task_ref: TaskRef,
+    carrier_stack_base: usize,
+    carrier_stack_top: usize,
     prepared: bool,
     task_entry: TaskEntry,
     task_entry_bound: bool,
@@ -3304,6 +3306,8 @@ impl UserTaskSet {
             parent_task_ref: TaskRef::NONE,
             pending_task_ref: TaskRef::NONE,
             last_exited_task_ref: TaskRef::NONE,
+            carrier_stack_base: 0,
+            carrier_stack_top: 0,
             prepared: false,
             task_entry: TaskEntry::None,
             task_entry_bound: false,
@@ -3446,7 +3450,7 @@ impl UserTaskSet {
 
     pub const fn last_exited_flow_ref(&self) -> TaskFlowRef {
         if let Some(slot) = self.slot_for_ref(self.last_exited_task_ref) {
-            slot.flow.flow_ref()
+            slot.task.flow_ref()
         } else {
             TaskFlowRef::NONE
         }
@@ -3472,11 +3476,30 @@ impl UserTaskSet {
         }
     }
 
+    pub(crate) fn carrier_stack_matches(&self, base: usize, top: usize) -> bool {
+        self.set_lifecycle.state() == State::Ready
+            && base != 0
+            && top > base
+            && self.carrier_stack_base == base
+            && self.carrier_stack_top == top
+    }
+
+    pub(crate) fn carrier_stack_bounds(&self) -> Option<(usize, usize)> {
+        if self.set_lifecycle.state() == State::Ready
+            && self.carrier_stack_base != 0
+            && self.carrier_stack_top > self.carrier_stack_base
+        {
+            Some((self.carrier_stack_base, self.carrier_stack_top))
+        } else {
+            None
+        }
+    }
+
     pub const fn cpu_ref_for_task(&self, task_ref: TaskRef) -> Option<super::cpu::CpuRef> {
         let Some(slot) = self.slot_for_ref(task_ref) else {
             return None;
         };
-        slot.flow.cpu_ref()
+        slot.task.flow_cpu_ref()
     }
 
     pub const fn task_ref_valid(&self, task_ref: TaskRef) -> bool {
@@ -3487,7 +3510,7 @@ impl UserTaskSet {
         let Some(slot) = self.slot_for_ref(task_ref) else {
             return false;
         };
-        slot.flow.declared() && slot.flow.flow_ref().same_identity(flow_ref)
+        slot.task.embedded_flow().declared() && slot.task.flow_ref().same_identity(flow_ref)
     }
 
     pub const fn free_task_slot_count(&self) -> usize {
@@ -3545,7 +3568,7 @@ impl UserTaskSet {
             if slot.occupied && (&slot.task as *const Task as usize) == identity {
                 return Some(super::current_task::CurrentTaskCandidate {
                     task: &slot.task,
-                    flow: &slot.flow,
+                    flow: slot.task.embedded_flow(),
                 });
             }
             index += 1;
@@ -3560,7 +3583,7 @@ impl UserTaskSet {
         let slot = self.slot_for_ref(task_ref)?;
         Some(super::current_task::CurrentTaskCandidate {
             task: &slot.task,
-            flow: &slot.flow,
+            flow: slot.task.embedded_flow(),
         })
     }
 
@@ -3589,7 +3612,7 @@ impl UserTaskSet {
         let slot = &mut self.task_slots[index];
         slot.generation = next_generation(slot.generation);
         let task_ref = TaskRef::user(index, slot.generation);
-        slot.task = Task::with_ref(task_ref);
+        slot.task = Task::new_user(task_ref, slot.flow_generation);
         slot.pid = pid;
         slot.runtime = UserAppRuntime::new();
         slot.occupied = true;
@@ -3600,9 +3623,16 @@ impl UserTaskSet {
             TaskKind::UserModeThread,
         ));
         task_event_or_terminate(slot.task.adopt_preset());
+        task_event_or_terminate(slot.task.declare_and_bind_embedded_flow());
         slot.task.init_dummy_switch_context();
+        if !slot
+            .task
+            .set_kernel_stack_bounds(self.carrier_stack_base, self.carrier_stack_top)
+        {
+            panic!("UserTask shared kernel stack boundary invariant failed");
+        }
         task_event_or_terminate(slot.task.adopt_setup());
-        task_event_or_terminate(slot.flow.declare());
+        slot.flow_generation = slot.task.flow_ref().generation();
 
         self.parent_task_ref = parent_ref;
         self.active_task_ref = task_ref;
@@ -3610,29 +3640,25 @@ impl UserTaskSet {
         self.last_exited_task_ref = TaskRef::NONE;
 
         let slot = &mut self.task_slots[index];
-        let UserTaskStorageSlot {
-            task,
-            flow,
-            runtime,
-            ..
-        } = slot;
-        task_event_or_terminate(flow.bind(task));
-        task_event_or_terminate(task.bind_flow(flow));
-        if !flow.bind_cpu_ref(super::cpu::CpuRef::new(0)) {
+        let UserTaskStorageSlot { task, runtime, .. } = slot;
+        if !task.bind_flow_cpu_ref(super::cpu::CpuRef::new(0)) {
             panic!("declared UserTaskFlow CPU binding invariant failed");
         }
-        task_event_or_terminate(flow.preset(task, None));
-        task_event_or_terminate(flow.setup(task, None));
-        task_event_or_terminate(flow.enable(task, None));
+        task_event_or_terminate(task.publish_embedded_flow());
         task_event_or_terminate(task.adopt_enable());
-        task_event_or_terminate(runtime.bind_dynamic(task, flow, pid));
+        task_event_or_terminate(runtime.bind_dynamic(task, task.embedded_flow(), pid));
         Some(task_ref)
     }
 
-    pub fn continue_task(&mut self, task_ref: TaskRef, cpu_ref: super::cpu::CpuRef) -> EventResult {
+    #[cfg(app_smoke)]
+    pub fn dispatch_task_for_test(
+        &mut self,
+        task_ref: TaskRef,
+        cpu_ref: super::cpu::CpuRef,
+    ) -> EventResult {
         let Some(index) = task_ref.user_slot() else {
             return failed_condition(
-                LifecycleEvent::Continue,
+                LifecycleEvent::Dispatch,
                 State::Destroyed,
                 State::Online,
                 State::OnCpu,
@@ -3641,53 +3667,35 @@ impl UserTaskSet {
         let slot = &mut self.task_slots[index];
         if !slot.occupied || !slot.task_ref().same_identity(task_ref) {
             return failed_condition(
-                LifecycleEvent::Continue,
+                LifecycleEvent::Dispatch,
                 slot.state(),
                 State::Online,
                 State::OnCpu,
             );
         }
-        if slot.flow.cpu_ref() != Some(cpu_ref) {
+        if slot.task.flow_cpu_ref() != Some(cpu_ref) {
             return failed_condition(
-                LifecycleEvent::Continue,
-                slot.flow.state(),
+                LifecycleEvent::Dispatch,
+                slot.task.flow_state(),
                 State::Online,
                 State::Online,
             );
         }
-        slot.task.continue_on_cpu()?;
-        if slot.flow.state() != State::Online
-            || !super::task_flow::task_flow_execution_guard_satisfied(&slot.flow, &slot.task)
+        slot.task.dispatch_and_enter_for_test()?;
+        if slot.task.flow_state() != State::Online
+            || !super::task_flow::task_flow_execution_guard_satisfied(
+                slot.task.embedded_flow(),
+                &slot.task,
+            )
         {
             return failed_condition(
-                LifecycleEvent::Continue,
-                slot.flow.state(),
+                LifecycleEvent::Dispatch,
+                slot.task.flow_state(),
                 State::Online,
                 State::Online,
             );
         }
         Ok(())
-    }
-
-    pub(crate) fn accept_task_continue(&mut self, task_ref: TaskRef) -> EventResult {
-        let Some(index) = task_ref.user_slot() else {
-            return failed_condition(
-                LifecycleEvent::Continue,
-                State::Destroyed,
-                State::Online,
-                State::OnCpu,
-            );
-        };
-        let slot = &mut self.task_slots[index];
-        if !slot.occupied || !slot.task_ref().same_identity(task_ref) {
-            return failed_condition(
-                LifecycleEvent::Continue,
-                slot.state(),
-                State::Online,
-                State::OnCpu,
-            );
-        }
-        slot.task.continue_on_cpu()
     }
 
     pub(crate) fn suspend_task(&mut self, task_ref: TaskRef) -> EventResult {
@@ -3717,34 +3725,6 @@ impl UserTaskSet {
         Ok(())
     }
 
-    pub(crate) fn continue_flow(&self, task_ref: TaskRef) -> EventResult {
-        let Some(index) = task_ref.user_slot() else {
-            return failed_condition(
-                LifecycleEvent::Continue,
-                State::Destroyed,
-                State::Online,
-                State::Online,
-            );
-        };
-        let slot = &self.task_slots[index];
-        let flow = &slot.flow;
-        if !slot.occupied
-            || !slot.task_ref().same_identity(task_ref)
-            || slot.task.state() != State::OnCpu
-            || flow.state() != State::Online
-            || !slot.task.flow().same_identity(flow.flow_ref())
-            || !super::task_flow::task_flow_execution_guard_satisfied(flow, &slot.task)
-        {
-            return failed_condition(
-                LifecycleEvent::Continue,
-                flow.state(),
-                State::Online,
-                State::Online,
-            );
-        }
-        Ok(())
-    }
-
     fn destroy_active_user_task(&mut self) -> bool {
         let Some(index) = self.active_task_ref.user_slot() else {
             return false;
@@ -3758,13 +3738,10 @@ impl UserTaskSet {
         }
 
         let slot = &mut self.task_slots[index];
-        let UserTaskStorageSlot {
-            task,
-            flow,
-            runtime,
-            ..
-        } = slot;
-        if runtime.cleanup_dynamic(task, flow).is_err() || flow.cleanup_for_exit(task).is_err() {
+        let UserTaskStorageSlot { task, runtime, .. } = slot;
+        if runtime.cleanup_dynamic(task, task.embedded_flow()).is_err()
+            || task.cleanup_embedded_flow().is_err()
+        {
             return false;
         }
 
@@ -3806,13 +3783,13 @@ impl UserTaskSet {
             return false;
         }
         if slot.task.state() != State::OnCpu
-            || slot.flow.state() != State::Online
-            || slot.task.flow() != slot.flow.flow_ref()
+            || slot.task.flow_state() != State::Online
+            || slot.task.flow() != slot.task.embedded_flow().flow_ref()
         {
             return false;
         }
         slot.runtime
-            .replace_dynamic_application(&slot.task, &slot.flow)
+            .replace_dynamic_application(&slot.task, slot.task.embedded_flow())
     }
 
     pub fn prepare_active_task_for_shutdown(&mut self) -> Option<TaskRef> {
@@ -3868,10 +3845,9 @@ impl UserTaskSet {
                 other += 1;
             }
 
-            let slot = &mut self.task_slots[index];
-            let UserTaskStorageSlot { task, flow, .. } = slot;
-            if task.continue_on_cpu().is_err()
-                || flow.cleanup_for_exit(task).is_err()
+            let task = &mut self.task_slots[index].task;
+            if task.dispatch_and_enter_for_test().is_err()
+                || task.cleanup_embedded_flow().is_err()
                 || task.disable().is_err()
                 || task.cleanup().is_err()
             {
@@ -3904,7 +3880,7 @@ impl UserTaskSet {
             .map(|slot| slot.task.flow())
             .unwrap_or(TaskFlowRef::NONE);
         if self
-            .continue_task(recycled_ref, super::cpu::CpuRef::new(0))
+            .dispatch_task_for_test(recycled_ref, super::cpu::CpuRef::new(0))
             .is_err()
         {
             return Err("start recycled initial flow");
@@ -4595,8 +4571,27 @@ impl UserTaskSet {
         self.parent_wait_resumed && self.child_exit_status_observed
     }
 
-    pub fn setup(&mut self) -> EventResult {
-        if self.set_lifecycle.state() != State::Base || self.active_task_state() != State::Base {
+    pub fn setup(&mut self, carrier: &KernelInitTask) -> EventResult {
+        self.setup_with_carrier_stack(
+            carrier,
+            carrier.task().kernel_stack_base(),
+            carrier.task().kernel_stack_top(),
+        )
+    }
+
+    pub fn setup_with_carrier_stack(
+        &mut self,
+        carrier: &KernelInitTask,
+        carrier_stack_base: usize,
+        carrier_stack_top: usize,
+    ) -> EventResult {
+        if self.set_lifecycle.state() != State::Base
+            || self.active_task_state() != State::Base
+            || carrier.state() != State::OnCpu
+            || !carrier.current_stack_pointer_in_range()
+            || carrier_stack_base == 0
+            || carrier_stack_top <= carrier_stack_base
+        {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.set_lifecycle.state(),
@@ -4606,6 +4601,8 @@ impl UserTaskSet {
         }
 
         self.prepared = true;
+        self.carrier_stack_base = carrier_stack_base;
+        self.carrier_stack_top = carrier_stack_top;
         self.task_entry = TaskEntry::UserChild;
         self.task_entry_bound = true;
         self.active_task_record_available = true;
@@ -8959,9 +8956,6 @@ pub fn prepare_first_user_init_handoff(ctx: &mut crate::context::Context) -> Eve
     {
         user_boot_panic("user payload setup failed\n");
     }
-    if ctx.user_task_set.setup().is_err() {
-        user_boot_panic("user child process preset failed\n");
-    }
     if !prepare_user_kernel_trap_stack(
         &mut ctx.vmalloc_allocator,
         &mut ctx.page_table_caches,
@@ -8970,6 +8964,17 @@ pub fn prepare_first_user_init_handoff(ctx: &mut crate::context::Context) -> Eve
         &ctx.config,
     ) {
         user_boot_panic("user kernel trap stack setup failed\n");
+    }
+    if ctx
+        .user_task_set
+        .setup_with_carrier_stack(
+            &ctx.kernel_init_task,
+            user_kernel_trap_stack_base(),
+            user_kernel_trap_stack_top(),
+        )
+        .is_err()
+    {
+        user_boot_panic("user child process preset failed\n");
     }
 
     let success = select_and_exec_user_init(ctx);
@@ -9073,7 +9078,7 @@ pub fn prepare_first_user_init_handoff(ctx: &mut crate::context::Context) -> Eve
 #[cfg(app_user_boot)]
 pub fn commit_first_user_init_handoff(ctx: &mut crate::context::Context) -> EventResult {
     if ctx.kernel_init_user_runtime.state() != State::Ready
-        || ctx.kernel_init_flow.state() != State::Online
+        || ctx.kernel_init_task.flow_state() != State::Online
         || ctx.kernel_init_task.task().flow() != TaskFlowRef::KERNEL_INIT
         || ctx.selected_payload_handoff.state() != State::Online
     {

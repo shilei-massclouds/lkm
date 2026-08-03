@@ -61,12 +61,12 @@ lifecycle 或 checkpoint。
 
 - `Kernel.Enable` 同步驱动 BootInitFlow 三段 lifecycle；BootInitFlow Online 后，同一固定 Flow 对
   CPU0 Scheduler `yields Schedule()`。非 identity switch 由 Scheduler 显式保存/恢复 TaskThreadContext、
-  Suspend prev、Continue next，再向 next 固定 TaskFlow 交付 contextual Continue；Kernel 不是 Schedule
+  Suspend prev、Dispatch next，再向 next 固定 TaskFlow 交付 contextual Enter；Kernel 不是 Schedule
   sender，`yields` 不隐式产生调度效果。
 - `BootInitFlow.Preset` 直接驱动入口对象并提交 Prepared；Setup 直接驱动 boot/interrupt 叶子以及
   `BootInitRestInitPhase`；Enable 只驱动 `BootInitScheduleHandoffPhase`。
-- KernelInitFlow 随 KernelInitTask 发布为 Online；首次及恢复派发都由 contextual Continue 承载。
-  首个 Continue 直接驱动 PreSMP/SMP bringup、runtime、initcall、rootfs、finalize、PayloadPrepare 和
+- KernelInitFlow 随 KernelInitTask 发布为 Online；首次及恢复派发都由 contextual Enter 承载。
+  首个 Enter 转到唯一 Start，直接驱动 PreSMP/SMP bringup、runtime、initcall、rootfs、finalize、PayloadPrepare 和
   PayloadHandoffPrepare 叶子。
 - `PayloadHandoffPreparePhase.Online` 后 Kernel.Enable 提交 Kernel.Online，并由 Kernel 作为唯一发送者
   `emits KernelInitFlow.CommitPayloadHandoff`。UserBoot 只替换 Flow-owned UserAppRuntime 内部的
@@ -2320,7 +2320,7 @@ BootInitFlow 的 idle resume 子阶段，都应作为对应 execution continuati
 
 1. `BootInitRestInitPhase`：由上一阶段遗留的 `BootTask` 执行 `rcu_scheduler_starting()`，创建 PID 1 的 `KernelInitTask`，把 init 临时固定在 boot CPU，创建 `KthreaddTask`，设置 `system_state = SYSTEM_SCHEDULING`，并完成 `kthreadd_done`。PID 1 解除等待必须由 `KernelInitTask` 在自己的 wait side 观察该 completion 后提交。本阶段不提交 `Scheduler.schedule()`，不执行 kthreadd 服务循环，也不进入 boot idle。
 2. `BootInitScheduleHandoffPhase`：仍由 `BootTask` 执行，只覆盖 `schedule_preempt_disabled()` 中退出 inherited preempt-disabled guard、进入 `Scheduler.schedule()` 并提交首次 handoff facts 的调度分界点。
-3. `BootIdleEntryPhase`：由首次调度交接后同一 BootTask/BootInitFlow 的 contextual Continue 从 schedule 返回点执行，进入 `cpu_startup_entry(CPUHP_ONLINE)` 和代表性 idle loop cycle；该子阶段完全受 `BootIdleStartupContext` 覆盖。
+3. `BootIdleEntryPhase`：由首次调度交接后同一 BootTask/BootInitFlow 的 contextual Enter 从 schedule 返回点执行，进入 `cpu_startup_entry(CPUHP_ONLINE)` 和代表性 idle loop cycle；该子阶段完全受 `BootIdleStartupContext` 覆盖。
 4. `SmpRuntimePhase` 的入口由 `TaskEntry::KernelInit` 启动；其首个子阶段 `PreSmpInitPhase` 覆盖 `kernel_init` 线程中 `kernel_init_freeable()` 从 `gfp_allowed_mask = __GFP_BITS_MASK` 到 `smp_init()` 前的初始化段。它运行在 `KernelInitTask` 上，完成 SMP 启动前仍必须在单核多任务环境中推进的准备动作，例如打开 PageAllocator 完整 GFP mask、记录当前配置下裁剪的内存节点访问路径和 deferred 的 `cad_pid` 绑定位置、执行 `smp_prepare_cpus(setup_max_cpus)`、完成 `workqueue_init()`、`init_mm_internals()`、`rcu_init_tasks_generic()`、`do_pre_smp_initcalls()` 和 `lockup_detector_init()`。`smp_init()` 本身不属于本子阶段，而是后续 `SmpBringupPhase` 的入口边界。
 
 ##### BootInitFlow Enable 分叉修正规则
@@ -2380,7 +2380,7 @@ schedule 后的 resume coordinate 并在 BootTask 恢复后进入 idle。因此�
 7. `kthreadd 准备同步门`（暂名 `KthreaddReadyGate`）：覆盖静态 completion `kthreadd_done` 和 `complete(&kthreadd_done)`。它是 `Completion` 类型的静态实例；`DECLARE_COMPLETION(kthreadd_done)` 可看作由 `KthreaddReadyGate` 自身的 `preset()` 与 `setup()` 绑定静态存储并确认初始化事实，初始扩展状态为 `Pending`。它把 `KernelInitTask` 和 `KthreaddTask` 解耦：PID 1 可以先创建并阻塞等待，待 `kthreadd_task` 全局引用建立且 `SystemState.value == SYSTEM_SCHEDULING` 后，`complete(&kthreadd_done)` 建模为 `KthreaddReadyGate.complete()` 扩展事件，只发布 token/wake 事实；PID 1 继续执行 `kernel_init_freeable()` 的 release fact 由 `KernelInitTask` 的 wait side 观察或消费该 token 后提交。
 8. `系统状态对象`（暂名 `SystemState`）的 setup：覆盖 `system_state = SYSTEM_SCHEDULING`。`SystemState` 是独立全局对象，早期由静态全局数据形成，`SystemState.preset()` 已把对象生命周期推进到 `Prepared`，并在内部属性 `value` 中记录 `SYSTEM_BOOTING`。本处执行 `SystemState.setup()`，把对象生命周期推进到 `Ready`，同时把内部属性 `SystemState.value` 更新为 `SYSTEM_SCHEDULING`。这里的 `value` 是 Linux 的全局阶段枚举，不是对象生命周期状态；该对象不替代 `Scheduler`，也不把 SMP 或 workqueue 直接推进到后续状态。
 9. `boot idle continuation`：它是 BootInitFlow Online Action 在 `yields Schedule` 后的 resume
-coordinate，不是对象或另一个 Flow。只有调度器未来恢复 BootTask 后，contextual Continue 才覆盖
+coordinate，不是对象或另一个 Flow。只有调度器未来恢复 BootTask 后，contextual Enter 才覆盖
 `cpu_startup_entry(CPUHP_ONLINE)`。Task carrier 始终是 Linux 静态 `init_task/current` 对应的 BootTask。
 
 <p align="center">
@@ -2406,7 +2406,7 @@ coordinate，不是对象或另一个 Flow。只有调度器未来恢复 BootTas
 | `system_state = SYSTEM_SCHEDULING` | formal candidate: `SystemState.setup()` | 把 `SystemState.state` 推进到 `Ready`，并把内部属性 `SystemState.value` 从 `SYSTEM_BOOTING` 更新为 `SYSTEM_SCHEDULING`；表示系统进入调度运行状态，但不等价于 SMP 已启动，也不自动推进 workqueue 到 enabled。 |
 | `complete(&kthreadd_done)` | extension event: `KthreaddReadyGate.complete()` | 对静态 `Completion` 实例执行 `complete()`：通常把扩展状态从 `Pending` 推进到 `Completed`，并唤醒等待中的 `KernelInitTask`。若随后 PID 1 的 `wait()` 消费该令牌，实例扩展状态可回到 `Pending`；因此本阶段不把 `Open` 作为长期结束状态。 |
 | `schedule_preempt_disabled()` | formal pattern: `BootIdlePreemption.enable_no_resched()` + `Scheduler.schedule()` + `BootIdleStartupContext` | 退出继承的禁抢占原子上下文，执行一次调度分界，再进入 post-schedule boot idle 原子上下文；形成第一次实际调度交接，使已入队的新任务具备运行机会。 |
-| `cpu_startup_entry(CPUHP_ONLINE)` | formal: `BootIdleEntryPhase` + idle actions | 同一 BootTask/BootInitFlow 保持身份；调度器恢复它后由 contextual Continue 从 schedule 返回点驱动入口和 idle 循环。该过程同时以 `CPUHP_ONLINE` 标记 boot CPU hotplug 状态；secondary CPU 仍未启动。 |
+| `cpu_startup_entry(CPUHP_ONLINE)` | formal: `BootIdleEntryPhase` + idle actions | 同一 BootTask/BootInitFlow 保持身份；调度器恢复它后由 contextual Enter 从 schedule 返回点驱动入口和 idle 循环。该过程同时以 `CPUHP_ONLINE` 标记 boot CPU hotplug 状态；secondary CPU 仍未启动。 |
 
 <p align="center">
   <img src="pic/rest-init-sequence.svg" alt="rest_init 期对象构建时序" width="900">
@@ -2569,7 +2569,7 @@ Boot idle 入口不构成其前置条件。
 - `BootInitRestInitPhase.state == Online`
 - `BootInitScheduleHandoffPhase.state == Online`
 - `BootInitFlow.state == Online`
-- `BootTask` 保持同一 identity；未执行时为 Online，未来被调度恢复时通过 Continue 回到 OnCpu，boot CPU idle/scheduler 路径绑定同一 Task
+- `BootTask` 保持同一 identity；未执行时为 Online，未来被调度恢复时通过 Dispatch 回到 OnCpu，boot CPU idle/scheduler 路径绑定同一 Task
 - `KernelInitTask.state == Online`，且 PID 1 已解除 `kthreadd_done` 等待
 - `KthreaddTask.state == Online`，表示 `kthreadd` 任务已建立并可由调度器运行
 - `SystemState.state == Ready`
@@ -2629,12 +2629,12 @@ Boot idle 入口不构成其前置条件。
 当前先将 `SmpBringupPhase` 的对象和边界记录如下：
 
 1. `SMP 启动期对象`（暂名 `SmpBringupPhase`）：属于阶段对象，是 `SMP Runtime Phase` 的第二个子阶段对象。它从 `PreSmpInitPhase.Ready` 接续，由 `KernelInitTask` 驱动，按 `smp_init()` 的有效顺序推进 secondary CPU 从 present 到 online。
-2. `secondary idle 任务对象`（`CpuGroup.cpus[cpu].IdleTask`）：覆盖 `idle_threads_init()`。它遍历 possible CPU，跳过 `BootCPU.id`，对每个 possible non-boot CPU 驱动 `CpuGroup.cpus[cpu].IdleTask.preset/setup/enable()`：形成并初始化该 CPU 的 inactive idle task，内部对应 Linux `fork_idle(cpu)` / `init_idle(task, cpu)`，并把该 TaskRef 写入 `CpuGroup.cpus[cpu].Scheduler.idle/curr`。这里的 Online 表示 idle task 已可作为 Scheduler idle 选择，不表示普通 runnable class queue membership。每个 AP idle task必须有独立 task 记录和 dedicated stack；传给 SBI HSM boot data 的 `task_ptr` 指向该 AP idle task，`stack_ptr` 指向该 task 的 AP pt_regs/栈顶边界。该调用不启动 CPU，也不设置 `cpu.online`；目标 hart 从 `secondary_start_sbi` 开始执行时由架构入口直接把同一 idle Task 置为 OnCpu并启动 initial idle Flow，不发送 Scheduler Continue。`cpu_startup_entry(CPUHP_AP_ONLINE_IDLE)` 继续负责进入可中断的 AP idle/park 路径、使对应 Scheduler Online，并发布 hotplug online-idle 完成事实。
+2. `secondary idle 任务对象`（`CpuGroup.cpus[cpu].IdleTask`）：覆盖 `idle_threads_init()`。它遍历 possible CPU，跳过 `BootCPU.id`，对每个 possible non-boot CPU 驱动 `CpuGroup.cpus[cpu].IdleTask.preset/setup/enable()`：形成并初始化该 CPU 的 inactive idle task，内部对应 Linux `fork_idle(cpu)` / `init_idle(task, cpu)`，并把该 TaskRef 写入 `CpuGroup.cpus[cpu].Scheduler.idle/curr`。这里的 Online 表示 idle task 已可作为 Scheduler idle 选择，不表示普通 runnable class queue membership。每个 AP idle task必须有独立 task 记录和 dedicated stack；传给 SBI HSM boot data 的 `task_ptr` 指向该 AP idle task，`stack_ptr` 指向该 task 的 AP pt_regs/栈顶边界。该调用不启动 CPU，也不设置 `cpu.online`；目标 hart 从 `secondary_start_sbi` 开始执行时由架构入口直接把同一 idle Task 置为 OnCpu并调用 initial idle Flow 的 Start，不发送 Scheduler Dispatch/TaskFlow.Enter。`cpu_startup_entry(CPUHP_AP_ONLINE_IDLE)` 继续负责进入可中断的 AP idle/park 路径、使对应 Scheduler Online，并发布 hotplug online-idle 完成事实。
 3. `CPU hotplug 状态与线程对象`：覆盖 `cpuhp_threads_init()`。`CpuHotplugState` 是 `CpuGroup.cpus[cpu]` 的子对象，不再作为顶层集合对象；`CpuHotplugThread` 是 smpboot 模板创建的统一 `Task + TaskFlow` 的特化角色视图，挂在对应 CPU 下，写作 `CpuGroup.cpus[cpu].CpuHotplugThread`，但不另存 Task lifecycle、PID 或 switch context。本调用先驱动所有 possible CPU 的 `CpuHotplugState.preset_sync_gates()`，初始化 `done_up` / `done_down` completion；这两个 completion 按通用规则作为 `CpuHotplugState` 的同步子对象/属性，不单独建立 gate 对象。随后记录 `CpuHotplugThread.template.registered == true`；最后只为当前 online 的 `BootCPU` 创建并 unpark `CpuGroup.cpus[BootCPU.id].CpuHotplugThread`。secondary CPU 的 `CpuHotplugThread` 不要求在本调用结束时存在。
 4. `CPU 组对象`（`CpuGroup`）的正式启用动作：覆盖 `bringup_nonboot_cpus(setup_max_cpus)` 的主线。`max_cpus == 0` 只作为 `nosmp` checkpoint，成立时跳过 secondary bringup。当前未启用 `CONFIG_HOTPLUG_PARALLEL`，并且 `cpuhp_bringup_cpus_parallel(max_cpus)` 折叠为 false，因此实际走串行 `cpuhp_bringup_mask(cpu_present_mask, setup_max_cpus, CPUHP_ONLINE)`。规格层把它建模为集合级 `CpuGroup.enable(mask = present_cpus, limit = setup_max_cpus, target = CPUHP_ONLINE)`，它不直接执行 arch 启动，而是逐个对目标 CPU 调用 `CpuGroup.cpus[cpu].CpuHotplugState.advance(target = CPUHP_ONLINE)`。
 5. `CPU hotplug 单 CPU 推进动作`：覆盖 `cpu_up(cpu, CPUHP_ONLINE)` / `_cpu_up(cpu, 0, CPUHP_ONLINE)`。该动作先检查 `cpu_possible` / `cpu_present` / `cpu_bootable` 等前置条件；若目标 CPU 仍处于 `CPUHP_OFFLINE`，要求前序 `CpuGroup.cpus[cpu].IdleTask.state == Prepared`；随后设置 `CpuHotplugState.target_step = CPUHP_ONLINE`。Linux 在 boot CPU 上只推进到 `CPUHP_BRINGUP_CPU`，超过该 step 的 AP-side callbacks 交给目标 CPU 的 `CpuHotplugThread` 继续执行。因此该动作是单 CPU 的 hotplug 状态推进入口，不等同于一次性设置 `online = true`。
 6. `CPUHP_BRINGUP_CPU` 复合过程（`CpuHotplugState.bringup_cpu(cpu)`）：覆盖 `CpuHotplugState.advance()` 内部的 `CPUHP_BRINGUP_CPU` step。它是第三层 composite，其语义是 hotplug 状态机驱动的一段跨 CPU bringup 协议。BP side 由 boot CPU 执行 `__cpu_up()` / `cpu_ops->cpu_start(cpu, tidle)`，释放目标 hart，并等待 `CpuHotplugState.cpu_running` 和 `done_up` completion；AP side 由目标 secondary CPU 自己执行 `ApEntryPreludePhase`、`ApSmpCallinPhase` 和 `ApOnlineIdlePhase`。Linux/RISC-V 实现中 `cpu_running` 是全局静态 completion；规格层把它作为本次 hotplug bringup 的 arch 同步实例约束归入 `CpuHotplugState`，不对象化为独立同步门。
-7. `AP 入口先导期`（`ApEntryPreludePhase`）：覆盖 RISC-V `secondary_start_sbi` 与 `.Lsecondary_start_common`。它是区别于 BP `BootInitFlow.Preset` 入口步骤的 AP 专属阶段：不清 BSS、不解析 boot args，而是消费 HSM boot data，在提交 `IdleTask.OnCpu` 和激活 initial idle Flow 之前继承目标 CPU 的 CpuRef；随后该 Flow 才能解析 `CurrentCPU` 并访问 CPU-local 状态。该首次执行权来自 hart entry，不发送 Scheduler Continue。
+7. `AP 入口先导期`（`ApEntryPreludePhase`）：覆盖 RISC-V `secondary_start_sbi` 与 `.Lsecondary_start_common`。它是区别于 BP `BootInitFlow.Preset` 入口步骤的 AP 专属阶段：不清 BSS、不解析 boot args，而是消费 HSM boot data，在提交 `IdleTask.OnCpu` 和调用 initial idle Flow 的 Start 之前继承目标 CPU 的 CpuRef；随后该 Flow 才能解析 `CurrentCPU` 并访问 CPU-local 状态。该首次执行权来自 hart entry，不发送 Scheduler Dispatch/TaskFlow.Enter。
 8. `AP smp_callin 期`（`ApSmpCallinPhase`）：覆盖 Linux `smp_callin()` 的最小语义。AP 在自身 CPU 视角中把 current idle task 绑定到 `init_mm`，记录 topology 和 `notify_cpu_starting()` 边界，启用该 CPU 的 IPI 接收路径，发布 `set_cpu_online()` 事实，执行本地 icache/TLB flush summary，然后 complete `cpu_running` 释放 BP side。
 9. `AP online-idle 期`（`ApOnlineIdlePhase`）：覆盖 `local_irq_enable()` 与 `cpu_startup_entry(CPUHP_AP_ONLINE_IDLE)`。AP 打开本地中断，进入 AP idle/park 运行线，并在 `cpuhp_online_idle()` 边界 complete `done_up`。本阶段明确不运行 BP payload 或用户 syscall；完整 idle loop、调度抢占和后续 AP hotplug callbacks 仍 deferred。
 10. `IPI 对象`（`SbiIpi`）的 per-CPU enable 动作：覆盖 secondary CPU 上的 `riscv_ipi_enable()`。前序 `SbiIpi.state == Ready` 已建立 IPI mux 和 hotplug hook；本阶段在每个 secondary CPU bringup 时启用该 CPU 的 IPI 接收路径。这里仍是按 CPU 的启用动作，不表示所有跨 CPU callback API 都已经进入完整运行边界。
@@ -3784,7 +3784,7 @@ boot/primary hart 事实并精确建立
 负责关闭 BootCPU 的中断分路门控或完成待决中断清除写。CpuGroup 效果由真实内核入口 adoption，不要求修改外部固件。实际字节放置可以由
 QEMU/loader 完成；OpenSBI.Enable 交接域保证其结果，不虚构
 固件内部复制。Kernel 在 Ready 内 drives BootInitFlow，后者的 Preset 首先由
-InterruptType 关闭 BootCPU 的全部中断分路门控、完成一次待决中断清除写并建立相应顺序事实；该写不保证硬件驱动的待决位随后保持为零。BootInitFlow Online 后由同一固定 Flow `yields` 首次 Schedule；non-identity switch 的显式 Task/context commit 与 contextual Continue 再推进 KernelInitFlow；
+InterruptType 关闭 BootCPU 的全部中断分路门控、完成一次待决中断清除写并建立相应顺序事实；该写不保证硬件驱动的待决位随后保持为零。BootInitFlow Online 后由同一固定 Flow `yields` 首次 Schedule；non-identity switch 的显式 Task/context commit 与 contextual Enter 再推进 KernelInitFlow；
 `PayloadHandoffPreparePhase.Online` 后提交
 Online，再 emits `KernelInitFlow.CommitPayloadHandoff`。其余启动相关寄存器由入口阶段逐步更新。
 全局 `Startup` 仍规范化为 `Preset`，不重绑定为 `Enable`。

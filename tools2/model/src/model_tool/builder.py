@@ -686,7 +686,7 @@ def _check_task_only_lifecycle(
         for handler in state.get("handlers", []):
             if (
                 handler.get("kind") == "Transition"
-                and handler.get("name") in {"Activate", "Continue", "Suspend"}
+                and handler.get("name") in {"Activate", "Dispatch", "Suspend"}
                 and not task_lifecycle
             ):
                 _diagnostic(
@@ -1449,6 +1449,94 @@ def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
             for variant in member.get("variants", []):
                 result.extend(yield_calls(variant.get("members", [])))
         return result
+
+    def validate_context_entry_handlers(
+        owner: str,
+        declared_type: str | None,
+        handlers: list[dict[str, Any]],
+    ) -> None:
+        task_flow_owner = _is_subtype(types, declared_type, "TaskFlow")
+        initial_entries: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for handler in handlers:
+            if handler["id"] in seen:
+                continue
+            seen.add(handler["id"])
+            contextual = _handler_property(handler, "contextual_entry")
+            initial = _handler_property(handler, "initial_context_entry")
+            if contextual is not None and contextual != "true":
+                _diagnostic(
+                    diagnostics,
+                    "error",
+                    f"contextual_entry on {handler['id']} must be true when present",
+                    handler["span"],
+                )
+            if contextual == "true" and (
+                not task_flow_owner
+                or handler.get("kind") != "Action"
+                or _handler_property(handler, "state_effect") != "StateEffect::None"
+            ):
+                _diagnostic(
+                    diagnostics,
+                    "error",
+                    "contextual_entry is allowed only on a TaskFlow "
+                    f"StateEffect::None Action: {handler['id']}",
+                    handler["span"],
+                )
+            if initial is not None and initial != "true":
+                _diagnostic(
+                    diagnostics,
+                    "error",
+                    f"initial_context_entry on {handler['id']} must be true when present",
+                    handler["span"],
+                )
+            if initial == "true":
+                initial_entries.append(handler)
+                if (
+                    not task_flow_owner
+                    or handler.get("kind") != "Action"
+                    or handler.get("name") != "Start"
+                    or _handler_property(handler, "state_effect") != "StateEffect::None"
+                ):
+                    _diagnostic(
+                        diagnostics,
+                        "error",
+                        "initial_context_entry is allowed only on a TaskFlow "
+                        f"StateEffect::None Action::Start: {handler['id']}",
+                        handler["span"],
+                    )
+        if len(initial_entries) > 1:
+            _diagnostic(
+                diagnostics,
+                "error",
+                f"TaskFlow {owner} has more than one initial_context_entry Action::Start",
+                initial_entries[1]["span"],
+            )
+
+    for type_name, declaration in types.items():
+        validate_context_entry_handlers(
+            type_name,
+            type_name,
+            [
+                *declaration.get("effective_processes", []),
+                *[
+                    handler
+                    for state in declaration.get("states", {}).values()
+                    for handler in state.get("handlers", [])
+                ],
+            ],
+        )
+
+    for system_name, system in systems.items():
+        validate_context_entry_handlers(
+            system_name,
+            system.get("declared_type"),
+            [
+                handler
+                for handlers in system.get("handlers_by_name", {}).values()
+                for handler in handlers
+            ],
+        )
 
     seen_handlers: set[str] = set()
     for system in systems.values():

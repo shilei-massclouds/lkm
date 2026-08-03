@@ -10,6 +10,7 @@ pub struct SelectedPayloadHandoff {
     variant_setup_ready: bool,
     variant_prepare_ready: bool,
     no_return_entry_bound: bool,
+    committed: bool,
 }
 
 impl SelectedPayloadHandoff {
@@ -21,6 +22,7 @@ impl SelectedPayloadHandoff {
             variant_setup_ready: false,
             variant_prepare_ready: false,
             no_return_entry_bound: false,
+            committed: false,
         }
     }
 
@@ -46,6 +48,29 @@ impl SelectedPayloadHandoff {
 
     pub const fn no_return_entry_bound(&self) -> bool {
         self.no_return_entry_bound
+    }
+
+    pub const fn committed(&self) -> bool {
+        self.committed
+    }
+
+    pub fn commit(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Online
+            || !self.kind_bound
+            || !self.variant_setup_ready
+            || !self.variant_prepare_ready
+            || !self.no_return_entry_bound
+            || self.committed
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Online,
+                State::Online,
+            );
+        }
+        self.committed = true;
+        Ok(())
     }
 
     pub fn setup(&mut self, config: &Config, variant_setup_ready: bool) -> EventResult {

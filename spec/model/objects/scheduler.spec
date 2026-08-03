@@ -129,9 +129,9 @@ predicate scheduler_switch_order_save_suspend_restore_finish<S, T: TaskRef, U: T
     next_ref: U
 ) -> bool;
 predicate scheduler_switch_preserves_prev_disposition<S, T: TaskRef>(scheduler: S, prev_ref: T) -> bool;
-predicate scheduler_switch_current_bindings_committed_before_continue<S, T: TaskRef>(scheduler: S, next_ref: T) -> bool;
+predicate scheduler_switch_current_bindings_committed_before_dispatch<S, T: TaskRef>(scheduler: S, next_ref: T) -> bool;
 predicate scheduler_switch_finish_runs_on_next_stack<S, T: TaskRef>(scheduler: S, next_ref: T) -> bool;
-predicate scheduler_identity_has_no_switch_or_task_continue<S, T: TaskRef>(scheduler: S, task_ref: T) -> bool;
+predicate scheduler_identity_has_no_switch_or_task_dispatch<S, T: TaskRef>(scheduler: S, task_ref: T) -> bool;
 
 type Scheduler: ResourceObject {
     parent: CPU;
@@ -358,7 +358,7 @@ type Scheduler: ResourceObject {
             ensures {
                 scheduler_schedule_sender_is_current_fixed_flow(self);
                 scheduler_schedule_identity_resumes_yield_source(self, self.curr);
-                scheduler_identity_has_no_switch_or_task_continue(self, self.curr);
+                scheduler_identity_has_no_switch_or_task_dispatch(self, self.curr);
                 scheduler_identity_class_bookkeeping_callback_defined(self);
             }
         }
@@ -385,8 +385,8 @@ type Scheduler: ResourceObject {
                 scheduler_next_dispatch_preflight_complete(self, next_ref, next_ref.flow);
             }
             drives {
-                next_ref.Transition::Continue;
-                next_ref.flow.Action::Continue;
+                next_ref.Transition::Dispatch;
+                next_ref.flow.Action::Enter;
             }
             ensures {
                 scheduler_task_does_not_forward_flow_dispatch(next_ref);
@@ -415,7 +415,7 @@ type Scheduler: ResourceObject {
             ensures {
                 scheduler_switch_order_save_suspend_restore_finish(self, prev_ref, next_ref);
                 scheduler_switch_preserves_prev_disposition(self, prev_ref);
-                scheduler_switch_current_bindings_committed_before_continue(self, next_ref);
+                scheduler_switch_current_bindings_committed_before_dispatch(self, next_ref);
                 scheduler_schedule_nonidentity_dispatches_next_task(self, next_ref);
             }
         }

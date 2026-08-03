@@ -89,7 +89,7 @@ fn require_selected_entry(ctx: &Context, expected_kind: SelectedPayloadKind) {
         || !ctx.selected_payload_handoff.no_return_entry_bound()
         || !crate::phases::payload::prepare::is_online()
         || !crate::phases::payload::handoff_prepare::is_online()
-        || !ctx.kernel_init_flow.payload_handoff_committed()
+        || !ctx.selected_payload_handoff.committed()
         || !crate::systems::kernel::is_online()
     {
         crate::arch::riscv64::sbi::putstr("selected payload entry invariant failed\n");

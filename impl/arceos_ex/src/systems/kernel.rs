@@ -74,11 +74,11 @@ pub fn accept_enable_at_entry(boot_args: &BootArgs) -> EventResult {
             .boot_task
             .task()
             .flow()
-            .same_identity(ctx.boot_init_flow.core().flow_ref())
-        || ctx.boot_init_flow.state() != State::Base
+            .same_identity(ctx.boot_task.task().embedded_flow().flow_ref())
+        || ctx.boot_task.task().flow_state() != State::Base
         || ctx.cpu_group.state() != State::Prepared
         || ctx.cpu_group.boot_cpu_state() != State::Prepared
-        || ctx.boot_init_flow.cpu_ref().is_some()
+        || ctx.boot_task.task().flow_cpu_ref().is_some()
         || KERNEL_ENABLE_ACCEPTED.load(Ordering::Acquire)
     {
         return failed_condition(LifecycleEvent::Enable, state, State::Ready, State::Online);
@@ -114,7 +114,7 @@ pub fn commit_online_after_application_environment_ready() -> EventResult {
         || !ctx
             .current_task_ref()
             .is_ok_and(|task_ref| task_ref.same_identity(ctx.kernel_init_task.task_ref()))
-        || ctx.kernel_init_flow.state() != State::Online
+        || ctx.kernel_init_task.flow_state() != State::Online
         || !crate::phases::payload::prepare::is_online()
         || !crate::phases::payload::handoff_prepare::is_online()
         || ctx.selected_payload_handoff.state() != State::Online

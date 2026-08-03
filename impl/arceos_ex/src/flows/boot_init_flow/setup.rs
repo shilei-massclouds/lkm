@@ -4,7 +4,6 @@ use crate::{
     objects::{
         earlycon, printk,
         state::{EventResult, LifecycleEvent, State, failed_condition},
-        task::Task,
         task_flow::task_flow_execution_guard_satisfied,
     },
 };
@@ -18,12 +17,6 @@ const TRIMMED_PAGE_ADDRESS_INIT: u8 = 1 << 1;
 const START_KERNEL_POSITION_PRESERVED: u8 = 1 << 2;
 const REQUIRED_FACTS: u8 =
     TRIMMED_VMLINUX_BUILD_ID | TRIMMED_PAGE_ADDRESS_INIT | START_KERNEL_POSITION_PRESERVED;
-
-impl super::BootInitFlow {
-    pub fn setup(&mut self, owner: &Task, checkpoint: Checkpoint) -> EventResult {
-        self.flow.setup(owner, Some(checkpoint))
-    }
-}
 
 /// Starts BootInitFlow.Setup with its first direct leaf.
 #[unsafe(no_mangle)]
@@ -95,12 +88,13 @@ pub fn setup_after_boot_init_rest_init() -> ! {
     let dependencies_ready = super::setup_leaves_online() && super::rest_init::is_online();
     let ctx = crate::context::context();
     let result = if dependencies_ready {
-        ctx.boot_init_flow
-            .setup(ctx.boot_task.task(), Checkpoint::BootInitFlowReady)
+        ctx.boot_task
+            .task_mut()
+            .setup_embedded_flow(Checkpoint::BootInitFlowReady)
     } else {
         failed_condition(
             LifecycleEvent::Setup,
-            ctx.boot_init_flow.state(),
+            ctx.boot_task.task().flow_state(),
             State::Prepared,
             State::Ready,
         )
@@ -139,7 +133,7 @@ fn direct_setup_start(ctx: &Context) -> EventResult {
     {
         return failed_condition(
             LifecycleEvent::Setup,
-            ctx.boot_init_flow.state(),
+            ctx.boot_task.task().flow_state(),
             State::Prepared,
             State::Ready,
         );
@@ -311,7 +305,7 @@ fn setup_arch_return_ready(ctx: &Context) -> EventResult {
 fn direct_setup_failure(ctx: &Context) -> EventResult {
     failed_condition(
         LifecycleEvent::Setup,
-        ctx.boot_init_flow.state(),
+        ctx.boot_task.task().flow_state(),
         State::Prepared,
         State::Ready,
     )
@@ -348,10 +342,10 @@ fn require_setup_leaf(child_online: bool, child: &str) {
 
 fn start_kernel_entry_guard_satisfied() -> bool {
     let ctx = crate::context::context_ref();
-    let flow = ctx.boot_init_flow.core();
-    let cpu_ref = ctx.boot_init_flow.cpu_ref();
+    let flow = ctx.boot_task.task().embedded_flow();
+    let cpu_ref = ctx.boot_task.task().flow_cpu_ref();
     crate::systems::kernel::enable_in_progress()
-        && ctx.boot_init_flow.state() == State::Prepared
+        && ctx.boot_task.task().flow_state() == State::Prepared
         && super::boot_task_on_cpu_and_canonical()
         && ctx.boot_task.task().flow().same_identity(flow.flow_ref())
         && task_flow_execution_guard_satisfied(flow, ctx.boot_task.task())

@@ -27,7 +27,7 @@ pub enum LifecycleEvent {
     Enable,
     Disable,
     Cleanup,
-    Continue,
+    Dispatch,
     Suspend,
 }
 
@@ -43,7 +43,9 @@ impl LifecycleEvent {
             Self::Enable => b'E',
             Self::Disable => b'D',
             Self::Cleanup => b'C',
-            Self::Continue => b'R',
+            // Preserve the established trace byte while naming the semantic
+            // scheduler event correctly.
+            Self::Dispatch => b'R',
             Self::Suspend => b'U',
         }
     }
@@ -486,7 +488,7 @@ const fn is_allowed_lifecycle_transition_rust(
         || key == transition_key(State::Online, LifecycleEvent::Disable, State::Offline)
         || key == transition_key(State::Online, LifecycleEvent::Cleanup, State::Destroyed)
         || key == transition_key(State::Offline, LifecycleEvent::Cleanup, State::Destroyed)
-        || key == transition_key(State::Online, LifecycleEvent::Continue, State::OnCpu)
+        || key == transition_key(State::Online, LifecycleEvent::Dispatch, State::OnCpu)
         || key == transition_key(State::OnCpu, LifecycleEvent::Suspend, State::Online)
         || key == transition_key(State::OnCpu, LifecycleEvent::Disable, State::Offline)
 }

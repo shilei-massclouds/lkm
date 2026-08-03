@@ -198,7 +198,7 @@ def check_adoption_sources(source_root: Path) -> None:
     )
     receipt_check = rust_entry.find("head_entry_receipts_valid")
     accept_enable = rust_entry.find("accept_enable_at_entry")
-    assign_cpu_ref = rust_entry.find("bind_cpu_ref")
+    assign_cpu_ref = rust_entry.find("bind_flow_cpu_ref")
     physical_direct = rust_entry.find("adopt_head_physical_on_cpu")
     preset_accept = rust_entry.find("adopt_head_preset_start")
     if not 0 <= receipt_check < accept_enable < assign_cpu_ref < physical_direct < preset_accept:
@@ -258,6 +258,52 @@ def check_adoption_sources(source_root: Path) -> None:
     start_guard = rust_function(setup_source, "fn start_kernel_entry_guard_satisfied")
     if "crate::systems::kernel::enable_in_progress()" not in start_guard:
         raise AssertionError("start_kernel guard does not require accepted Kernel.Enable in progress")
+
+
+def check_task_flow_embedding_sources(source_root: Path) -> None:
+    task_source = (source_root / "objects/task.rs").read_text()
+    task_body = rust_function(task_source, "pub struct Task {")
+    if task_body.count("flow: TaskFlow,") != 1:
+        raise AssertionError("Task must physically embed exactly one TaskFlow field")
+    if "flow_ref: TaskFlowRef," in task_body:
+        raise AssertionError("Task retains a duplicate FlowRef beside its embedded TaskFlow")
+
+    forbidden_structs = (
+        "pub struct BootInitFlow",
+        "pub struct KernelInitFlow",
+        "pub struct KthreaddFlow",
+    )
+    rust_sources = {
+        path: path.read_text() for path in source_root.rglob("*.rs")
+    }
+    for declaration in forbidden_structs:
+        owners = [str(path) for path, source in rust_sources.items() if declaration in source]
+        if owners:
+            raise AssertionError(f"concrete Flow wrapper remains for {declaration}: {owners}")
+
+    carrier_items = (
+        (source_root / "objects/user_boot.rs", "struct UserTaskStorageSlot {"),
+        (source_root / "objects/smp_bringup.rs", "struct ApIdleTaskRecord {"),
+        (source_root / "objects/scheduler.rs", "pub struct SmokeSchedulerTask {"),
+    )
+    for path, declaration in carrier_items:
+        body = rust_function(path.read_text(), declaration)
+        if "flow: TaskFlow" in body or "flow_ref: TaskFlowRef" in body:
+            raise AssertionError(
+                f"{declaration} retains Task-parallel Flow storage or FlowRef"
+            )
+
+    context = rust_function(
+        (source_root / "context.rs").read_text(), "pub struct Context {"
+    )
+    duplicate_fields = (
+        "boot_init_flow:",
+        "kernel_init_flow:",
+        "kthreadd_flow:",
+    )
+    present = [field for field in duplicate_fields if field in context]
+    if present:
+        raise AssertionError(f"Context retains Task-parallel Flow fields: {present}")
 
 
 def check_local_control_setup(
@@ -326,12 +372,14 @@ def main() -> int:
     table = symbols(args.objdump, args.elf)
     check_head(args.objdump, args.elf, table)
     check_adoption_sources(args.source_root)
+    check_task_flow_embedding_sources(args.source_root)
     check_local_control_setup(args.objdump, args.elf, table)
     check_completion_tail(args.objdump, args.elf, table)
     print(
         "BootInitFlow entry verified: ordered sie/sip write, Preset excludes SIE, "
         "PhysicalDirect/Started/Interrupt early order, receipt adoption, Bind/CPU/Trap/Vm order, "
-        "Setup SIE closure, Kernel.Enable guard, and non-linking tail start_kernel"
+        "Setup SIE closure, Kernel.Enable guard, one embedded TaskFlow per Task, "
+        "and non-linking tail start_kernel"
     )
     return 0
 

@@ -15,7 +15,7 @@ use super::{
     },
     static_branch::StaticBranch,
     task::{Task, TaskEntry, TaskKind, TaskRef},
-    task_flow::{TaskFlow, TaskFlowRef},
+    task_flow::TaskFlowRef,
     trap_type::TrapType,
     user_boot::USER_CHILD_PID,
 };
@@ -231,15 +231,15 @@ pub struct Scheduler {
     last_prev_disposition: PrevDisposition,
     switch_to_passes: usize,
     identity_switch_passes: usize,
-    task_continue_signal_passes: usize,
-    flow_continue_signal_passes: usize,
+    task_dispatch_signal_passes: usize,
+    flow_enter_signal_passes: usize,
     switch_preflight_passes: usize,
     switch_protocol_sequence: usize,
     save_core_context_sequence: usize,
     suspend_task_sequence: usize,
     restore_core_context_sequence: usize,
     finish_task_switch_sequence: usize,
-    task_continue_sequence: usize,
+    task_dispatch_sequence: usize,
     flow_signal_sequence: usize,
     idle_schedule_passes: usize,
     idle_schedule_returned_passes: usize,
@@ -444,15 +444,15 @@ impl Scheduler {
             last_prev_disposition: PrevDisposition::Runnable,
             switch_to_passes: 0,
             identity_switch_passes: 0,
-            task_continue_signal_passes: 0,
-            flow_continue_signal_passes: 0,
+            task_dispatch_signal_passes: 0,
+            flow_enter_signal_passes: 0,
             switch_preflight_passes: 0,
             switch_protocol_sequence: 0,
             save_core_context_sequence: 0,
             suspend_task_sequence: 0,
             restore_core_context_sequence: 0,
             finish_task_switch_sequence: 0,
-            task_continue_sequence: 0,
+            task_dispatch_sequence: 0,
             flow_signal_sequence: 0,
             idle_schedule_passes: 0,
             idle_schedule_returned_passes: 0,
@@ -686,12 +686,12 @@ impl Scheduler {
         self.identity_switch_passes
     }
 
-    pub const fn task_continue_signal_passes(&self) -> usize {
-        self.task_continue_signal_passes
+    pub const fn task_dispatch_signal_passes(&self) -> usize {
+        self.task_dispatch_signal_passes
     }
 
-    pub const fn flow_continue_signal_passes(&self) -> usize {
-        self.flow_continue_signal_passes
+    pub const fn flow_enter_signal_passes(&self) -> usize {
+        self.flow_enter_signal_passes
     }
 
     pub const fn switch_preflight_passes(&self) -> usize {
@@ -714,8 +714,8 @@ impl Scheduler {
         self.finish_task_switch_sequence
     }
 
-    pub const fn task_continue_sequence(&self) -> usize {
-        self.task_continue_sequence
+    pub const fn task_dispatch_sequence(&self) -> usize {
+        self.task_dispatch_sequence
     }
 
     pub const fn flow_signal_sequence(&self) -> usize {
@@ -1436,12 +1436,16 @@ impl Scheduler {
             self.identity_switch_passes = self.identity_switch_passes.wrapping_add(1);
             return Ok(());
         }
-        let Some(next_dispatch) = task_access.preflight_next_dispatch(next_ref, self.cpu_ref())
+        let Some(next_dispatch) =
+            task_access.preflight_next_dispatch_on_user_carrier(next_ref, self.cpu_ref())
         else {
-            return self.failed_switch_to();
+            return Err(self.failed_switch_preflight("simulated-next-dispatch-preflight"));
         };
-        if current_task.task_ref() != prev_ref || !task_access.switch_out_ready(prev_ref) {
-            return self.failed_switch_to();
+        if current_task.task_ref() != prev_ref {
+            return Err(self.failed_switch_preflight("simulated-current-task-matches-prev"));
+        }
+        if !task_access.switch_out_ready(prev_ref) {
+            return Err(self.failed_switch_preflight("simulated-prev-switch-out-ready"));
         }
         self.switch_to_entry_prev_ref = prev_ref;
         self.switch_to_entry_next_ref = next_ref;
@@ -1453,7 +1457,7 @@ impl Scheduler {
         self.switch_prev_committed_online = false;
         self.next_dispatch = Some(next_dispatch);
         if !self.publish_current(next_ref) {
-            return self.failed_switch_to();
+            return Err(self.failed_switch_commit("simulated-publish-current"));
         }
         crate::checkpoint::checkpoint(Checkpoint::SchedulerSwitchToEntry);
         Ok(())
@@ -1544,17 +1548,17 @@ impl Scheduler {
             .take()
             .filter(|dispatch| dispatch.task_ref().same_identity(task_ref))
             .ok_or_else(|| self.failed_schedule_condition())?;
-        task_access
-            .accept_task_continue(dispatch)
+        let enter_proof = task_access
+            .accept_task_dispatch(dispatch)
             .ok_or_else(|| self.failed_schedule_condition())??;
-        self.task_continue_signal_passes = self.task_continue_signal_passes.wrapping_add(1);
+        self.task_dispatch_signal_passes = self.task_dispatch_signal_passes.wrapping_add(1);
         self.switch_protocol_sequence = self.switch_protocol_sequence.wrapping_add(1);
-        self.task_continue_sequence = self.switch_protocol_sequence;
+        self.task_dispatch_sequence = self.switch_protocol_sequence;
 
         task_access
-            .emit_flow_continue(dispatch)
+            .enter_task_flow(dispatch, enter_proof)
             .ok_or_else(|| self.failed_schedule_condition())??;
-        self.flow_continue_signal_passes = self.flow_continue_signal_passes.wrapping_add(1);
+        self.flow_enter_signal_passes = self.flow_enter_signal_passes.wrapping_add(1);
         self.switch_protocol_sequence = self.switch_protocol_sequence.wrapping_add(1);
         self.flow_signal_sequence = self.switch_protocol_sequence;
 
@@ -1769,6 +1773,17 @@ impl Scheduler {
                 "SwitchTo.Preflight",
                 "TaskPair",
                 "all prerequisites before first mutation",
+                first_failed,
+            ))
+    }
+
+    fn failed_switch_commit(&self, first_failed: &'static str) -> EventError {
+        self.failed_schedule_condition()
+            .with_diagnostic(FailureDiagnostic::new(
+                "Scheduler",
+                "SwitchTo.Commit",
+                "TaskPair",
+                "selected Task and scheduler bindings",
                 first_failed,
             ))
     }
@@ -2163,7 +2178,6 @@ const fn default_sched_class(task_ref: TaskRef) -> SchedClassRef {
 #[cfg_attr(not(app_smoke), allow(dead_code))]
 pub struct SmokeSchedulerTask {
     task: Task,
-    flow: TaskFlow,
     enqueued: bool,
     entry_ran: bool,
     yielded_back: bool,
@@ -2174,7 +2188,6 @@ impl SmokeSchedulerTask {
     const fn new(task_id: usize) -> Self {
         Self {
             task: Task::with_ref(smoke_task_ref(task_id)),
-            flow: TaskFlow::new_static(TaskFlowRef::smoke(smoke_flow_index(task_id))),
             enqueued: false,
             entry_ran: false,
             yielded_back: false,
@@ -2190,11 +2203,11 @@ impl SmokeSchedulerTask {
     }
 
     pub const fn cpu_id(&self) -> usize {
-        self.flow.cpu_id()
+        self.task.embedded_flow().cpu_id()
     }
 
     pub const fn cpu_ref(&self) -> Option<CpuRef> {
-        self.flow.cpu_ref()
+        self.task.flow_cpu_ref()
     }
 
     pub const fn enqueued(&self) -> bool {
@@ -2240,22 +2253,31 @@ impl SmokeSchedulerTask {
     fn current_task_candidate(&self) -> super::current_task::CurrentTaskCandidate<'_> {
         super::current_task::CurrentTaskCandidate {
             task: &self.task,
-            flow: &self.flow,
+            flow: self.task.embedded_flow(),
         }
     }
 
     pub const fn flow_ref(&self) -> TaskFlowRef {
-        self.flow.flow_ref()
+        self.task.flow_ref()
     }
 
     pub fn unified_carrier_ready(&self) -> bool {
-        self.flow.owner().same_identity(self.task.task_ref())
-            && self.task.flow().same_identity(self.flow.flow_ref())
-            && ((self.task.state() == State::Ready && self.flow.state() == State::Online)
-                || (self.task.state() == State::Online && self.flow.state() == State::Online)
+        self.task
+            .embedded_flow()
+            .owner()
+            .same_identity(self.task.task_ref())
+            && self
+                .task
+                .flow()
+                .same_identity(self.task.embedded_flow().flow_ref())
+            && ((self.task.state() == State::Ready && self.task.flow_state() == State::Online)
+                || (self.task.state() == State::Online && self.task.flow_state() == State::Online)
                 || (self.task.state() == State::OnCpu
-                    && self.flow.state() == State::Online
-                    && self.task.flow().same_identity(self.flow.flow_ref())))
+                    && self.task.flow_state() == State::Online
+                    && self
+                        .task
+                        .flow()
+                        .same_identity(self.task.embedded_flow().flow_ref())))
     }
 
     fn setup(
@@ -2278,8 +2300,7 @@ impl SmokeSchedulerTask {
             )
             .is_err()
             || self.task.adopt_preset().is_err()
-            || self.flow.bind(&mut self.task).is_err()
-            || self.task.bind_flow(&self.flow).is_err()
+            || self.task.declare_and_bind_embedded_flow().is_err()
         {
             return false;
         }
@@ -2288,13 +2309,10 @@ impl SmokeSchedulerTask {
         if self.task.adopt_setup().is_err() {
             return false;
         }
-        if !self.flow.bind_cpu_ref(CpuRef::new(cpu_id)) {
+        if !self.task.bind_flow_cpu_ref(CpuRef::new(cpu_id)) {
             return false;
         }
-        if self.flow.preset(&self.task, None).is_err()
-            || self.flow.setup(&self.task, None).is_err()
-            || self.flow.enable(&self.task, None).is_err()
-        {
+        if self.task.publish_embedded_flow().is_err() {
             return false;
         }
         true
@@ -2328,7 +2346,9 @@ impl SmokeSchedulerTask {
     }
 
     pub fn mark_entry_ran(&mut self) -> EventResult {
-        if self.task.state() != State::OnCpu || self.flow.state() != State::Online || !self.enqueued
+        if self.task.state() != State::OnCpu
+            || self.task.flow_state() != State::Online
+            || !self.enqueued
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -2367,27 +2387,6 @@ impl SmokeSchedulerTask {
     pub(crate) fn suspend_from_cpu(&mut self) -> EventResult {
         self.task.suspend_from_cpu()
     }
-
-    pub(crate) fn accept_task_continue(&mut self) -> EventResult {
-        self.task.continue_on_cpu()
-    }
-
-    pub(crate) fn continue_flow(&self) -> EventResult {
-        if self.task.state() == State::OnCpu
-            && self.flow.state() == State::Online
-            && self.task.flow().same_identity(self.flow.flow_ref())
-            && super::task_flow::task_flow_execution_guard_satisfied(&self.flow, &self.task)
-        {
-            Ok(())
-        } else {
-            failed_condition(
-                LifecycleEvent::Continue,
-                self.flow.state(),
-                State::Online,
-                State::Online,
-            )
-        }
-    }
 }
 
 const fn smoke_task_ref(task_id: usize) -> TaskRef {
@@ -2397,16 +2396,6 @@ const fn smoke_task_ref(task_id: usize) -> TaskRef {
         SMOKE_RWSEM_TASK_ID => TaskRef::SMOKE_RWSEM,
         SMOKE_RWLOCK_TASK_ID => TaskRef::SMOKE_RWLOCK,
         _ => TaskRef::NONE,
-    }
-}
-
-const fn smoke_flow_index(task_id: usize) -> usize {
-    match task_id {
-        SMOKE_SCHEDULER_TASK_ID => 0,
-        SMOKE_MUTEX_TASK_ID => 1,
-        SMOKE_RWSEM_TASK_ID => 2,
-        SMOKE_RWLOCK_TASK_ID => 3,
-        _ => 0,
     }
 }
 

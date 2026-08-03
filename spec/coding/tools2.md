@@ -156,7 +156,7 @@ state 或 condition 拒绝，以及 handler body/invariant/下游 Signal 失败�
 TaskFlowLane resume coordinate，把 source lane 标记为 awaiting-resume，并立即执行目标。
 Target 正常完成后始终执行通用默认恢复检查：若 source lane 的 Task/Flow/CPU/context epoch
 和执行 binding 未改变，立即消费 token 并从该词法坐标继续；若已改变，token 保持 pending，
-由未来匹配的 contextual Continue 精确一次消费。不得根据 target 是否包含 Continue 来猜测结果。
+由未来匹配且带 `contextual_entry: true` 的 handler 精确一次消费。不得根据 handler 名称猜测结果。
 
 YieldToken 包含 source response identity、TaskRef/FlowRef/generation、occurrence、模型 resume coordinate、
 CPU/TaskFlowLane 和 context epoch 交叉校验值。它不包含 Python frame、宿主调用栈、寄存器或

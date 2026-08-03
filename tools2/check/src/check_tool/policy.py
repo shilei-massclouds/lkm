@@ -20,6 +20,27 @@ def check_derivation(derivation: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(obligations, list):
         raise ValueError("derivation obligations must be a list")
     unresolved = [item for item in obligations if item.get("unresolved") is True]
+    snapshots = [
+        derivation.get("initial_snapshot"),
+        derivation.get("last_stable_snapshot"),
+        *[
+            snapshot
+            for signal in derivation.get("signals", [])
+            for snapshot in (signal.get("before_snapshot"), signal.get("after_snapshot"))
+        ],
+    ]
+    for snapshot in snapshots:
+        if snapshot is None:
+            continue
+        entries = snapshot.get("initial_context_entries")
+        if not isinstance(entries, dict) or not all(
+            isinstance(flow, str)
+            and isinstance(record, dict)
+            and record.get("consumed") is True
+            and isinstance(record.get("signal_id"), str)
+            for flow, record in entries.items()
+        ):
+            raise ValueError("derivation initial_context_entries are inconsistent")
     summary = derivation.get("summary")
     if not isinstance(summary, dict) or summary.get("unresolved_obligations") != len(unresolved):
         raise ValueError("derivation unresolved obligation summary is inconsistent")

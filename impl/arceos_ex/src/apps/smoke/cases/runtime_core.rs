@@ -12,8 +12,7 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     };
 
-    if !phases::smp_runtime::runtime_core::is_online()
-        || !ctx.kernel_init_flow.payload_handoff_committed()
+    if !phases::smp_runtime::runtime_core::is_online() || !ctx.selected_payload_handoff.committed()
     {
         printk::write_str("runtime core phase is not ready\n");
         return SmokeResult::Failed;
@@ -35,7 +34,7 @@ pub fn run() -> SmokeResult {
 
     if ctx.kernel_init_task.pinned_to_boot_cpu()
         || ctx.kernel_init_task.pf_no_setaffinity()
-        || ctx.kernel_init_flow.cpu_id() != boot_cpu.logical_id()
+        || ctx.kernel_init_task.flow_cpu_id() != boot_cpu.logical_id()
     {
         printk::write_str("kernel_init affinity release facts invalid\n");
         return SmokeResult::Failed;

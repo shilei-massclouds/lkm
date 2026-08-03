@@ -3,7 +3,7 @@
 `BootInitFlow` 是静态 `BootTask.flow` 指向的终身 TaskFlow。它从 `_start` 编排 boot execution，提交
 Online 后仍承载同一 PID 0 的 idle setup、首次 Schedule 返回、`BootIdleEntryPhase` 和 idle loop。
 不存在第二个 boot idle Flow；`BootTask` 首次真实切出时才保存 context 并进入 Online，未来通过统一
-Continue 返回同一个 BootInitFlow continuation。
+Enter 返回同一个 BootInitFlow continuation。
 
 ## 生命周期与不变量
 

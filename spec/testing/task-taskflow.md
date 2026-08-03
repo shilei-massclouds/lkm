@@ -5,9 +5,9 @@ TaskFlow boundary from Charter, Model, and Coding.
 
 ## Fixed carrier and flow binding
 
-- Every published Task exposes exactly one immutable `flow: TaskFlowRef`. The
-  referenced Flow has that Task as its unique owner/parent, cannot be shared,
-  and cannot be replaced during the Task lifetime.
+- Every published Task physically embeds exactly one `TaskFlow`; `flow_ref()`
+  is derived from that instance. The Flow has that Task as its unique
+  owner/parent, cannot be shared, and cannot be replaced during the Task lifetime.
 - BootTask is created `OnCpu/Live` and is permanently bound to BootInitFlow.
   BootInitFlow contains the idle setup, scheduling return, and idle-loop
   actions; tests must not observe a second boot Task or a second boot Flow.
@@ -26,19 +26,23 @@ TaskFlow boundary from Charter, Model, and Coding.
 ## Dispatch and context
 
 - All non-identity dispatches use one path: Scheduler restores the selected
-  TaskThreadContext, commits `Task Online --Continue--> OnCpu`, and delivers
-  contextual `TaskFlow.Action::Continue` to the fixed FlowRef. First entry and
+  TaskThreadContext, commits `Task Online --Dispatch--> OnCpu`, and delivers
+  contextual `TaskFlow.Action::Enter` to the embedded Flow. First entry and
   later entry differ only in the architectural context contents.
-- Contextual Continue carries no PC, SP, register, function name, or
+- Contextual Enter carries no PC, SP, register, function name, or
   checkpoint. Tests cross-check its YieldToken/dispatch record against the
   TaskThreadContext epoch without copying either representation into the
   other.
+- Real fork/wait handoff coverage checks that UserTask Setup binds the prepared
+  user kernel trap-stack carrier used by contextual Enter; retaining the
+  earlier KernelInitTask stack range must fail the CurrentStack binding check.
 - Identity Schedule performs no Task transition, context save/restore,
-  CurrentTask/CurrentStack update, or contextual Continue. It consumes the
+  CurrentTask/CurrentStack update, Dispatch, or contextual Enter. It consumes the
   source YieldToken through the generic target-completion resume attempt.
 - A real switch explicitly orders SaveCoreContext, prev `Suspend` to Online,
-  RestoreCoreContext and CPU-local binding commit, next `Continue` to OnCpu,
-  and contextual Flow Continue. Blocked and wakeup tests use the same Task
+  RestoreCoreContext and CPU-local binding commit, next `Dispatch` to OnCpu,
+  and contextual Flow Enter. First Enter consumes the Setup-bound Start once;
+  resume Enter consumes a matching YieldToken or saved coordinate and never repeats Start. Blocked and wakeup tests use the same Task
   states; runqueue membership, not a second lifecycle state, distinguishes
   them.
 - Terminal paths order Flow `Online -> Offline -> Destroyed` and Task
@@ -69,6 +73,10 @@ TaskFlow boundary from Charter, Model, and Coding.
 - Trap entry does not change Task OnCpu or TaskFlow Online. The CPU effective
   Flow stack pushes Trap/Interrupt/Exception leaves and restores the nested
   leaf before a task-switched trap continuation resumes.
+- Child-to-parent terminal handoff accepts the shared user trap stack only
+  through the simulated-user-handoff stack identity preflighted in
+  `NextDispatch`; a physical switch or a stale/different carrier must fail
+  CurrentStack validation.
 - Ordinary IRQ coverage proves no Task lifecycle delta. Wrong CPU, Flow,
   generation, context epoch, or duplicate continuation fails terminally after
   commit, while rejection before YieldToken commit preserves the exact before
@@ -84,6 +92,10 @@ TaskFlow boundary from Charter, Model, and Coding.
   `TaskFlowRef::BOOT_INIT` after every switch.
 - KernelInitTask and KthreaddTask Flow state is Online before either Task is
   eligible for its first dispatch.
+- BootTask and AP idle first architecture entries send no Dispatch/Enter;
+  after their first real switch out, restoration uses the common path.
+- Representation tests cover Boot, KernelInit, Kthreadd, User, AP idle and
+  smoke aggregates and reject old Flow wrapper or Task-parallel Flow storage.
 - PID 1 multiple-exec smoke preserves KernelInitTask, KernelInitFlow, and
   UserAppRuntime identity. Child smoke proves independent
   Task/UserTaskFlow/UserAppRuntime identity and terminal reclamation.

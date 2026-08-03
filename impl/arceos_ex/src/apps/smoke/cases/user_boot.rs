@@ -189,7 +189,10 @@ impl SmokeScenario for UserBootElfScenario {
                 .setup(&ctx.kernel_init_task, &ctx.exec_sync_boundaries)
                 .is_ok(),
         );
-        assertions.assert("user child preset", ctx.user_task_set.setup().is_ok());
+        assertions.assert(
+            "user child preset",
+            ctx.user_task_set.setup(&ctx.kernel_init_task).is_ok(),
+        );
         assertions.assert("elf preset", ctx.elf_object.preset_from_vfs(image).is_ok());
         assertions.assert("elf setup", ctx.elf_object.setup(image).is_ok());
         let interpreter_image = if let Some(_path) = ctx.elf_object.interpreter_path() {
@@ -1484,8 +1487,8 @@ impl SmokeScenario for UserBootElfScenario {
                     == crate::objects::rest_init::KERNEL_INIT_PID
                 && ctx.kernel_init_user_runtime.application_entered()
                 && !ctx.kernel_init_user_runtime.released()
-                && ctx.kernel_init_flow.state() == State::Online
-                && ctx.kernel_init_flow.owner_bound()
+                && ctx.kernel_init_task.flow_state() == State::Online
+                && ctx.kernel_init_task.flow().owner().is_valid()
                 && ctx.kernel_init_task.state() == State::OnCpu
                 && ctx.kernel_init_task.kernel_init_flow_owned()
                 && ctx.kernel_init_user_runtime.task_ref_owner() == ctx.kernel_init_task.task_ref()

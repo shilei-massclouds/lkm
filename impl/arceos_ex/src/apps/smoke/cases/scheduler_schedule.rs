@@ -7,7 +7,7 @@ use crate::{
     objects::{
         state::State,
         task::{Task, TaskBreakpointState, TaskEntry, TaskExecutionAuthority, TaskKind, TaskRef},
-        task_flow::{TaskFlow, TaskFlowRef},
+        task_flow::TaskFlowRef,
     },
 };
 
@@ -167,10 +167,10 @@ impl SmokeScenario for CooperativeSwitchScenario {
                     < ctx.scheduler().set_next_task_sequence()
                 && ctx.scheduler().last_picked_class()
                     == Some(crate::objects::scheduler::SchedClassRef::Fair)
-                && ctx.scheduler().task_continue_signal_passes() != 0,
+                && ctx.scheduler().task_dispatch_signal_passes() != 0,
         );
         assertions.assert(
-            "nonidentity switch preflights then saves suspends restores finishes and continues fixed carriers",
+            "nonidentity switch preflights then saves suspends restores finishes and dispatches fixed carriers",
             ctx.scheduler().switch_preflight_passes() == ctx.scheduler().switch_to_passes()
                 && ctx.scheduler().save_core_context_sequence() != 0
                 && ctx.scheduler().save_core_context_sequence()
@@ -180,12 +180,12 @@ impl SmokeScenario for CooperativeSwitchScenario {
                 && ctx.scheduler().restore_core_context_sequence()
                     < ctx.scheduler().finish_task_switch_sequence()
                 && ctx.scheduler().finish_task_switch_sequence()
-                    < ctx.scheduler().task_continue_sequence()
-                && ctx.scheduler().task_continue_sequence()
+                    < ctx.scheduler().task_dispatch_sequence()
+                && ctx.scheduler().task_dispatch_sequence()
                     < ctx.scheduler().flow_signal_sequence()
-                && ctx.scheduler().flow_continue_signal_passes() != 0
-                && ctx.scheduler().task_continue_signal_passes()
-                    == ctx.scheduler().flow_continue_signal_passes(),
+                && ctx.scheduler().flow_enter_signal_passes() != 0
+                && ctx.scheduler().task_dispatch_signal_passes()
+                    == ctx.scheduler().flow_enter_signal_passes(),
         );
 
         let before_state = ctx.kernel_init_task.state();
@@ -204,18 +204,18 @@ impl SmokeScenario for CooperativeSwitchScenario {
         let before_prepare = ctx.scheduler().scheduler_prepare_task_switch_count();
         let before_finish = ctx.scheduler().scheduler_finish_task_switch_count();
         let before_identity = ctx.scheduler().identity_switch_passes();
-        let before_flow_continue = ctx.scheduler().flow_continue_signal_passes();
-        let before_task_continue = ctx.scheduler().task_continue_signal_passes();
+        let before_flow_enter = ctx.scheduler().flow_enter_signal_passes();
+        let before_task_dispatch = ctx.scheduler().task_dispatch_signal_passes();
         let identity_result = ctx.schedule_current();
         if let Err(error) = identity_result {
             print_schedule_error("identity schedule accepted", error);
         }
         assertions.assert_ok("identity schedule accepted", identity_result);
         assertions.assert(
-            "identity schedule consumes return without lifecycle or Continue delivery",
+            "identity schedule consumes return without Dispatch/Enter delivery",
             ctx.scheduler().identity_switch_passes() == before_identity + 1
-                && ctx.scheduler().flow_continue_signal_passes() == before_flow_continue
-                && ctx.scheduler().task_continue_signal_passes() == before_task_continue
+                && ctx.scheduler().flow_enter_signal_passes() == before_flow_enter
+                && ctx.scheduler().task_dispatch_signal_passes() == before_task_dispatch
                 && ctx.kernel_init_task.state() == before_state
                 && ctx.kernel_init_task.task().execution_authority() == before_authority
                 && ctx.kernel_init_task.task().breakpoint_state() == before_breakpoint
@@ -264,7 +264,7 @@ impl SmokeScenario for CooperativeSwitchScenario {
                     .is_ok_and(|task_ref| task_ref == TaskRef::KERNEL_INIT),
         );
         assertions.assert(
-            "prepared enable continue handoff suspend and terminal contract",
+            "prepared enable dispatch enter suspend and terminal contract",
             task_breakpoint_contract_smoke(),
         );
         assertions.assert(
@@ -309,8 +309,8 @@ fn schedule_sender_rejection_smoke() -> bool {
         prepare_prev_passes,
         pick_next_passes,
         switch_entries,
-        flow_continues,
-        task_continues,
+        flow_enters,
+        task_dispatches,
         task_state,
         task_authority,
         task_breakpoint,
@@ -334,8 +334,8 @@ fn schedule_sender_rejection_smoke() -> bool {
             ctx.scheduler().prepare_prev_passes(),
             ctx.scheduler().pick_next_task_passes(),
             ctx.scheduler().switch_to_entry_count(),
-            ctx.scheduler().flow_continue_signal_passes(),
-            ctx.scheduler().task_continue_signal_passes(),
+            ctx.scheduler().flow_enter_signal_passes(),
+            ctx.scheduler().task_dispatch_signal_passes(),
             ctx.kernel_init_task.state(),
             ctx.kernel_init_task.task().execution_authority(),
             ctx.kernel_init_task.task().breakpoint_state(),
@@ -373,8 +373,8 @@ fn schedule_sender_rejection_smoke() -> bool {
         && ctx.scheduler().prepare_prev_passes() == prepare_prev_passes
         && ctx.scheduler().pick_next_task_passes() == pick_next_passes
         && ctx.scheduler().switch_to_entry_count() == switch_entries
-        && ctx.scheduler().flow_continue_signal_passes() == flow_continues
-        && ctx.scheduler().task_continue_signal_passes() == task_continues
+        && ctx.scheduler().flow_enter_signal_passes() == flow_enters
+        && ctx.scheduler().task_dispatch_signal_passes() == task_dispatches
         && ctx.kernel_init_task.state() == task_state
         && ctx.kernel_init_task.task().execution_authority() == task_authority
         && ctx.kernel_init_task.task().breakpoint_state() == task_breakpoint
@@ -384,32 +384,27 @@ fn schedule_sender_rejection_smoke() -> bool {
 }
 
 fn task_breakpoint_contract_smoke() -> bool {
-    let mut task = Task::with_ref(TaskRef::user(0, 77));
-    let mut flow = TaskFlow::new_user(0);
+    let mut task = Task::new_user(TaskRef::user(0, 77), 0);
     if task
         .set_identity_metadata(77, TaskEntry::UserChild, TaskKind::TestOnly)
         .is_err()
         || task.adopt_preset().is_err()
-        || flow.declare().is_err()
-        || flow.bind(&mut task).is_err()
-        || task.bind_flow(&flow).is_err()
+        || task.declare_and_bind_embedded_flow().is_err()
     {
         return false;
     }
     task.init_dummy_switch_context();
     if task.breakpoint_state() != TaskBreakpointState::Prepared
         || task.adopt_setup().is_err()
-        || !flow.bind_cpu_ref(crate::objects::cpu::CpuRef::new(0))
-        || flow.preset(&task, None).is_err()
-        || flow.setup(&task, None).is_err()
-        || flow.enable(&task, None).is_err()
+        || !task.bind_flow_cpu_ref(crate::objects::cpu::CpuRef::new(0))
+        || task.publish_embedded_flow().is_err()
         || task.set_runtime_running().is_err()
         || task.publish_runqueue_binding().is_err()
         || task.adopt_enable().is_err()
     {
         return false;
     }
-    let flow_ref = flow.flow_ref();
+    let flow_ref = task.flow_ref();
     let stale_flow = flow_ref.with_generation_for_test(flow_ref.generation() + 1);
     if task.state() != State::Online
         || task.execution_authority() != TaskExecutionAuthority::None
@@ -418,9 +413,30 @@ fn task_breakpoint_contract_smoke() -> bool {
         || !task.breakpoint_matches(flow_ref)
         || task.breakpoint_matches(stale_flow)
         || !task.switch_in_ready()
-        || task.continue_on_cpu().is_err()
+        || !task.dispatch_rejected_for_test(
+            stale_flow,
+            task.context_epoch(),
+            crate::objects::cpu::CpuRef::new(0),
+        )
+        || !task.dispatch_rejected_for_test(
+            flow_ref,
+            task.context_epoch().wrapping_add(1),
+            crate::objects::cpu::CpuRef::new(0),
+        )
+        || !task.dispatch_rejected_for_test(
+            flow_ref,
+            task.context_epoch(),
+            crate::objects::cpu::CpuRef::new(1),
+        )
+        || task.dispatch_and_enter_for_test().is_err()
+        || task.embedded_flow().initial_context_entry_pending()
+        || !task.embedded_flow().initial_context_entry_consumed()
+        || !task.duplicate_enter_rejected_for_test()
         || task.switch_in_ready()
-        || !crate::objects::task_flow::task_flow_execution_guard_satisfied(&flow, &task)
+        || !crate::objects::task_flow::task_flow_execution_guard_satisfied(
+            task.embedded_flow(),
+            &task,
+        )
         || task.declare_scheduler_sleep().is_err()
         || task.post_pending_wake_signal().is_err()
         || !task.scheduler_sleep_declared()
@@ -442,8 +458,10 @@ fn task_breakpoint_contract_smoke() -> bool {
         || !task.breakpoint_matches(flow_ref)
         || task.breakpoint_matches(stale_flow)
         || task.wake_for_scheduler_enqueue().is_err()
-        || task.continue_on_cpu().is_err()
-        || flow.cleanup_for_exit(&task).is_err()
+        || task.dispatch_and_enter_for_test().is_err()
+        || task.embedded_flow().initial_context_entry_pending()
+        || !task.embedded_flow().initial_context_entry_consumed()
+        || task.cleanup_embedded_flow().is_err()
         || task.disable().is_err()
         || task.state() != State::Offline
         || task.breakpoint_state() != TaskBreakpointState::Invalid

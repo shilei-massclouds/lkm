@@ -101,7 +101,7 @@ fn require_transition(
     if actual != expected
         || !super::common_dependencies_ready()
         || !super::mainline_ready(ctx)
-        || ctx.kernel_init_flow.state() != State::Online
+        || ctx.kernel_init_task.flow_state() != State::Online
     {
         return failed_condition(event, actual, expected, target);
     }

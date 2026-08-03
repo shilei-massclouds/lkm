@@ -6327,11 +6327,9 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
             panic_dispatch("declared child process-group invariant failed\n");
         }
         if !clone_is_nested_vfork
-            && ctx
-                .commit_user_dispatch(ctx.user_task_set.active_task_ref())
-                .is_err()
+            && let Err(error) = ctx.commit_user_dispatch(ctx.user_task_set.active_task_ref())
         {
-            panic_dispatch("declared child dispatch invariant failed\n");
+            panic_dispatch_event("declared child dispatch invariant failed\n", error);
         }
         child_frame
     };
@@ -7048,11 +7046,8 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
             complete_error_syscall(frame, ECHILD);
             return;
         };
-        if ctx
-            .commit_user_dispatch(ctx.user_task_set.active_task_ref())
-            .is_err()
-        {
-            panic_dispatch("child wait handoff dispatch invariant failed\n");
+        if let Err(error) = ctx.commit_user_dispatch(ctx.user_task_set.active_task_ref()) {
+            panic_dispatch_event("child wait handoff dispatch invariant failed\n", error);
         }
         child_frame
     };
@@ -8198,6 +8193,12 @@ fn breakpoint_instruction_length(sepc: usize) -> usize {
 
 fn panic_dispatch(message: &str) -> ! {
     crate::arch::riscv64::sbi::putstr(message);
+    crate::arch::riscv64::sbi::system_shutdown()
+}
+
+fn panic_dispatch_event(message: &str, error: super::state::EventError) -> ! {
+    crate::arch::riscv64::sbi::putstr(message);
+    crate::phases::print_event_error(error);
     crate::arch::riscv64::sbi::system_shutdown()
 }
 

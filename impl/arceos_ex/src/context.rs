@@ -1,4 +1,3 @@
-use crate::flows::boot_init_flow::BootInitFlow;
 #[cfg(checkpoint_handler_uart_irq_chain)]
 use crate::objects::irq_time::{
     Serial8250ConsoleBurstIrqTxProbe, Serial8250ConsoleIrqTxProbe,
@@ -92,9 +91,7 @@ use crate::objects::{
     raw_dtb::RawDtb,
     rcu::RcuCore,
     resource_tree::ResourceTree,
-    rest_init::{
-        KernelInitFlow, KernelInitTask, KthreaddFlow, KthreaddReadyGate, KthreaddTask, SystemState,
-    },
+    rest_init::{KernelInitTask, KthreaddReadyGate, KthreaddTask, SystemState},
     rootfs::{
         InitramfsSyncDeferred, IntegrityKeysDeferred, KUnitRuntimeTrimmed, RootFS, RootfsBoundary,
         RootfsConsoleDeferred, RootfsPrepareNamespacePaths,
@@ -136,7 +133,6 @@ pub struct Context {
     pub kernel_addr_space: KernelAddrSpace,
     pub cpu_group: CpuGroup,
     pub boot_task: BootTask,
-    pub boot_init_flow: BootInitFlow,
     pub init_stack: InitStack,
     pub syscall_table: SyscallTable,
     pub vm: Vm,
@@ -265,11 +261,8 @@ pub struct Context {
     pub ramfs_type: RamFsType,
 
     pub kernel_init_task: KernelInitTask,
-    #[cfg_attr(app_hello, allow(dead_code))]
-    pub kernel_init_flow: KernelInitFlow,
     pub kernel_init_task_pi_lock: RawSpinLock,
     pub kthreadd_task: KthreaddTask,
-    pub kthreadd_flow: KthreaddFlow,
     pub kthreadd_task_pi_lock: RawSpinLock,
     pub system_state: SystemState,
     pub kthreadd_ready_gate: KthreaddReadyGate,
@@ -387,7 +380,6 @@ impl Context {
             kernel_addr_space: KernelAddrSpace::new(),
             cpu_group: CpuGroup::new(),
             boot_task: BootTask::new(),
-            boot_init_flow: BootInitFlow::new(),
             init_stack: InitStack::new(),
             syscall_table: SyscallTable::new(),
             vm: Vm::new(),
@@ -508,10 +500,8 @@ impl Context {
             files_struct: FilesStruct::new(),
             ramfs_type: RamFsType::new(),
             kernel_init_task: KernelInitTask::new(),
-            kernel_init_flow: KernelInitFlow::new(),
             kernel_init_task_pi_lock: RawSpinLock::new(),
             kthreadd_task: KthreaddTask::new(),
-            kthreadd_flow: KthreaddFlow::new(),
             kthreadd_task_pi_lock: RawSpinLock::new(),
             system_state: SystemState::new(),
             kthreadd_ready_gate: KthreaddReadyGate::new(),
@@ -817,16 +807,13 @@ impl Context {
             let task = self.kernel_init_task.task();
             Some(CurrentTaskCandidate {
                 task,
-                flow: self.kernel_init_flow.core(),
+                flow: task.embedded_flow(),
             })
         } else if task_ref.same_identity(TaskRef::KTHREADD) {
             let task = self.kthreadd_task.task();
-            if !task.flow().same_identity(self.kthreadd_flow.flow_ref()) {
-                return None;
-            }
             Some(CurrentTaskCandidate {
                 task,
-                flow: self.kthreadd_flow.core(),
+                flow: task.embedded_flow(),
             })
         } else if let Some(candidate) = self
             .scheduler_test_tasks
@@ -850,7 +837,7 @@ impl Context {
         if task.flow().same_identity(TaskFlowRef::BOOT_INIT) {
             Some(CurrentTaskCandidate {
                 task,
-                flow: self.boot_init_flow.core(),
+                flow: task.embedded_flow(),
             })
         } else {
             None
@@ -1085,10 +1072,7 @@ impl Context {
             cpu_group,
             scheduler_test_tasks,
             kernel_init_task,
-            kernel_init_flow,
             kthreadd_task,
-            kthreadd_flow,
-            boot_init_flow,
             user_task_set,
             ..
         } = self;
@@ -1103,10 +1087,7 @@ impl Context {
         };
         let mut task_access = SchedulerTaskAccess::new(
             kernel_init_task,
-            kernel_init_flow,
             kthreadd_task,
-            kthreadd_flow,
-            boot_init_flow.core(),
             user_task_set,
             scheduler_test_tasks,
         );
@@ -1184,7 +1165,7 @@ impl Context {
     ) -> EventResult {
         if !current_task.task_ref().same_identity(previous) {
             return crate::objects::state::failed_condition(
-                LifecycleEvent::Continue,
+                LifecycleEvent::Dispatch,
                 State::OnCpu,
                 State::OnCpu,
                 State::OnCpu,
@@ -1197,10 +1178,7 @@ impl Context {
                 cpu_group,
                 scheduler_test_tasks,
                 kernel_init_task,
-                kernel_init_flow,
                 kthreadd_task,
-                kthreadd_flow,
-                boot_init_flow,
                 user_task_set,
                 ..
             } = self;
@@ -1215,10 +1193,7 @@ impl Context {
             })?;
             let task_access = SchedulerTaskAccess::new(
                 kernel_init_task,
-                kernel_init_flow,
                 kthreadd_task,
-                kthreadd_flow,
-                boot_init_flow.core(),
                 user_task_set,
                 scheduler_test_tasks,
             );
@@ -1233,16 +1208,13 @@ impl Context {
             cpu_group,
             scheduler_test_tasks,
             kernel_init_task,
-            kernel_init_flow,
             kthreadd_task,
-            kthreadd_flow,
-            boot_init_flow,
             user_task_set,
             ..
         } = self;
         let Some(scheduler) = cpu_group.boot_scheduler_mut() else {
             return failed_condition(
-                LifecycleEvent::Continue,
+                LifecycleEvent::Dispatch,
                 State::Base,
                 State::Online,
                 State::Online,
@@ -1250,10 +1222,7 @@ impl Context {
         };
         let mut task_access = SchedulerTaskAccess::new(
             kernel_init_task,
-            kernel_init_flow,
             kthreadd_task,
-            kthreadd_flow,
-            boot_init_flow.core(),
             user_task_set,
             scheduler_test_tasks,
         );
@@ -1307,10 +1276,7 @@ impl Context {
             cpu_group,
             scheduler_test_tasks,
             kernel_init_task,
-            kernel_init_flow,
             kthreadd_task,
-            kthreadd_flow,
-            boot_init_flow,
             user_task_set,
             ..
         } = self;
@@ -1324,10 +1290,7 @@ impl Context {
         };
         let task_access = SchedulerTaskAccess::new(
             kernel_init_task,
-            kernel_init_flow,
             kthreadd_task,
-            kthreadd_flow,
-            boot_init_flow.core(),
             user_task_set,
             scheduler_test_tasks,
         );
@@ -1365,19 +1328,13 @@ impl Context {
                 cpu_group,
                 scheduler_test_tasks,
                 kernel_init_task,
-                kernel_init_flow,
                 kthreadd_task,
-                kthreadd_flow,
-                boot_init_flow,
                 user_task_set,
                 ..
             } = self;
             let mut task_access = SchedulerTaskAccess::new(
                 kernel_init_task,
-                kernel_init_flow,
                 kthreadd_task,
-                kthreadd_flow,
-                boot_init_flow.core(),
                 user_task_set,
                 scheduler_test_tasks,
             );
@@ -1390,8 +1347,9 @@ impl Context {
                 .begin_kernel_shutdown(&mut self.kernel_init_task)
                 .is_err()
                 || self
-                    .kernel_init_flow
-                    .cleanup_for_exit(&self.kernel_init_task)
+                    .kernel_init_task
+                    .task_mut()
+                    .cleanup_embedded_flow()
                     .is_err()
                 || self.kernel_init_task.task_mut().disable().is_err()
                 || self.kernel_init_task.task_mut().cleanup().is_err()
@@ -1424,10 +1382,7 @@ impl Context {
                 cpu_group,
                 scheduler_test_tasks,
                 kernel_init_task,
-                kernel_init_flow,
                 kthreadd_task,
-                kthreadd_flow,
-                boot_init_flow,
                 user_task_set,
                 ..
             } = self;
@@ -1441,10 +1396,7 @@ impl Context {
             };
             let task_access = SchedulerTaskAccess::new(
                 kernel_init_task,
-                kernel_init_flow,
                 kthreadd_task,
-                kthreadd_flow,
-                boot_init_flow.core(),
                 user_task_set,
                 scheduler_test_tasks,
             );
@@ -1476,10 +1428,7 @@ impl Context {
                 cpu_group,
                 scheduler_test_tasks,
                 kernel_init_task,
-                kernel_init_flow,
                 kthreadd_task,
-                kthreadd_flow,
-                boot_init_flow,
                 user_task_set,
                 ..
             } = self;
@@ -1493,10 +1442,7 @@ impl Context {
             };
             let task_access = SchedulerTaskAccess::new(
                 kernel_init_task,
-                kernel_init_flow,
                 kthreadd_task,
-                kthreadd_flow,
-                boot_init_flow.core(),
                 user_task_set,
                 scheduler_test_tasks,
             );
@@ -1601,7 +1547,7 @@ fn current_task_event_error(error: CurrentTaskError) -> EventError {
     ));
     EventError::failed(
         EventErrorCode::ConditionFailed,
-        LifecycleEvent::Continue,
+        LifecycleEvent::Dispatch,
         State::Online,
         State::OnCpu,
         State::OnCpu,

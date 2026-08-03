@@ -48,9 +48,9 @@ pub fn run() -> SmokeResult {
 
     let payload_prepare_online = crate::phases::payload::prepare::is_online();
     let payload_handoff_prepare_online = crate::phases::payload::handoff_prepare::is_online();
-    let kernel_init_flow_online = ctx.kernel_init_flow.state() == State::Online;
-    let kernel_init_flow_active = ctx.kernel_init_flow.owner_bound();
-    let payload_handoff_committed = ctx.kernel_init_flow.payload_handoff_committed();
+    let kernel_init_flow_online = ctx.kernel_init_task.flow_state() == State::Online;
+    let kernel_init_flow_active = ctx.kernel_init_task.flow().owner().is_valid();
+    let payload_handoff_committed = ctx.selected_payload_handoff.committed();
     let task_flow_binding_active =
         ctx.kernel_init_task.task().flow() == crate::objects::task_flow::TaskFlowRef::KERNEL_INIT;
     if !payload_prepare_online

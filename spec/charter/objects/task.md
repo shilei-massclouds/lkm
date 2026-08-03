@@ -32,7 +32,7 @@ CPU 归属只保存在固定 `TaskFlow.cpu_ref`；Task 不保存同义 CPU assig
 
 ```text
 Base --Preset--> Prepared --Setup--> Ready --Enable--> Online
-Online --Continue--> OnCpu --Suspend--> Online
+Online --Dispatch--> OnCpu --Suspend--> Online
 OnCpu --Disable(terminal)--> Offline --Cleanup--> Destroyed
 ```
 
@@ -44,23 +44,26 @@ Task 还保存两组正交状态：
 
 - `TaskExecutionAuthority::{None, Reserved, Live}`：普通 Online Task 为 None，OnCpu Task 为 Live；
   Reserved 只用于已成为 AP `rq->idle/rq->curr`、但尚未收到 HSM 执行权的 idle Task。
-- `TaskBreakpointState::{Invalid, Prepared, Valid}`：Setup 构造 Prepared context；Enable 把 context
-  永久绑定到 `flow` 并发布 Valid；Continue 只从 Online 校验并消费 Valid context，提交
+- `TaskBreakpointState::{Invalid, Prepared, Valid}`：Setup 构造 Prepared context，建立初始 `ra/sp`、
+  固定 FlowRef/generation、context epoch、dispatch record，并把该 Flow 实例唯一的 `Start` 坐标绑定为
+  首次恢复坐标；Enable 只把 context 永久绑定到 `flow` 并发布 Valid；Dispatch 只从 Online 校验并消费
+  Valid context，提交
   `OnCpu/Live/Invalid`；Suspend 只从 OnCpu 保存 context 并发布 `Online/None/Valid`。
 
-首次入口与恢复入口使用同一个 Continue 路径。Scheduler 不保存 first/resume dispatch kind，也不根据
+首次入口与恢复入口使用同一个 Dispatch/Enter 路径。Scheduler 不保存 first/resume dispatch kind，也不根据
 Task 历史选择不同 Signal。实际入口由已经恢复的 `TaskThreadContext` 中 `ra/sp/s0..s11` 决定；新 Task
 在发布前已拥有指向其固定 FlowRef 的首个 Valid context，已运行 Task 的 Suspend 则覆盖为新的 Valid
 context。
 
 `BootTask` 是允许的静态 override：初态为 `OnCpu/Live/Invalid`，没有 Preset/Setup/Enable。它首次
-切出时才由 Scheduler 保存第一个 context，此后同样经 `Online --Continue--> OnCpu --Suspend--> Online`
+切出时才由 Scheduler 保存第一个 context，此后同样经 `Online --Dispatch--> OnCpu --Suspend--> Online`
 往返。boot-only const 初始化器直接构造静态 task、PID 0、`TaskRef::BOOT` 和 `stack`，不复用普通
 Task lifecycle 方法。
 
 每个 `ApIdleTask` 在 BP 预建完成时为 `OnCpu/Reserved/Invalid`。HSM 入口验证 boot data、原子建立
 CurrentTask/CurrentStack 并把 authority 激活为 Live，不改变 Task lifecycle；它首次切出时才产生
-Valid context，之后使用普通 Continue/Suspend。
+Valid context，之后使用普通 Dispatch/Suspend。HSM 架构入口直接调用 `ApIdleFlow.Start`，不发送
+Task.Dispatch 或 TaskFlow.Enter。
 
 ## TaskThreadContext
 
@@ -102,8 +105,9 @@ Prepared context、scheduler entity 和 New/not-enqueued 状态。Enable 在 wak
 类型完成发布并为 Online。Enable 不执行 Flow 主体。
 
 `BootInitRestInitPhase` 完整驱动 PID 1 与 kthreadd 的创建和发布。它们首次真正被选择时与以后恢复时
-完全相同：Scheduler 恢复 context、提交 CurrentTask/CurrentStack，再 drives Task.Continue，随后向固定
-Flow 交付 contextual `Action::Continue`。
+完全相同：Scheduler 恢复 context、提交 CurrentTask/CurrentStack，再 drives Task.Dispatch，随后向固定
+Flow 交付 contextual `Action::Enter`。首次 Enter 后由 Setup 绑定的坐标执行实例 `Start`；后续 Enter
+只恢复保存坐标。
 
 `TaskCreationCore.CopyProcess` 的 source 必须是当前 `OnCpu/Live` Task；其固定 Flow 必须是 effective
 TaskFlow，TaskRef 必须与 CurrentTaskRef 一致。Online、Reserved、非 current 或 stale reference 在修改
@@ -117,7 +121,7 @@ TaskThreadContext、不改变 Task/TaskFlow lifecycle，也不切换 CurrentTask
 
 identity Schedule 不保存 context、不改变 Task 状态或 CPU binding。Scheduler handler 完成后，通用
 yield resume attempt 发现 source execution binding 仍有效，立即精确一次消费 YieldToken，并从
-`yields` 后继续；不发送 TaskFlow.Continue。
+`yields` 后继续；不发送 Task.Dispatch 或 TaskFlow.Enter。
 
 non-identity switch 必须由 Scheduler 显式完成：
 
@@ -126,11 +130,12 @@ non-identity switch 必须由 Scheduler 显式完成：
 3. Task.Suspend(prev)，提交 `OnCpu/Live/Invalid -> Online/None/Valid`；
 4. RestoreCoreContext(next)，并原子提交 CurrentTask/CurrentStack 和固定 Flow 的 CpuRef；
 5. 在 next stack 上完成 finish；
-6. Task.Continue(next)，提交 `Online/None/Valid -> OnCpu/Live/Invalid`；
-7. 向 next 的固定 Flow 交付 contextual `Action::Continue`。
+6. Task.Dispatch(next)，提交 `Online/None/Valid -> OnCpu/Live/Invalid` 并生成不可伪造、一次性的私有
+   Enter proof；
+7. 用该 proof 向 next 的固定 Flow 交付 contextual `Action::Enter`。
 
 Schedule 目标处理结束时，prev 的执行绑定已经改变，因此 prev 的 YieldToken 保持 pending。未来同一
-Task context 恢复时，contextual Continue 以 TaskRef、FlowRef、generation、CPU、dispatch record 和
+Task context 恢复时，contextual Enter 以 TaskRef、FlowRef、generation、CPU、dispatch record 和
 context epoch 交叉校验 token 后精确一次恢复 source 模型 continuation。模型 token 与
 TaskThreadContext 不互相复制：前者只保存可序列化模型游标，后者只保存真实寄存器 continuation。
 

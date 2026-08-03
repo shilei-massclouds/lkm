@@ -38,105 +38,6 @@ pub enum SystemStateValue {
     Running,
 }
 
-/// The lifetime Flow of [`KernelInitTask`], whose PID is 1. Exec replaces the
-/// owned application instance, never this Flow association.
-#[cfg_attr(not(app_smoke), allow(dead_code))]
-pub struct KernelInitFlow {
-    flow: TaskFlow,
-    payload_handoff_committed: bool,
-}
-
-#[cfg_attr(not(app_smoke), allow(dead_code))]
-impl KernelInitFlow {
-    pub const fn new() -> Self {
-        Self {
-            flow: TaskFlow::new_static(TaskFlowRef::KERNEL_INIT),
-            payload_handoff_committed: false,
-        }
-    }
-
-    pub const fn state(&self) -> State {
-        self.flow.state()
-    }
-
-    pub const fn owner_bound(&self) -> bool {
-        self.flow.owner().is_valid()
-    }
-
-    pub const fn payload_handoff_committed(&self) -> bool {
-        self.payload_handoff_committed
-    }
-
-    #[cfg_attr(app_smoke, allow(dead_code))]
-    pub const fn flow_ref(&self) -> TaskFlowRef {
-        self.flow.flow_ref()
-    }
-
-    pub const fn cpu_id(&self) -> usize {
-        self.flow.cpu_id()
-    }
-
-    pub const fn cpu_ref(&self) -> Option<super::cpu::CpuRef> {
-        self.flow.cpu_ref()
-    }
-
-    pub fn commit_cpu_ref(&mut self, cpu_ref: super::cpu::CpuRef) -> bool {
-        self.flow.commit_cpu_ref(cpu_ref)
-    }
-
-    pub fn bind_fixed(&mut self, owner: &mut KernelInitTask) -> EventResult {
-        self.flow.bind(owner.task_mut())?;
-        owner.task_mut().bind_flow(&self.flow)
-    }
-
-    pub fn publish(&mut self, owner: &KernelInitTask) -> EventResult {
-        self.flow.preset(owner.task(), None)?;
-        self.flow.setup(owner.task(), None)?;
-        self.flow.enable(owner.task(), None)
-    }
-
-    pub fn continue_flow(&self, owner: &KernelInitTask) -> EventResult {
-        if self.flow.state() != State::Online
-            || !owner.task().flow().same_identity(self.flow.flow_ref())
-            || !super::task_flow::task_flow_execution_guard_satisfied(&self.flow, owner.task())
-        {
-            return failed_condition(
-                LifecycleEvent::Continue,
-                self.flow.state(),
-                State::Online,
-                State::Online,
-            );
-        }
-        Ok(())
-    }
-
-    pub fn cleanup_for_exit(&mut self, owner: &KernelInitTask) -> EventResult {
-        self.flow.cleanup_for_exit(owner.task())
-    }
-
-    pub fn require_payload_handoff_action(&self, owner: &KernelInitTask) -> EventResult {
-        if self.flow.state() != State::Online
-            || !super::task_flow::task_flow_execution_guard_satisfied(&self.flow, owner.task())
-        {
-            return failed_condition(
-                LifecycleEvent::Enable,
-                self.flow.state(),
-                State::Online,
-                State::Online,
-            );
-        }
-        Ok(())
-    }
-
-    pub fn mark_payload_handoff_committed(&mut self) {
-        self.payload_handoff_committed = true;
-    }
-
-    pub const fn core(&self) -> &TaskFlow {
-        &self.flow
-    }
-}
-
 pub struct KernelInitTask {
     task: Task,
     clone_fs: bool,
@@ -311,12 +212,50 @@ impl KernelInitTask {
         &mut self.task
     }
 
-    pub(crate) fn suspend_from_cpu(&mut self) -> EventResult {
-        self.task.suspend_from_cpu()
+    pub const fn flow(&self) -> &TaskFlow {
+        self.task.embedded_flow()
     }
 
-    pub(crate) fn continue_on_cpu(&mut self) -> EventResult {
-        self.task.continue_on_cpu()
+    pub const fn flow_state(&self) -> State {
+        self.task.flow_state()
+    }
+
+    pub const fn flow_ref(&self) -> TaskFlowRef {
+        self.task.flow_ref()
+    }
+
+    pub const fn flow_cpu_id(&self) -> usize {
+        self.task.embedded_flow().cpu_id()
+    }
+
+    pub fn bind_fixed_flow(&mut self) -> EventResult {
+        self.task.declare_and_bind_embedded_flow()
+    }
+
+    pub fn publish_flow(&mut self) -> EventResult {
+        self.task.publish_embedded_flow()
+    }
+
+    pub fn commit_flow_cpu_ref(&mut self, cpu_ref: super::cpu::CpuRef) -> bool {
+        self.task.commit_flow_cpu_ref(cpu_ref)
+    }
+
+    pub fn require_payload_handoff_action(&self) -> EventResult {
+        if self.flow_state() != State::Online
+            || !super::task_flow::task_flow_execution_guard_satisfied(self.flow(), self.task())
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.flow_state(),
+                State::Online,
+                State::Online,
+            );
+        }
+        Ok(())
+    }
+
+    pub(crate) fn suspend_from_cpu(&mut self) -> EventResult {
+        self.task.suspend_from_cpu()
     }
 
     pub fn commit_preset_metadata(&mut self) -> EventResult {
@@ -440,16 +379,12 @@ impl KernelInitTask {
         Ok(())
     }
 
-    pub fn release_boot_cpu_affinity(
-        &mut self,
-        flow: &KernelInitFlow,
-        cpu_group: &CpuGroup,
-    ) -> bool {
+    pub fn release_boot_cpu_affinity(&mut self, cpu_group: &CpuGroup) -> bool {
         if self.task.state() != State::OnCpu
             || self.task.pid() != KERNEL_INIT_PID
             || !self.task.affinity_pinned()
             || !self.task.no_setaffinity()
-            || flow.cpu_id() == usize::MAX
+            || self.task.embedded_flow().cpu_id() == usize::MAX
             || !cpu_group.secondary_cpus_online()
             || !cpu_group.smp_concurrency_open()
         {
@@ -457,80 +392,6 @@ impl KernelInitTask {
         }
 
         self.task.clear_cpu_pin()
-    }
-}
-
-pub struct KthreaddFlow {
-    flow: TaskFlow,
-}
-
-#[allow(dead_code)]
-impl KthreaddFlow {
-    pub const fn new() -> Self {
-        Self {
-            flow: TaskFlow::new_static(TaskFlowRef::KTHREADD),
-        }
-    }
-
-    pub const fn state(&self) -> State {
-        self.flow.state()
-    }
-
-    #[cfg_attr(app_smoke, allow(dead_code))]
-    pub const fn flow_ref(&self) -> TaskFlowRef {
-        self.flow.flow_ref()
-    }
-
-    pub const fn cpu_id(&self) -> usize {
-        self.flow.cpu_id()
-    }
-
-    pub const fn cpu_ref(&self) -> Option<super::cpu::CpuRef> {
-        self.flow.cpu_ref()
-    }
-
-    pub fn bind_cpu_ref(&mut self, cpu_ref: super::cpu::CpuRef) -> bool {
-        self.flow.bind_cpu_ref(cpu_ref)
-    }
-
-    pub fn commit_cpu_ref(&mut self, cpu_ref: super::cpu::CpuRef) -> bool {
-        self.flow.commit_cpu_ref(cpu_ref)
-    }
-
-    #[cfg_attr(app_smoke, allow(dead_code))]
-    pub const fn owner(&self) -> TaskRef {
-        self.flow.owner()
-    }
-
-    #[cfg_attr(app_smoke, allow(dead_code))]
-    pub fn bind_fixed(&mut self, owner: &mut KthreaddTask) -> EventResult {
-        self.flow.bind(owner.task_mut())?;
-        owner.task_mut().bind_flow(&self.flow)
-    }
-
-    pub fn publish(&mut self, owner: &KthreaddTask) -> EventResult {
-        self.flow.preset(owner.task(), None)?;
-        self.flow.setup(owner.task(), None)?;
-        self.flow.enable(owner.task(), None)
-    }
-
-    pub fn continue_flow(&self, owner: &KthreaddTask) -> EventResult {
-        if self.flow.state() != State::Online
-            || !owner.task().flow().same_identity(self.flow.flow_ref())
-            || !super::task_flow::task_flow_execution_guard_satisfied(&self.flow, owner.task())
-        {
-            return failed_condition(
-                LifecycleEvent::Continue,
-                self.flow.state(),
-                State::Online,
-                State::Online,
-            );
-        }
-        Ok(())
-    }
-
-    pub const fn core(&self) -> &TaskFlow {
-        &self.flow
     }
 }
 
@@ -671,12 +532,32 @@ impl KthreaddTask {
         &mut self.task
     }
 
-    pub(crate) fn suspend_from_cpu(&mut self) -> EventResult {
-        self.task.suspend_from_cpu()
+    pub const fn flow(&self) -> &TaskFlow {
+        self.task.embedded_flow()
     }
 
-    pub(crate) fn continue_on_cpu(&mut self) -> EventResult {
-        self.task.continue_on_cpu()
+    pub const fn flow_state(&self) -> State {
+        self.task.flow_state()
+    }
+
+    pub const fn flow_ref(&self) -> TaskFlowRef {
+        self.task.flow_ref()
+    }
+
+    pub fn bind_fixed_flow(&mut self) -> EventResult {
+        self.task.declare_and_bind_embedded_flow()
+    }
+
+    pub fn publish_flow(&mut self) -> EventResult {
+        self.task.publish_embedded_flow()
+    }
+
+    pub fn commit_flow_cpu_ref(&mut self, cpu_ref: super::cpu::CpuRef) -> bool {
+        self.task.commit_flow_cpu_ref(cpu_ref)
+    }
+
+    pub(crate) fn suspend_from_cpu(&mut self) -> EventResult {
+        self.task.suspend_from_cpu()
     }
 
     pub fn commit_preset_metadata(&mut self) -> EventResult {
@@ -725,14 +606,17 @@ impl KthreaddTask {
         Ok(())
     }
 
-    pub fn mark_schedule_loop_active(&mut self, flow: &KthreaddFlow) -> EventResult {
+    pub fn mark_schedule_loop_active(&mut self) -> EventResult {
         if self.task.state() != State::OnCpu
-            || flow.state() != State::Online
-            || !super::task_flow::task_flow_execution_guard_satisfied(flow.core(), &self.task)
+            || self.task.flow_state() != State::Online
+            || !super::task_flow::task_flow_execution_guard_satisfied(
+                self.task.embedded_flow(),
+                &self.task,
+            )
         {
             return failed_condition(
                 LifecycleEvent::Setup,
-                flow.state(),
+                self.task.flow_state(),
                 State::Online,
                 State::Online,
             );
@@ -1201,7 +1085,7 @@ pub fn runtime_services_still_deferred(
 pub(crate) extern "C" fn kernel_init_entry() -> ! {
     crate::phases::shutdown_on_error(
         crate::context::context().finish_task_switch(TaskRef::KERNEL_INIT),
-        "kernel_init Continue failed\n",
+        "kernel_init Dispatch/Enter failed\n",
     );
     let ctx = crate::context::context_ref();
     crate::checkpoint::dispatch(Checkpoint::SchedulerPickNextTaskExit, ctx);
@@ -1226,11 +1110,10 @@ pub(crate) extern "C" fn kthreadd_entry() -> ! {
     let ctx = crate::context::context();
     crate::phases::shutdown_on_error(
         ctx.finish_task_switch(TaskRef::KTHREADD),
-        "kthreadd Continue failed\n",
+        "kthreadd Dispatch/Enter failed\n",
     );
     crate::phases::shutdown_on_error(
-        ctx.kthreadd_task
-            .mark_schedule_loop_active(&ctx.kthreadd_flow),
+        ctx.kthreadd_task.mark_schedule_loop_active(),
         "kthreadd dispatch guard failed\n",
     );
     crate::arch::riscv64::sbi::putstr("kthreadd (pid=2) started\n");

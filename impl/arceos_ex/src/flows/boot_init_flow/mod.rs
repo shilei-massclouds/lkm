@@ -5,6 +5,7 @@ mod preset;
 mod rest_init;
 mod schedule_handoff;
 mod setup;
+pub(crate) use idle::IdleRuntime;
 
 #[allow(unused_imports)]
 pub use enable::{boot_task_restored, enable, enable_after_boot_init_schedule_handoff};
@@ -25,43 +26,10 @@ pub(crate) use preset::{
 use crate::objects::{
     state::{EventResult, LifecycleEvent, State, failed_condition},
     task::TaskRef,
-    task_flow::{TaskFlow, TaskFlowRef, task_flow_execution_guard_satisfied},
 };
 
-/// BootTask's immutable initial continuation. Every execution boundary reads
-/// the owning Task's Task-only OnCpu projection.
-pub struct BootInitFlow {
-    flow: TaskFlow,
-    pub(crate) idle: idle::IdleRuntime,
-}
-
-impl BootInitFlow {
-    pub const fn new() -> Self {
-        Self {
-            flow: TaskFlow::new_static_bound(TaskFlowRef::BOOT_INIT, TaskRef::BOOT),
-            idle: idle::IdleRuntime::new(),
-        }
-    }
-
-    pub const fn state(&self) -> State {
-        self.flow.state()
-    }
-
-    pub(crate) const fn core(&self) -> &TaskFlow {
-        &self.flow
-    }
-
-    pub fn bind_cpu_ref(&mut self, cpu_ref: crate::objects::cpu::CpuRef) -> bool {
-        self.flow.bind_cpu_ref(cpu_ref)
-    }
-
-    pub const fn cpu_ref(&self) -> Option<crate::objects::cpu::CpuRef> {
-        self.flow.cpu_ref()
-    }
-}
-
 pub fn is_online() -> bool {
-    crate::context::context_ref().boot_init_flow.state() == State::Online
+    crate::objects::boot_task::BootTask::canonical_task().flow_state() == State::Online
         && setup_leaves_online()
         && rest_init::is_online()
         && schedule_handoff::is_online()
@@ -98,7 +66,7 @@ pub fn dispatch_ready() -> bool {
 }
 
 pub fn is_prepared() -> bool {
-    crate::context::context_ref().boot_init_flow.state() == State::Prepared
+    crate::objects::boot_task::BootTask::canonical_task().flow_state() == State::Prepared
         && boot_task_on_cpu_and_canonical()
 }
 
@@ -126,9 +94,12 @@ pub(super) fn require_guarded_state(
     target: State,
 ) -> EventResult {
     let ctx = crate::context::context_ref();
-    let actual = ctx.boot_init_flow.state();
+    let actual = ctx.boot_task.task().flow_state();
     if actual != expected
-        || !task_flow_execution_guard_satisfied(&ctx.boot_init_flow.flow, ctx.boot_task.task())
+        || !crate::objects::task_flow::task_flow_execution_guard_satisfied(
+            ctx.boot_task.task().embedded_flow(),
+            ctx.boot_task.task(),
+        )
     {
         return failed_condition(event, actual, expected, target);
     }
@@ -138,7 +109,7 @@ pub(super) fn require_guarded_state(
 pub(super) fn phase_failure(event: LifecycleEvent, expected: State, target: State) -> EventResult {
     failed_condition(
         event,
-        crate::context::context_ref().boot_init_flow.state(),
+        crate::context::context_ref().boot_task.task().flow_state(),
         expected,
         target,
     )

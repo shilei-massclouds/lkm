@@ -147,6 +147,10 @@ def _render_verbose(view: dict[str, Any]) -> str:
             lines.append(f"{indent}  asynchronous: delivered by global FIFO")
         if signal.get("handler"):
             lines.append(f"{indent}  handler: {signal['handler']['id']}")
+            if signal["handler"].get("contextual_entry"):
+                lines.append(f"{indent}  contextual entry: restores the selected TaskFlow lane")
+            if signal["handler"].get("initial_context_entry"):
+                lines.append(f"{indent}  initial context entry: consumed exactly once")
         if signal.get("payload"):
             rendered = ", ".join(
                 f"{item['name']}:{item['type']}={json.dumps(item['value'], ensure_ascii=False)}"

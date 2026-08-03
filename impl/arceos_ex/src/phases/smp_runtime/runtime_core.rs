@@ -40,7 +40,7 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
         && ctx.cpu_group.possible_cpu_count() > 0;
     let affinity_released = ctx
         .kernel_init_task
-        .release_boot_cpu_affinity(&ctx.kernel_init_flow, &ctx.cpu_group);
+        .release_boot_cpu_affinity(&ctx.cpu_group);
     ctx.scheduler_shared
         .enable_smp(smp_cpu_inventory_ready, affinity_released)?;
     {

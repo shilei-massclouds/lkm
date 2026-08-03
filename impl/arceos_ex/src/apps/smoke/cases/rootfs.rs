@@ -33,9 +33,7 @@ const ELF_MACHINE_RISCV: u16 = 243;
 pub fn run() -> SmokeResult {
     let ctx = context();
 
-    if !phases::smp_runtime::rootfs::is_online()
-        || !ctx.kernel_init_flow.payload_handoff_committed()
-    {
+    if !phases::smp_runtime::rootfs::is_online() || !ctx.selected_payload_handoff.committed() {
         printk::write_str("rootfs phase is not ready\n");
         return SmokeResult::Failed;
     }

@@ -9,8 +9,8 @@ BootInitFlow.Online 后按固定顺序执行同一 Flow 的 Actions：
 2. `yields CpuGroup.cpus[0].scheduler.Action::Schedule()`；
 3. identity 时由目标完成后的通用 resume attempt 立即从 yields 后继续；
 4. non-identity 时 Scheduler 显式保存 BootTask context、Task.Suspend、恢复 next context、提交 bindings 和
-   next Task.Continue；BootInitFlow lane token 保持 pending；
-5. 未来 Scheduler 恢复 BootTask 后，contextual BootInitFlow.Continue 校验 context epoch/token，先回到
+   next Task.Dispatch 与 TaskFlow.Enter；BootInitFlow lane token 保持 pending；
+5. 未来 Scheduler 恢复 BootTask 后，contextual BootInitFlow.Enter 校验 context epoch/token，先回到
    `schedule()` 返回 continuation，再驱动 `BootIdleEntryPhase` 和 idle loop。
 
 本轮 canonical before-send 边界固定在第 2 步 token/Signal 尚未创建的位置。发送 Schedule 本身不改变

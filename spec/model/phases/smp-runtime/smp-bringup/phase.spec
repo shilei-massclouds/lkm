@@ -475,7 +475,7 @@ object CpuStartProvider: HardwareObject {
                     ApIdleFlow.Transition::Preset;
                     ApIdleFlow.Transition::Setup;
                     ApIdleFlow.Transition::Enable;
-                    ApIdleFlow.Action::Continue;
+                    ApIdleFlow.Action::Start;
                 }
             }
         }
@@ -517,7 +517,7 @@ object CpuStartProvider: HardwareObject {
  * 建立 AP 当前 idle task 指针、AP 栈/pt_regs 指针，切到已存在的
  * SwapperVm，并安装正式 trap vector。boot-data/tp 验证后，同一入口直接
  * 建立该 idle Task 的 OnCpu 与 initial idle Flow Startup，不发送 Scheduler
- * Continue。该对象是以 secondary logical_id
+ * Start。该对象是以 secondary logical_id
  * 为 target key 的 replicated phase family；每个 AP 有独立四态。
  */
 object ApEntryPreludePhase: PhaseObject {

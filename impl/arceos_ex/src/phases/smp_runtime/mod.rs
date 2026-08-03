@@ -18,9 +18,9 @@ use crate::{
 /// Entered only from `kernel_init_entry()` after its actual stack check.
 pub fn start_kernel_init_flow() -> ! {
     let ctx = crate::context::context_ref();
-    if ctx.kernel_init_flow.state() != State::Online || !mainline_ready(ctx) {
+    if ctx.kernel_init_task.flow_state() != State::Online || !mainline_ready(ctx) {
         crate::phases::shutdown_on_error(
-            flow_failure(LifecycleEvent::Continue, State::Online, State::Online),
+            flow_failure(LifecycleEvent::Dispatch, State::Online, State::Online),
             "arceos_ex kernel init flow preset start failed\n",
         );
     }
@@ -43,7 +43,7 @@ pub fn preset_after_smp_bringup() -> ! {
     let result = if pre_smp_init::is_online() && smp_bringup::is_online() && mainline_ready(ctx) {
         Ok(())
     } else {
-        flow_failure(LifecycleEvent::Continue, State::Online, State::Online)
+        flow_failure(LifecycleEvent::Dispatch, State::Online, State::Online)
     };
     crate::phases::shutdown_on_error(result, "arceos_ex kernel init flow preset failed\n");
     runtime_core::preset(crate::context::context())
@@ -98,7 +98,7 @@ pub fn setup_after_payload_prepare() -> ! {
     let result = if setup_children_online() && mainline_ready(ctx) {
         Ok(())
     } else {
-        flow_failure(LifecycleEvent::Continue, State::Online, State::Online)
+        flow_failure(LifecycleEvent::Dispatch, State::Online, State::Online)
     };
     crate::phases::shutdown_on_error(result, "arceos_ex kernel init flow setup failed\n");
     crate::phases::payload::handoff_prepare::preset()
@@ -109,7 +109,7 @@ pub fn enable_after_payload_handoff_prepare() -> ! {
     let result = if crate::phases::payload::handoff_prepare::is_online() && mainline_ready(ctx) {
         Ok(())
     } else {
-        flow_failure(LifecycleEvent::Continue, State::Online, State::Online)
+        flow_failure(LifecycleEvent::Dispatch, State::Online, State::Online)
     };
     crate::phases::shutdown_on_error(result, "arceos_ex kernel init flow enable failed\n");
     crate::phases::shutdown_on_error(
@@ -135,12 +135,12 @@ fn require_flow_continuation(
     message: &'static str,
 ) {
     let ctx = crate::context::context_ref();
-    let result = if child_online && ctx.kernel_init_flow.state() == expected && mainline_ready(ctx)
-    {
-        Ok(())
-    } else {
-        flow_failure(event, expected, target)
-    };
+    let result =
+        if child_online && ctx.kernel_init_task.flow_state() == expected && mainline_ready(ctx) {
+            Ok(())
+        } else {
+            flow_failure(event, expected, target)
+        };
     crate::phases::shutdown_on_error(result, message)
 }
 
@@ -160,15 +160,17 @@ fn mainline_ready(ctx: &crate::context::Context) -> bool {
 fn commit_payload_handoff() -> ! {
     let ctx = crate::context::context();
     crate::phases::shutdown_on_error(
-        ctx.kernel_init_flow
-            .require_payload_handoff_action(&ctx.kernel_init_task),
+        ctx.kernel_init_task.require_payload_handoff_action(),
         "arceos_ex kernel init payload handoff guard failed\n",
     );
     crate::phases::shutdown_on_error(
         crate::apps::commit_selected_payload(ctx),
         "arceos_ex selected payload handoff commit failed\n",
     );
-    ctx.kernel_init_flow.mark_payload_handoff_committed();
+    crate::phases::shutdown_on_error(
+        ctx.selected_payload_handoff.commit(),
+        "arceos_ex selected payload handoff fact commit failed\n",
+    );
     crate::checkpoint::checkpoint(Checkpoint::KernelInitFlowPayloadHandoffCommitted);
     crate::checkpoint::dispatch_after_trace(Checkpoint::KernelInitFlowPayloadHandoffCommitted, ctx);
     crate::apps::enter_selected_payload(ctx)
@@ -177,7 +179,7 @@ fn commit_payload_handoff() -> ! {
 fn flow_failure(event: LifecycleEvent, expected: State, target: State) -> EventResult {
     failed_condition(
         event,
-        crate::context::context_ref().kernel_init_flow.state(),
+        crate::context::context_ref().kernel_init_task.flow_state(),
         expected,
         target,
     )

@@ -112,7 +112,7 @@ Computer.Enable；Computer 的三个 handler 不相互触发。子 System 规格
 `Computer.Enable -> Riscv64Platform.Enable -> OpenSBI.Enable -> Kernel.Enable` 异步推进；
 Kernel.Enable 同步驱动 `BootInitFlow` 的三段 lifecycle。BootInitFlow 提交 Online 后，同一固定 Flow
 向 CPU0 Scheduler `yields Schedule()`；non-identity switch 的显式 context save/restore 和统一
-Task/TaskFlow Continue 再承载 KernelInitFlow 的后续执行。
+Task.Dispatch/TaskFlow.Enter 再承载 KernelInitFlow 的后续执行。
 
 > MUST[model]：Computer 模型
 >
@@ -282,14 +282,15 @@ BootInitFlow Online Actions 继续承载 schedule return 和 idle continuation�
 
 #### BootIdleEntryPhase
 
-它是 `BootInitFlow` 的 Online 子 Phase，只在调度器未来恢复 BootTask 并由 contextual Continue 回到
+它是 `BootInitFlow` 的 Online 子 Phase，只在调度器未来恢复 BootTask 并由 contextual Enter 回到
 schedule 返回点后执行。
 
 ### KernelInitFlow 直接叶子
 
 首次 dispatch 必须显式保存 BootTask context并 Suspend；真实栈切换后 Scheduler 恢复 PID 1 context、
-提交 CurrentTask/CurrentStack、drives KernelInitTask.Continue，再向已 Online 的固定 KernelInitFlow
-交付 contextual Continue。首个 context 从 `kernel_init_entry()` 验证 PID 1 vmalloc stack后执行全部
+提交 CurrentTask/CurrentStack、drives KernelInitTask.Dispatch，再向已 Online 的固定 KernelInitFlow
+交付 contextual Enter。首个 context 从 `kernel_init_entry()` 验证 PID 1 vmalloc stack后执行
+`KernelInitFlow.Start`，并驱动全部
 PreSMP/SMP/runtime/rootfs/finalize/payload 叶子。
 
 #### PreSmpInitPhase
