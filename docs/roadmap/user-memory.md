@@ -20,6 +20,28 @@ address-space snapshot；vfork 的既有共享-VM 兼容片不由本阶段泛化
 `MAP_PRIVATE`，parent 在 wait 后验证退出状态、全部原字节和 brk 不变，并能继续 munmap。对象 smoke
 另以 eager-copy 后故障注入验证 page、未发布 Task 槽、PID 分配和 parent SATP 的原子回滚。
 
+### 第二阶段完整回归证据（2026-08-04）
+
+以提交 `58f6eb03` 为被测基线完成一轮独立验收；本轮只记录验证证据，不改变 Charter、Model、Coding、
+Compose 或 Impl 语义：
+
+- 仓库根直接执行 `make test`，结果为 188/188；双 provider 的 KUnit 各 25/25、kernel smoke 各
+  58/58，其余 user/rootfs/LTP acceptance 全部通过。
+- `make -C tools2 test-all` 通过：106 个 Python 测试、16 个 frontend 测试、bundle check 与 9 个
+  Playwright E2E 均成功。
+- 默认 `make stress-test` 对 DF-0001 user boot、DF-0002 smoke initcall、DF-0003 scripted shell 和
+  DF-0004 canonical rc.local 各执行 10 轮，合计 40/40、failure=0、无 timeout。报告分别保存在
+  `impl/arceos_ex/tests/stress/out/20260803T160957.418065Z-df-0001-user-boot/`、
+  `impl/arceos_ex/tests/stress/out/20260803T161007.373015Z-df-0002-smoke-initcall/`、
+  `impl/arceos_ex/tests/stress/out/20260803T161033.063669Z-df-0003-distro-sh-ls/` 和
+  `impl/arceos_ex/tests/stress/out/20260803T161047.998168Z-rc-local-native-timeout-focused/`。
+- 默认 `make difftest` 的 preflight 确认 474 个 checkpoint mapping 当前有效、103 个 exact Linux marker
+  无 missing/stale/mismatch；`rc-local-difftest` 为 1/1，class=`paired-checkpoint-diff-ok`，
+  `first_divergence=None`。报告保存在
+  `impl/arceos_ex/tests/stress/out/20260803T161138.191593Z-rc-local-difftest/`。
+- 全部命令结束后无残留 QEMU 进程；测试未产生 tracked 修改。后续仍从下述第三阶段开始，不因本轮
+  回归通过而把 eager dup_mm 视为 COW 完成。
+
 ## 第三阶段：真实 COW（最高优先级）
 
 下一执行窗口必须 charter-first 从本阶段开始，不能以 eager copy 长期替代 COW，也不能恢复 snapshot
