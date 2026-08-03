@@ -173,6 +173,27 @@ predicate user_address_space_mmap_anonymous_window_bound<T>(space: T) -> bool;
 predicate user_address_space_mmap_fixed_heap_base_compat_bound<T>(space: T) -> bool;
 predicate user_address_space_mprotect_accepts_mapped_user_range<T>(space: T) -> bool;
 predicate user_address_space_munmap_accepts_mapped_user_range<T>(space: T) -> bool;
+predicate user_address_space_munmap_anonymous_private_whole_vma<T>(space: T) -> bool;
+predicate user_address_space_munmap_removes_leaves_backing_and_vma<T>(space: T) -> bool;
+predicate user_address_space_munmap_range_and_slot_reusable<T>(space: T) -> bool;
+predicate user_address_space_munmap_rejects_partial_or_nonanonymous_atomically<T>(space: T) -> bool;
+predicate user_address_space_vmas_nonoverlapping<T>(space: T) -> bool;
+predicate user_address_space_heap_demand_paged<T>(space: T) -> bool;
+predicate user_address_space_anonymous_private_demand_paged<T>(space: T) -> bool;
+predicate user_address_space_fault_request_task_mm_bound<T>(space: T) -> bool;
+predicate user_address_space_terminal_handoff_fault_request_uses_committed_parent_task<T>(space: T) -> bool;
+predicate user_address_space_fault_access_classified<T>(space: T) -> bool;
+predicate user_address_space_fault_classes_total_and_exclusive<T>(space: T) -> bool;
+predicate user_address_space_fault_not_present_bound<T>(space: T) -> bool;
+predicate user_address_space_fault_protection_bound<T>(space: T) -> bool;
+predicate user_address_space_fault_unmapped_bound<T>(space: T) -> bool;
+predicate user_address_space_fault_retry_preserves_sepc<T>(space: T) -> bool;
+predicate user_address_space_fault_targeted_tlb_flush<T>(space: T) -> bool;
+predicate user_address_space_fault_failure_atomic<T>(space: T) -> bool;
+predicate user_address_space_fault_diagnostic_stable<T>(space: T) -> bool;
+predicate user_address_space_fault_cow_count_zero_first_slice<T>(space: T) -> bool;
+predicate user_address_space_fault_kernel_extable_isolated<T>(space: T) -> bool;
+predicate user_address_space_fault_sigsegv_delivery_deferred<T>(space: T) -> bool;
 predicate swapper_vm_remains_kernel_shared_instance<T>(swapper: T) -> bool;
 
 predicate user_trap_frame_allocated<T>(frame: T) -> bool;
@@ -997,6 +1018,9 @@ object UserAddressSpace: ResourceObject {
                     user_address_space_satp_token_ready(self);
                     user_address_space_prepared_but_not_current(self);
                     user_address_space_runtime_ready(self);
+                    user_address_space_vmas_nonoverlapping(self);
+                    user_address_space_heap_demand_paged(self);
+                    user_address_space_anonymous_private_demand_paged(self);
                 }
             }
         }
@@ -1014,6 +1038,9 @@ object UserAddressSpace: ResourceObject {
             user_address_space_bound_to_kernel_init_task(self, KernelInitTask);
             kernel_init_task_first_user_address_space_bound(KernelInitTask, self);
             user_address_space_heap_arena_mapped(self);
+            user_address_space_vmas_nonoverlapping(self);
+            user_address_space_heap_demand_paged(self);
+            user_address_space_anonymous_private_demand_paged(self);
         }
 
         actions {
@@ -1041,6 +1068,29 @@ object UserAddressSpace: ResourceObject {
             on Action::Munmap {
                 ensures {
                     user_address_space_munmap_accepts_mapped_user_range(self);
+                    user_address_space_munmap_anonymous_private_whole_vma(self);
+                    user_address_space_munmap_removes_leaves_backing_and_vma(self);
+                    user_address_space_munmap_range_and_slot_reusable(self);
+                    user_address_space_munmap_rejects_partial_or_nonanonymous_atomically(self);
+                }
+            }
+
+            on Action::ResolveUserFault {
+                ensures {
+                    user_address_space_fault_request_task_mm_bound(self);
+                    user_address_space_terminal_handoff_fault_request_uses_committed_parent_task(self);
+                    user_address_space_fault_access_classified(self);
+                    user_address_space_fault_classes_total_and_exclusive(self);
+                    user_address_space_fault_not_present_bound(self);
+                    user_address_space_fault_protection_bound(self);
+                    user_address_space_fault_unmapped_bound(self);
+                    user_address_space_fault_retry_preserves_sepc(self);
+                    user_address_space_fault_targeted_tlb_flush(self);
+                    user_address_space_fault_failure_atomic(self);
+                    user_address_space_fault_diagnostic_stable(self);
+                    user_address_space_fault_cow_count_zero_first_slice(self);
+                    user_address_space_fault_kernel_extable_isolated(self);
+                    user_address_space_fault_sigsegv_delivery_deferred(self);
                 }
             }
         }

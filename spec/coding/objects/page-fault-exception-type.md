@@ -6,6 +6,11 @@ sorted `ExceptionTable`; only a non-nested, non-hardirq, entry-irq-enabled curre
 fixup. Nested, hardirq or entry-irq-disabled faults may only apply the validated fixup immediately. Missing/stale
 entries and illegal context are terminal.
 
+User-origin instruction/load/store causes build one `UserFaultRequest` from the trap frame and current Task/mm,
+then call the `UserAddressSpace` classifier. A successful result returns the original `sepc`; invalid or failed
+results remain explicit and cannot fall through to kernel exception-table lookup. The kernel branch likewise
+must not read user VMA, sparse-backing, or COW diagnostic state.
+
 `Preset` installs only the terminal page-fault fallback consumed by `TrapType.Setup`; handler and fixup bindings
 remain later lifecycle work.
 

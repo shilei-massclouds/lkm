@@ -26,11 +26,13 @@ snapshot (root for boot). Unsupported platform/HWCAP2/rseq/vDSO entries are abse
 aligned. The VMA covers the argument pages plus configured expansion, capped by the selected-top rlimit;
 only pages containing initial data are allocated and mapped.
 
-`resolve_user_stack_fault` accepts only the current SATP and load/store access. A missing page inside the VMA
-allocates one sparse slot. An address below it may move the VMA base only after rlimit, guard-gap and adjacent
-mapping checks. Multi-page jumps do not populate intermediate pages. Backing allocation, new L0 allocation
-and leaf installation form one rollback unit; failure preserves base, slots, PTE accounting and allocator
-counts. Success performs targeted `sfence.vma` and does not advance `sepc`.
+The common `UserAddressSpace` resolver is the only policy entry point. Its stack branch delegates sparse-page
+allocation and downward-growth checks to `UserStack`; the stack object does not classify non-stack,
+instruction, permission or stale-mm faults. A missing page inside the VMA allocates one sparse slot. An
+address below it may move the VMA base only after rlimit, guard-gap and adjacent mapping checks. Multi-page
+jumps do not populate intermediate pages. Backing allocation, new L0 allocation and leaf installation form
+one rollback unit; failure preserves base, slots, PTE accounting and allocator counts. Success performs
+targeted `sfence.vma` and returns `RetrySameInstruction` without advancing `sepc`.
 
 Usercopy resolves every stack page in a valid range through the same mechanism and reports failure as
 `EFAULT`; the detailed rejection remains observable through `UserStack.GrowRejected`. Release and exec/parent
@@ -44,5 +46,5 @@ checkpoint owners expose top max, selected top, ASLR offset, execfn pointer and 
 without changing checkpoint IDs, names or order.
 
 Dynamic rlimit syscalls and `SIGSEGV/si_code`, fork/COW, multiple thread stacks, `MAP_STACK`/
-`MAP_GROWSDOWN`, the common VMA fault/locking core, a complete CRNG, kernel compiler stack protector and
+`MAP_GROWSDOWN`, a complete CRNG, kernel compiler stack protector and
 per-task canaries remain separate roadmap work.

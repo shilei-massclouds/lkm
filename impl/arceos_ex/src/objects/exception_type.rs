@@ -25,8 +25,9 @@ use super::{
     user_boot::{
         USER_SIGNAL_COUNT, USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE,
         USER_SUPPLEMENTARY_GROUP_MAX, USER_WAIT4_ALL_CHILDREN, USER_WAIT4_WUNTRACED,
-        UserFaultAccess, UserFaultMappingDiagnostic, UserMappingKind, UserMmapError,
-        UserProcessGroupLookup, UserProcessGroupUpdate, UserRtSigtimedwaitResult, UserSignalAction,
+        UserFaultAccess, UserFaultClass, UserFaultMappingDiagnostic, UserFaultRequest,
+        UserFaultResult, UserMappingKind, UserMmapError, UserProcessGroupLookup,
+        UserProcessGroupUpdate, UserRtSigtimedwaitResult, UserSignalAction,
     },
 };
 
@@ -3600,37 +3601,46 @@ fn page_fault_exception_handler(frame: &mut TrapFrame) {
     let cause = frame.scause & !SCAUSE_INTERRUPT_BIT;
     let current_satp = crate::arch::riscv64::csr::read_satp();
     let from_user = frame.sstatus & crate::arch::riscv64::csr::SSTATUS_SPP == 0;
-    if from_user
-        && matches!(cause, EXC_LOAD_PAGE_FAULT | EXC_STORE_PAGE_FAULT)
-        && current_satp
-            == crate::context::context_ref()
-                .user_address_space
-                .satp_token()
-    {
+    if from_user && PAGE_FAULT_CAUSES.contains(&cause) {
         let access = page_fault_access(frame);
+        let task_ref = crate::context::context_ref()
+            .current_task_ref()
+            .unwrap_or(super::task::TaskRef::NONE);
+        let request =
+            UserFaultRequest::new(task_ref, current_satp, frame.stval, frame.sepc, access);
+        let stack_pages_before = crate::context::context_ref()
+            .user_stack
+            .backing_page_count();
         let result = {
             let ctx = crate::context::context();
-            ctx.user_address_space.resolve_user_stack_fault(
+            ctx.user_address_space.resolve_user_fault(
                 &mut ctx.user_stack,
-                frame.stval,
-                access,
-                current_satp,
+                request,
                 &mut ctx.page_allocator,
                 &ctx.page_metadata_map,
             )
         };
-        match result {
-            Ok(_) => {
+        if result.retry_same_instruction() {
+            if crate::context::context_ref()
+                .user_stack
+                .backing_page_count()
+                != stack_pages_before
+            {
                 crate::checkpoint::dispatch(
                     crate::checkpoint::Checkpoint::UserStackGrowComplete,
                     crate::context::context_ref(),
                 );
-                return;
             }
-            Err(_) => crate::checkpoint::dispatch(
+            debug_assert_eq!(result.sepc(), frame.sepc);
+            return;
+        }
+        if frame.stval >= crate::context::context_ref().user_stack.rlimit_base()
+            && frame.stval < crate::context::context_ref().user_stack.top()
+        {
+            crate::checkpoint::dispatch(
                 crate::checkpoint::Checkpoint::UserStackGrowRejected,
                 crate::context::context_ref(),
-            ),
+            );
         }
     }
     panic_dispatch_frame("page fault exception", frame)
@@ -3901,6 +3911,14 @@ fn syscall_table_getdents64(table: &SyscallTable, frame: &mut TrapFrame) {
 }
 
 fn syscall_table_read(table: &SyscallTable, frame: &mut TrapFrame) {
+    syscall_table_read_for_task(table, frame, None);
+}
+
+fn syscall_table_read_for_task(
+    table: &SyscallTable,
+    frame: &mut TrapFrame,
+    explicit_task_ref: Option<super::task::TaskRef>,
+) {
     let fd = frame.reg(10);
     let user_ptr = frame.reg(11);
     let requested = frame.reg(12);
@@ -3941,7 +3959,7 @@ fn syscall_table_read(table: &SyscallTable, frame: &mut TrapFrame) {
             return;
         }
     };
-    if !copy_to_user(user_ptr, &buffer[..read]) {
+    if !copy_to_user_for_task(user_ptr, &buffer[..read], explicit_task_ref) {
         print_read_trace_copy_error(frame, fd, requested, len, read);
         complete_unsupported_syscall(frame);
         return;
@@ -5856,8 +5874,13 @@ fn syscall_table_mprotect(frame: &mut TrapFrame) {
 fn syscall_table_munmap(frame: &mut TrapFrame) {
     let addr = frame.reg(10);
     let len = frame.reg(11);
-    let ctx = crate::context::context_ref();
-    if ctx.user_address_space.user_munmap(addr, len) {
+    let ctx = crate::context::context();
+    if ctx.user_address_space.user_munmap(
+        addr,
+        len,
+        &mut ctx.page_allocator,
+        &ctx.page_metadata_map,
+    ) {
         complete_successful_syscall(frame, 0);
     } else {
         complete_error_syscall(frame, ENOMEM);
@@ -7128,7 +7151,7 @@ fn complete_observed_child_exit_to_parent_wait(
     let child_before_restore = &crate::context::context_ref().user_task_set;
     let pipe_read_resume = child_before_restore.builtin_grandchild_parent_resume_is_pipe_read();
     let builtin_restore_expected = child_before_restore.builtin_grandchild_active();
-    let (mut parent_frame, status_ptr, child_pid, parent_pid, parent_satp) = {
+    let (mut parent_frame, status_ptr, child_pid, parent_pid, parent_task_ref, parent_satp) = {
         let ctx = crate::context::context();
         let Ok(exiting_task) = ctx.current_task() else {
             return false;
@@ -7152,14 +7175,16 @@ fn complete_observed_child_exit_to_parent_wait(
             }
             return false;
         };
-        if ctx
-            .replace_terminal_user_task(
-                ctx.user_task_set.last_exited_task_ref(),
-                ctx.user_task_set.active_task_ref(),
-                parent_pid,
-                exiting_task,
-            )
-            .is_err()
+        let parent_task_ref = ctx.user_task_set.active_task_ref();
+        if !parent_task_ref.is_valid()
+            || ctx
+                .replace_terminal_user_task(
+                    ctx.user_task_set.last_exited_task_ref(),
+                    parent_task_ref,
+                    parent_pid,
+                    exiting_task,
+                )
+                .is_err()
         {
             return false;
         }
@@ -7168,6 +7193,7 @@ fn complete_observed_child_exit_to_parent_wait(
             status_ptr,
             child_pid,
             parent_pid,
+            parent_task_ref,
             ctx.user_address_space.satp_token(),
         )
     };
@@ -7249,7 +7275,7 @@ fn complete_observed_child_exit_to_parent_wait(
             return false;
         }
         *frame = parent_frame;
-        syscall_table_read(table, frame);
+        syscall_table_read_for_task(table, frame, Some(parent_task_ref));
         crate::checkpoint::dispatch(
             Checkpoint::UserChildParentWaitResumed,
             crate::context::context_ref(),
@@ -7257,7 +7283,8 @@ fn complete_observed_child_exit_to_parent_wait(
         return true;
     }
 
-    let status_copied = status_ptr == 0 || write_user_u32(status_ptr, wait_status);
+    let status_copied =
+        status_ptr == 0 || write_user_u32_for_task(status_ptr, wait_status, parent_task_ref);
     {
         let ctx = crate::context::context();
         if !ctx
@@ -7575,7 +7602,8 @@ fn complete_child_exit_to_parent_wait(frame: &mut TrapFrame, status: usize) -> b
         return false;
     }
 
-    let status_copied = status_ptr == 0 || write_user_u32(status_ptr, wait_status);
+    let status_copied = status_ptr == 0
+        || write_user_u32_for_task(status_ptr, wait_status, super::task::TaskRef::KERNEL_INIT);
     {
         let ctx = crate::context::context();
         if !ctx.user_task_set.mark_parent_wait_resumed(status_copied) {
@@ -7696,10 +7724,23 @@ fn copy_from_user(user_ptr: usize, dst: &mut [u8]) -> bool {
 }
 
 fn copy_to_user(user_ptr: usize, src: &[u8]) -> bool {
+    copy_to_user_for_task(user_ptr, src, None)
+}
+
+fn copy_to_user_for_task(
+    user_ptr: usize,
+    src: &[u8],
+    explicit_task_ref: Option<super::task::TaskRef>,
+) -> bool {
     if src.is_empty() {
         return true;
     }
-    if !user_copy_range_accessible(user_ptr, src.len(), UserFaultAccess::Store) {
+    if !user_copy_range_accessible_for_task(
+        user_ptr,
+        src.len(),
+        UserFaultAccess::Store,
+        explicit_task_ref,
+    ) {
         return false;
     }
 
@@ -7714,6 +7755,15 @@ fn copy_to_user(user_ptr: usize, src: &[u8]) -> bool {
 }
 
 fn user_copy_range_accessible(user_ptr: usize, len: usize, access: UserFaultAccess) -> bool {
+    user_copy_range_accessible_for_task(user_ptr, len, access, None)
+}
+
+fn user_copy_range_accessible_for_task(
+    user_ptr: usize,
+    len: usize,
+    access: UserFaultAccess,
+    explicit_task_ref: Option<super::task::TaskRef>,
+) -> bool {
     if len == 0 || user_ptr == 0 {
         return len == 0;
     }
@@ -7724,53 +7774,165 @@ fn user_copy_range_accessible(user_ptr: usize, len: usize, access: UserFaultAcce
         return false;
     };
 
-    let stack_candidate = {
-        let ctx = crate::context::context_ref();
-        user_ptr >= ctx.user_stack.rlimit_base() && end <= ctx.user_stack.top()
+    let current_satp = crate::arch::riscv64::csr::read_satp();
+    let task_ref = match explicit_task_ref {
+        Some(task_ref) if task_ref.is_valid() => task_ref,
+        Some(_) => return false,
+        None => match crate::context::context_ref().current_task_ref() {
+            Ok(task_ref) => task_ref,
+            Err(_) => {
+                print_user_copy_task_ref_diagnostic(user_ptr, len, access, current_satp);
+                return false;
+            }
+        },
     };
-    if stack_candidate {
-        let current_satp = crate::arch::riscv64::csr::read_satp();
-        let pages_before = crate::context::context_ref()
-            .user_stack
-            .backing_page_count();
-        let resolved = {
-            let ctx = crate::context::context();
-            ctx.user_address_space.resolve_user_stack_range(
-                &mut ctx.user_stack,
-                user_ptr,
-                len,
-                access,
-                current_satp,
-                &mut ctx.page_allocator,
-                &ctx.page_metadata_map,
-            )
-        };
-        if resolved.is_err() {
+    let pages_before = crate::context::context_ref()
+        .user_stack
+        .backing_page_count();
+    let resolved = {
+        let ctx = crate::context::context();
+        ctx.user_address_space.resolve_user_fault_range(
+            &mut ctx.user_stack,
+            task_ref,
+            user_ptr,
+            len,
+            access,
+            current_satp,
+            &mut ctx.page_allocator,
+            &ctx.page_metadata_map,
+        )
+    };
+    if !resolved {
+        print_user_copy_fault_diagnostic(task_ref, user_ptr, len, access, current_satp);
+        if user_ptr >= crate::context::context_ref().user_stack.rlimit_base()
+            && end <= crate::context::context_ref().user_stack.top()
+        {
             crate::checkpoint::dispatch(
                 crate::checkpoint::Checkpoint::UserStackGrowRejected,
                 crate::context::context_ref(),
             );
-            return false;
         }
-        if crate::context::context_ref()
-            .user_stack
-            .backing_page_count()
-            != pages_before
-        {
-            crate::checkpoint::dispatch(
-                crate::checkpoint::Checkpoint::UserStackGrowComplete,
-                crate::context::context_ref(),
-            );
-        }
+        return false;
+    }
+    if crate::context::context_ref()
+        .user_stack
+        .backing_page_count()
+        != pages_before
+    {
+        crate::checkpoint::dispatch(
+            crate::checkpoint::Checkpoint::UserStackGrowComplete,
+            crate::context::context_ref(),
+        );
     }
 
     let space = &crate::context::context_ref().user_address_space;
     if !space.user_range_mapped(user_ptr, len) {
+        print_user_copy_fault_diagnostic(task_ref, user_ptr, len, access, current_satp);
         return false;
     }
     let first = space.fault_mapping_diagnostic(user_ptr, access);
     let last = space.fault_mapping_diagnostic(last, access);
-    first.permission_satisfied() && last.permission_satisfied()
+    let permitted = first.permission_satisfied() && last.permission_satisfied();
+    if !permitted {
+        print_user_copy_fault_diagnostic(task_ref, user_ptr, len, access, current_satp);
+    }
+    permitted
+}
+
+#[cfg(checkpoint_handler_user_syscall_error)]
+fn print_user_copy_task_ref_diagnostic(
+    user_ptr: usize,
+    len: usize,
+    access: UserFaultAccess,
+    current_satp: usize,
+) {
+    let ctx = crate::context::context_ref();
+    let active = ctx.user_task_set.active_task_ref();
+    let exited = ctx.user_task_set.last_exited_task_ref();
+    crate::arch::riscv64::sbi::putstr("usercopy fault task_ref_unavailable tp=0x");
+    print_hex(crate::arch::riscv64::csr::read_tp());
+    crate::arch::riscv64::sbi::putstr(" active_slot=");
+    print_decimal(active.slot());
+    crate::arch::riscv64::sbi::putstr(" active_generation=");
+    print_decimal(active.generation() as usize);
+    crate::arch::riscv64::sbi::putstr(" exited_slot=");
+    print_decimal(exited.slot());
+    crate::arch::riscv64::sbi::putstr(" exited_generation=");
+    print_decimal(exited.generation() as usize);
+    crate::arch::riscv64::sbi::putstr(" current_satp=0x");
+    print_hex(current_satp);
+    crate::arch::riscv64::sbi::putstr(" expected_satp=0x");
+    print_hex(ctx.user_address_space.satp_token());
+    crate::arch::riscv64::sbi::putstr(" addr=0x");
+    print_hex(user_ptr);
+    crate::arch::riscv64::sbi::putstr(" len=");
+    print_decimal(len);
+    crate::arch::riscv64::sbi::putstr(" access=");
+    print_fault_access(access);
+    crate::arch::riscv64::sbi::putchar(b'\n');
+}
+
+#[cfg(not(checkpoint_handler_user_syscall_error))]
+fn print_user_copy_task_ref_diagnostic(
+    _user_ptr: usize,
+    _len: usize,
+    _access: UserFaultAccess,
+    _current_satp: usize,
+) {
+}
+
+#[cfg(checkpoint_handler_user_syscall_error)]
+fn print_user_copy_fault_diagnostic(
+    task_ref: super::task::TaskRef,
+    user_ptr: usize,
+    len: usize,
+    access: UserFaultAccess,
+    current_satp: usize,
+) {
+    let ctx = crate::context::context_ref();
+    let last = ctx.user_address_space.last_user_fault();
+    crate::arch::riscv64::sbi::putstr("usercopy fault task_slot=");
+    print_decimal(task_ref.slot());
+    crate::arch::riscv64::sbi::putstr(" task_generation=");
+    print_decimal(task_ref.generation() as usize);
+    crate::arch::riscv64::sbi::putstr(" current_satp=0x");
+    print_hex(current_satp);
+    crate::arch::riscv64::sbi::putstr(" expected_satp=0x");
+    print_hex(ctx.user_address_space.satp_token());
+    crate::arch::riscv64::sbi::putstr(" addr=0x");
+    print_hex(user_ptr);
+    crate::arch::riscv64::sbi::putstr(" len=");
+    print_decimal(len);
+    crate::arch::riscv64::sbi::putstr(" access=");
+    print_fault_access(access);
+    crate::arch::riscv64::sbi::putstr(" stack=0x");
+    print_hex(ctx.user_stack.base());
+    crate::arch::riscv64::sbi::putstr("..0x");
+    print_hex(ctx.user_stack.top());
+    crate::arch::riscv64::sbi::putstr(" rlimit=0x");
+    print_hex(ctx.user_stack.rlimit_base());
+    print_fault_mapping_diagnostic(
+        " mapping=",
+        ctx.user_address_space
+            .fault_mapping_diagnostic(user_ptr, access),
+    );
+    crate::arch::riscv64::sbi::putstr(" last_class=");
+    print_user_fault_class(last.class());
+    crate::arch::riscv64::sbi::putstr(" last_result=");
+    print_user_fault_result(last.result());
+    crate::arch::riscv64::sbi::putstr(" last_addr=0x");
+    print_hex(last.address());
+    crate::arch::riscv64::sbi::putchar(b'\n');
+}
+
+#[cfg(not(checkpoint_handler_user_syscall_error))]
+fn print_user_copy_fault_diagnostic(
+    _task_ref: super::task::TaskRef,
+    _user_ptr: usize,
+    _len: usize,
+    _access: UserFaultAccess,
+    _current_satp: usize,
+) {
 }
 
 fn read_user_usize(user_ptr: usize) -> Option<usize> {
@@ -7872,6 +8034,11 @@ fn write_user_u32(user_ptr: usize, value: u32) -> bool {
     debug_assert_eq!(GID_T_SIZE, core::mem::size_of::<u32>());
     debug_assert_eq!(PID_T_SIZE, core::mem::size_of::<u32>());
     copy_to_user(user_ptr, &value.to_le_bytes())
+}
+
+#[cfg(app_user_boot)]
+fn write_user_u32_for_task(user_ptr: usize, value: u32, task_ref: super::task::TaskRef) -> bool {
+    copy_to_user_for_task(user_ptr, &value.to_le_bytes(), Some(task_ref))
 }
 
 fn write_uts_field(buffer: &mut [u8; NEW_UTSNAME_SIZE], field: usize, value: &[u8]) {
@@ -8275,6 +8442,27 @@ fn print_user_page_fault_diagnostic(frame: &TrapFrame) {
     let stval_mapping = space.fault_mapping_diagnostic(frame.stval, fault_access);
     print_fault_mapping_diagnostic(" sepc_map=", sepc_mapping);
     print_fault_mapping_diagnostic(" stval_map=", stval_mapping);
+    let resolved = space.last_user_fault();
+    crate::arch::riscv64::sbi::putstr(" task_slot=");
+    print_decimal(resolved.task_ref().slot());
+    crate::arch::riscv64::sbi::putstr(" task_generation=");
+    print_decimal(resolved.task_ref().generation() as usize);
+    crate::arch::riscv64::sbi::putstr(" mm=0x");
+    print_hex(resolved.mm_satp());
+    crate::arch::riscv64::sbi::putstr(" request_addr=0x");
+    print_hex(resolved.address());
+    crate::arch::riscv64::sbi::putstr(" request_sepc=0x");
+    print_hex(resolved.sepc());
+    crate::arch::riscv64::sbi::putstr(" request_access=");
+    print_fault_access(resolved.access());
+    crate::arch::riscv64::sbi::putstr(" class=");
+    print_user_fault_class(resolved.class());
+    crate::arch::riscv64::sbi::putstr(" result=");
+    print_user_fault_result(resolved.result());
+    crate::arch::riscv64::sbi::putstr(" cow_shared=");
+    print_decimal(resolved.cow_shared_count());
+    crate::arch::riscv64::sbi::putstr(" cow_copied=");
+    print_decimal(resolved.cow_copied_count());
 }
 
 fn page_fault_access(frame: &TrapFrame) -> UserFaultAccess {
@@ -8320,7 +8508,29 @@ fn print_mapping_kind(kind: UserMappingKind, mapped: bool) {
         UserMappingKind::ElfSegment => crate::arch::riscv64::sbi::putstr("elf"),
         UserMappingKind::Stack => crate::arch::riscv64::sbi::putstr("stack"),
         UserMappingKind::Heap => crate::arch::riscv64::sbi::putstr("heap"),
+        UserMappingKind::AnonymousPrivate => crate::arch::riscv64::sbi::putstr("anon-private"),
         UserMappingKind::Empty => crate::arch::riscv64::sbi::putstr("empty"),
+    }
+}
+
+fn print_user_fault_class(class: UserFaultClass) {
+    match class {
+        UserFaultClass::NotPresent => crate::arch::riscv64::sbi::putstr("not-present"),
+        UserFaultClass::CowWriteProtect => crate::arch::riscv64::sbi::putstr("cow-write-protect"),
+        UserFaultClass::Protection => crate::arch::riscv64::sbi::putstr("protection"),
+        UserFaultClass::Unmapped => crate::arch::riscv64::sbi::putstr("unmapped"),
+    }
+}
+
+fn print_user_fault_result(result: UserFaultResult) {
+    match result {
+        UserFaultResult::RetrySameInstruction => {
+            crate::arch::riscv64::sbi::putstr("retry-same-instruction")
+        }
+        UserFaultResult::SegvMaperr => crate::arch::riscv64::sbi::putstr("segv-maperr"),
+        UserFaultResult::SegvAccerr => crate::arch::riscv64::sbi::putstr("segv-accerr"),
+        UserFaultResult::TaskOom => crate::arch::riscv64::sbi::putstr("task-oom"),
+        UserFaultResult::InvalidContext => crate::arch::riscv64::sbi::putstr("invalid-context"),
     }
 }
 

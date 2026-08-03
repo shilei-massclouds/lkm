@@ -256,7 +256,7 @@ const USER_INIT_CANDIDATES: [UserInitPathRef; 4] = [
     UserInitPathRef::BinSh,
 ];
 const USER_SELECTED_PATH_MAX: usize = 128;
-const MAX_USER_MAPPINGS: usize = MAX_LOAD_SEGMENTS * 2 + 2;
+const MAX_USER_MAPPINGS: usize = MAX_LOAD_SEGMENTS * 2 + 16;
 const MAX_MAPPING_BACKING_PAGES: usize = 512;
 const MAX_USER_L0_TABLES: usize = MAX_USER_MAPPINGS + 2;
 const USER_CLONE_CSIGNAL_MASK: usize = 0xff;
@@ -721,6 +721,7 @@ pub enum UserMappingKind {
     ElfSegment,
     Stack,
     Heap,
+    AnonymousPrivate,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -729,6 +730,169 @@ pub enum UserFaultAccess {
     Load,
     Store,
     Unknown,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UserFaultClass {
+    NotPresent,
+    #[allow(dead_code)]
+    CowWriteProtect,
+    Protection,
+    Unmapped,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UserFaultResult {
+    RetrySameInstruction,
+    SegvMaperr,
+    SegvAccerr,
+    TaskOom,
+    InvalidContext,
+}
+
+#[derive(Clone, Copy)]
+pub struct UserFaultRequest {
+    task_ref: TaskRef,
+    mm_satp: usize,
+    address: usize,
+    sepc: usize,
+    access: UserFaultAccess,
+}
+
+impl UserFaultRequest {
+    pub const fn new(
+        task_ref: TaskRef,
+        mm_satp: usize,
+        address: usize,
+        sepc: usize,
+        access: UserFaultAccess,
+    ) -> Self {
+        Self {
+            task_ref,
+            mm_satp,
+            address,
+            sepc,
+            access,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct UserFaultResolution {
+    class: UserFaultClass,
+    result: UserFaultResult,
+    sepc: usize,
+}
+
+impl UserFaultResolution {
+    const fn new(class: UserFaultClass, result: UserFaultResult, sepc: usize) -> Self {
+        Self {
+            class,
+            result,
+            sepc,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub const fn class(self) -> UserFaultClass {
+        self.class
+    }
+
+    #[allow(dead_code)]
+    pub const fn result(self) -> UserFaultResult {
+        self.result
+    }
+
+    pub const fn sepc(self) -> usize {
+        self.sepc
+    }
+
+    pub const fn retry_same_instruction(self) -> bool {
+        matches!(self.result, UserFaultResult::RetrySameInstruction)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct UserFaultDiagnostic {
+    task_ref: TaskRef,
+    mm_satp: usize,
+    address: usize,
+    sepc: usize,
+    access: UserFaultAccess,
+    class: UserFaultClass,
+    result: UserFaultResult,
+    cow_shared_count: usize,
+    cow_copied_count: usize,
+}
+
+impl UserFaultDiagnostic {
+    const fn empty() -> Self {
+        Self {
+            task_ref: TaskRef::NONE,
+            mm_satp: 0,
+            address: 0,
+            sepc: 0,
+            access: UserFaultAccess::Unknown,
+            class: UserFaultClass::Unmapped,
+            result: UserFaultResult::InvalidContext,
+            cow_shared_count: 0,
+            cow_copied_count: 0,
+        }
+    }
+
+    const fn from_request(
+        request: UserFaultRequest,
+        class: UserFaultClass,
+        result: UserFaultResult,
+    ) -> Self {
+        Self {
+            task_ref: request.task_ref,
+            mm_satp: request.mm_satp,
+            address: request.address,
+            sepc: request.sepc,
+            access: request.access,
+            class,
+            result,
+            cow_shared_count: 0,
+            cow_copied_count: 0,
+        }
+    }
+
+    pub const fn class(self) -> UserFaultClass {
+        self.class
+    }
+
+    pub const fn task_ref(self) -> TaskRef {
+        self.task_ref
+    }
+
+    pub const fn mm_satp(self) -> usize {
+        self.mm_satp
+    }
+
+    pub const fn address(self) -> usize {
+        self.address
+    }
+
+    pub const fn sepc(self) -> usize {
+        self.sepc
+    }
+
+    pub const fn access(self) -> UserFaultAccess {
+        self.access
+    }
+
+    pub const fn result(self) -> UserFaultResult {
+        self.result
+    }
+
+    pub const fn cow_shared_count(self) -> usize {
+        self.cow_shared_count
+    }
+
+    pub const fn cow_copied_count(self) -> usize {
+        self.cow_copied_count
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -871,6 +1035,7 @@ pub struct UserMapping {
     user_accessible: bool,
     bss_zero_bytes: usize,
     backing_pages: [Option<PageRef>; MAX_MAPPING_BACKING_PAGES],
+    backing_vaddrs: [usize; MAX_MAPPING_BACKING_PAGES],
     backing_page_count: usize,
     file_bytes_copied: usize,
     bss_bytes_zeroed: usize,
@@ -893,6 +1058,7 @@ impl UserMapping {
             user_accessible: false,
             bss_zero_bytes: 0,
             backing_pages: [None; MAX_MAPPING_BACKING_PAGES],
+            backing_vaddrs: [0; MAX_MAPPING_BACKING_PAGES],
             backing_page_count: 0,
             file_bytes_copied: 0,
             bss_bytes_zeroed: 0,
@@ -925,6 +1091,7 @@ impl UserMapping {
         let mut index = 0usize;
         while index < MAX_MAPPING_BACKING_PAGES {
             self.backing_pages[index] = None;
+            self.backing_vaddrs[index] = 0;
             index += 1;
         }
     }
@@ -962,12 +1129,32 @@ impl UserMapping {
         self.reset_empty();
         self.kind = UserMappingKind::Heap;
         self.vaddr = USER_HEAP_BASE;
-        self.memsz = USER_HEAP_SIZE;
+        self.memsz = 0;
         self.readable = true;
         self.writable = true;
         self.user_accessible = true;
-        self.bss_zero_bytes = USER_HEAP_SIZE;
-        self.bss_bytes_zeroed = USER_HEAP_SIZE;
+        self.page_table_entry_bound = true;
+    }
+
+    fn init_anonymous_private(
+        &mut self,
+        vaddr: usize,
+        memsz: usize,
+        readable: bool,
+        writable: bool,
+        executable: bool,
+    ) {
+        self.reset_empty();
+        self.kind = UserMappingKind::AnonymousPrivate;
+        self.vaddr = vaddr;
+        self.memsz = memsz;
+        self.readable = readable;
+        self.writable = writable;
+        self.executable = executable;
+        self.user_accessible = true;
+        self.bss_zero_bytes = memsz;
+        self.bss_bytes_zeroed = memsz;
+        self.page_table_entry_bound = true;
     }
 
     pub const fn kind(&self) -> UserMappingKind {
@@ -1026,6 +1213,25 @@ impl UserMapping {
         }
     }
 
+    pub const fn backing_page_vaddr(&self, index: usize) -> Option<usize> {
+        if index < self.backing_page_count {
+            Some(self.backing_vaddrs[index])
+        } else {
+            None
+        }
+    }
+
+    fn backing_page_index(&self, vaddr: usize) -> Option<usize> {
+        let mut index = 0usize;
+        while index < self.backing_page_count {
+            if self.backing_vaddrs[index] == vaddr {
+                return Some(index);
+            }
+            index += 1;
+        }
+        None
+    }
+
     pub const fn file_bytes_copied(&self) -> usize {
         self.file_bytes_copied
     }
@@ -1048,6 +1254,16 @@ impl UserMapping {
 
     const fn contains_vaddr(&self, addr: usize) -> bool {
         self.vaddr <= addr && addr < self.end_vaddr()
+    }
+
+    fn mapped_start(&self) -> Option<usize> {
+        self.vaddr.checked_sub(self.page_offset)
+    }
+
+    fn mapped_end(&self) -> Option<usize> {
+        let start = self.mapped_start()?;
+        let bytes = align_up_checked(self.page_offset.checked_add(self.memsz)?, USER_PAGE_SIZE)?;
+        start.checked_add(bytes)
     }
 }
 
@@ -1108,6 +1324,7 @@ pub struct UserAddressSpace {
     heap_size: usize,
     heap_brk: usize,
     mmap_next: usize,
+    last_user_fault: UserFaultDiagnostic,
     #[cfg(app_smoke)]
     fail_next_stack_pte_install: bool,
 }
@@ -1173,6 +1390,7 @@ impl UserAddressSpace {
             heap_size: 0,
             heap_brk: 0,
             mmap_next: 0,
+            last_user_fault: UserFaultDiagnostic::empty(),
             #[cfg(app_smoke)]
             fail_next_stack_pte_install: false,
         }
@@ -1225,6 +1443,7 @@ impl UserAddressSpace {
         self.heap_size = 0;
         self.heap_brk = 0;
         self.mmap_next = 0;
+        self.last_user_fault = UserFaultDiagnostic::empty();
         #[cfg(app_smoke)]
         {
             self.fail_next_stack_pte_install = false;
@@ -1458,6 +1677,34 @@ impl UserAddressSpace {
         self.heap_brk
     }
 
+    pub const fn last_user_fault(&self) -> UserFaultDiagnostic {
+        self.last_user_fault
+    }
+
+    fn vma_overlaps(&self, start: usize, end: usize) -> bool {
+        let mut index = 0usize;
+        while index < self.mapping_count {
+            let mapping = &self.mappings[index];
+            let Some(mapping_start) = mapping.mapped_start() else {
+                index += 1;
+                continue;
+            };
+            let Some(mapping_end) = mapping.mapped_end() else {
+                index += 1;
+                continue;
+            };
+            if mapping.kind() != UserMappingKind::Empty
+                && mapping.memsz() != 0
+                && start < mapping_end
+                && end > mapping_start
+            {
+                return true;
+            }
+            index += 1;
+        }
+        false
+    }
+
     pub fn preset(
         &mut self,
         swapper_vm: &SwapperVm,
@@ -1567,22 +1814,6 @@ impl UserAddressSpace {
         }
         self.heap_mapping_index = self.mapping_count;
         self.mappings[self.heap_mapping_index].init_heap();
-        if let Err(error) = materialize_zero_mapping(
-            &mut self.mappings[self.heap_mapping_index],
-            page_allocator,
-            page_metadata_map,
-        ) {
-            self.mappings[self.heap_mapping_index].reset_empty();
-            release_mappings(
-                &mut self.mappings,
-                self.mapping_count,
-                page_allocator,
-                page_metadata_map,
-            );
-            self.mapping_count = 0;
-            self.segment_mapping_count = 0;
-            return Err(error);
-        }
         self.mapping_count += 1;
 
         self.user_pages_u_enabled = true;
@@ -1681,6 +1912,10 @@ impl UserAddressSpace {
             return self.heap_brk;
         }
         self.heap_brk = requested;
+        let mapping = &mut self.mappings[self.heap_mapping_index];
+        mapping.memsz = requested - self.heap_base;
+        mapping.bss_zero_bytes = mapping.memsz;
+        mapping.bss_bytes_zeroed = mapping.memsz;
         self.heap_brk
     }
 
@@ -1701,11 +1936,18 @@ impl UserAddressSpace {
             };
         }
         const PROT_NONE: usize = 0x0;
+        const PROT_READ: usize = 0x1;
+        const PROT_WRITE: usize = 0x2;
+        const PROT_EXEC: usize = 0x4;
+        const SUPPORTED_PROT: usize = PROT_READ | PROT_WRITE | PROT_EXEC;
         const MAP_PRIVATE: usize = 0x02;
         const MAP_FIXED: usize = 0x10;
         const MAP_ANONYMOUS: usize = 0x20;
         const SUPPORTED_FLAGS: usize = MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS;
         if !offset.is_multiple_of(USER_PAGE_SIZE) {
+            return Err(UserMmapError::Invalid);
+        }
+        if prot & !SUPPORTED_PROT != 0 {
             return Err(UserMmapError::Invalid);
         }
         if flags & !SUPPORTED_FLAGS != 0 {
@@ -1734,11 +1976,29 @@ impl UserAddressSpace {
         let base = if addr != 0 {
             align_down(addr, USER_PAGE_SIZE)
         } else {
-            self.mmap_next
+            self.first_available_mmap_range(mmap_start, heap_end, len)
+                .ok_or(UserMmapError::NoMemory)?
         };
         let end = base.checked_add(len).ok_or(UserMmapError::NoMemory)?;
         if base < mmap_start || end > heap_end {
             return Err(UserMmapError::NoMemory);
+        }
+        if self.vma_overlaps(base, end) {
+            return Err(UserMmapError::NoMemory);
+        }
+        let mapping_index = self
+            .first_empty_mapping_slot()
+            .or_else(|| (self.mapping_count < MAX_USER_MAPPINGS).then_some(self.mapping_count))
+            .ok_or(UserMmapError::NoMemory)?;
+        self.mappings[mapping_index].init_anonymous_private(
+            base,
+            len,
+            prot & PROT_READ != 0,
+            prot & PROT_WRITE != 0,
+            prot & PROT_EXEC != 0,
+        );
+        if mapping_index == self.mapping_count {
+            self.mapping_count += 1;
         }
         if addr == 0 {
             self.mmap_next = end;
@@ -1750,8 +2010,122 @@ impl UserAddressSpace {
         self.user_range_mapped(addr, len)
     }
 
-    pub fn user_munmap(&self, addr: usize, len: usize) -> bool {
-        self.user_range_mapped(addr, len)
+    pub fn user_munmap(
+        &mut self,
+        addr: usize,
+        len: usize,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) -> bool {
+        if self.lifecycle.state() != State::Online
+            || len == 0
+            || !addr.is_multiple_of(USER_PAGE_SIZE)
+        {
+            return false;
+        }
+        let Some(len) = align_up_checked(len, USER_PAGE_SIZE) else {
+            return false;
+        };
+        let Some(end) = addr.checked_add(len) else {
+            return false;
+        };
+        let mut mapping_index = 0usize;
+        while mapping_index < self.mapping_count {
+            let mapping = &self.mappings[mapping_index];
+            if mapping.kind() == UserMappingKind::AnonymousPrivate
+                && mapping.mapped_start() == Some(addr)
+                && mapping.mapped_end() == Some(end)
+            {
+                break;
+            }
+            mapping_index += 1;
+        }
+        if mapping_index == self.mapping_count {
+            return false;
+        }
+
+        let backing_page_count = self.mappings[mapping_index].backing_page_count();
+        let mut page_index = 0usize;
+        while page_index < backing_page_count {
+            let Some(page) = self.mappings[mapping_index].backing_page(page_index) else {
+                return false;
+            };
+            let Some(virt) = self.mappings[mapping_index].backing_page_vaddr(page_index) else {
+                return false;
+            };
+            if !self.user_leaf_pte_maps_page(virt, page.phys().value(), page_metadata_map) {
+                return false;
+            }
+            page_index += 1;
+        }
+
+        page_index = 0;
+        while page_index < backing_page_count {
+            let page = self.mappings[mapping_index]
+                .backing_page(page_index)
+                .expect("prevalidated anonymous backing page must remain present");
+            let virt = self.mappings[mapping_index]
+                .backing_page_vaddr(page_index)
+                .expect("prevalidated anonymous backing VA must remain present");
+            if !self.clear_user_leaf_pte(virt, page.phys().value(), page_metadata_map) {
+                return false;
+            }
+            crate::arch::riscv64::csr::sfence_vma_addr(virt);
+            page_index += 1;
+        }
+        release_mapping_pages(
+            &mut self.mappings[mapping_index],
+            page_allocator,
+            page_metadata_map,
+        );
+        self.mappings[mapping_index].reset_empty();
+        while self.mapping_count > 0
+            && self.mappings[self.mapping_count - 1].kind() == UserMappingKind::Empty
+        {
+            self.mapping_count -= 1;
+        }
+        self.mmap_next = self.mmap_next.min(addr);
+        true
+    }
+
+    fn first_empty_mapping_slot(&self) -> Option<usize> {
+        let mut index = 0usize;
+        while index < self.mapping_count {
+            if self.mappings[index].kind() == UserMappingKind::Empty {
+                return Some(index);
+            }
+            index += 1;
+        }
+        None
+    }
+
+    fn first_available_mmap_range(
+        &self,
+        mmap_start: usize,
+        heap_end: usize,
+        len: usize,
+    ) -> Option<usize> {
+        let mut base = mmap_start;
+        loop {
+            let end = base.checked_add(len).filter(|end| *end <= heap_end)?;
+            let mut next_base = 0usize;
+            let mut index = 0usize;
+            while index < self.mapping_count {
+                let mapping = &self.mappings[index];
+                if let (Some(mapping_start), Some(mapping_end)) =
+                    (mapping.mapped_start(), mapping.mapped_end())
+                    && base < mapping_end
+                    && end > mapping_start
+                {
+                    next_base = next_base.max(mapping_end);
+                }
+                index += 1;
+            }
+            if next_base == 0 {
+                return Some(base);
+            }
+            base = align_up_checked(next_base, USER_PAGE_SIZE)?;
+        }
     }
 
     pub fn user_range_mapped(&self, addr: usize, len: usize) -> bool {
@@ -1764,17 +2138,11 @@ impl UserAddressSpace {
         let mut index = 0usize;
         while index < self.mapping_count {
             let mapping = &self.mappings[index];
-            let Some(mapping_start) = mapping.vaddr().checked_sub(mapping.page_offset()) else {
+            let Some(mapping_start) = mapping.mapped_start() else {
                 index += 1;
                 continue;
             };
-            let mapped_bytes = if mapping.kind() == UserMappingKind::Stack {
-                mapping.memsz()
-            } else {
-                mapping.backing_page_count().saturating_mul(USER_PAGE_SIZE)
-            };
-            let mapping_len = mapped_bytes;
-            let Some(mapping_end) = mapping_start.checked_add(mapping_len) else {
+            let Some(mapping_end) = mapping.mapped_end() else {
                 index += 1;
                 continue;
             };
@@ -1801,17 +2169,11 @@ impl UserAddressSpace {
         let mut index = 0usize;
         while index < self.mapping_count {
             let mapping = &self.mappings[index];
-            let Some(mapping_start) = mapping.vaddr().checked_sub(mapping.page_offset()) else {
+            let Some(mapping_start) = mapping.mapped_start() else {
                 index += 1;
                 continue;
             };
-            let mapped_bytes = if mapping.kind() == UserMappingKind::Stack {
-                mapping.memsz()
-            } else {
-                mapping.backing_page_count().saturating_mul(USER_PAGE_SIZE)
-            };
-            let mapping_len = mapped_bytes;
-            let Some(mapping_end) = mapping_start.checked_add(mapping_len) else {
+            let Some(mapping_end) = mapping.mapped_end() else {
                 index += 1;
                 continue;
             };
@@ -1840,6 +2202,240 @@ impl UserAddressSpace {
         }
 
         UserFaultMappingDiagnostic::unmapped(addr, access)
+    }
+
+    fn mapping_index_for_address(&self, addr: usize) -> Option<usize> {
+        let mut index = 0usize;
+        while index < self.mapping_count {
+            let mapping = &self.mappings[index];
+            let start = mapping.mapped_start()?;
+            let end = mapping.mapped_end()?;
+            if mapping.kind() != UserMappingKind::Empty && addr >= start && addr < end {
+                return Some(index);
+            }
+            index += 1;
+        }
+        None
+    }
+
+    fn record_user_fault(
+        &mut self,
+        request: UserFaultRequest,
+        class: UserFaultClass,
+        result: UserFaultResult,
+    ) -> UserFaultResolution {
+        self.last_user_fault = UserFaultDiagnostic::from_request(request, class, result);
+        UserFaultResolution::new(class, result, request.sepc)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn resolve_user_fault(
+        &mut self,
+        stack: &mut UserStack,
+        request: UserFaultRequest,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) -> UserFaultResolution {
+        if self.lifecycle.state() != State::Online
+            || stack.state() != State::Ready
+            || request.task_ref == TaskRef::NONE
+            || request.mm_satp == 0
+            || request.mm_satp != self.satp_token
+            || matches!(request.access, UserFaultAccess::Unknown)
+        {
+            return self.record_user_fault(
+                request,
+                UserFaultClass::Protection,
+                UserFaultResult::InvalidContext,
+            );
+        }
+
+        let stack_growth_candidate = matches!(
+            request.access,
+            UserFaultAccess::Load | UserFaultAccess::Store
+        ) && request.address >= stack.rlimit_base()
+            && request.address < stack.top();
+        let mapping_index = self.mapping_index_for_address(request.address);
+        if mapping_index.is_none() && !stack_growth_candidate {
+            return self.record_user_fault(
+                request,
+                UserFaultClass::Unmapped,
+                UserFaultResult::SegvMaperr,
+            );
+        }
+
+        if stack_growth_candidate
+            && mapping_index.is_none_or(|index| index == self.stack_mapping_index)
+        {
+            let result = self.resolve_user_stack_fault(
+                stack,
+                request.address,
+                request.access,
+                request.mm_satp,
+                page_allocator,
+                page_metadata_map,
+            );
+            let outcome = match result {
+                Ok(_) => UserFaultResult::RetrySameInstruction,
+                Err(
+                    UserStackGrowReject::BackingAllocation
+                    | UserStackGrowReject::PageTableAllocation
+                    | UserStackGrowReject::PteInstall,
+                ) => UserFaultResult::TaskOom,
+                Err(UserStackGrowReject::Rlimit | UserStackGrowReject::MappingCollision) => {
+                    UserFaultResult::SegvMaperr
+                }
+                Err(_) => UserFaultResult::SegvAccerr,
+            };
+            return self.record_user_fault(request, UserFaultClass::NotPresent, outcome);
+        }
+
+        let Some(mapping_index) = mapping_index else {
+            return self.record_user_fault(
+                request,
+                UserFaultClass::Unmapped,
+                UserFaultResult::SegvMaperr,
+            );
+        };
+        let mapping = &self.mappings[mapping_index];
+        let permitted = mapping.user_accessible()
+            && match request.access {
+                UserFaultAccess::Instruction => mapping.executable(),
+                UserFaultAccess::Load => mapping.readable(),
+                UserFaultAccess::Store => mapping.writable(),
+                UserFaultAccess::Unknown => false,
+            };
+        if !permitted {
+            return self.record_user_fault(
+                request,
+                UserFaultClass::Protection,
+                UserFaultResult::SegvAccerr,
+            );
+        }
+
+        let fault_page = align_down(request.address, USER_PAGE_SIZE);
+        if mapping.kind() == UserMappingKind::Stack
+            || mapping.backing_page_index(fault_page).is_some()
+        {
+            return self.record_user_fault(
+                request,
+                UserFaultClass::Protection,
+                UserFaultResult::SegvAccerr,
+            );
+        }
+        if !matches!(
+            mapping.kind(),
+            UserMappingKind::Heap | UserMappingKind::AnonymousPrivate
+        ) {
+            return self.record_user_fault(
+                request,
+                UserFaultClass::Protection,
+                UserFaultResult::SegvAccerr,
+            );
+        }
+
+        let outcome = if self.fault_in_sparse_mapping_page(
+            mapping_index,
+            fault_page,
+            page_allocator,
+            page_metadata_map,
+        ) {
+            crate::arch::riscv64::csr::sfence_vma_addr(fault_page);
+            UserFaultResult::RetrySameInstruction
+        } else {
+            UserFaultResult::TaskOom
+        };
+        self.record_user_fault(request, UserFaultClass::NotPresent, outcome)
+    }
+
+    fn fault_in_sparse_mapping_page(
+        &mut self,
+        mapping_index: usize,
+        fault_page: usize,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) -> bool {
+        if mapping_index >= self.mapping_count
+            || self.mappings[mapping_index].backing_page_count >= MAX_MAPPING_BACKING_PAGES
+        {
+            return false;
+        }
+        let Some(page) = page_allocator.alloc_page(GfpFlags::kernel(), page_metadata_map) else {
+            return false;
+        };
+        let Some(linear) = page_metadata_map.page_address(page) else {
+            let _ = page_allocator.free_pages(page, 0, page_metadata_map);
+            return false;
+        };
+        unsafe { core::ptr::write_bytes(linear as *mut u8, 0, USER_PAGE_SIZE) };
+
+        let slot = self.mappings[mapping_index].backing_page_count;
+        self.mappings[mapping_index].backing_pages[slot] = Some(page);
+        self.mappings[mapping_index].backing_vaddrs[slot] = fault_page;
+        self.mappings[mapping_index].backing_page_count += 1;
+        let old_l0_count = self.page_table_l0_count;
+        let mapping = &self.mappings[mapping_index];
+        if !self.install_user_leaf_pte(
+            fault_page,
+            page.phys().value(),
+            mapping.readable(),
+            mapping.writable(),
+            mapping.executable(),
+            page_allocator,
+            page_metadata_map,
+        ) {
+            self.rollback_l0_tables(old_l0_count, page_allocator, page_metadata_map);
+            let mapping = &mut self.mappings[mapping_index];
+            mapping.backing_page_count -= 1;
+            mapping.backing_pages[slot] = None;
+            mapping.backing_vaddrs[slot] = 0;
+            let _ = page_allocator.free_pages(page, 0, page_metadata_map);
+            return false;
+        }
+        true
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn resolve_user_fault_range(
+        &mut self,
+        stack: &mut UserStack,
+        task_ref: TaskRef,
+        addr: usize,
+        len: usize,
+        access: UserFaultAccess,
+        current_satp: usize,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) -> bool {
+        if len == 0 {
+            return true;
+        }
+        let Some(end) = addr.checked_add(len) else {
+            return false;
+        };
+        let mut page = align_down(addr, USER_PAGE_SIZE);
+        while page < end {
+            let stack_page_present =
+                page >= stack.base() && page < stack.top() && stack.page_for_vaddr(page).is_some();
+            let mapping_page_present = self.mapping_index_for_address(page).is_some_and(|index| {
+                self.mappings[index].kind() != UserMappingKind::Stack
+                    && self.mappings[index].backing_page_index(page).is_some()
+            });
+            if !stack_page_present && !mapping_page_present {
+                let request = UserFaultRequest::new(task_ref, current_satp, page, 0, access);
+                if !self
+                    .resolve_user_fault(stack, request, page_allocator, page_metadata_map)
+                    .retry_same_instruction()
+                {
+                    return false;
+                }
+            }
+            let Some(next) = page.checked_add(USER_PAGE_SIZE) else {
+                return false;
+            };
+            page = next;
+        }
+        true
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1890,9 +2486,8 @@ impl UserAddressSpace {
                 if index != self.stack_mapping_index {
                     let other = &self.mappings[index];
                     if other.kind() != UserMappingKind::Empty {
-                        let other_start = other.vaddr().saturating_sub(other.page_offset());
-                        let other_len = other.backing_page_count().saturating_mul(USER_PAGE_SIZE);
-                        let other_end = other_start.saturating_add(other_len);
+                        let other_start = other.mapped_start().unwrap_or(other.vaddr());
+                        let other_end = other.mapped_end().unwrap_or(other.end_vaddr());
                         if fault_page < other_end && fault_page + USER_PAGE_SIZE > other_start {
                             return reject(stack, UserStackGrowReject::MappingCollision);
                         }
@@ -1979,16 +2574,24 @@ impl UserAddressSpace {
             return None;
         }
         let mapping = &mut self.mappings[self.heap_mapping_index];
-        let bytes = mapping.backing_page_count().checked_mul(USER_PAGE_SIZE)?;
+        let bytes = if mapping.memsz() < 2 * USER_PAGE_SIZE {
+            2 * USER_PAGE_SIZE
+        } else {
+            mapping.memsz()
+        };
         let old_vaddr = mapping.vaddr;
         mapping.vaddr = end.checked_sub(bytes)?;
+        mapping.memsz = bytes;
         Some(old_vaddr)
     }
 
     #[cfg(app_smoke)]
     pub fn smoke_restore_heap_mapping_vaddr(&mut self, vaddr: usize) {
         if self.heap_mapping_index < self.mapping_count {
-            self.mappings[self.heap_mapping_index].vaddr = vaddr;
+            let heap_extent = self.heap_brk.saturating_sub(self.heap_base);
+            let mapping = &mut self.mappings[self.heap_mapping_index];
+            mapping.vaddr = vaddr;
+            mapping.memsz = heap_extent;
         }
     }
 
@@ -2172,18 +2775,17 @@ impl UserAddressSpace {
         let kind = self.mappings[mapping_index].kind();
         let user_accessible = self.mappings[mapping_index].user_accessible();
         let backing_page_count = self.mappings[mapping_index].backing_page_count();
-        let page_offset = self.mappings[mapping_index].page_offset();
-        let Some(mut virt) = self.mappings[mapping_index]
-            .vaddr()
-            .checked_sub(page_offset)
-        else {
-            return false;
-        };
         if kind == UserMappingKind::Stack {
             return user_accessible;
         }
-        if kind == UserMappingKind::Empty || !user_accessible || backing_page_count == 0 {
+        if kind == UserMappingKind::Empty || !user_accessible {
             return false;
+        }
+        if backing_page_count == 0 {
+            return matches!(
+                kind,
+                UserMappingKind::Heap | UserMappingKind::AnonymousPrivate
+            );
         }
 
         let readable = self.mappings[mapping_index].readable();
@@ -2192,6 +2794,9 @@ impl UserAddressSpace {
         let mut page_index = 0usize;
         while page_index < backing_page_count {
             let Some(page) = self.mappings[mapping_index].backing_page(page_index) else {
+                return false;
+            };
+            let Some(virt) = self.mappings[mapping_index].backing_page_vaddr(page_index) else {
                 return false;
             };
             if !self.install_user_leaf_pte(
@@ -2205,10 +2810,6 @@ impl UserAddressSpace {
             ) {
                 return false;
             }
-            let Some(next_virt) = virt.checked_add(USER_PAGE_SIZE) else {
-                return false;
-            };
-            virt = next_virt;
             page_index += 1;
         }
         true
@@ -2265,6 +2866,71 @@ impl UserAddressSpace {
         }
         self.user_leaf_pte_count += 1;
         true
+    }
+
+    fn user_leaf_pte_maps_page(
+        &self,
+        virt: usize,
+        phys: usize,
+        page_metadata_map: &PageMetadataMap,
+    ) -> bool {
+        const PTE_VALID: usize = 1 << 0;
+        const PTE_LEAF_PERMISSIONS: usize = (1 << 1) | (1 << 2) | (1 << 3);
+        const PTE_USER: usize = 1 << 4;
+        const SV39_PPN_MASK: usize = (1usize << 44) - 1;
+
+        let (vpn2, vpn1, vpn0) = sv39_indices(virt);
+        if vpn2 != 0 || !phys.is_multiple_of(USER_PAGE_SIZE) {
+            return false;
+        }
+        let Some(l0_page) = self.existing_l0_page(vpn1) else {
+            return false;
+        };
+        let Some(l0_table) = page_table_page_mut(l0_page, page_metadata_map) else {
+            return false;
+        };
+        let Some(pte) = l0_table.entry(vpn0) else {
+            return false;
+        };
+        pte & PTE_VALID != 0
+            && pte & PTE_LEAF_PERMISSIONS != 0
+            && pte & PTE_USER != 0
+            && (((pte >> 10) & SV39_PPN_MASK) << 12) == phys
+    }
+
+    fn clear_user_leaf_pte(
+        &mut self,
+        virt: usize,
+        expected_phys: usize,
+        page_metadata_map: &PageMetadataMap,
+    ) -> bool {
+        if !self.user_leaf_pte_maps_page(virt, expected_phys, page_metadata_map) {
+            return false;
+        }
+        let (_, vpn1, vpn0) = sv39_indices(virt);
+        let Some(l0_page) = self.existing_l0_page(vpn1) else {
+            return false;
+        };
+        let Some(l0_table) = page_table_page_mut(l0_page, page_metadata_map) else {
+            return false;
+        };
+        if self.user_leaf_pte_count == 0 || !l0_table.set_entry(vpn0, 0) {
+            return false;
+        }
+        self.user_leaf_pte_count -= 1;
+        true
+    }
+
+    fn existing_l0_page(&self, vpn1: usize) -> Option<PageRef> {
+        let mut index = 0usize;
+        while index < self.page_table_l0_count {
+            let slot = self.page_table_l0s[index];
+            if slot.vpn1 == vpn1 {
+                return slot.page;
+            }
+            index += 1;
+        }
+        None
     }
 
     fn l0_page_for_vpn1(
@@ -6881,6 +7547,20 @@ fn checksum_mapping_page(
 ) -> Option<usize> {
     let page = mapping.backing_page(page_index)?;
     let linear = page_metadata_map.page_address(page)?;
+    if matches!(
+        mapping.kind(),
+        UserMappingKind::Heap | UserMappingKind::AnonymousPrivate
+    ) {
+        let mut hash = 0xcbf29ce484222325usize;
+        let mut offset = 0usize;
+        while offset < USER_PAGE_SIZE {
+            let byte = unsafe { *((linear + offset) as *const u8) };
+            hash ^= byte as usize;
+            hash = hash.wrapping_mul(0x100000001b3usize);
+            offset += 1;
+        }
+        return Some(hash);
+    }
     let page_base_offset = page_index.checked_mul(USER_PAGE_SIZE)?;
     let mapping_end_offset = mapping.page_offset().checked_add(mapping.memsz())?;
     if page_base_offset >= mapping_end_offset {
@@ -6913,9 +7593,7 @@ fn checksum_mapping_page(
 }
 
 fn mapping_page_user_start(mapping: &UserMapping, page_index: usize) -> Option<usize> {
-    let page_base_offset = page_index.checked_mul(USER_PAGE_SIZE)?;
-    let user_offset = page_base_offset.saturating_sub(mapping.page_offset());
-    mapping.vaddr().checked_add(user_offset)
+    mapping.backing_page_vaddr(page_index)
 }
 
 fn user_mapping_kind_index(kind: UserMappingKind) -> usize {
@@ -6924,6 +7602,7 @@ fn user_mapping_kind_index(kind: UserMappingKind) -> usize {
         UserMappingKind::ElfSegment => 1,
         UserMappingKind::Stack => 2,
         UserMappingKind::Heap => 3,
+        UserMappingKind::AnonymousPrivate => 4,
     }
 }
 
@@ -9692,6 +10371,10 @@ fn materialize_mapping(
         };
         unsafe { core::ptr::write_bytes(linear as *mut u8, 0, USER_PAGE_SIZE) };
         mapping.backing_pages[index] = Some(page);
+        mapping.backing_vaddrs[index] = mapping
+            .vaddr()
+            .saturating_sub(mapping.page_offset())
+            .saturating_add(index * USER_PAGE_SIZE);
         mapping.backing_page_count += 1;
         index += 1;
     }
@@ -9729,6 +10412,7 @@ fn release_mapping_pages(
         if let Some(page) = mapping.backing_pages[mapping.backing_page_count] {
             let _ = page_allocator.free_pages(page, 0, page_metadata_map);
             mapping.backing_pages[mapping.backing_page_count] = None;
+            mapping.backing_vaddrs[mapping.backing_page_count] = 0;
         }
     }
 }
@@ -9793,37 +10477,6 @@ fn copy_mapping_bytes(
     Ok(())
 }
 
-fn materialize_zero_mapping(
-    mapping: &mut UserMapping,
-    page_allocator: &mut PageAllocator,
-    page_metadata_map: &PageMetadataMap,
-) -> Result<(), ElfError> {
-    let page_count = pages_for_range(mapping.page_offset, mapping.memsz)?;
-    if page_count > MAX_MAPPING_BACKING_PAGES {
-        return Err(ElfError::TooManyMappingPages);
-    }
-    let mut index = 0usize;
-    while index < page_count {
-        let Some(page) = page_allocator.alloc_page(GfpFlags::kernel(), page_metadata_map) else {
-            release_mapping_pages(mapping, page_allocator, page_metadata_map);
-            return Err(ElfError::BackingAllocationFailed);
-        };
-        let Some(linear) = page_metadata_map.page_address(page) else {
-            let _ = page_allocator.free_pages(page, 0, page_metadata_map);
-            release_mapping_pages(mapping, page_allocator, page_metadata_map);
-            return Err(ElfError::BackingAllocationFailed);
-        };
-        unsafe { core::ptr::write_bytes(linear as *mut u8, 0, USER_PAGE_SIZE) };
-        mapping.backing_pages[index] = Some(page);
-        mapping.backing_page_count += 1;
-        index += 1;
-    }
-    mapping.file_bytes_copied = 0;
-    mapping.bss_bytes_zeroed = mapping.bss_zero_bytes();
-    mapping.page_table_entry_bound = true;
-    Ok(())
-}
-
 fn pages_for_range(offset: usize, len: usize) -> Result<usize, ElfError> {
     if offset >= USER_PAGE_SIZE {
         return Err(ElfError::InvalidProgramHeader);
@@ -9840,8 +10493,10 @@ fn pages_for_range(offset: usize, len: usize) -> Result<usize, ElfError> {
 fn mappings_have_backing_pages(mappings: &[UserMapping; MAX_USER_MAPPINGS], count: usize) -> bool {
     let mut index = 0usize;
     while index < count {
-        if mappings[index].kind() != UserMappingKind::Stack
-            && mappings[index].backing_page_count() == 0
+        if !matches!(
+            mappings[index].kind(),
+            UserMappingKind::Stack | UserMappingKind::Heap | UserMappingKind::AnonymousPrivate
+        ) && mappings[index].backing_page_count() == 0
         {
             return false;
         }

@@ -16,6 +16,8 @@ type PageFaultExceptionType: ResourceObject {
                     page_fault_context_matrix_ready(self);
                     page_fault_kernel_origin_independent_of_atomic(self);
                     page_fault_exception_table_fixup_required_for_kernel(self);
+                    page_fault_user_request_task_mm_bound(self);
+                    page_fault_user_and_kernel_recovery_isolated(self);
                 }
             }
         }
@@ -34,4 +36,6 @@ predicate page_fault_handler_ready<P: PageFaultExceptionType>(page_fault: P) -> 
 predicate page_fault_context_matrix_ready<P: PageFaultExceptionType>(page_fault: P) -> bool;
 predicate page_fault_kernel_origin_independent_of_atomic<P: PageFaultExceptionType>(page_fault: P) -> bool;
 predicate page_fault_exception_table_fixup_required_for_kernel<P: PageFaultExceptionType>(page_fault: P) -> bool;
+predicate page_fault_user_request_task_mm_bound<P: PageFaultExceptionType>(page_fault: P) -> bool;
+predicate page_fault_user_and_kernel_recovery_isolated<P: PageFaultExceptionType>(page_fault: P) -> bool;
 predicate page_fault_recovery_online<P: PageFaultExceptionType>(page_fault: P) -> bool;

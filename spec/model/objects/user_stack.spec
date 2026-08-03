@@ -23,6 +23,7 @@ predicate user_stack_layout_auxv_checkpoint_diagnostics_bound<T>(stack: T) -> bo
 predicate user_stack_rlimit_bound<T>(stack: T) -> bool;
 predicate user_stack_guard_gap_bound<T>(stack: T) -> bool;
 predicate user_stack_fault_range_resolver_bound<T, A>(stack: T, space: A) -> bool;
+predicate user_stack_fault_policy_delegated_to_address_space<T, A>(stack: T, space: A) -> bool;
 predicate user_stack_fault_rollback_atomic<T>(stack: T) -> bool;
 predicate user_stack_targeted_tlb_flush<T>(stack: T) -> bool;
 predicate user_stack_usercopy_growth_bound<T>(stack: T) -> bool;
@@ -66,6 +67,7 @@ object UserStack: ResourceObject {
                     user_stack_rlimit_bound(self);
                     user_stack_guard_gap_bound(self);
                     user_stack_fault_range_resolver_bound(self, UserAddressSpace);
+                    user_stack_fault_policy_delegated_to_address_space(self, UserAddressSpace);
                     user_stack_fault_rollback_atomic(self);
                     user_stack_targeted_tlb_flush(self);
                     user_stack_usercopy_growth_bound(self);
@@ -94,6 +96,7 @@ object UserStack: ResourceObject {
             user_stack_auxv_preexec_facts_bound(self);
             user_stack_layout_auxv_checkpoint_diagnostics_bound(self);
             user_stack_fault_rollback_atomic(self);
+            user_stack_fault_policy_delegated_to_address_space(self, UserAddressSpace);
             user_stack_move_swap_ownership(self);
         }
 

@@ -39,6 +39,7 @@ Object-level charter notes live here when they need a dedicated topic file.
 | Runtime Type instance / `declare` | [`dynamic-instance-declaration.md`](dynamic-instance-declaration.md) |
 | `ExecTransaction` | [`exec-transaction.md`](exec-transaction.md) |
 | `UserStack` | [`user-stack.md`](user-stack.md) |
+| `UserAddressSpace` | [`user-address-space.md`](user-address-space.md) |
 | `BinaryFormatRegistry` | [`binary-format-registry.md`](binary-format-registry.md) |
 | `ExecSyncBoundaries` | [`exec-sync-boundaries.md`](exec-sync-boundaries.md) |
 | `ElfObject` | [`elf-object.md`](elf-object.md) |

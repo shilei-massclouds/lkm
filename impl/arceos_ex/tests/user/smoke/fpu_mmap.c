@@ -1,4 +1,5 @@
 #include <stddef.h>
+#include <stdint.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <unistd.h>
@@ -51,6 +52,61 @@ static int smoke_mmap_fixed_prot_none(void)
 	return 0;
 }
 
+static int smoke_anonymous_demand_faults(void)
+{
+	volatile unsigned char *bytes;
+	long rc;
+
+	rc = syscall(SYS_mmap, NULL, 8192, PROT_READ | PROT_WRITE,
+		     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	if (rc < 0) {
+		return 97;
+	}
+	bytes = (volatile unsigned char *)(uintptr_t)rc;
+	if (bytes[0] != 0 || bytes[4096] != 0) {
+		return 98;
+	}
+	bytes[0] = 0x35;
+	bytes[4096] = 0xa7;
+	if (bytes[0] != 0x35 || bytes[4096] != 0xa7) {
+		return 99;
+	}
+	if (SAY_LITERAL("user anonymous demand faults ok\n") < 0) {
+		return 100;
+	}
+	return 0;
+}
+
+static int smoke_brk_demand_fault(void)
+{
+	volatile unsigned char *last;
+	uintptr_t current;
+	uintptr_t target;
+	long rc;
+
+	rc = syscall(SYS_brk, 0);
+	if (rc <= 0) {
+		return 101;
+	}
+	current = (uintptr_t)rc;
+	target = ((current + 4095UL) & ~4095UL) + 4096UL;
+	if (target <= current || syscall(SYS_brk, target) != (long)target) {
+		return 102;
+	}
+	last = (volatile unsigned char *)(target - 1);
+	if (*last != 0) {
+		return 103;
+	}
+	*last = 0x6d;
+	if (*last != 0x6d) {
+		return 104;
+	}
+	if (SAY_LITERAL("user brk demand fault ok\n") < 0) {
+		return 105;
+	}
+	return 0;
+}
+
 int smoke_fpu_mmap(void)
 {
 	int status = smoke_user_fpu();
@@ -58,5 +114,13 @@ int smoke_fpu_mmap(void)
 	if (status != 0) {
 		return status;
 	}
-	return smoke_mmap_fixed_prot_none();
+	status = smoke_mmap_fixed_prot_none();
+	if (status != 0) {
+		return status;
+	}
+	status = smoke_anonymous_demand_faults();
+	if (status != 0) {
+		return status;
+	}
+	return smoke_brk_demand_fault();
 }

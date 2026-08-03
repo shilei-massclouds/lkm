@@ -125,6 +125,7 @@ use crate::objects::{
 };
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
+#[repr(C)]
 pub struct Context {
     pub config: Config,
     pub static_objects: StaticObjects,

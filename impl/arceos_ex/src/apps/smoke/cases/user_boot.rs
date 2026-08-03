@@ -10,7 +10,7 @@ use crate::{
         files::{FdRef, FileBackendKind, FileError, OpenFileDescriptionRef},
         process_prepare::TaskCopyUserProcessInputs,
         state::State,
-        task::TaskEntry,
+        task::{TaskEntry, TaskRef},
         trap_type::{
             KERNEL_TRAP_OVERFLOW_STACK_SIZE, KERNEL_TRAP_THREAD_SHIFT, TRAP_FRAME_SIZE,
             TRAP_STACK_RECORD_SIZE, TrapEntryOrigin, TrapFrame, formal_trap_entry_prelude,
@@ -22,8 +22,9 @@ use crate::{
             USER_COMPLETED_CHILD_RECORD_CAPACITY, USER_HEAP_BASE, USER_HEAP_SIZE,
             USER_INIT_EXPECTED_MESSAGE, USER_PAGE_SIZE, USER_SIGCHLD_MASK,
             USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE, USER_STACK_TOP,
-            USER_WAIT4_ALL_CHILDREN, UserMappingKind, UserProcessGroupLookup,
-            UserProcessGroupUpdate, UserRtSigtimedwaitResult,
+            USER_WAIT4_ALL_CHILDREN, UserFaultAccess, UserFaultClass, UserFaultRequest,
+            UserFaultResult, UserMappingKind, UserProcessGroupLookup, UserProcessGroupUpdate,
+            UserRtSigtimedwaitResult,
         },
         virtio_blk,
     },
@@ -723,12 +724,14 @@ impl SmokeScenario for UserBootElfScenario {
             "heap mapping facts",
             heap_mapping.kind() == UserMappingKind::Heap
                 && heap_mapping.vaddr() == USER_HEAP_BASE
-                && heap_mapping.memsz() == USER_HEAP_SIZE
+                && heap_mapping.memsz() == 0
                 && heap_mapping.filesz() == 0
                 && heap_mapping.readable()
                 && heap_mapping.writable()
                 && !heap_mapping.executable()
                 && heap_mapping.user_accessible()
+                && heap_mapping.backing_page_count() == 0
+                && heap_mapping.page_table_entry_bound()
                 && space.heap_base() == USER_HEAP_BASE
                 && space.heap_size() == USER_HEAP_SIZE
                 && space.heap_brk() == USER_HEAP_BASE,
@@ -756,6 +759,7 @@ impl SmokeScenario for UserBootElfScenario {
         );
         exercise_kernel_trap_overflow_contract(assertions);
         exercise_user_stack_growth(assertions, ctx);
+        exercise_user_fault_core(assertions, ctx);
         let syscall_setup_ok = ctx
             .cpu_group
             .boot_cpu_exception_mut()
@@ -2055,6 +2059,199 @@ fn exercise_user_stack_growth(assertions: &mut SmokeAssertions, ctx: &mut crate:
             && nx.kind() == UserMappingKind::Stack
             && !nx.executable()
             && !nx.permission_satisfied(),
+    );
+}
+
+#[inline(never)]
+fn exercise_user_fault_core(assertions: &mut SmokeAssertions, ctx: &mut crate::context::Context) {
+    let satp = ctx.user_address_space.satp_token();
+    let task_ref = ctx.current_task_ref().unwrap_or(TaskRef::NONE);
+    let sepc = 0xfeed_1000usize;
+    let heap_end = USER_HEAP_BASE + 2 * USER_PAGE_SIZE;
+    let brk = ctx.user_address_space.user_brk(heap_end);
+    let free_before = ctx.page_allocator.buddy_total_free_pages();
+    let leaves_before = ctx.user_address_space.user_leaf_pte_count();
+    let l0_before = ctx.user_address_space.page_table_l0_count();
+    let heap_fault = ctx.user_address_space.resolve_user_fault(
+        &mut ctx.user_stack,
+        UserFaultRequest::new(
+            task_ref,
+            satp,
+            USER_HEAP_BASE + USER_PAGE_SIZE,
+            sepc,
+            UserFaultAccess::Store,
+        ),
+        &mut ctx.page_allocator,
+        &ctx.page_metadata_map,
+    );
+    let heap_diag = ctx.user_address_space.last_user_fault();
+    assertions.assert(
+        "common fault core heap NotPresent retries same instruction",
+        brk == heap_end
+            && heap_fault.class() == UserFaultClass::NotPresent
+            && heap_fault.result() == UserFaultResult::RetrySameInstruction
+            && heap_fault.sepc() == sepc
+            && heap_diag.task_ref() == task_ref
+            && heap_diag.mm_satp() == satp
+            && heap_diag.address() == USER_HEAP_BASE + USER_PAGE_SIZE
+            && heap_diag.class() == UserFaultClass::NotPresent
+            && heap_diag.result() == UserFaultResult::RetrySameInstruction
+            && heap_diag.cow_shared_count() == 0
+            && heap_diag.cow_copied_count() == 0
+            && ctx.user_address_space.user_leaf_pte_count() == leaves_before + 1
+            && ctx.page_allocator.buddy_total_free_pages()
+                + 1
+                + (ctx.user_address_space.page_table_l0_count() - l0_before)
+                == free_before,
+    );
+
+    let mappings_before_anonymous = ctx.user_address_space.mapping_count();
+    let leaves_before_anonymous = ctx.user_address_space.user_leaf_pte_count();
+    let anonymous = ctx
+        .user_address_space
+        .user_mmap(0, 2 * USER_PAGE_SIZE, 0x3, 0x22, usize::MAX, 0)
+        .ok();
+    let anonymous_fault = anonymous.map(|base| {
+        ctx.user_address_space.resolve_user_fault(
+            &mut ctx.user_stack,
+            UserFaultRequest::new(task_ref, satp, base, sepc + 4, UserFaultAccess::Load),
+            &mut ctx.page_allocator,
+            &ctx.page_metadata_map,
+        )
+    });
+    assertions.assert(
+        "common fault core anonymous-private demand page",
+        anonymous.is_some()
+            && anonymous_fault.is_some_and(|resolution| {
+                resolution.class() == UserFaultClass::NotPresent
+                    && resolution.result() == UserFaultResult::RetrySameInstruction
+                    && resolution.sepc() == sepc + 4
+            }),
+    );
+
+    let state_before_rejected_unmap = (
+        ctx.user_address_space.mapping_count(),
+        ctx.user_address_space.user_leaf_pte_count(),
+        ctx.page_allocator.buddy_total_free_pages(),
+    );
+    let partial_unmap_rejected = anonymous.is_some_and(|base| {
+        !ctx.user_address_space.user_munmap(
+            base,
+            USER_PAGE_SIZE,
+            &mut ctx.page_allocator,
+            &ctx.page_metadata_map,
+        )
+    });
+    let heap_unmap_rejected = !ctx.user_address_space.user_munmap(
+        USER_HEAP_BASE,
+        2 * USER_PAGE_SIZE,
+        &mut ctx.page_allocator,
+        &ctx.page_metadata_map,
+    );
+    assertions.assert(
+        "anonymous-private munmap rejects partial and non-anonymous atomically",
+        partial_unmap_rejected
+            && heap_unmap_rejected
+            && state_before_rejected_unmap
+                == (
+                    ctx.user_address_space.mapping_count(),
+                    ctx.user_address_space.user_leaf_pte_count(),
+                    ctx.page_allocator.buddy_total_free_pages(),
+                ),
+    );
+
+    let leaves_before_unmap = ctx.user_address_space.user_leaf_pte_count();
+    let free_before_unmap = ctx.page_allocator.buddy_total_free_pages();
+    let anonymous_unmapped = anonymous.is_some_and(|base| {
+        ctx.user_address_space.user_munmap(
+            base,
+            2 * USER_PAGE_SIZE,
+            &mut ctx.page_allocator,
+            &ctx.page_metadata_map,
+        )
+    });
+    let unmapped_diagnostic = anonymous.map(|base| {
+        ctx.user_address_space
+            .fault_mapping_diagnostic(base, UserFaultAccess::Load)
+    });
+    let anonymous_reused = ctx
+        .user_address_space
+        .user_mmap(0, 2 * USER_PAGE_SIZE, 0x3, 0x22, usize::MAX, 0)
+        .ok();
+    let anonymous_reuse_unmapped = anonymous_reused.is_some_and(|base| {
+        ctx.user_address_space.user_munmap(
+            base,
+            2 * USER_PAGE_SIZE,
+            &mut ctx.page_allocator,
+            &ctx.page_metadata_map,
+        )
+    });
+    assertions.assert(
+        "anonymous-private whole-VMA munmap releases and reuses range",
+        anonymous_unmapped
+            && anonymous_reused == anonymous
+            && anonymous_reuse_unmapped
+            && unmapped_diagnostic.is_some_and(|diagnostic| !diagnostic.mapped())
+            && leaves_before_unmap == leaves_before_anonymous + 1
+            && ctx.user_address_space.user_leaf_pte_count() == leaves_before_anonymous
+            && ctx.page_allocator.buddy_total_free_pages() == free_before_unmap + 1
+            && ctx.user_address_space.mapping_count() == mappings_before_anonymous,
+    );
+
+    let read_only_addr = (0..ctx.user_address_space.segment_mapping_count()).find_map(|index| {
+        let mapping = ctx.user_address_space.mapping(index)?;
+        (!mapping.writable()).then_some(mapping.vaddr())
+    });
+    let protection = read_only_addr.map(|address| {
+        ctx.user_address_space.resolve_user_fault(
+            &mut ctx.user_stack,
+            UserFaultRequest::new(task_ref, satp, address, sepc + 8, UserFaultAccess::Store),
+            &mut ctx.page_allocator,
+            &ctx.page_metadata_map,
+        )
+    });
+    assertions.assert(
+        "common fault core protection classification",
+        protection.is_some_and(|resolution| {
+            resolution.class() == UserFaultClass::Protection
+                && resolution.result() == UserFaultResult::SegvAccerr
+        }),
+    );
+
+    let unmapped = ctx.user_address_space.resolve_user_fault(
+        &mut ctx.user_stack,
+        UserFaultRequest::new(
+            task_ref,
+            satp,
+            USER_HEAP_BASE - USER_PAGE_SIZE,
+            sepc + 12,
+            UserFaultAccess::Load,
+        ),
+        &mut ctx.page_allocator,
+        &ctx.page_metadata_map,
+    );
+    assertions.assert(
+        "common fault core unmapped classification",
+        unmapped.class() == UserFaultClass::Unmapped
+            && unmapped.result() == UserFaultResult::SegvMaperr,
+    );
+
+    let wrong_mm = ctx.user_address_space.resolve_user_fault(
+        &mut ctx.user_stack,
+        UserFaultRequest::new(
+            task_ref,
+            satp ^ 1,
+            USER_HEAP_BASE,
+            sepc + 16,
+            UserFaultAccess::Load,
+        ),
+        &mut ctx.page_allocator,
+        &ctx.page_metadata_map,
+    );
+    assertions.assert(
+        "common fault core stale mm rejected",
+        wrong_mm.class() == UserFaultClass::Protection
+            && wrong_mm.result() == UserFaultResult::InvalidContext,
     );
 }
 

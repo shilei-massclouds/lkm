@@ -16,6 +16,10 @@ type PageFaultExceptionFlowType: FlowObject {
                     page_fault_flow_atomic_fixup_or_fatal(self);
                     page_fault_flow_nested_hardirq_or_irqoff_never_schedules(self);
                     page_fault_flow_missing_or_stale_fixup_is_terminal(self);
+                    page_fault_flow_user_request_contains_task_mm_addr_sepc_access(self);
+                    page_fault_flow_user_vma_classification_exclusive(self);
+                    page_fault_flow_user_retry_same_instruction(self);
+                    page_fault_flow_user_kernel_state_disjoint(self);
                 }
             }
         }
@@ -40,6 +44,10 @@ predicate page_fault_flow_kernel_task_context_fixup_can_schedule<F: PageFaultExc
 predicate page_fault_flow_atomic_fixup_or_fatal<F: PageFaultExceptionFlowType>(flow: F) -> bool;
 predicate page_fault_flow_nested_hardirq_or_irqoff_never_schedules<F: PageFaultExceptionFlowType>(flow: F) -> bool;
 predicate page_fault_flow_missing_or_stale_fixup_is_terminal<F: PageFaultExceptionFlowType>(flow: F) -> bool;
+predicate page_fault_flow_user_request_contains_task_mm_addr_sepc_access<F: PageFaultExceptionFlowType>(flow: F) -> bool;
+predicate page_fault_flow_user_vma_classification_exclusive<F: PageFaultExceptionFlowType>(flow: F) -> bool;
+predicate page_fault_flow_user_retry_same_instruction<F: PageFaultExceptionFlowType>(flow: F) -> bool;
+predicate page_fault_flow_user_kernel_state_disjoint<F: PageFaultExceptionFlowType>(flow: F) -> bool;
 predicate page_fault_flow_root_leaf_revalidated_after_schedule<F: PageFaultExceptionFlowType>(flow: F) -> bool;
 predicate page_fault_flow_completed<F: PageFaultExceptionFlowType>(flow: F) -> bool;
 predicate page_fault_flow_disabled<F: PageFaultExceptionFlowType>(flow: F) -> bool;

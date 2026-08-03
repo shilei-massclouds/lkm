@@ -453,6 +453,12 @@ Context fields should be grouped by resource-object category, matching
 the source directory hierarchy as it evolves. They should not be
 grouped by Phase except as an explicitly recorded transitional step.
 
+The implementation Context must use a deterministic declaration-order layout. Its boot-translation prefix
+(`Config`, static/linker objects, `KernelImage`, `KernelAddrSpace`, `CpuGroup`, `BootTask`, and `InitStack`)
+must remain inside the first trampoline-mapped PMD even when later user-mm storage grows. Rust's default
+field-reordering layout is not sufficient for this boundary; the carrier uses `repr(C)` and the existing
+VM-switch validation remains the runtime proof.
+
 #### Context accessor placement
 
 Rule ID: `coding_should_avoid_phase_local_context_accessors` (SHOULD).

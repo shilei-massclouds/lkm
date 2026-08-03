@@ -29,12 +29,13 @@
 
 ## 增长与失败原子性
 
-当前 SATP 的用户 load/store fault 可以 fault-in VMA 内未分配页，也可以在 8 MiB rlimit、1 MiB
-guard gap 和相邻 mapping 允许时向下移动 VMA base。跨页跳跃只分配 fault page。新 backing、L0
-页表或 PTE 安装任一步失败都回滚新资源和 VMA metadata；成功只对 fault VA 执行定点
-`sfence.vma` 并重试原指令。instruction/权限/越界/冲突/非 stack fault 保持 terminal diagnostic。
+`UserAddressSpace` 的统一用户 fault core 可以 fault-in 当前栈 VMA 内未分配页，也可以在 8 MiB
+rlimit、1 MiB guard gap 和相邻 mapping 允许时请求本对象向下移动 VMA base。跨页跳跃只分配
+fault page。新 backing、L0 页表或 PTE 安装任一步失败都回滚新资源和 VMA metadata；成功只对
+fault VA 执行定点 `sfence.vma` 并以 `RetrySameInstruction` 重试原 `sepc`。本对象只实现稀疏
+backing 与增长约束，不自行分类 instruction、权限、越界、冲突或非 stack fault。
 
 usercopy 对合法栈范围使用同一 range resolver 逐页 fault-in；失败仍返回 `EFAULT`。checkpoint
 诊断在既有稳定时点记录 top max、选定 top、offset、execfn pointer 和 auxv 完整性，不新增、插入或
-重排 checkpoint。完整 SIGSEGV、动态 `RLIMIT_STACK`、通用 VMA fault core、COW、多线程栈、
+重排 checkpoint。完整 SIGSEGV、动态 `RLIMIT_STACK`、COW、多线程栈、
 `MAP_STACK/MAP_GROWSDOWN`、完整 CRNG 和内核 compiler stack protector 不在本轮。
