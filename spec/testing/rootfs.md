@@ -133,7 +133,7 @@ Rule IDs (MUST):
 - `arceos_ex_must_ltp_close_list_be_dual_provider_scripted_acceptance`
 - `arceos_ex_must_ltp_close_list_exact_entries`
 - `arceos_ex_must_ltp_close_list_exit_with_list_status`
-- `arceos_ex_must_ltp_list_command_substitution_preserve_outer_wait_snapshot`
+- `arceos_ex_must_ltp_list_command_substitution_preserve_outer_wait_mm`
 - `arceos_ex_must_ltp_list_grandchild_smoke_use_independent_scenario_stack`
 
 `ltp` and `ltp-lo` are scripted acceptance identities for the native and linux-object providers,
@@ -152,16 +152,16 @@ discovery and the bounded shell/list integration path; it does not claim that `c
 
 The list command's BusyBox command substitution is covered by the bounded two-level plain-fork slice: the
 PID1-originated script child may create one builtin-only grandchild for `cd`/`pwd`, pipe/stdio and exit. Tests
-must cover distinct outer/inner snapshot ownership, blocking parent-read handoff, child-write/parent-read pipe data, two-level wait/exit
-restore, sequential pid monotonicity, illegal clone arguments, a second pending child, deeper nesting,
+must cover distinct outer/inner Task-owned mm identities, blocking parent-read handoff, child-write/parent-read
+pipe data, two-level wait/exit mm switch and release, sequential pid monotonicity, illegal clone arguments, a second pending child, deeper nesting,
 builtin-grandchild `cd`/absolute `pwd`, `/dev/null` stderr redirection, and the canonical 33,110-byte runtest list
-read. A separate builtin-grandchild-exec smoke scenario must cover first-exec retention without changing outer PID1
-ownership, two consecutive execs retaining the same script parent while releasing the intermediate image,
+read. A separate builtin-grandchild-exec smoke scenario must cover an unchanged parked outer mm while each child
+exec releases its own retired image, two consecutive execs preserving the same Task/mm ownership boundary,
 child-view-only close-on-exec, wait4 and pipe-read resume, script exit restoring PID1, and atomic rollback for
 argument/staging/ELF/address-space failures without page or fd-reference leaks. Non-builtin sources, deeper clone,
-and a second pending child remain rejected. Capture and exec failure injection must leave the current executable,
-both snapshot layers, pending identity and fd views unchanged. The object-smoke two-level
-plain-fork coverage is a separate smoke scenario, so its bounded snapshot call chain does not inherit the
+and a second pending child remain rejected. Fork/exec failure injection must leave the current executable,
+all published Task-owned mm values, pending identity and fd views unchanged. The object-smoke two-level
+plain-fork coverage is a separate smoke scenario, so its bounded Task/mm call chain does not inherit the
 large canonical-ELF scenario frame or cross the fixed 16 KiB kernel-init stack boundary. It runs before the
 separate legacy child-lifecycle scenario, whose observed-plain-fork coverage intentionally finishes with a
 second child pending from the current shell continuation rather than an idle reusable top-level slot.

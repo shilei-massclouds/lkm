@@ -306,6 +306,77 @@ impl UserStack {
         *self = Self::new();
     }
 
+    pub(crate) fn eager_duplicate_from(
+        &mut self,
+        parent: &Self,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) -> bool {
+        if self.lifecycle.state() != State::Base
+            || !self.pages.is_empty()
+            || parent.lifecycle.state() != State::Ready
+        {
+            return false;
+        }
+
+        self.lifecycle = parent.lifecycle;
+        self.base = parent.base;
+        self.top = parent.top;
+        self.initial_sp = parent.initial_sp;
+        self.arg0_ptr = parent.arg0_ptr;
+        self.random_ptr = parent.random_ptr;
+        self.execfn_ptr = parent.execfn_ptr;
+        self.auxv_ptr = parent.auxv_ptr;
+        self.aslr_offset = parent.aslr_offset;
+        self.config = parent.config;
+        self.allocated = parent.allocated;
+        self.mapped_into_address_space = parent.mapped_into_address_space;
+        self.zeroed = parent.zeroed;
+        self.initial_sp_bound = parent.initial_sp_bound;
+        self.minimal_arg_env_bound = parent.minimal_arg_env_bound;
+        self.auxv_complete = parent.auxv_complete;
+        self.last_fault_address = parent.last_fault_address;
+        self.last_old_base = parent.last_old_base;
+        self.last_new_base = parent.last_new_base;
+        self.last_allocated_page_count = parent.last_allocated_page_count;
+        self.last_grow_rejection = parent.last_grow_rejection;
+        self.last_tlb_flush = parent.last_tlb_flush;
+        #[cfg(app_smoke)]
+        {
+            self.fail_next_backing_allocation = false;
+        }
+
+        if self.pages.try_reserve_exact(parent.pages.len()).is_err() {
+            *self = Self::new();
+            return false;
+        }
+        for parent_slot in &parent.pages {
+            let Some(page) = page_allocator.alloc_page(GfpFlags::kernel(), page_metadata_map)
+            else {
+                self.release_exec_backing(page_allocator, page_metadata_map);
+                return false;
+            };
+            let Some(src) = page_metadata_map.page_address(parent_slot.page) else {
+                let _ = page_allocator.free_pages(page, 0, page_metadata_map);
+                self.release_exec_backing(page_allocator, page_metadata_map);
+                return false;
+            };
+            let Some(dst) = page_metadata_map.page_address(page) else {
+                let _ = page_allocator.free_pages(page, 0, page_metadata_map);
+                self.release_exec_backing(page_allocator, page_metadata_map);
+                return false;
+            };
+            unsafe {
+                core::ptr::copy_nonoverlapping(src as *const u8, dst as *mut u8, USER_PAGE_SIZE);
+            }
+            self.pages.push(UserStackPage {
+                vaddr: parent_slot.vaddr,
+                page,
+            });
+        }
+        true
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn setup(
         &mut self,

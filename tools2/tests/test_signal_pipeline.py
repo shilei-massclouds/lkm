@@ -6931,14 +6931,14 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
             self.assertEqual(snapshot.read_bytes(), BOOT_INIT_SETUP_SCENARIO.read_bytes())
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "bc3ff127ade5b81dc6830eed37a2a59427703a16a4742cbff4d1573d225c07de",
+                "6e7ad00146b30fd3508a46939855274a04fa93f74df9cd1f7713c9f003bb2b8b",
             )
             self.assertEqual(
                 {
                     derivation["model_fingerprint"], model["model_fingerprint"],
                     view["model_fingerprint"], saved["model_fingerprint"],
                 },
-                {"sha256:a0407175dbcb300fd146babf7744eb1b0af891f7e4dbc92a4bd982c466b05fc8"},
+                {"sha256:29ad31b2d0fc269c59d1d5f8d76f2694205833775d3abb8c652ffeb2987ccb7d"},
             )
             with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
                 compact_text = render_text(view)
@@ -7277,7 +7277,7 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
             )
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "c59fbc7810b74e95ba40a6d92ffd268bbc92a4b996ea06e1416b489f86003321",
+                "1a01a4c1424e12426ba640af749d1b2df2861723a3f00877f8ba06c5bf56bf2d",
             )
             model = self.prepared_model_document
             assert view is not None
@@ -7289,7 +7289,7 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
                     view["model_fingerprint"],
                     saved["model_fingerprint"],
                 },
-                {"sha256:a0407175dbcb300fd146babf7744eb1b0af891f7e4dbc92a4bd982c466b05fc8"},
+                {"sha256:29ad31b2d0fc269c59d1d5f8d76f2694205833775d3abb8c652ffeb2987ccb7d"},
             )
 
     def test_main_model_all_cpu_schedulers_expose_ap_mailbox_ipi_idle_protocol(self) -> None:

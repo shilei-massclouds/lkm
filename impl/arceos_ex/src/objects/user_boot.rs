@@ -309,6 +309,9 @@ struct UserTaskStorageSlot {
     pid: usize,
     task: Task,
     runtime: UserAppRuntime,
+    inactive_address_space: UserAddressSpace,
+    inactive_stack: UserStack,
+    mm_present: bool,
 }
 
 impl UserTaskStorageSlot {
@@ -320,6 +323,9 @@ impl UserTaskStorageSlot {
             pid: 0,
             task: Task::new(),
             runtime: UserAppRuntime::new(),
+            inactive_address_space: UserAddressSpace::new(),
+            inactive_stack: UserStack::new(),
+            mm_present: false,
         }
     }
 
@@ -1286,6 +1292,7 @@ pub struct UserAddressSpace {
     allocated: bool,
     first_instance: bool,
     bound_to_kernel_init_task: bool,
+    owner_task_ref: TaskRef,
     low_half_private: bool,
     high_half_shares_swapper: bool,
     kernel_pages_u_disabled: bool,
@@ -1352,6 +1359,7 @@ impl UserAddressSpace {
             allocated: false,
             first_instance: false,
             bound_to_kernel_init_task: false,
+            owner_task_ref: TaskRef::NONE,
             low_half_private: false,
             high_half_shares_swapper: false,
             kernel_pages_u_disabled: false,
@@ -1401,6 +1409,7 @@ impl UserAddressSpace {
         self.allocated = false;
         self.first_instance = false;
         self.bound_to_kernel_init_task = false;
+        self.owner_task_ref = TaskRef::NONE;
         self.low_half_private = false;
         self.high_half_shares_swapper = false;
         self.kernel_pages_u_disabled = false;
@@ -1535,6 +1544,23 @@ impl UserAddressSpace {
 
     pub const fn bound_to_kernel_init_task(&self) -> bool {
         self.bound_to_kernel_init_task
+    }
+
+    pub const fn owner_task_ref(&self) -> TaskRef {
+        self.owner_task_ref
+    }
+
+    pub const fn owned_by(&self, task_ref: TaskRef) -> bool {
+        self.owner_task_ref.same_identity(task_ref)
+    }
+
+    pub fn rebind_owner_after_exec(&mut self, task_ref: TaskRef) -> bool {
+        if self.lifecycle.state() != State::Online || !task_ref.is_valid() {
+            return false;
+        }
+        self.owner_task_ref = task_ref;
+        self.bound_to_kernel_init_task = task_ref.same_identity(TaskRef::KERNEL_INIT);
+        true
     }
 
     pub const fn low_half_private(&self) -> bool {
@@ -1729,6 +1755,7 @@ impl UserAddressSpace {
         self.allocated = true;
         self.first_instance = true;
         self.bound_to_kernel_init_task = true;
+        self.owner_task_ref = kernel_init_task.task_ref();
         self.low_half_private = true;
         self.high_half_shares_swapper = true;
         self.kernel_pages_u_disabled = true;
@@ -2239,6 +2266,7 @@ impl UserAddressSpace {
         if self.lifecycle.state() != State::Online
             || stack.state() != State::Ready
             || request.task_ref == TaskRef::NONE
+            || !self.owner_task_ref.same_identity(request.task_ref)
             || request.mm_satp == 0
             || request.mm_satp != self.satp_token
             || matches!(request.access, UserFaultAccess::Unknown)
@@ -2627,6 +2655,153 @@ impl UserAddressSpace {
                 .ok_or(UserStackGrowReject::Rlimit)?;
         }
         Ok(())
+    }
+
+    pub fn eager_duplicate_from(
+        &mut self,
+        parent: &Self,
+        parent_stack: &UserStack,
+        child_stack: &mut UserStack,
+        owner_task_ref: TaskRef,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) -> bool {
+        if self.lifecycle.state() != State::Base
+            || self.satp_token != 0
+            || self.mapping_count != 0
+            || parent.lifecycle.state() != State::Online
+            || !parent.owner_task_ref.is_valid()
+            || !owner_task_ref.is_valid()
+            || owner_task_ref.same_identity(parent.owner_task_ref)
+            || child_stack.state() != State::Base
+            || !child_stack.eager_duplicate_from(parent_stack, page_allocator, page_metadata_map)
+        {
+            return false;
+        }
+
+        // UserAddressSpace has fixed inline mapping storage and no Drop implementation.
+        // Copying the metadata first is safe only because every copied ownership-bearing
+        // PageRef is detached below before an allocation or failure path can observe it.
+        unsafe {
+            core::ptr::copy_nonoverlapping(parent as *const Self, self as *mut Self, 1);
+        }
+        self.first_instance = false;
+        self.bound_to_kernel_init_task = false;
+        self.owner_task_ref = owner_task_ref;
+        self.page_table_root = None;
+        self.page_table_l1 = None;
+        self.page_table_l0s = [UserL0TableSlot::empty(); MAX_USER_L0_TABLES];
+        self.page_table_l0_count = 0;
+        self.user_leaf_pte_count = 0;
+        self.real_page_table_allocated = false;
+        self.user_leaf_ptes_installed = false;
+        self.high_half_root_entries_shared = false;
+        self.satp_token_ready = false;
+        self.prepared_but_not_current = false;
+        self.satp_token = 0;
+        self.runtime_ready = false;
+
+        let mut mapping_index = 0usize;
+        while mapping_index < self.mapping_count {
+            self.mappings[mapping_index].clear_backing_pages();
+            self.mappings[mapping_index].backing_page_count = 0;
+            let parent_mapping = &parent.mappings[mapping_index];
+            let mut page_index = 0usize;
+            while page_index < parent_mapping.backing_page_count() {
+                let Some(parent_page) = parent_mapping.backing_page(page_index) else {
+                    self.discard_eager_duplicate(child_stack, page_allocator, page_metadata_map);
+                    return false;
+                };
+                let Some(page) = page_allocator.alloc_page(GfpFlags::kernel(), page_metadata_map)
+                else {
+                    self.discard_eager_duplicate(child_stack, page_allocator, page_metadata_map);
+                    return false;
+                };
+                let Some(src) = page_metadata_map.page_address(parent_page) else {
+                    let _ = page_allocator.free_pages(page, 0, page_metadata_map);
+                    self.discard_eager_duplicate(child_stack, page_allocator, page_metadata_map);
+                    return false;
+                };
+                let Some(dst) = page_metadata_map.page_address(page) else {
+                    let _ = page_allocator.free_pages(page, 0, page_metadata_map);
+                    self.discard_eager_duplicate(child_stack, page_allocator, page_metadata_map);
+                    return false;
+                };
+                unsafe {
+                    core::ptr::copy_nonoverlapping(
+                        src as *const u8,
+                        dst as *mut u8,
+                        USER_PAGE_SIZE,
+                    );
+                }
+                let slot = self.mappings[mapping_index].backing_page_count;
+                self.mappings[mapping_index].backing_pages[slot] = Some(page);
+                self.mappings[mapping_index].backing_vaddrs[slot] =
+                    parent_mapping.backing_vaddrs[page_index];
+                self.mappings[mapping_index].backing_page_count += 1;
+                page_index += 1;
+            }
+            mapping_index += 1;
+        }
+
+        if !self.allocate_base_page_tables(page_allocator, page_metadata_map)
+            || !self.copy_parent_high_half(parent, page_metadata_map)
+            || !self.install_all_user_leaf_ptes(child_stack, page_allocator, page_metadata_map)
+        {
+            self.discard_eager_duplicate(child_stack, page_allocator, page_metadata_map);
+            return false;
+        }
+        let Some(root) = self.page_table_root else {
+            self.discard_eager_duplicate(child_stack, page_allocator, page_metadata_map);
+            return false;
+        };
+        self.satp_token = csr::SATP_MODE_SV39 | (root.phys().value() >> 12);
+        self.satp_token_ready = self.satp_token != 0;
+        self.real_page_table_allocated = self.satp_token_ready;
+        self.runtime_ready = self.satp_token_ready;
+        self.prepared_but_not_current = self.satp_token_ready;
+        if !self.satp_token_ready || self.satp_token == parent.satp_token {
+            self.discard_eager_duplicate(child_stack, page_allocator, page_metadata_map);
+            return false;
+        }
+        true
+    }
+
+    fn copy_parent_high_half(
+        &mut self,
+        parent: &Self,
+        page_metadata_map: &PageMetadataMap,
+    ) -> bool {
+        let (Some(parent_root), Some(child_root)) = (parent.page_table_root, self.page_table_root)
+        else {
+            return false;
+        };
+        let Some(parent_table) = page_table_page_mut(parent_root, page_metadata_map) else {
+            return false;
+        };
+        let Some(child_table) = page_table_page_mut(child_root, page_metadata_map) else {
+            return false;
+        };
+        self.high_half_root_entries_shared =
+            copy_high_half_root_entries(child_table, parent_table) != 0;
+        self.high_half_root_entries_shared
+    }
+
+    fn discard_eager_duplicate(
+        &mut self,
+        child_stack: &mut UserStack,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) {
+        release_mappings(
+            &mut self.mappings,
+            self.mapping_count,
+            page_allocator,
+            page_metadata_map,
+        );
+        self.release_page_table_pages(page_allocator, page_metadata_map);
+        self.reset_staging_metadata();
+        child_stack.release_exec_backing(page_allocator, page_metadata_map);
     }
 
     pub fn enable(
@@ -3836,6 +4011,10 @@ pub struct UserTaskSet {
     parent_task_ref: TaskRef,
     pending_task_ref: TaskRef,
     last_exited_task_ref: TaskRef,
+    kernel_init_inactive_address_space: UserAddressSpace,
+    kernel_init_inactive_stack: UserStack,
+    kernel_init_mm_present: bool,
+    ordinary_independent_mm: bool,
     carrier_stack_base: usize,
     carrier_stack_top: usize,
     prepared: bool,
@@ -3932,6 +4111,10 @@ pub struct UserTaskSet {
     builtin_grandchild: BuiltinGrandchildContinuation,
     #[cfg(app_smoke)]
     fail_next_builtin_grandchild_wait_capture: bool,
+    #[cfg(app_smoke)]
+    fail_next_eager_child_mm_after_copy: bool,
+    #[cfg(app_smoke)]
+    last_unpublished_rollback_stage: usize,
     next_child_pid: usize,
     completed_child_records: [UserCompletedChildRecord; USER_COMPLETED_CHILD_RECORD_CAPACITY],
     completed_child_record_count: usize,
@@ -3972,6 +4155,10 @@ impl UserTaskSet {
             parent_task_ref: TaskRef::NONE,
             pending_task_ref: TaskRef::NONE,
             last_exited_task_ref: TaskRef::NONE,
+            kernel_init_inactive_address_space: UserAddressSpace::new(),
+            kernel_init_inactive_stack: UserStack::new(),
+            kernel_init_mm_present: false,
+            ordinary_independent_mm: false,
             carrier_stack_base: 0,
             carrier_stack_top: 0,
             prepared: false,
@@ -4067,6 +4254,10 @@ impl UserTaskSet {
             builtin_grandchild: BuiltinGrandchildContinuation::new(),
             #[cfg(app_smoke)]
             fail_next_builtin_grandchild_wait_capture: false,
+            #[cfg(app_smoke)]
+            fail_next_eager_child_mm_after_copy: false,
+            #[cfg(app_smoke)]
+            last_unpublished_rollback_stage: 0,
             next_child_pid: USER_CHILD_PID,
             completed_child_records: [UserCompletedChildRecord::empty();
                 USER_COMPLETED_CHILD_RECORD_CAPACITY],
@@ -4124,6 +4315,10 @@ impl UserTaskSet {
 
     pub const fn parent_task_ref(&self) -> TaskRef {
         self.parent_task_ref
+    }
+
+    pub const fn ordinary_independent_mm(&self) -> bool {
+        self.ordinary_independent_mm
     }
 
     pub const fn pending_task_ref(&self) -> TaskRef {
@@ -4263,7 +4458,237 @@ impl UserTaskSet {
         }
     }
 
-    fn allocate_user_task(&mut self, pid: usize, parent_ref: TaskRef) -> Option<TaskRef> {
+    fn prepare_eager_child_mm(
+        &mut self,
+        child_ref: TaskRef,
+        parent_address_space: &UserAddressSpace,
+        parent_stack: &UserStack,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) -> bool {
+        let Some(index) = child_ref.user_slot() else {
+            return false;
+        };
+        let slot = &mut self.task_slots[index];
+        if !slot.occupied
+            || !slot.task_ref().same_identity(child_ref)
+            || slot.mm_present
+            || slot.inactive_address_space.state() != State::Base
+            || slot.inactive_stack.state() != State::Base
+        {
+            return false;
+        }
+        if !slot.inactive_address_space.eager_duplicate_from(
+            parent_address_space,
+            parent_stack,
+            &mut slot.inactive_stack,
+            child_ref,
+            page_allocator,
+            page_metadata_map,
+        ) {
+            return false;
+        }
+        #[cfg(app_smoke)]
+        if core::mem::take(&mut self.fail_next_eager_child_mm_after_copy) {
+            slot.inactive_address_space.discard_eager_duplicate(
+                &mut slot.inactive_stack,
+                page_allocator,
+                page_metadata_map,
+            );
+            return false;
+        }
+        slot.mm_present = true;
+        true
+    }
+
+    fn rollback_unpublished_user_task(
+        &mut self,
+        child_ref: TaskRef,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) {
+        #[cfg(app_smoke)]
+        {
+            self.last_unpublished_rollback_stage = 0;
+        }
+        if let Some(index) = child_ref.user_slot()
+            && self.task_slots[index].occupied
+            && self.task_slots[index].task_ref().same_identity(child_ref)
+        {
+            let slot = &mut self.task_slots[index];
+            if slot.mm_present {
+                slot.inactive_address_space
+                    .release_retired_exec_image(page_allocator, page_metadata_map);
+                slot.inactive_stack
+                    .release_exec_backing(page_allocator, page_metadata_map);
+                slot.mm_present = false;
+            }
+            #[cfg(app_smoke)]
+            {
+                self.last_unpublished_rollback_stage = 1;
+            }
+            if !slot.mm_present
+                && slot.inactive_address_space.state() == State::Base
+                && slot.inactive_stack.state() == State::Base
+            {
+                #[cfg(app_smoke)]
+                {
+                    self.last_unpublished_rollback_stage = 2;
+                }
+                if slot.task.state() == State::Base
+                    && slot.task.flow_state() == State::Base
+                    && !slot.task.embedded_flow().declared()
+                    && slot.runtime.state() == State::Base
+                    && !slot.task.running()
+                    && !slot.task.runqueue_published()
+                {
+                    #[cfg(app_smoke)]
+                    {
+                        self.last_unpublished_rollback_stage = 3;
+                    }
+                    slot.occupied = false;
+                    slot.pid = 0;
+                    #[cfg(app_smoke)]
+                    {
+                        self.last_unpublished_rollback_stage = 4;
+                    }
+                }
+            }
+        }
+        #[cfg(app_smoke)]
+        {
+            if self.last_unpublished_rollback_stage == 4 && !self.task_ref_valid(child_ref) {
+                self.last_unpublished_rollback_stage = 5;
+            }
+        }
+    }
+
+    fn switch_to_child_mm(
+        &mut self,
+        parent_ref: TaskRef,
+        child_ref: TaskRef,
+        address_space: &mut UserAddressSpace,
+        stack: &mut UserStack,
+    ) -> bool {
+        let Some(child_index) = child_ref.user_slot() else {
+            return false;
+        };
+        let child_ready = {
+            let child = &self.task_slots[child_index];
+            child.occupied
+                && child.task_ref().same_identity(child_ref)
+                && child.mm_present
+                && child.inactive_address_space.owned_by(child_ref)
+                && child.inactive_address_space.satp_token() != 0
+        };
+        if !child_ready || !address_space.owned_by(parent_ref) || address_space.satp_token() == 0 {
+            return false;
+        }
+        if parent_ref.same_identity(TaskRef::KERNEL_INIT) {
+            if self.kernel_init_mm_present
+                || self.kernel_init_inactive_address_space.state() != State::Base
+                || self.kernel_init_inactive_stack.state() != State::Base
+            {
+                return false;
+            }
+        } else {
+            let Some(parent_index) = parent_ref.user_slot() else {
+                return false;
+            };
+            let parent = &self.task_slots[parent_index];
+            if !parent.occupied
+                || !parent.task_ref().same_identity(parent_ref)
+                || parent.mm_present
+                || parent.inactive_address_space.state() != State::Base
+                || parent.inactive_stack.state() != State::Base
+            {
+                return false;
+            }
+        }
+
+        if parent_ref.same_identity(TaskRef::KERNEL_INIT) {
+            core::mem::swap(address_space, &mut self.kernel_init_inactive_address_space);
+            core::mem::swap(stack, &mut self.kernel_init_inactive_stack);
+            self.kernel_init_mm_present = true;
+        } else {
+            let parent_index = parent_ref.user_slot().unwrap_or(0);
+            core::mem::swap(
+                address_space,
+                &mut self.task_slots[parent_index].inactive_address_space,
+            );
+            core::mem::swap(stack, &mut self.task_slots[parent_index].inactive_stack);
+            self.task_slots[parent_index].mm_present = true;
+        }
+        let parent_satp = if parent_ref.same_identity(TaskRef::KERNEL_INIT) {
+            self.kernel_init_inactive_address_space.satp_token()
+        } else {
+            let parent_index = parent_ref.user_slot().unwrap_or(0);
+            self.task_slots[parent_index]
+                .inactive_address_space
+                .satp_token()
+        };
+        core::mem::swap(
+            address_space,
+            &mut self.task_slots[child_index].inactive_address_space,
+        );
+        core::mem::swap(stack, &mut self.task_slots[child_index].inactive_stack);
+        self.task_slots[child_index].mm_present = false;
+        self.ordinary_independent_mm = address_space.owned_by(child_ref)
+            && address_space.satp_token() != 0
+            && address_space.satp_token() != parent_satp;
+        self.ordinary_independent_mm
+    }
+
+    fn release_child_and_restore_parent_mm(
+        &mut self,
+        child_ref: TaskRef,
+        parent_ref: TaskRef,
+        address_space: &mut UserAddressSpace,
+        stack: &mut UserStack,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) -> bool {
+        if !self.ordinary_independent_mm
+            || !address_space.owned_by(child_ref)
+            || address_space.satp_token() == 0
+        {
+            return false;
+        }
+        let parent_ready = if parent_ref.same_identity(TaskRef::KERNEL_INIT) {
+            self.kernel_init_mm_present
+                && self.kernel_init_inactive_address_space.owned_by(parent_ref)
+        } else if let Some(parent_index) = parent_ref.user_slot() {
+            let parent = &self.task_slots[parent_index];
+            parent.occupied
+                && parent.task_ref().same_identity(parent_ref)
+                && parent.mm_present
+                && parent.inactive_address_space.owned_by(parent_ref)
+        } else {
+            false
+        };
+        if !parent_ready {
+            return false;
+        }
+
+        address_space.release_retired_exec_image(page_allocator, page_metadata_map);
+        stack.release_exec_backing(page_allocator, page_metadata_map);
+        if parent_ref.same_identity(TaskRef::KERNEL_INIT) {
+            core::mem::swap(address_space, &mut self.kernel_init_inactive_address_space);
+            core::mem::swap(stack, &mut self.kernel_init_inactive_stack);
+            self.kernel_init_mm_present = false;
+        } else {
+            let parent_index = parent_ref.user_slot().unwrap_or(0);
+            core::mem::swap(
+                address_space,
+                &mut self.task_slots[parent_index].inactive_address_space,
+            );
+            core::mem::swap(stack, &mut self.task_slots[parent_index].inactive_stack);
+            self.task_slots[parent_index].mm_present = false;
+        }
+        address_space.owned_by(parent_ref) && address_space.satp_token() != 0
+    }
+
+    fn reserve_user_task(&mut self, pid: usize) -> Option<TaskRef> {
         if pid == 0 {
             return None;
         }
@@ -4276,12 +4701,35 @@ impl UserTaskSet {
         }
 
         let slot = &mut self.task_slots[index];
+        if slot.mm_present
+            || slot.inactive_address_space.state() != State::Base
+            || slot.inactive_stack.state() != State::Base
+        {
+            return None;
+        }
         slot.generation = next_generation(slot.generation);
         let task_ref = TaskRef::user(index, slot.generation);
         slot.task = Task::new_user(task_ref, slot.flow_generation);
         slot.pid = pid;
         slot.runtime = UserAppRuntime::new();
         slot.occupied = true;
+
+        Some(task_ref)
+    }
+
+    fn publish_reserved_user_task(&mut self, task_ref: TaskRef, parent_ref: TaskRef) -> bool {
+        let Some(index) = task_ref.user_slot() else {
+            return false;
+        };
+        let slot = &mut self.task_slots[index];
+        if !slot.occupied
+            || !slot.task_ref().same_identity(task_ref)
+            || slot.task.state() != State::Base
+            || slot.runtime.state() != State::Base
+        {
+            return false;
+        }
+        let pid = slot.pid;
 
         task_event_or_terminate(slot.task.set_identity_metadata(
             pid,
@@ -4313,6 +4761,14 @@ impl UserTaskSet {
         task_event_or_terminate(task.publish_embedded_flow());
         task_event_or_terminate(task.adopt_enable());
         task_event_or_terminate(runtime.bind_dynamic(task, task.embedded_flow(), pid));
+        true
+    }
+
+    fn allocate_user_task(&mut self, pid: usize, parent_ref: TaskRef) -> Option<TaskRef> {
+        let task_ref = self.reserve_user_task(pid)?;
+        if !self.publish_reserved_user_task(task_ref, parent_ref) {
+            return None;
+        }
         Some(task_ref)
     }
 
@@ -4429,6 +4885,9 @@ impl UserTaskSet {
         if !slot.occupied
             || !slot.task_ref().same_identity(task_ref)
             || slot.state() != State::Destroyed
+            || slot.mm_present
+            || slot.inactive_address_space.state() != State::Base
+            || slot.inactive_stack.state() != State::Base
         {
             return false;
         }
@@ -4856,9 +5315,37 @@ impl UserTaskSet {
         true
     }
 
+    pub fn mark_builtin_grandchild_independent_exec_committed(&mut self) -> bool {
+        if !self.ordinary_independent_mm
+            || !self.builtin_grandchild_active()
+            || self
+                .builtin_grandchild
+                .parent_exec_address_space_snapshot_saved
+            || self.builtin_grandchild.parent_exec_stack_snapshot_saved
+            || self.builtin_grandchild.parent_exec_snapshot_ever_saved
+            || self.builtin_grandchild.parent_exec_snapshot_restored
+            || self.builtin_grandchild.parent_exec_retained_satp != 0
+        {
+            return false;
+        }
+        self.builtin_grandchild.exec_commit_count =
+            self.builtin_grandchild.exec_commit_count.saturating_add(1);
+        true
+    }
+
     #[cfg(app_smoke)]
     pub fn smoke_fail_next_builtin_grandchild_wait_capture(&mut self) {
         self.fail_next_builtin_grandchild_wait_capture = true;
+    }
+
+    #[cfg(app_smoke)]
+    pub fn smoke_fail_next_eager_child_mm_after_copy(&mut self) {
+        self.fail_next_eager_child_mm_after_copy = true;
+    }
+
+    #[cfg(app_smoke)]
+    pub const fn smoke_last_unpublished_rollback_stage(&self) -> usize {
+        self.last_unpublished_rollback_stage
     }
 
     pub fn pid1_plain_fork_child_continuation(&self) -> bool {
@@ -4868,13 +5355,9 @@ impl UserTaskSet {
             && self.pid != 0
             && self.parent_pid == super::rest_init::KERNEL_INIT_PID
             && self.parent_wait_frame.is_some()
-            && self.parent_address_space_snapshot_saved
+            && self.ordinary_independent_mm
             && self.parent_fd_snapshot_saved
             && !self.parent_fd_snapshot_restored
-            && self.parent_wait_stack_snapshot_copied
-            && !self.parent_wait_stack_snapshot_restored
-            && self.parent_wait_writable_page_snapshot_saved
-            && !self.parent_wait_writable_page_snapshot_restored
     }
 
     pub fn observed_plain_fork_child_pending_wait(&self) -> bool {
@@ -5112,7 +5595,7 @@ impl UserTaskSet {
     }
 
     pub const fn parent_wait_register_checkpoint_bound(&self) -> bool {
-        self.parent_wait_frame.is_some() && self.parent_address_space_snapshot_saved
+        self.parent_wait_frame.is_some() && self.ordinary_independent_mm
     }
 
     pub const fn parent_wait_stack_window_checkpoint_bound(&self) -> bool {
@@ -5283,9 +5766,11 @@ impl UserTaskSet {
         parent: &KernelInitTaskUserState,
         boundaries: &UserCloneDeferredBoundaries,
         address_space: &UserAddressSpace,
+        stack: &UserStack,
         trap_frame: &UserTrapFrame,
         fs_struct: &FsStruct,
         files_struct: &FilesStruct,
+        page_allocator: &mut PageAllocator,
         page_metadata_map: &PageMetadataMap,
         current_frame: &TrapFrame,
         clone_flags: usize,
@@ -5319,15 +5804,30 @@ impl UserTaskSet {
         let mut child_frame = *current_frame;
         child_frame.set_reg(10, 0);
         child_frame.sepc = child_frame.sepc.wrapping_add(4);
-        let stack_snapshot_len = copy_user_stack_snapshot(
-            address_space,
-            page_metadata_map,
-            &mut self.user_stack_snapshot,
-        )?;
-        let parent_fd_snapshot = files_struct.save_parent_fd_snapshot().ok()?;
-
         let child_pid = self.next_child_pid;
-        self.allocate_user_task(child_pid, TaskRef::NONE)?;
+        let child_ref = self.reserve_user_task(child_pid)?;
+        if !self.prepare_eager_child_mm(
+            child_ref,
+            address_space,
+            stack,
+            page_allocator,
+            page_metadata_map,
+        ) {
+            self.rollback_unpublished_user_task(child_ref, page_allocator, page_metadata_map);
+            return None;
+        }
+        let parent_fd_snapshot = match files_struct.save_parent_fd_snapshot() {
+            Ok(snapshot) => snapshot,
+            Err(_) => {
+                self.rollback_unpublished_user_task(child_ref, page_allocator, page_metadata_map);
+                return None;
+            }
+        };
+        if !self.publish_reserved_user_task(child_ref, TaskRef::KERNEL_INIT) {
+            files_struct.discard_parent_fd_snapshot(&parent_fd_snapshot);
+            self.rollback_unpublished_user_task(child_ref, page_allocator, page_metadata_map);
+            return None;
+        }
         self.pid = child_pid;
         self.parent_pid = super::rest_init::KERNEL_INIT_PID;
         self.tgid = child_pid;
@@ -5344,9 +5844,9 @@ impl UserTaskSet {
         self.fs_struct_copied = true;
         self.credentials_copied = parent.credentials_inherited();
         self.signal_state_copied = parent.signal_state_inherited();
-        self.user_address_space_snapshot = true;
-        self.user_stack_snapshot_len = stack_snapshot_len;
-        self.user_stack_snapshot_copied = true;
+        self.user_address_space_snapshot = false;
+        self.user_stack_snapshot_len = 0;
+        self.user_stack_snapshot_copied = false;
         self.user_stack_snapshot_restored = false;
         self.trap_frame_copied = true;
         self.trap_frame_child_return_zero = child_frame.reg(10) == 0;
@@ -5418,7 +5918,7 @@ impl UserTaskSet {
         &mut self,
         parent: &KernelInitTaskUserState,
         boundaries: &UserCloneDeferredBoundaries,
-        address_space: &UserAddressSpace,
+        address_space: &mut UserAddressSpace,
         trap_frame: &UserTrapFrame,
         fs_struct: &FsStruct,
         files_struct: &FilesStruct,
@@ -5488,7 +5988,11 @@ impl UserTaskSet {
         )?;
 
         let child_pid = self.next_child_pid;
-        self.allocate_user_task(child_pid, TaskRef::NONE)?;
+        let child_ref = self.allocate_user_task(child_pid, TaskRef::NONE)?;
+        self.ordinary_independent_mm = false;
+        if !address_space.rebind_owner_after_exec(child_ref) {
+            return None;
+        }
         let next_child_accepted =
             self.completed_child_record_total_archived != 0 || self.task_allocation_count != 0;
 
@@ -5579,7 +6083,7 @@ impl UserTaskSet {
         &mut self,
         parent: &KernelInitTaskUserState,
         boundaries: &UserCloneDeferredBoundaries,
-        address_space: &UserAddressSpace,
+        address_space: &mut UserAddressSpace,
         trap_frame: &UserTrapFrame,
         fs_struct: &FsStruct,
         files_struct: &FilesStruct,
@@ -5658,7 +6162,11 @@ impl UserTaskSet {
             &mut self.parent_wait_writable_page_checksums,
         )?;
 
-        self.allocate_user_task(child_pid, parent_task_ref)?;
+        let child_ref = self.allocate_user_task(child_pid, parent_task_ref)?;
+        self.ordinary_independent_mm = false;
+        if !address_space.rebind_owner_after_exec(child_ref) {
+            return None;
+        }
 
         self.pid = child_pid;
         self.parent_pid = parent_pid;
@@ -5748,9 +6256,11 @@ impl UserTaskSet {
         parent: &KernelInitTaskUserState,
         boundaries: &UserCloneDeferredBoundaries,
         address_space: &UserAddressSpace,
+        stack: &UserStack,
         trap_frame: &UserTrapFrame,
         fs_struct: &FsStruct,
         files_struct: &FilesStruct,
+        page_allocator: &mut PageAllocator,
         page_metadata_map: &PageMetadataMap,
         current_frame: &TrapFrame,
         clone_flags: usize,
@@ -5793,37 +6303,47 @@ impl UserTaskSet {
         let mut child_frame = *current_frame;
         child_frame.set_reg(10, 0);
         child_frame.sepc = child_frame.sepc.wrapping_add(4);
+        let child_ref = self.reserve_user_task(child_pid)?;
+        if !self.prepare_eager_child_mm(
+            child_ref,
+            address_space,
+            stack,
+            page_allocator,
+            page_metadata_map,
+        ) {
+            self.rollback_unpublished_user_task(child_ref, page_allocator, page_metadata_map);
+            return None;
+        }
+        let fork_fd_snapshot = match files_struct.save_parent_fd_snapshot() {
+            Ok(snapshot) => snapshot,
+            Err(_) => {
+                self.rollback_unpublished_user_task(child_ref, page_allocator, page_metadata_map);
+                return None;
+            }
+        };
+        if !self.publish_reserved_user_task(child_ref, parent_task_ref) {
+            files_struct.discard_parent_fd_snapshot(&fork_fd_snapshot);
+            self.rollback_unpublished_user_task(child_ref, page_allocator, page_metadata_map);
+            return None;
+        }
         if builtin_grandchild_source {
             self.builtin_grandchild.reset_empty();
-            let stack_snapshot_len = copy_user_stack_snapshot(
-                address_space,
-                page_metadata_map,
-                &mut self.builtin_grandchild.child_stack_snapshot,
-            )?;
-            let child_fd_snapshot = files_struct.save_parent_fd_snapshot().ok()?;
             self.builtin_grandchild.bound = true;
             self.builtin_grandchild.child_trap_frame = Some(child_frame);
-            self.builtin_grandchild.child_stack_snapshot_len = stack_snapshot_len;
-            self.builtin_grandchild.child_stack_snapshot_copied = true;
+            self.builtin_grandchild.child_stack_snapshot_len = 0;
+            self.builtin_grandchild.child_stack_snapshot_copied = false;
             self.builtin_grandchild.child_stack_snapshot_restored = false;
-            self.builtin_grandchild.child_fd_snapshot = child_fd_snapshot;
+            self.builtin_grandchild.child_fd_snapshot = fork_fd_snapshot;
             self.builtin_grandchild.child_fd_snapshot_saved = true;
             self.builtin_grandchild.child_fd_snapshot_restored = false;
         } else {
-            let stack_snapshot_len = copy_user_stack_snapshot(
-                address_space,
-                page_metadata_map,
-                &mut self.user_stack_snapshot,
-            )?;
-            let parent_fd_snapshot = files_struct.save_parent_fd_snapshot().ok()?;
-
             self.exit_signal = boundaries.exit_signal(clone_flags);
-            self.parent_fd_snapshot = parent_fd_snapshot;
+            self.parent_fd_snapshot = fork_fd_snapshot;
             self.parent_fd_snapshot_saved = true;
             self.parent_fd_snapshot_restored = false;
-            self.user_address_space_snapshot = true;
-            self.user_stack_snapshot_len = stack_snapshot_len;
-            self.user_stack_snapshot_copied = true;
+            self.user_address_space_snapshot = false;
+            self.user_stack_snapshot_len = 0;
+            self.user_stack_snapshot_copied = false;
             self.user_stack_snapshot_restored = false;
             self.trap_frame_copied = true;
             self.trap_frame_child_return_zero = child_frame.reg(10) == 0;
@@ -5844,8 +6364,7 @@ impl UserTaskSet {
             self.parent_wait_stack_window_after_byte = 0;
             self.parent_clone_return = child_pid;
         }
-        self.allocate_user_task(child_pid, parent_task_ref)?;
-        self.pending_task_ref = self.active_task_ref;
+        self.pending_task_ref = child_ref;
         self.active_task_ref = parent_task_ref;
         self.child_exit_status = 0;
         self.child_exit_status_observed = false;
@@ -5878,9 +6397,10 @@ impl UserTaskSet {
     pub fn wait4_yield_to_child_continuation(
         &mut self,
         parent: &KernelInitTaskUserState,
-        address_space: &UserAddressSpace,
-        page_allocator: &mut PageAllocator,
-        page_metadata_map: &PageMetadataMap,
+        address_space: &mut UserAddressSpace,
+        stack: &mut UserStack,
+        _page_allocator: &mut PageAllocator,
+        _page_metadata_map: &PageMetadataMap,
         parent_wait_frame: &TrapFrame,
         stat_addr: usize,
         upid: usize,
@@ -5903,9 +6423,6 @@ impl UserTaskSet {
             || !self.fs_struct_copied
             || !self.credentials_copied
             || !self.signal_state_copied
-            || !self.user_address_space_snapshot
-            || !self.user_stack_snapshot_copied
-            || self.user_stack_snapshot_len == 0
             || !self.trap_frame_copied
             || !self.trap_frame_child_return_zero
             || self.parent_wait_resumed
@@ -5920,67 +6437,17 @@ impl UserTaskSet {
             return None;
         }
 
-        unsafe {
-            core::ptr::copy_nonoverlapping(
-                address_space as *const UserAddressSpace,
-                &mut self.parent_address_space_snapshot as *mut UserAddressSpace,
-                1,
-            );
-        }
         self.parent_wait_frame = Some(*parent_wait_frame);
         self.parent_wait_status_ptr = stat_addr;
-        self.parent_address_space_snapshot_saved = true;
-
-        if !self.capture_parent_wait_stack_window(
-            address_space,
-            page_metadata_map,
-            parent_wait_frame.reg(2),
-        ) {
-            return None;
-        }
-        let parent_stack_snapshot_len = copy_user_stack_snapshot(
-            address_space,
-            page_metadata_map,
-            &mut self.parent_wait_stack_snapshot,
-        )?;
-        self.parent_wait_stack_snapshot_len = parent_stack_snapshot_len;
-        self.parent_wait_stack_snapshot_copied = true;
-        self.parent_wait_stack_snapshot_restored = false;
-
-        let (writable_page_count, writable_page_truncated) = capture_writable_page_snapshot(
-            address_space,
-            page_allocator,
-            page_metadata_map,
-            &mut self.parent_wait_writable_page_snapshot_pages,
-            &mut self.parent_wait_writable_page_checksums,
-        )?;
-        self.parent_wait_writable_page_count = writable_page_count;
-        self.parent_wait_writable_page_snapshot_saved = true;
-        self.parent_wait_writable_page_snapshot_truncated = writable_page_truncated;
-        self.parent_wait_writable_page_snapshot_restored = false;
-        self.parent_wait_writable_page_compared = false;
-        self.parent_wait_writable_page_dirty_count = 0;
-        self.parent_wait_writable_page_stack_dirty_count = 0;
-        self.parent_wait_writable_page_non_stack_dirty_count = 0;
-        self.parent_wait_first_non_stack_dirty_kind = 0;
-        self.parent_wait_first_non_stack_dirty_mapping_index = 0;
-        self.parent_wait_first_non_stack_dirty_page_index = 0;
-        self.parent_wait_first_non_stack_dirty_addr = 0;
-        self.parent_wait_first_non_stack_dirty_before_checksum = 0;
-        self.parent_wait_first_non_stack_dirty_after_checksum = 0;
-
-        if !restore_user_stack_snapshot(
-            address_space,
-            page_metadata_map,
-            &self.user_stack_snapshot,
-            self.user_stack_snapshot_len,
-        ) {
+        self.parent_address_space_snapshot_saved = false;
+        let child_ref = self.active_task_ref;
+        if !self.switch_to_child_mm(TaskRef::KERNEL_INIT, child_ref, address_space, stack) {
             return None;
         }
 
         let child_frame = self.child_trap_frame?;
         self.wait4_parent_wait_observed = true;
-        self.user_stack_snapshot_restored = true;
+        self.user_stack_snapshot_restored = false;
         self.child_continuation_taken = true;
         Some(child_frame)
     }
@@ -5990,7 +6457,8 @@ impl UserTaskSet {
     pub fn wait4_yield_to_observed_child_continuation(
         &mut self,
         parent: &KernelInitTaskUserState,
-        address_space: &UserAddressSpace,
+        address_space: &mut UserAddressSpace,
+        stack: &mut UserStack,
         fs_struct: &mut FsStruct,
         files_struct: &mut FilesStruct,
         page_allocator: &mut PageAllocator,
@@ -6004,6 +6472,7 @@ impl UserTaskSet {
             return self.wait4_yield_to_builtin_grandchild_continuation(
                 parent,
                 address_space,
+                stack,
                 fs_struct,
                 files_struct,
                 page_allocator,
@@ -6020,8 +6489,6 @@ impl UserTaskSet {
             || !parent.pid1_preserved()
             || upid != USER_WAIT4_ALL_CHILDREN
             || rusage != 0
-            || !self.user_stack_snapshot_copied
-            || self.user_stack_snapshot_len == 0
             || !self.trap_frame_copied
             || !self.trap_frame_child_return_zero
             || self.child_trap_frame.is_none()
@@ -6029,81 +6496,20 @@ impl UserTaskSet {
             return None;
         }
 
-        if self.parent_wait_writable_page_snapshot_saved
-            && !self.parent_wait_writable_page_snapshot_restored
-            && self.parent_wait_writable_page_count != 0
-        {
-            release_writable_page_snapshot_pages(
-                &mut self.parent_wait_writable_page_snapshot_pages,
-                self.parent_wait_writable_page_count,
-                page_allocator,
-                page_metadata_map,
-            );
-        }
-
-        unsafe {
-            core::ptr::copy_nonoverlapping(
-                address_space as *const UserAddressSpace,
-                &mut self.parent_address_space_snapshot as *mut UserAddressSpace,
-                1,
-            );
-        }
         self.parent_wait_frame = Some(*parent_wait_frame);
         self.parent_wait_status_ptr = stat_addr;
-        self.parent_address_space_snapshot_saved = true;
-
-        if !self.capture_parent_wait_stack_window(
-            address_space,
-            page_metadata_map,
-            parent_wait_frame.reg(2),
-        ) {
-            return None;
-        }
-        let parent_stack_snapshot_len = copy_user_stack_snapshot(
-            address_space,
-            page_metadata_map,
-            &mut self.parent_wait_stack_snapshot,
-        )?;
-        self.parent_wait_stack_snapshot_len = parent_stack_snapshot_len;
-        self.parent_wait_stack_snapshot_copied = true;
-        self.parent_wait_stack_snapshot_restored = false;
-
-        let (writable_page_count, writable_page_truncated) = capture_writable_page_snapshot(
-            address_space,
-            page_allocator,
-            page_metadata_map,
-            &mut self.parent_wait_writable_page_snapshot_pages,
-            &mut self.parent_wait_writable_page_checksums,
-        )?;
-        self.parent_wait_writable_page_count = writable_page_count;
-        self.parent_wait_writable_page_snapshot_saved = true;
-        self.parent_wait_writable_page_snapshot_truncated = writable_page_truncated;
-        self.parent_wait_writable_page_snapshot_restored = false;
-        self.parent_wait_writable_page_compared = false;
-        self.parent_wait_writable_page_dirty_count = 0;
-        self.parent_wait_writable_page_stack_dirty_count = 0;
-        self.parent_wait_writable_page_non_stack_dirty_count = 0;
-        self.parent_wait_first_non_stack_dirty_kind = 0;
-        self.parent_wait_first_non_stack_dirty_mapping_index = 0;
-        self.parent_wait_first_non_stack_dirty_page_index = 0;
-        self.parent_wait_first_non_stack_dirty_addr = 0;
-        self.parent_wait_first_non_stack_dirty_before_checksum = 0;
-        self.parent_wait_first_non_stack_dirty_after_checksum = 0;
-
-        if !restore_user_stack_snapshot(
-            address_space,
-            page_metadata_map,
-            &self.user_stack_snapshot,
-            self.user_stack_snapshot_len,
-        ) {
-            return None;
-        }
+        self.parent_address_space_snapshot_saved = false;
 
         let child_frame = self.child_trap_frame?;
         let parent_pid = self.observed_plain_fork_parent_pid;
         let child_pid = self.observed_plain_fork_child_pid;
+        let parent_ref = self.active_task_ref;
+        let child_ref = self.pending_task_ref;
+        if !self.switch_to_child_mm(parent_ref, child_ref, address_space, stack) {
+            return None;
+        }
         self.wait4_parent_wait_observed = true;
-        self.user_stack_snapshot_restored = true;
+        self.user_stack_snapshot_restored = false;
         self.observed_plain_fork_child_active = true;
         self.active_task_ref = self.pending_task_ref;
         self.pending_task_ref = TaskRef::NONE;
@@ -6117,7 +6523,8 @@ impl UserTaskSet {
     pub fn pipe_read_yield_to_builtin_grandchild_continuation(
         &mut self,
         parent: &KernelInitTaskUserState,
-        address_space: &UserAddressSpace,
+        address_space: &mut UserAddressSpace,
+        stack: &mut UserStack,
         fs_struct: &mut FsStruct,
         files_struct: &mut FilesStruct,
         page_allocator: &mut PageAllocator,
@@ -6127,6 +6534,7 @@ impl UserTaskSet {
         let handoff = self.wait4_yield_to_builtin_grandchild_continuation(
             parent,
             address_space,
+            stack,
             fs_struct,
             files_struct,
             page_allocator,
@@ -6144,11 +6552,12 @@ impl UserTaskSet {
     fn wait4_yield_to_builtin_grandchild_continuation(
         &mut self,
         parent: &KernelInitTaskUserState,
-        address_space: &UserAddressSpace,
+        address_space: &mut UserAddressSpace,
+        stack: &mut UserStack,
         fs_struct: &mut FsStruct,
         files_struct: &mut FilesStruct,
-        page_allocator: &mut PageAllocator,
-        page_metadata_map: &PageMetadataMap,
+        _page_allocator: &mut PageAllocator,
+        _page_metadata_map: &PageMetadataMap,
         parent_wait_frame: &TrapFrame,
         stat_addr: usize,
         upid: usize,
@@ -6163,107 +6572,42 @@ impl UserTaskSet {
             || !parent.pid1_preserved()
             || upid != USER_WAIT4_ALL_CHILDREN
             || rusage != 0
-            || !self.builtin_grandchild.child_stack_snapshot_copied
-            || self.builtin_grandchild.child_stack_snapshot_len == 0
             || !self.builtin_grandchild.child_fd_snapshot_saved
             || self.builtin_grandchild.child_fd_snapshot_restored
             || self.builtin_grandchild.child_trap_frame.is_none()
             || self.builtin_grandchild.parent_wait_frame.is_some()
             || self.builtin_grandchild.parent_fd_snapshot_saved
-            || self.builtin_grandchild.parent_writable_page_snapshot_saved
         {
             return None;
         }
-
-        let parent_stack_snapshot_len = copy_user_stack_snapshot(
-            address_space,
-            page_metadata_map,
-            &mut self.builtin_grandchild.parent_stack_snapshot,
-        )?;
-        let (writable_page_count, writable_page_truncated) = capture_writable_page_snapshot(
-            address_space,
-            page_allocator,
-            page_metadata_map,
-            &mut self.builtin_grandchild.parent_writable_page_snapshot_pages,
-            &mut self.builtin_grandchild.parent_writable_page_checksums,
-        )?;
         #[cfg(app_smoke)]
         let inject_capture_failure =
             core::mem::take(&mut self.fail_next_builtin_grandchild_wait_capture);
         #[cfg(not(app_smoke))]
         let inject_capture_failure = false;
-        if inject_capture_failure || writable_page_truncated || writable_page_count == 0 {
-            release_writable_page_snapshot_pages(
-                &mut self.builtin_grandchild.parent_writable_page_snapshot_pages,
-                writable_page_count,
-                page_allocator,
-                page_metadata_map,
-            );
+        if inject_capture_failure {
             return None;
         }
 
         let parent_fs_snapshot = match fs_struct.save_snapshot() {
             Ok(snapshot) => snapshot,
-            Err(_) => {
-                release_writable_page_snapshot_pages(
-                    &mut self.builtin_grandchild.parent_writable_page_snapshot_pages,
-                    writable_page_count,
-                    page_allocator,
-                    page_metadata_map,
-                );
-                return None;
-            }
+            Err(_) => return None,
         };
         let parent_fd_snapshot = match files_struct.save_parent_fd_snapshot() {
             Ok(snapshot) => snapshot,
-            Err(_) => {
-                release_writable_page_snapshot_pages(
-                    &mut self.builtin_grandchild.parent_writable_page_snapshot_pages,
-                    writable_page_count,
-                    page_allocator,
-                    page_metadata_map,
-                );
-                return None;
-            }
+            Err(_) => return None,
         };
-        if !restore_user_stack_snapshot(
-            address_space,
-            page_metadata_map,
-            &self.builtin_grandchild.child_stack_snapshot,
-            self.builtin_grandchild.child_stack_snapshot_len,
-        ) {
-            let _ = restore_user_stack_snapshot(
-                address_space,
-                page_metadata_map,
-                &self.builtin_grandchild.parent_stack_snapshot,
-                parent_stack_snapshot_len,
-            );
-            files_struct.discard_parent_fd_snapshot(&parent_fd_snapshot);
-            release_writable_page_snapshot_pages(
-                &mut self.builtin_grandchild.parent_writable_page_snapshot_pages,
-                writable_page_count,
-                page_allocator,
-                page_metadata_map,
-            );
-            return None;
-        }
         if files_struct
             .restore_parent_fd_snapshot(&self.builtin_grandchild.child_fd_snapshot)
             .is_err()
         {
-            let _ = restore_user_stack_snapshot(
-                address_space,
-                page_metadata_map,
-                &self.builtin_grandchild.parent_stack_snapshot,
-                parent_stack_snapshot_len,
-            );
             files_struct.discard_parent_fd_snapshot(&parent_fd_snapshot);
-            release_writable_page_snapshot_pages(
-                &mut self.builtin_grandchild.parent_writable_page_snapshot_pages,
-                writable_page_count,
-                page_allocator,
-                page_metadata_map,
-            );
+            return None;
+        }
+        let parent_ref = self.active_task_ref;
+        let child_ref = self.pending_task_ref;
+        if !self.switch_to_child_mm(parent_ref, child_ref, address_space, stack) {
+            let _ = files_struct.restore_parent_fd_snapshot(&parent_fd_snapshot);
             return None;
         }
 
@@ -6275,16 +6619,16 @@ impl UserTaskSet {
         self.builtin_grandchild.parent_fd_snapshot = parent_fd_snapshot;
         self.builtin_grandchild.parent_fd_snapshot_saved = true;
         self.builtin_grandchild.parent_fd_snapshot_restored = false;
-        self.builtin_grandchild.parent_stack_snapshot_len = parent_stack_snapshot_len;
-        self.builtin_grandchild.parent_stack_snapshot_copied = true;
+        self.builtin_grandchild.parent_stack_snapshot_len = 0;
+        self.builtin_grandchild.parent_stack_snapshot_copied = false;
         self.builtin_grandchild.parent_stack_snapshot_restored = false;
-        self.builtin_grandchild.parent_writable_page_count = writable_page_count;
-        self.builtin_grandchild.parent_writable_page_snapshot_saved = true;
+        self.builtin_grandchild.parent_writable_page_count = 0;
+        self.builtin_grandchild.parent_writable_page_snapshot_saved = false;
         self.builtin_grandchild
             .parent_writable_page_snapshot_truncated = false;
         self.builtin_grandchild
             .parent_writable_page_snapshot_restored = false;
-        self.builtin_grandchild.child_stack_snapshot_restored = true;
+        self.builtin_grandchild.child_stack_snapshot_restored = false;
         self.builtin_grandchild.child_fd_snapshot_restored = true;
 
         let child_frame = self.builtin_grandchild.child_trap_frame?;
@@ -6310,7 +6654,7 @@ impl UserTaskSet {
         if self.active_task_state() != State::OnCpu
             || !self.child_continuation_taken
             || self.parent_wait_resumed
-            || !self.parent_address_space_snapshot_saved
+            || !self.ordinary_independent_mm
             || self.pid == 0
             || self.parent_pid != super::rest_init::KERNEL_INIT_PID
         {
@@ -6318,7 +6662,11 @@ impl UserTaskSet {
         }
 
         let parent_frame = self.parent_wait_frame?;
-        if !self.restore_parent_exec_objects(
+        let child_ref = self.active_task_ref;
+        let child_pid = self.pid;
+        if !self.release_child_and_restore_parent_mm(
+            child_ref,
+            TaskRef::KERNEL_INIT,
             address_space,
             stack,
             page_allocator,
@@ -6331,7 +6679,7 @@ impl UserTaskSet {
         if !self.destroy_active_user_task() {
             return None;
         }
-        Some((parent_frame, self.parent_wait_status_ptr, self.pid))
+        Some((parent_frame, self.parent_wait_status_ptr, child_pid))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -6344,7 +6692,7 @@ impl UserTaskSet {
         page_metadata_map: &PageMetadataMap,
         exit_status: usize,
     ) -> Option<(TrapFrame, usize, usize, usize)> {
-        let (retained_address_space, retained_stack) = retained_exec_objects;
+        let (_retained_address_space, _retained_stack) = retained_exec_objects;
         if self.builtin_grandchild.bound {
             if self.active_task_state() != State::OnCpu
                 || !self.observed_plain_fork_clone
@@ -6353,10 +6701,7 @@ impl UserTaskSet {
                 || self.pid == 0
                 || self.pid != self.observed_plain_fork_child_pid
                 || self.parent_pid != self.observed_plain_fork_parent_pid
-                || !self.builtin_grandchild.child_stack_snapshot_restored
                 || !self.builtin_grandchild.child_fd_snapshot_restored
-                || !self.builtin_grandchild.parent_stack_snapshot_copied
-                || !self.builtin_grandchild.parent_writable_page_snapshot_saved
                 || !self.builtin_grandchild.parent_fd_snapshot_saved
             {
                 return None;
@@ -6364,11 +6709,13 @@ impl UserTaskSet {
             let parent_frame = self.builtin_grandchild.parent_wait_frame?;
             let child_pid = self.observed_plain_fork_child_pid;
             let parent_pid = self.observed_plain_fork_parent_pid;
-            if !self.restore_builtin_grandchild_exec_objects(
+            let child_ref = self.active_task_ref;
+            let parent_ref = self.parent_task_ref;
+            if !self.release_child_and_restore_parent_mm(
+                child_ref,
+                parent_ref,
                 address_space,
                 stack,
-                retained_address_space,
-                retained_stack,
                 page_allocator,
                 page_metadata_map,
             ) {
@@ -6390,7 +6737,7 @@ impl UserTaskSet {
             || !self.observed_plain_fork_clone
             || !self.observed_plain_fork_child_active
             || self.observed_plain_fork_parent_restored
-            || !self.parent_address_space_snapshot_saved
+            || !self.ordinary_independent_mm
             || self.pid == 0
             || self.pid != self.observed_plain_fork_child_pid
             || self.parent_pid != self.observed_plain_fork_parent_pid
@@ -6401,7 +6748,11 @@ impl UserTaskSet {
         let parent_frame = self.parent_wait_frame?;
         let child_pid = self.observed_plain_fork_child_pid;
         let parent_pid = self.observed_plain_fork_parent_pid;
-        if !self.restore_parent_exec_objects(
+        let child_ref = self.active_task_ref;
+        let parent_ref = self.parent_task_ref;
+        if !self.release_child_and_restore_parent_mm(
+            child_ref,
+            parent_ref,
             address_space,
             stack,
             page_allocator,
@@ -6450,6 +6801,9 @@ impl UserTaskSet {
             page_allocator,
             page_metadata_map,
         ) {
+            return None;
+        }
+        if !address_space.rebind_owner_after_exec(TaskRef::KERNEL_INIT) {
             return None;
         }
         self.child_exit_status = exit_status;
@@ -6823,8 +7177,7 @@ impl UserTaskSet {
 
     pub fn mark_parent_wait_resumed(&mut self, status_copied: bool) -> bool {
         if !self.child_exit_status_observed
-            || !self.parent_wait_stack_snapshot_restored
-            || !self.parent_wait_writable_page_snapshot_restored
+            || !self.ordinary_independent_mm
             || !self.parent_fd_snapshot_restored
             || self.parent_wait_resumed
         {
@@ -6841,17 +7194,11 @@ impl UserTaskSet {
         wait_status: usize,
     ) -> bool {
         let continuation_restored = if self.builtin_grandchild.bound {
-            self.builtin_grandchild.parent_exec_snapshot_restored
-                && self.builtin_grandchild.parent_stack_snapshot_restored
-                && self
-                    .builtin_grandchild
-                    .parent_writable_page_snapshot_restored
+            self.ordinary_independent_mm
                 && self.builtin_grandchild.parent_fd_snapshot_restored
                 && self.builtin_grandchild.parent_fs_snapshot_restored
         } else {
-            self.parent_wait_stack_snapshot_restored
-                && self.parent_wait_writable_page_snapshot_restored
-                && self.parent_fd_snapshot_restored
+            self.ordinary_independent_mm && self.parent_fd_snapshot_restored
         };
         if !self.observed_plain_fork_clone
             || !self.observed_plain_fork_child_active
@@ -6885,11 +7232,7 @@ impl UserTaskSet {
             || !self.observed_plain_fork_child_active
             || self.observed_plain_fork_parent_restored
             || !self.child_exit_status_observed
-            || !self.builtin_grandchild.parent_exec_snapshot_restored
-            || !self.builtin_grandchild.parent_stack_snapshot_restored
-            || !self
-                .builtin_grandchild
-                .parent_writable_page_snapshot_restored
+            || !self.ordinary_independent_mm
             || !self.builtin_grandchild.parent_fd_snapshot_restored
             || !self.builtin_grandchild.parent_fs_snapshot_restored
         {
@@ -6931,21 +7274,12 @@ impl UserTaskSet {
                 || self.pid != self.observed_plain_fork_parent_pid
                 || !self.current_child_continuation()
                 || !self.enqueued
-                || !self.builtin_grandchild.parent_stack_snapshot_restored
-                || !self.builtin_grandchild.parent_exec_snapshot_restored
-                || !self
-                    .builtin_grandchild
-                    .parent_writable_page_snapshot_restored
+                || !self.ordinary_independent_mm
                 || !self.builtin_grandchild.parent_fd_snapshot_restored
                 || !self.builtin_grandchild.parent_fs_snapshot_restored
                 || !self.parent_fd_snapshot_saved
                 || self.parent_fd_snapshot_restored
                 || self.parent_wait_frame.is_none()
-                || !self.parent_address_space_snapshot_saved
-                || !self.parent_wait_stack_snapshot_copied
-                || self.parent_wait_stack_snapshot_restored
-                || !self.parent_wait_writable_page_snapshot_saved
-                || self.parent_wait_writable_page_snapshot_restored
                 || self
                     .builtin_grandchild
                     .parent_exec_address_space_snapshot_saved
@@ -6984,8 +7318,7 @@ impl UserTaskSet {
             || self.pid != self.observed_plain_fork_parent_pid
             || !self.current_child_continuation()
             || !self.enqueued
-            || !self.parent_wait_stack_snapshot_restored
-            || !self.parent_wait_writable_page_snapshot_restored
+            || !self.ordinary_independent_mm
             || !self.parent_fd_snapshot_restored
         {
             return false;
@@ -7151,8 +7484,7 @@ impl UserTaskSet {
             || !self.parent_wait_resumed
             || !self.child_exit_status_observed
             || !self.wait4_status_copied
-            || !self.parent_wait_stack_snapshot_restored
-            || !self.parent_wait_writable_page_snapshot_restored
+            || !self.ordinary_independent_mm
             || !self.parent_fd_snapshot_restored
             || self.pid == 0
             || self.parent_pid != super::rest_init::KERNEL_INIT_PID
@@ -7168,6 +7500,7 @@ impl UserTaskSet {
     }
 
     fn prepare_fresh_task_record(&mut self) -> bool {
+        self.ordinary_independent_mm = false;
         self.prepared = true;
         self.task_entry = TaskEntry::UserChild;
         self.task_entry_bound = true;

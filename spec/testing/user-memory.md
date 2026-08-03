@@ -42,7 +42,9 @@ Rule IDs (MUST after the corresponding implementation phase):
 
 普通 fork 的对象与真实 guest 测试必须证明父子 mm identity、根页表和 SATP 不同；child 发布前的任一
 dup_mm 分配失败都完整回滚。eager 过渡阶段先验证私有页字节隔离，且不得继续保存/恢复父 writable
-page、stack 或 address-space 字节快照。
+page、stack 或 address-space 字节快照。双 provider 运行的同一真实 fixture 必须让 child 分别修改 ELF
+可写 data/BSS、当前 stack、已触页匿名 `MAP_PRIVATE` 和增长后的 brk，再由 parent wait 验证退出状态、
+全部父字节及父 brk 边界均保持不变；child exit/reap 后必须仍能继续执行并解除父匿名映射。
 
 COW 阶段必须对已装入的 ELF 私有可写页、用户栈、brk 和匿名 `MAP_PRIVATE` 检查 fork 后同 PFN、双方
 RO+COW 和引用加一。child 与 parent 写、refcount=1 快路径、嵌套 fork、child exec、父先退、子先退及

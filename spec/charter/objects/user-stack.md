@@ -37,5 +37,7 @@ backing 与增长约束，不自行分类 instruction、权限、越界、冲突
 
 usercopy 对合法栈范围使用同一 range resolver 逐页 fault-in；失败仍返回 `EFAULT`。checkpoint
 诊断在既有稳定时点记录 top max、选定 top、offset、execfn pointer 和 auxv 完整性，不新增、插入或
-重排 checkpoint。完整 SIGSEGV、动态 `RLIMIT_STACK`、COW、多线程栈、
+重排 checkpoint。普通 fork 的 eager 独立-mm 阶段在 child 发布前为每个已驻留 stack page 分配并复制
+独立 backing；parent/child 栈字节不得通过 wait/exit snapshot 回滚实现隔离。完整 SIGSEGV、动态
+`RLIMIT_STACK`、COW、多线程栈、
 `MAP_STACK/MAP_GROWSDOWN`、完整 CRNG 和内核 compiler stack protector 不在本轮。

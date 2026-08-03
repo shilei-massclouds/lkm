@@ -35,9 +35,10 @@ one rollback unit; failure preserves base, slots, PTE accounting and allocator c
 targeted `sfence.vma` and returns `RetrySameInstruction` without advancing `sepc`.
 
 Usercopy resolves every stack page in a valid range through the same mechanism and reports failure as
-`EFAULT`; the detailed rejection remains observable through `UserStack.GrowRejected`. Release and exec/parent
-snapshot transfers use Rust move/swap. Raw byte copies of `UserStack` are forbidden. Snapshot byte copy uses
-the sparse-page read/write API.
+`EFAULT`; the detailed rejection remains observable through `UserStack.GrowRejected`. Release and exec/current
+Task transfers use Rust move/swap. Raw byte copies of `UserStack` are forbidden. Ordinary fork eagerly allocates
+and copies each resident stack page into the unpublished child stack, preserving sorted virtual-page order and
+rolling back all child pages on failure; wait and exit do not copy stack bytes.
 
 Exec obtains the complete 24-byte value from the current virtio HWRNG before point-of-no-return. No timestamp
 or early-mix fallback is allowed. Unavailable/short entropy is `EntropyUnavailable`; runtime maps it to
@@ -45,6 +46,6 @@ or early-mix fallback is allowed. Unavailable/short entropy is `EntropyUnavailab
 checkpoint owners expose top max, selected top, ASLR offset, execfn pointer and a computed auxv-complete fact
 without changing checkpoint IDs, names or order.
 
-Dynamic rlimit syscalls and `SIGSEGV/si_code`, fork/COW, multiple thread stacks, `MAP_STACK`/
+Dynamic rlimit syscalls and `SIGSEGV/si_code`, COW lowering, multiple thread stacks, `MAP_STACK`/
 `MAP_GROWSDOWN`, a complete CRNG, kernel compiler stack protector and
 per-task canaries remain separate roadmap work.

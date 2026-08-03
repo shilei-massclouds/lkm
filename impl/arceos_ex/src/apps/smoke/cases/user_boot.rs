@@ -2336,15 +2336,99 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
         assertions.assert("pid1 plain fork copy gate", false);
         return;
     }
+    let (free_before_dup_failure, slots_before_dup_failure, pid_before_dup_failure, satp_before) = {
+        let ctx = context();
+        (
+            ctx.page_allocator.buddy_total_free_pages(),
+            ctx.user_task_set.free_task_slot_count(),
+            ctx.user_task_set.next_child_pid(),
+            ctx.user_address_space.satp_token(),
+        )
+    };
+    context()
+        .user_task_set
+        .smoke_fail_next_eager_child_mm_after_copy();
+    let eager_dup_failure = {
+        let ctx = context();
+        ctx.user_task_set
+            .copy_plain_fork_from_parent(
+                &ctx.kernel_init_user_state,
+                &ctx.user_clone_deferred_boundaries,
+                &ctx.user_address_space,
+                &ctx.user_stack,
+                &ctx.user_trap_frame,
+                &ctx.fs_struct,
+                &ctx.files_struct,
+                &mut ctx.page_allocator,
+                &ctx.page_metadata_map,
+                &clone_frame,
+                USER_PLAIN_FORK_FLAGS,
+                0,
+                true,
+                true,
+                true,
+                true,
+            )
+            .is_none()
+    };
+    {
+        let ctx = context();
+        assertions.assert("pid1 eager dup failure injected", eager_dup_failure);
+        assertions.assert(
+            "pid1 eager dup failure releases pages",
+            ctx.page_allocator.buddy_total_free_pages() == free_before_dup_failure,
+        );
+        assertions.assert(
+            "pid1 eager dup rollback validates unpublished task",
+            ctx.user_task_set.smoke_last_unpublished_rollback_stage() >= 1,
+        );
+        assertions.assert(
+            "pid1 eager dup rollback releases mm storage",
+            ctx.user_task_set.smoke_last_unpublished_rollback_stage() >= 2,
+        );
+        assertions.assert(
+            "pid1 eager dup rollback keeps task unpublished",
+            ctx.user_task_set.smoke_last_unpublished_rollback_stage() >= 3,
+        );
+        assertions.assert(
+            "pid1 eager dup rollback clears reserved task",
+            ctx.user_task_set.smoke_last_unpublished_rollback_stage() >= 4,
+        );
+        assertions.assert(
+            "pid1 eager dup rollback releases slot",
+            ctx.user_task_set.smoke_last_unpublished_rollback_stage() == 5,
+        );
+        assertions.assert(
+            "pid1 eager dup failure releases task slot",
+            ctx.user_task_set.free_task_slot_count() == slots_before_dup_failure,
+        );
+        assertions.assert(
+            "pid1 eager dup failure preserves pid allocation",
+            ctx.user_task_set.next_child_pid() == pid_before_dup_failure,
+        );
+        assertions.assert(
+            "pid1 eager dup failure preserves reusable task record",
+            ctx.user_task_set.active_task_record_available(),
+        );
+        assertions.assert(
+            "pid1 eager dup failure preserves parent mm",
+            ctx.user_address_space.satp_token() == satp_before
+                && ctx
+                    .user_address_space
+                    .owned_by(crate::objects::task::TaskRef::KERNEL_INIT),
+        );
+    }
     let outer_child_pid = {
         let ctx = context();
         let Some(child_pid) = ctx.user_task_set.copy_plain_fork_from_parent(
             &ctx.kernel_init_user_state,
             &ctx.user_clone_deferred_boundaries,
             &ctx.user_address_space,
+            &ctx.user_stack,
             &ctx.user_trap_frame,
             &ctx.fs_struct,
             &ctx.files_struct,
+            &mut ctx.page_allocator,
             &ctx.page_metadata_map,
             &clone_frame,
             USER_PLAIN_FORK_FLAGS,
@@ -2388,7 +2472,8 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
         let ctx = context();
         let Some(child_frame) = ctx.user_task_set.wait4_yield_to_child_continuation(
             &ctx.kernel_init_user_state,
-            &ctx.user_address_space,
+            &mut ctx.user_address_space,
+            &mut ctx.user_stack,
             &mut ctx.page_allocator,
             &ctx.page_metadata_map,
             &wait_frame,
@@ -2417,12 +2502,16 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
             outer_child_frame.reg(10) == 0
                 && child.pid1_plain_fork_child_continuation()
                 && child.parent_wait_frame_saved()
-                && child.parent_address_space_snapshot_saved()
+                && !child.parent_address_space_snapshot_saved()
                 && child.parent_fd_snapshot_saved()
-                && child.parent_wait_stack_snapshot_copied()
-                && child.parent_wait_writable_page_snapshot_saved(),
+                && !child.parent_wait_stack_snapshot_copied()
+                && !child.parent_wait_writable_page_snapshot_saved()
+                && context()
+                    .user_address_space
+                    .owned_by(child.active_task_ref()),
         );
     }
+    let outer_child_satp = context().user_address_space.satp_token();
 
     let pipe_pair = match context().files_struct.pipe2_fd_pair(0) {
         Ok(pair) => pair,
@@ -2450,9 +2539,11 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
             &ctx.kernel_init_user_state,
             &ctx.user_clone_deferred_boundaries,
             &ctx.user_address_space,
+            &ctx.user_stack,
             &ctx.user_trap_frame,
             &ctx.fs_struct,
             &ctx.files_struct,
+            &mut ctx.page_allocator,
             &ctx.page_metadata_map,
             &inner_clone,
             USER_PLAIN_FORK_FLAGS,
@@ -2475,9 +2566,11 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
                 &ctx.kernel_init_user_state,
                 &ctx.user_clone_deferred_boundaries,
                 &ctx.user_address_space,
+                &ctx.user_stack,
                 &ctx.user_trap_frame,
                 &ctx.fs_struct,
                 &ctx.files_struct,
+                &mut ctx.page_allocator,
                 &ctx.page_metadata_map,
                 &inner_clone,
                 USER_PLAIN_FORK_FLAGS,
@@ -2508,7 +2601,8 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
         ctx.user_task_set
             .pipe_read_yield_to_builtin_grandchild_continuation(
                 &ctx.kernel_init_user_state,
-                &ctx.user_address_space,
+                &mut ctx.user_address_space,
+                &mut ctx.user_stack,
                 &mut ctx.fs_struct,
                 &mut ctx.files_struct,
                 &mut ctx.page_allocator,
@@ -2542,7 +2636,8 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
             .user_task_set
             .pipe_read_yield_to_builtin_grandchild_continuation(
                 &ctx.kernel_init_user_state,
-                &ctx.user_address_space,
+                &mut ctx.user_address_space,
+                &mut ctx.user_stack,
                 &mut ctx.fs_struct,
                 &mut ctx.files_struct,
                 &mut ctx.page_allocator,
@@ -2572,9 +2667,11 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
                 &ctx.kernel_init_user_state,
                 &ctx.user_clone_deferred_boundaries,
                 &ctx.user_address_space,
+                &ctx.user_stack,
                 &ctx.user_trap_frame,
                 &ctx.fs_struct,
                 &ctx.files_struct,
+                &mut ctx.page_allocator,
                 &ctx.page_metadata_map,
                 &inner_child_frame,
                 USER_PLAIN_FORK_FLAGS,
@@ -2594,9 +2691,6 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
         );
     }
     let script_satp = context().user_address_space.satp_token();
-    let outer_parent_satp_owned = context()
-        .user_task_set
-        .parent_address_space_snapshot_saved();
     assertions.assert(
         "builtin grandchild exec precommit failure atomic",
         crate::objects::exec_transaction::smoke_builtin_grandchild_precommit_failure_is_atomic(
@@ -2625,19 +2719,15 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
         context().files_struct.fcntl_getfd_fd(cloexec_fd),
         Err(FileError::BadFd)
     );
-    let retained_parent_satp = context()
-        .user_task_set
-        .builtin_grandchild_parent_exec_satp();
     assertions.assert(
-        "builtin grandchild first exec owns inner parent only",
-        first_exec.is_some_and(|success| success.retired_pages_released == 0)
+        "builtin grandchild first exec releases only its retired image",
+        first_exec.is_some_and(|success| success.retired_pages_released != 0)
             && first_exec_closed_child_fd
-            && retained_parent_satp == script_satp
             && context().user_address_space.satp_token() != script_satp
-            && context()
+            && !context()
                 .user_task_set
                 .builtin_grandchild_parent_exec_snapshot_saved()
-            && context()
+            && !context()
                 .user_task_set
                 .builtin_grandchild_parent_exec_snapshot_ever_saved()
             && !context()
@@ -2645,12 +2735,15 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
                 .builtin_grandchild_parent_exec_snapshot_restored()
             && context()
                 .user_task_set
-                .builtin_grandchild_exec_commit_count()
-                == 1
+                .builtin_grandchild_parent_exec_satp()
+                == 0
             && context()
                 .user_task_set
+                .builtin_grandchild_exec_commit_count()
+                == 1
+            && !context()
+                .user_task_set
                 .parent_address_space_snapshot_saved()
-                == outer_parent_satp_owned
             && context().user_task_set.active_task_ref() == exec_task_ref
             && fork_flow_ref.same_identity(first_exec_flow_ref)
             && context()
@@ -2671,18 +2764,17 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
             && context()
                 .user_task_set
                 .builtin_grandchild_parent_exec_satp()
-                == retained_parent_satp
-            && context()
+                == 0
+            && !context()
                 .user_task_set
                 .builtin_grandchild_parent_exec_snapshot_saved()
             && context()
                 .user_task_set
                 .builtin_grandchild_exec_commit_count()
                 == 2
-            && context()
+            && !context()
                 .user_task_set
                 .parent_address_space_snapshot_saved()
-                == outer_parent_satp_owned
             && context().user_task_set.active_task_ref() == exec_task_ref
             && first_exec_flow_ref.same_identity(second_exec_flow_ref)
             && context()
@@ -2739,32 +2831,22 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
     };
     {
         let ctx = context();
-        let inner_exec_objects_restored = ctx.user_address_space.satp_token() == script_satp
+        let parent_mm_restored = ctx.user_address_space.satp_token() == outer_child_satp
             && ctx
+                .user_address_space
+                .owned_by(ctx.user_task_set.active_task_ref())
+            && !ctx
                 .user_task_set
                 .builtin_grandchild_parent_exec_snapshot_ever_saved()
             && !ctx
                 .user_task_set
                 .builtin_grandchild_parent_exec_snapshot_saved()
-            && ctx
+            && !ctx
                 .user_task_set
                 .builtin_grandchild_parent_exec_snapshot_restored();
-        let _ = ctx
-            .user_task_set
-            .compare_parent_wait_writable_pages(&ctx.user_address_space, &ctx.page_metadata_map);
         if !ctx
             .user_task_set
-            .restore_parent_wait_stack_snapshot(&ctx.user_address_space, &ctx.page_metadata_map)
-            || !ctx
-                .user_task_set
-                .restore_parent_wait_writable_page_snapshot(
-                    &ctx.user_address_space,
-                    &mut ctx.page_allocator,
-                    &ctx.page_metadata_map,
-                )
-            || !ctx
-                .user_task_set
-                .restore_observed_child_parent_fs_snapshot(&mut ctx.fs_struct)
+            .restore_observed_child_parent_fs_snapshot(&mut ctx.fs_struct)
             || !ctx
                 .user_task_set
                 .restore_parent_fd_snapshot(&mut ctx.files_struct)
@@ -2777,7 +2859,7 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
             || !ctx
                 .user_task_set
                 .mark_builtin_grandchild_exited_to_parent_read()
-            || !inner_exec_objects_restored
+            || !parent_mm_restored
         {
             assertions.assert("builtin grandchild restores pipe-read parent", false);
             return;
@@ -2824,17 +2906,17 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
                 && !child.builtin_grandchild_bound()
                 && child.pid1_plain_fork_child_continuation()
                 && child.parent_wait_frame_saved()
-                && child.parent_address_space_snapshot_saved()
+                && !child.parent_address_space_snapshot_saved()
                 && child.parent_fd_snapshot_saved()
-                && child.parent_wait_stack_snapshot_copied()
-                && child.parent_wait_writable_page_snapshot_saved(),
+                && !child.parent_wait_stack_snapshot_copied()
+                && !child.parent_wait_writable_page_snapshot_saved(),
         );
     }
 
     if !exercise_builtin_grandchild_wait4_exec(
         assertions,
         outer_child_pid,
-        script_satp,
+        outer_child_satp,
         &main_buffer[..main_len],
         interpreter_image,
     ) {
@@ -2852,9 +2934,11 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
                 &ctx.kernel_init_user_state,
                 &ctx.user_clone_deferred_boundaries,
                 &ctx.user_address_space,
+                &ctx.user_stack,
                 &ctx.user_trap_frame,
                 &ctx.fs_struct,
                 &ctx.files_struct,
+                &mut ctx.page_allocator,
                 &ctx.page_metadata_map,
                 &invalid_clone,
                 0,
@@ -2869,9 +2953,11 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
                 &ctx.kernel_init_user_state,
                 &ctx.user_clone_deferred_boundaries,
                 &ctx.user_address_space,
+                &ctx.user_stack,
                 &ctx.user_trap_frame,
                 &ctx.fs_struct,
                 &ctx.files_struct,
+                &mut ctx.page_allocator,
                 &ctx.page_metadata_map,
                 &invalid_clone,
                 USER_PLAIN_FORK_FLAGS,
@@ -2926,25 +3012,9 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
     };
     {
         let ctx = context();
-        let _ = ctx
-            .user_task_set
-            .compare_parent_wait_stack_window(&ctx.user_address_space, &ctx.page_metadata_map);
-        let _ = ctx
-            .user_task_set
-            .compare_parent_wait_writable_pages(&ctx.user_address_space, &ctx.page_metadata_map);
         if !ctx
             .user_task_set
-            .restore_parent_wait_stack_snapshot(&ctx.user_address_space, &ctx.page_metadata_map)
-            || !ctx
-                .user_task_set
-                .restore_parent_wait_writable_page_snapshot(
-                    &ctx.user_address_space,
-                    &mut ctx.page_allocator,
-                    &ctx.page_metadata_map,
-                )
-            || !ctx
-                .user_task_set
-                .restore_parent_fd_snapshot(&mut ctx.files_struct)
+            .restore_parent_fd_snapshot(&mut ctx.files_struct)
             || !ctx.user_task_set.mark_parent_wait_resumed(true)
             || ctx
                 .commit_terminal_kernel_init_dispatch(exiting_task)
@@ -2985,9 +3055,11 @@ fn exercise_builtin_grandchild_wait4_exec(
             &ctx.kernel_init_user_state,
             &ctx.user_clone_deferred_boundaries,
             &ctx.user_address_space,
+            &ctx.user_stack,
             &ctx.user_trap_frame,
             &ctx.fs_struct,
             &ctx.files_struct,
+            &mut ctx.page_allocator,
             &ctx.page_metadata_map,
             &wait_clone,
             USER_PLAIN_FORK_FLAGS,
@@ -3014,7 +3086,8 @@ fn exercise_builtin_grandchild_wait4_exec(
             .user_task_set
             .wait4_yield_to_observed_child_continuation(
                 &ctx.kernel_init_user_state,
-                &ctx.user_address_space,
+                &mut ctx.user_address_space,
+                &mut ctx.user_stack,
                 &mut ctx.fs_struct,
                 &mut ctx.files_struct,
                 &mut ctx.page_allocator,
@@ -3094,22 +3167,9 @@ fn exercise_builtin_grandchild_wait4_exec(
     };
     {
         let ctx = context();
-        let _ = ctx
-            .user_task_set
-            .compare_parent_wait_writable_pages(&ctx.user_address_space, &ctx.page_metadata_map);
         if !ctx
             .user_task_set
-            .restore_parent_wait_stack_snapshot(&ctx.user_address_space, &ctx.page_metadata_map)
-            || !ctx
-                .user_task_set
-                .restore_parent_wait_writable_page_snapshot(
-                    &ctx.user_address_space,
-                    &mut ctx.page_allocator,
-                    &ctx.page_metadata_map,
-                )
-            || !ctx
-                .user_task_set
-                .restore_observed_child_parent_fs_snapshot(&mut ctx.fs_struct)
+            .restore_observed_child_parent_fs_snapshot(&mut ctx.fs_struct)
             || !ctx
                 .user_task_set
                 .restore_parent_fd_snapshot(&mut ctx.files_struct)
@@ -3128,11 +3188,11 @@ fn exercise_builtin_grandchild_wait4_exec(
     assertions.assert(
         "builtin grandchild exec wait4 resume preserves outer owner",
         wait_child_frame.reg(10) == 0
-            && wait_exec.is_some_and(|success| success.retired_pages_released == 0)
+            && wait_exec.is_some_and(|success| success.retired_pages_released != 0)
             && wait_parent_frame.sepc == 0x903c
             && context().user_address_space.satp_token() == script_satp
             && context().user_task_set.pid1_plain_fork_child_continuation()
-            && context()
+            && !context()
                 .user_task_set
                 .parent_address_space_snapshot_saved(),
     );
@@ -3243,7 +3303,7 @@ fn archive_completed_vfork_child(index: usize) -> Option<usize> {
         ctx.user_task_set.copy_vfork_from_parent(
             &ctx.kernel_init_user_state,
             &ctx.user_clone_deferred_boundaries,
-            &ctx.user_address_space,
+            &mut ctx.user_address_space,
             &ctx.user_trap_frame,
             &ctx.fs_struct,
             &ctx.files_struct,
@@ -3376,7 +3436,7 @@ fn exercise_nested_vfork_task_record(assertions: &mut SmokeAssertions) {
             ctx.user_task_set.copy_nested_vfork_from_current_child(
                 &ctx.kernel_init_user_state,
                 &ctx.user_clone_deferred_boundaries,
-                &ctx.user_address_space,
+                &mut ctx.user_address_space,
                 &ctx.user_trap_frame,
                 &ctx.fs_struct,
                 &ctx.files_struct,
@@ -3468,9 +3528,11 @@ fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
             &ctx.kernel_init_user_state,
             &ctx.user_clone_deferred_boundaries,
             &ctx.user_address_space,
+            &ctx.user_stack,
             &ctx.user_trap_frame,
             &ctx.fs_struct,
             &ctx.files_struct,
+            &mut ctx.page_allocator,
             &ctx.page_metadata_map,
             &clone_frame,
             USER_PLAIN_FORK_FLAGS,
@@ -3579,7 +3641,8 @@ fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
             .user_task_set
             .wait4_yield_to_observed_child_continuation(
                 &ctx.kernel_init_user_state,
-                &ctx.user_address_space,
+                &mut ctx.user_address_space,
+                &mut ctx.user_stack,
                 &mut ctx.fs_struct,
                 &mut ctx.files_struct,
                 &mut ctx.page_allocator,
@@ -3670,25 +3733,9 @@ fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
 
     {
         let ctx = context();
-        let _ = ctx
-            .user_task_set
-            .compare_parent_wait_stack_window(&ctx.user_address_space, &ctx.page_metadata_map);
-        let _ = ctx
-            .user_task_set
-            .compare_parent_wait_writable_pages(&ctx.user_address_space, &ctx.page_metadata_map);
         if !ctx
             .user_task_set
-            .restore_parent_wait_stack_snapshot(&ctx.user_address_space, &ctx.page_metadata_map)
-            || !ctx
-                .user_task_set
-                .restore_parent_wait_writable_page_snapshot(
-                    &ctx.user_address_space,
-                    &mut ctx.page_allocator,
-                    &ctx.page_metadata_map,
-                )
-            || !ctx
-                .user_task_set
-                .restore_parent_fd_snapshot(&mut ctx.files_struct)
+            .restore_parent_fd_snapshot(&mut ctx.files_struct)
             || !ctx
                 .kernel_init_user_state
                 .restore_observed_child_parent_process_visible(shell_pid, child_pid)
@@ -3769,9 +3816,11 @@ fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
             &ctx.kernel_init_user_state,
             &ctx.user_clone_deferred_boundaries,
             &ctx.user_address_space,
+            &ctx.user_stack,
             &ctx.user_trap_frame,
             &ctx.fs_struct,
             &ctx.files_struct,
+            &mut ctx.page_allocator,
             &ctx.page_metadata_map,
             &clone_frame,
             USER_PLAIN_FORK_FLAGS,
@@ -3821,7 +3870,7 @@ fn start_active_vfork_child(index: usize) -> Option<usize> {
         ctx.user_task_set.copy_vfork_from_parent(
             &ctx.kernel_init_user_state,
             &ctx.user_clone_deferred_boundaries,
-            &ctx.user_address_space,
+            &mut ctx.user_address_space,
             &ctx.user_trap_frame,
             &ctx.fs_struct,
             &ctx.files_struct,

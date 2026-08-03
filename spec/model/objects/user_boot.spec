@@ -127,6 +127,7 @@ predicate user_clone_full_clone3_deferred<T>(boundaries: T) -> bool;
 predicate user_clone_full_thread_group_deferred<T>(boundaries: T) -> bool;
 predicate user_clone_full_clone_vm_vfork_deferred<T>(boundaries: T) -> bool;
 predicate user_clone_full_cow_mm_deferred<T>(boundaries: T) -> bool;
+predicate user_clone_independent_mm_eager_copy_bound<T>(boundaries: T) -> bool;
 predicate user_clone_full_pidfd_file_ops_deferred<T>(boundaries: T) -> bool;
 predicate user_clone_full_ptrace_hooks_deferred<T>(boundaries: T) -> bool;
 predicate user_clone_full_seccomp_hooks_deferred<T>(boundaries: T) -> bool;
@@ -192,6 +193,9 @@ predicate user_address_space_fault_targeted_tlb_flush<T>(space: T) -> bool;
 predicate user_address_space_fault_failure_atomic<T>(space: T) -> bool;
 predicate user_address_space_fault_diagnostic_stable<T>(space: T) -> bool;
 predicate user_address_space_fault_cow_count_zero_first_slice<T>(space: T) -> bool;
+predicate user_address_space_owner_task_bound<T, K>(space: T, task: K) -> bool;
+predicate user_address_space_active_carrier_validated<T>(space: T) -> bool;
+predicate user_address_space_exec_replacement_atomic<T>(space: T) -> bool;
 predicate user_address_space_fault_kernel_extable_isolated<T>(space: T) -> bool;
 predicate user_address_space_fault_sigsegv_delivery_deferred<T>(space: T) -> bool;
 predicate swapper_vm_remains_kernel_shared_instance<T>(swapper: T) -> bool;
@@ -558,9 +562,14 @@ predicate user_child_process_parent_fd_snapshot_saved<T, F>(process: T, files: F
 predicate user_child_process_parent_fd_snapshot_restored<T, F>(process: T, files: F) -> bool;
 predicate user_child_process_credentials_copied<T, P>(process: T, parent: P) -> bool;
 predicate user_child_process_signal_state_copied<T, P>(process: T, parent: P) -> bool;
-predicate user_child_process_user_address_space_snapshot<T, A>(process: T, space: A) -> bool;
-predicate user_child_process_user_stack_snapshot_copied<T, A>(process: T, space: A) -> bool;
-predicate user_child_process_user_stack_snapshot_restored<T, A>(process: T, space: A) -> bool;
+predicate user_child_process_independent_mm_owned<T, A>(process: T, space: A) -> bool;
+predicate user_child_process_root_and_satp_distinct<T, P>(process: T, parent: P) -> bool;
+predicate user_child_process_eager_private_pages_copied<T, A>(process: T, space: A) -> bool;
+predicate user_child_process_dup_mm_failure_atomic<T, P>(process: T, parent: P) -> bool;
+predicate user_child_process_mm_published_after_copy<T>(process: T) -> bool;
+predicate user_child_process_task_mm_switched<T, P>(process: T, parent: P) -> bool;
+predicate user_child_process_exit_mm_released_once<T>(process: T) -> bool;
+predicate user_child_process_parent_mm_resumed_without_byte_restore<T, P>(process: T, parent: P) -> bool;
 predicate user_child_process_trap_frame_copied<T, R>(process: T, frame: R) -> bool;
 predicate user_child_process_trap_frame_child_return_zero<T>(process: T) -> bool;
 predicate user_child_process_trap_frame_child_sp_set<T>(process: T) -> bool;
@@ -593,18 +602,12 @@ predicate user_child_process_plain_fork_reaped_slot_released<T, R>(process: T, r
 predicate user_child_process_vfork_next_child_accepted<T>(process: T) -> bool;
 predicate user_child_process_wait4_handoff_frame_diagnostic_bound<T>(process: T) -> bool;
 predicate user_child_process_parent_wait_frame_saved<T>(process: T) -> bool;
-predicate user_child_process_parent_address_space_snapshot_saved<T, A>(process: T, space: A) -> bool;
 predicate user_child_process_parent_exec_objects_retained<T, A, S>(process: T, space: A, stack: S) -> bool;
 predicate user_child_process_replaced_child_exec_backing_released<T>(process: T) -> bool;
 predicate user_child_process_parent_user_stack_restored<T, S>(process: T, stack: S) -> bool;
 predicate user_child_process_parent_wait_register_checkpoint_bound<T>(process: T) -> bool;
 predicate user_child_process_parent_wait_stack_window_checkpoint_bound<T>(process: T) -> bool;
 predicate user_child_process_parent_wait_stack_window_compared<T>(process: T) -> bool;
-predicate user_child_process_parent_wait_stack_snapshot_copied<T, A>(process: T, space: A) -> bool;
-predicate user_child_process_parent_wait_stack_snapshot_restored<T, A>(process: T, space: A) -> bool;
-predicate user_child_process_parent_wait_writable_page_snapshot_copied<T, A>(process: T, space: A) -> bool;
-predicate user_child_process_parent_wait_writable_page_snapshot_compared<T, A>(process: T, space: A) -> bool;
-predicate user_child_process_parent_wait_writable_page_snapshot_restored<T, A>(process: T, space: A) -> bool;
 predicate user_child_process_exit_status_observed<T>(process: T) -> bool;
 predicate user_child_process_wait4_status_copied<T>(process: T) -> bool;
 predicate user_child_process_parent_wait_resumed<T>(process: T) -> bool;
@@ -735,6 +738,7 @@ object UserCloneDeferredBoundaries: KernelObject {
                     user_clone_full_thread_group_deferred(self);
                     user_clone_full_clone_vm_vfork_deferred(self);
                     user_clone_full_cow_mm_deferred(self);
+                    user_clone_independent_mm_eager_copy_bound(self);
                     user_clone_full_pidfd_file_ops_deferred(self);
                     user_clone_full_ptrace_hooks_deferred(self);
                     user_clone_full_seccomp_hooks_deferred(self);
@@ -772,9 +776,9 @@ object UserCloneDeferredBoundaries: KernelObject {
 
                 deferred user_clone.004 {
                     category: DeferredCategory::Feature;
-                    summary: "Replace bounded page rollback with complete dup_mm and COW address-space semantics.";
+                    summary: "Replace eager private-page duplication with complete COW lowering and reference semantics.";
                     evidence { user_clone_full_cow_mm_deferred(self); }
-                    close_when: "Independent parent/child mm, COW faults, teardown and differential tests pass without snapshots.";
+                    close_when: "COW faults, shared-frame reference conservation, teardown and differential tests pass.";
                 }
 
                 deferred user_clone.005 {
@@ -887,6 +891,7 @@ object UserCloneDeferredBoundaries: KernelObject {
             user_clone_full_thread_group_deferred(self);
             user_clone_full_clone_vm_vfork_deferred(self);
             user_clone_full_cow_mm_deferred(self);
+            user_clone_independent_mm_eager_copy_bound(self);
             user_clone_full_pidfd_file_ops_deferred(self);
             user_clone_full_ptrace_hooks_deferred(self);
             user_clone_full_seccomp_hooks_deferred(self);
@@ -1089,6 +1094,9 @@ object UserAddressSpace: ResourceObject {
                     user_address_space_fault_failure_atomic(self);
                     user_address_space_fault_diagnostic_stable(self);
                     user_address_space_fault_cow_count_zero_first_slice(self);
+                    user_address_space_owner_task_bound(self, KernelInitTask);
+                    user_address_space_active_carrier_validated(self);
+                    user_address_space_exec_replacement_atomic(self);
                     user_address_space_fault_kernel_extable_isolated(self);
                     user_address_space_fault_sigsegv_delivery_deferred(self);
                 }
@@ -2914,7 +2922,11 @@ object SyscallTable: ResourceObject {
                     syscall_clone_wake_up_new_task_shape(self, Cpu0Scheduler);
                     user_child_process_process_group_visible_to_parent(child, KernelInitTask);
                     user_task_child_process_group_visible(KernelInitTask, child);
-                    user_child_process_user_stack_snapshot_copied(child, UserAddressSpace);
+                    user_child_process_independent_mm_owned(child, UserAddressSpace);
+                    user_child_process_root_and_satp_distinct(child, KernelInitTask);
+                    user_child_process_eager_private_pages_copied(child, UserAddressSpace);
+                    user_child_process_dup_mm_failure_atomic(child, KernelInitTask);
+                    user_child_process_mm_published_after_copy(child);
                     user_child_process_parent_fd_snapshot_saved(child, FilesStruct);
                     files_struct_parent_fd_snapshot_saved(FilesStruct, child);
                     user_task_set_contains(UserTaskSet, child);
@@ -3040,12 +3052,9 @@ object SyscallTable: ResourceObject {
                     user_child_process_child_continuation_taken(child);
                     user_child_process_wait4_handoff_frame_diagnostic_bound(child);
                     user_child_process_parent_wait_frame_saved(child);
-                    user_child_process_parent_address_space_snapshot_saved(child, UserAddressSpace);
                     user_child_process_parent_wait_register_checkpoint_bound(child);
                     user_child_process_parent_wait_stack_window_checkpoint_bound(child);
-                    user_child_process_parent_wait_stack_snapshot_copied(child, UserAddressSpace);
-                    user_child_process_parent_wait_writable_page_snapshot_copied(child, UserAddressSpace);
-                    user_child_process_user_stack_snapshot_restored(child, UserAddressSpace);
+                    user_child_process_task_mm_switched(child, KernelInitTask);
                     user_task_pending_plain_fork_child_consumed_on_wait_handoff(KernelInitTask, child);
                     user_address_space_fault_mapping_diagnostic_bound(UserAddressSpace);
                     syscall_wait4_child_exit_status_copyout_first_slice(self);
@@ -3129,10 +3138,8 @@ object SyscallTable: ResourceObject {
                     user_child_process_wait4_status_copied(child);
                     user_child_process_parent_wait_resumed(child);
                     user_child_process_parent_wait_resume_checkpoint_bound(child);
-                    user_child_process_parent_wait_stack_window_compared(child);
-                    user_child_process_parent_wait_stack_snapshot_restored(child, UserAddressSpace);
-                    user_child_process_parent_wait_writable_page_snapshot_compared(child, UserAddressSpace);
-                    user_child_process_parent_wait_writable_page_snapshot_restored(child, UserAddressSpace);
+                    user_child_process_exit_mm_released_once(child);
+                    user_child_process_parent_mm_resumed_without_byte_restore(child, KernelInitTask);
                     user_child_process_parent_fd_snapshot_restored(child, FilesStruct);
                     files_struct_parent_fd_snapshot_restored(FilesStruct, child);
                     user_child_process_completed_record_archived(child);

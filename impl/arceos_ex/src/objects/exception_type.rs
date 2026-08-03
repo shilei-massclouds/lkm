@@ -3991,7 +3991,8 @@ fn pipe_read_yield_to_builtin_grandchild(frame: &mut TrapFrame, fd: usize) -> bo
             .user_task_set
             .pipe_read_yield_to_builtin_grandchild_continuation(
                 &ctx.kernel_init_user_state,
-                &ctx.user_address_space,
+                &mut ctx.user_address_space,
+                &mut ctx.user_stack,
                 &mut ctx.fs_struct,
                 &mut ctx.files_struct,
                 &mut ctx.page_allocator,
@@ -4020,6 +4021,11 @@ fn pipe_read_yield_to_builtin_grandchild(frame: &mut TrapFrame, fd: usize) -> bo
         }
     }
 
+    let child_satp = crate::context::context_ref()
+        .user_address_space
+        .satp_token();
+    crate::arch::riscv64::csr::write_satp(child_satp);
+    crate::arch::riscv64::csr::sfence_vma();
     print_wait4_child_handoff_trace(&child_frame);
     *frame = child_frame;
     true
@@ -6027,9 +6033,11 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
                     &ctx.kernel_init_user_state,
                     &ctx.user_clone_deferred_boundaries,
                     &ctx.user_address_space,
+                    &ctx.user_stack,
                     &ctx.user_trap_frame,
                     &ctx.fs_struct,
                     &ctx.files_struct,
+                    &mut ctx.page_allocator,
                     &ctx.page_metadata_map,
                     frame,
                     clone_flags,
@@ -6108,9 +6116,11 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
                 &ctx.kernel_init_user_state,
                 &ctx.user_clone_deferred_boundaries,
                 &ctx.user_address_space,
+                &ctx.user_stack,
                 &ctx.user_trap_frame,
                 &ctx.fs_struct,
                 &ctx.files_struct,
+                &mut ctx.page_allocator,
                 &ctx.page_metadata_map,
                 frame,
                 clone_flags,
@@ -6268,7 +6278,7 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
                 ctx.user_task_set.copy_nested_vfork_from_current_child(
                     &ctx.kernel_init_user_state,
                     &ctx.user_clone_deferred_boundaries,
-                    &ctx.user_address_space,
+                    &mut ctx.user_address_space,
                     &ctx.user_trap_frame,
                     &ctx.fs_struct,
                     &ctx.files_struct,
@@ -6291,7 +6301,7 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
             let Some(child_frame) = ctx.user_task_set.copy_vfork_from_parent(
                 &ctx.kernel_init_user_state,
                 &ctx.user_clone_deferred_boundaries,
-                &ctx.user_address_space,
+                &mut ctx.user_address_space,
                 &ctx.user_trap_frame,
                 &ctx.fs_struct,
                 &ctx.files_struct,
@@ -6971,7 +6981,8 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
                 .user_task_set
                 .wait4_yield_to_observed_child_continuation(
                     &ctx.kernel_init_user_state,
-                    &ctx.user_address_space,
+                    &mut ctx.user_address_space,
+                    &mut ctx.user_stack,
                     &mut ctx.fs_struct,
                     &mut ctx.files_struct,
                     &mut ctx.page_allocator,
@@ -7002,6 +7013,11 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
             (child_frame, parent_pid, child_pid)
         };
 
+        let child_satp = crate::context::context_ref()
+            .user_address_space
+            .satp_token();
+        crate::arch::riscv64::csr::write_satp(child_satp);
+        crate::arch::riscv64::csr::sfence_vma();
         table.wait4_observed.store(1, Ordering::Release);
         #[cfg(app_user_boot)]
         {
@@ -7057,7 +7073,8 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
         let ctx = crate::context::context();
         let Some(child_frame) = ctx.user_task_set.wait4_yield_to_child_continuation(
             &ctx.kernel_init_user_state,
-            &ctx.user_address_space,
+            &mut ctx.user_address_space,
+            &mut ctx.user_stack,
             &mut ctx.page_allocator,
             &ctx.page_metadata_map,
             frame,
@@ -7075,6 +7092,11 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
         child_frame
     };
 
+    let child_satp = crate::context::context_ref()
+        .user_address_space
+        .satp_token();
+    crate::arch::riscv64::csr::write_satp(child_satp);
+    crate::arch::riscv64::csr::sfence_vma();
     table.wait4_observed.store(1, Ordering::Release);
     #[cfg(app_user_boot)]
     {
@@ -7205,39 +7227,8 @@ fn complete_observed_child_exit_to_parent_wait(
     crate::arch::riscv64::csr::write_satp(parent_satp);
     crate::arch::riscv64::csr::sfence_vma();
 
-    let stack_window_compared = {
-        let ctx = crate::context::context();
-        ctx.user_task_set
-            .compare_parent_wait_stack_window(&ctx.user_address_space, &ctx.page_metadata_map)
-    };
-
-    let writable_pages_compared = {
-        let ctx = crate::context::context();
-        ctx.user_task_set
-            .compare_parent_wait_writable_pages(&ctx.user_address_space, &ctx.page_metadata_map)
-    };
-
-    let parent_stack_restored = {
-        let ctx = crate::context::context();
-        ctx.user_task_set
-            .restore_parent_wait_stack_snapshot(&ctx.user_address_space, &ctx.page_metadata_map)
-    };
-    if !parent_stack_restored {
-        return false;
-    }
-
-    let writable_pages_restored = {
-        let ctx = crate::context::context();
-        ctx.user_task_set
-            .restore_parent_wait_writable_page_snapshot(
-                &ctx.user_address_space,
-                &mut ctx.page_allocator,
-                &ctx.page_metadata_map,
-            )
-    };
-    if !writable_pages_restored {
-        return false;
-    }
+    let stack_window_compared = false;
+    let writable_pages_compared = false;
 
     let fs_snapshot_restored = {
         let ctx = crate::context::context();
@@ -7559,39 +7550,8 @@ fn complete_child_exit_to_parent_wait(frame: &mut TrapFrame, status: usize) -> b
     crate::arch::riscv64::csr::write_satp(parent_satp);
     crate::arch::riscv64::csr::sfence_vma();
 
-    let stack_window_compared = {
-        let ctx = crate::context::context();
-        ctx.user_task_set
-            .compare_parent_wait_stack_window(&ctx.user_address_space, &ctx.page_metadata_map)
-    };
-
-    let writable_pages_compared = {
-        let ctx = crate::context::context();
-        ctx.user_task_set
-            .compare_parent_wait_writable_pages(&ctx.user_address_space, &ctx.page_metadata_map)
-    };
-
-    let parent_stack_restored = {
-        let ctx = crate::context::context();
-        ctx.user_task_set
-            .restore_parent_wait_stack_snapshot(&ctx.user_address_space, &ctx.page_metadata_map)
-    };
-    if !parent_stack_restored {
-        return false;
-    }
-
-    let writable_pages_restored = {
-        let ctx = crate::context::context();
-        ctx.user_task_set
-            .restore_parent_wait_writable_page_snapshot(
-                &ctx.user_address_space,
-                &mut ctx.page_allocator,
-                &ctx.page_metadata_map,
-            )
-    };
-    if !writable_pages_restored {
-        return false;
-    }
+    let stack_window_compared = false;
+    let writable_pages_compared = false;
 
     let fd_snapshot_restored = {
         let ctx = crate::context::context();

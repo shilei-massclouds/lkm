@@ -770,6 +770,11 @@ pub fn smoke_commit_builtin_grandchild_exec_image(
             return None;
         }
     };
+    let active_mm_owner = if ctx.user_address_space.owner_task_ref().is_valid() {
+        ctx.user_address_space.owner_task_ref()
+    } else {
+        ctx.exec_transaction.staging_address_space.owner_task_ref()
+    };
     let builtin_subsequent_exec = retention == RetiredImageRetention::None
         && ctx
             .user_task_set
@@ -802,6 +807,12 @@ pub fn smoke_commit_builtin_grandchild_exec_image(
             1,
         );
     }
+    if !ctx
+        .user_address_space
+        .rebind_owner_after_exec(active_mm_owner)
+    {
+        return None;
+    }
     ctx.exec_transaction
         .staging_address_space
         .reset_staging_after_exec_commit();
@@ -830,16 +841,32 @@ pub fn smoke_commit_builtin_grandchild_exec_image(
         RetiredImageRetention::OuterChild => return None,
     }
     let released = if builtin_subsequent_exec {
-        if !ctx
-            .user_task_set
-            .mark_builtin_grandchild_subsequent_exec_committed()
-        {
-            return None;
-        }
         directly_released
+    } else if retention == RetiredImageRetention::None {
+        let mut released = ctx
+            .exec_transaction
+            .retired_address_space
+            .release_retired_exec_image(&mut ctx.page_allocator, &ctx.page_metadata_map);
+        released += ctx
+            .exec_transaction
+            .retired_stack
+            .release_exec_backing(&mut ctx.page_allocator, &ctx.page_metadata_map);
+        released
     } else {
         0
     };
+    if retention == RetiredImageRetention::None && ctx.user_task_set.builtin_grandchild_active() {
+        let committed = if ctx.user_task_set.ordinary_independent_mm() {
+            ctx.user_task_set
+                .mark_builtin_grandchild_independent_exec_committed()
+        } else {
+            ctx.user_task_set
+                .mark_builtin_grandchild_subsequent_exec_committed()
+        };
+        if !committed {
+            return None;
+        }
+    }
     ctx.exec_transaction.finish_commit(released);
     Some(ExecSuccess {
         image_contains_stdin_fixture: super::elf_object::contains_bytes(
@@ -1208,6 +1235,11 @@ fn commit_prepared(
             ctx,
         );
     })?;
+    let active_mm_owner = if ctx.user_address_space.owner_task_ref().is_valid() {
+        ctx.user_address_space.owner_task_ref()
+    } else {
+        ctx.exec_transaction.staging_address_space.owner_task_ref()
+    };
     let builtin_subsequent_exec = retention == RetiredImageRetention::None
         && ctx
             .user_task_set
@@ -1241,6 +1273,12 @@ fn commit_prepared(
             &mut ctx.user_address_space,
             1,
         );
+    }
+    if !ctx
+        .user_address_space
+        .rebind_owner_after_exec(active_mm_owner)
+    {
+        exec_terminal("exec mm owner replacement invariant failed\n");
     }
     ctx.exec_transaction
         .staging_address_space
@@ -1348,13 +1386,17 @@ fn commit_prepared(
             released
         }
     };
-    if retention == RetiredImageRetention::None
-        && ctx.user_task_set.builtin_grandchild_active()
-        && !ctx
-            .user_task_set
-            .mark_builtin_grandchild_subsequent_exec_committed()
-    {
-        exec_terminal("builtin grandchild subsequent exec ownership invariant failed\n");
+    if retention == RetiredImageRetention::None && ctx.user_task_set.builtin_grandchild_active() {
+        let committed = if ctx.user_task_set.ordinary_independent_mm() {
+            ctx.user_task_set
+                .mark_builtin_grandchild_independent_exec_committed()
+        } else {
+            ctx.user_task_set
+                .mark_builtin_grandchild_subsequent_exec_committed()
+        };
+        if !committed {
+            exec_terminal("builtin grandchild exec ownership invariant failed\n");
+        }
     }
     if ctx.user_task_set.builtin_grandchild_active() {
         observation::print_builtin_grandchild_exec_retention(
@@ -1392,6 +1434,9 @@ fn classify_retired_image_retention(
         return Ok(RetiredImageRetention::None);
     }
     if ctx.user_task_set.builtin_grandchild_active() {
+        if ctx.user_task_set.ordinary_independent_mm() {
+            return Ok(RetiredImageRetention::None);
+        }
         if ctx
             .user_task_set
             .builtin_grandchild_first_exec_retention_required()

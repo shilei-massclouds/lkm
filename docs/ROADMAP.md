@@ -19,18 +19,20 @@
 
 ## 当前焦点
 
-1. 缺陷处理继续遵循证据驱动：先复现并定位 checkpoint/diagnostic 边界，再更新规格与实现。
-2. BusyBox init getty/login shell 的 bounded pending-child `setpgid` / `TIOCSPGRP` 验收已闭环并归档；
+1. 用户 fault core 与普通 fork 独立 mm/eager dup_mm 已完成；下一执行窗口必须从活跃任务首项的真实
+   COW 开始，完成后再进入同步致命 SIGSEGV，不得回退到 writable-page/stack/address-space snapshot。
+2. 缺陷处理继续遵循证据驱动：先复现并定位 checkpoint/diagnostic 边界，再更新规格与实现。
+3. BusyBox init getty/login shell 的 bounded pending-child `setpgid` / `TIOCSPGRP` 验收已闭环并归档；
    focused case 保持 opt-in，后续扩大任务图或 job-control 语义必须由新的可复现证据触发。
-3. native/linux-object 的自动 scripted shell 已通过 `scripted-shell` / `scripted-shell-lo` identity 进入默认门禁；
+4. native/linux-object 的自动 scripted shell 已通过 `scripted-shell` / `scripted-shell-lo` identity 进入默认门禁；
    `shell` / `shell-lo` 人工 PTY 诊断保持 opt-in。两者共享启动环境，但自动命令闭环不声明与任意
    PTY 会话等价。nightly stress 和 Linux paired difftest 继续长期回归，失败样本按稳定序列和
    source-scoped 事实分类。
-4. 默认 LTP 门禁收缩为 native/linux-object 两侧的 `close*` list-only acceptance：必须各精确列出
+5. 默认 LTP 门禁收缩为 native/linux-object 两侧的 `close*` list-only acceptance：必须各精确列出
    一次 `close01/02`，随后以 list 原始状态退出；不执行 selected binary，也不声明 stock LTP close
    或 `close(57)` 的新覆盖。此前 uname inner-exec 与 `mkdirat(34)` 证据保留为历史能力/边界。
-5. VFS/pathname、exec lifecycle、per-task/IRQ trap stack 后续与文件系统缓存层仍按各自 active row 推进。
-6. coding 层的 model-object 文件覆盖、实现证据和 rootfs 测试编排分别由
+6. VFS/pathname、exec lifecycle、per-task/IRQ trap stack 后续与文件系统缓存层仍按各自 active row 推进。
+7. coding 层的 model-object 文件覆盖、实现证据和 rootfs 测试编排分别由
    [`objects/README.md`](../spec/coding/objects/README.md)、
    [`arceos_ex-implementation.md`](../spec/coding/arceos_ex-implementation.md) 与
    [`testing/rootfs.md`](../spec/testing/rootfs.md) 承载。
@@ -46,12 +48,15 @@
 - [Linux PLIC object 复用历史](roadmap/linux-plic.md)
 - [virtio / block / VFS / Ext2 历史](roadmap/virtio-block-fs.md)
 - [用户态 payload、syscall 与 process 历史](roadmap/user-mode.md)
+- [用户缺页、独立 mm、COW 与 SIGSEGV 执行边界](roadmap/user-memory.md)
 - [IRQ / console / serial8250 / TTY 历史](roadmap/irq-console-tty.md)
 
 ## 活跃任务
 
 | 优先级 | 状态 | 领域 | 任务 | 剩余责任 | 细节 |
 | --- | --- | --- | --- | --- | --- |
+| `P0` | 当前计划 | charter/model/coding/arceos_ex/mm/task | 真实 COW 与共享 frame 引用闭环 | 在已完成的 per-Task 独立 mm 基线上，以 RISC-V software-reserved PTE 标志把原本可写的私有 VMA 降低为双方 RO+COW；建立受检查 frame refcount、store-page-fault 解共享、唯一引用快路径、失败原子回滚及 exec/exit/reap 引用守恒。关闭 `user_clone.004`；`user_clone.002/.003` 继续 deferred。 | [后续执行边界](roadmap/user-memory.md#第三阶段真实-cow最高优先级)；[UserAddressSpace charter](../spec/charter/objects/user-address-space.md)；[测试规格](../spec/testing/user-memory.md) |
+| `P0` | 待办 | charter/model/coding/arceos_ex/mm/task/signal | 同步致命 SIGSEGV 与最终收口 | COW 完成后，将 unmapped、权限、NX 与非 COW 写保护分别收口为 `SEGV_MAPERR/SEGV_ACCERR`，携带 `si_addr`，形成 signal 11 的 task exit/wait/SIGCHLD 状态；不扩展 handler frame、`rt_sigreturn` 或 core dump。完成双 provider、压力、引用回收与 difftest 总验收。 | [后续执行边界](roadmap/user-memory.md#第四阶段同步致命-sigsegv与最终收口)；[测试规格](../spec/testing/user-memory.md) |
 | `P0` | 长期回归 | validation/trace | ordinary-path nightly/压力缺陷复现 | 默认 suite 持续运行 DF-0001/DF-0002/DF-0003 ordinary cases 与 DF-0004 canonical `rc-local-native`；`stress-mem` 和 DF-0004 100 轮深采样按需显式运行。出现失败类后按稳定序列、source-scoped facts 或 timeout QMP artifact 定位，不以 probe 路径或重试替代 ordinary path。 | [缺陷记录](DEFECTS.md)；[测试规格](../spec/testing/rootfs.md) |
 | `P0` | 当前 | validation/trace/arceos_ex | 纵向差分定位 DEFECTS 问题 | 用 stress 报告、成功/失败序列、failure diagnostic 和 `stress-mem` 产物定位新失败；没有失败类集合时只记录回归，不增一次性 checkpoint。 | [缺陷记录](DEFECTS.md) |
 | `P0` | 进行中 | trace/arceos_ex | 当前 trace 诊断能力评估与缺口补强 | 只补仍影响定位的最小长期观察点；Linux-like trace 由现有证据不足触发。 | [pyveri DEVELOPMENT](../tools/pyveri/DEVELOPMENT.md#step-c1-收口-trace-输出和注释数据流) |
@@ -67,7 +72,6 @@
 | `P1` | 待办 | model/coding/arceos_ex/vfs/fs | Ext2 VFS inode/dentry cache 边界 | 对齐 iget/dentry cache、negative lookup、inode identity、refcount 与 evict 边界。 | [Ext2 coding](../spec/coding/objects/ext2.md)；[VFS coding](../spec/coding/objects/vfs.md) |
 | `P1` | 待办 | model/coding/arceos_ex/mm/fs | page cache / address_space / folio read path | `process_prepare.002` | [VFS coding](../spec/coding/objects/vfs.md) |
 | `P1` | 待办 | model/coding/arceos_ex/syscall/mm/signal | 动态用户栈 rlimit 与越界信号 | 实现 `prlimit64/setrlimit`、动态 `RLIMIT_STACK`，并把栈越界转换为 Linux-like `SIGSEGV/si_code`。 | [UserStack charter](../spec/charter/objects/user-stack.md) |
-| `P0` | 进行中 | charter/model/coding/arceos_ex/mm/task/signal | 用户缺页、独立 mm、COW 与同步 SIGSEGV 闭环 | 统一 VMA fault core 与同指令重试已完成；继续建立普通 fork 独立 mm、真实 COW 引用生命周期和 `SIGSEGV(MAPERR/ACCERR)` 的 exit/wait/SIGCHLD 收口，关闭 `user_clone.004`。 | [UserAddressSpace charter](../spec/charter/objects/user-address-space.md)；[测试规格](../spec/testing/user-memory.md) |
 | `P1` | 待办 | model/coding/arceos_ex/mm/task | 多线程与共享 mm | `user_clone.002`、`user_clone.003`；不由普通 fork/COW 闭环隐式扩展 thread group、`CLONE_VM` 或完整 vfork mm sharing。 | [UserStack charter](../spec/charter/objects/user-stack.md) |
 | `P2` | 延期 | model/coding/arceos_ex/random/hardening | 用户/内核栈随机与 protector 强化 | 在完整 CRNG 基础上补内核 compiler stack protector、per-task canary 与更强栈保护；RISC-V 原生更大 ASLR 窗口随地址布局扩展再评估。 | [UserStack coding](../spec/coding/objects/user-stack.md) |
 | `P2` | 延期 | compose/arceos_ex | 对象封装为组件试验 | 选择稳定对象后再明确 crate/component 边界、接口与验收方式。 | [compose 规格](../spec/compose/README.md) |

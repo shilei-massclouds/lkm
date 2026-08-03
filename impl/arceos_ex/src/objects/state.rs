@@ -257,6 +257,7 @@ pub fn failed_condition_with_diagnostic(
     .with_diagnostic(diagnostic))
 }
 
+#[derive(Clone, Copy)]
 pub struct Lifecycle {
     state: State,
     seen_events: u8,
