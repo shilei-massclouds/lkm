@@ -1,4 +1,4 @@
-use core::sync::atomic::{AtomicU8, Ordering};
+use core::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 
 use crate::{
     checkpoint::Checkpoint,
@@ -11,12 +11,18 @@ static STATES: [AtomicU8; MAX_CPUS] =
     [const { AtomicU8::new(crate::phases::state::encode(State::Base)) }; MAX_CPUS];
 static FACTS: [AtomicU8; MAX_CPUS] = [const { AtomicU8::new(0) }; MAX_CPUS];
 static PARK_LOOP_ENTERED: [AtomicU8; MAX_CPUS] = [const { AtomicU8::new(0) }; MAX_CPUS];
+static IDLE_LOOP_READY: [AtomicU8; MAX_CPUS] = [const { AtomicU8::new(0) }; MAX_CPUS];
+static WFI_ENTERED: [AtomicU64; MAX_CPUS] = [const { AtomicU64::new(0) }; MAX_CPUS];
+static WFI_WOKEN: [AtomicU64; MAX_CPUS] = [const { AtomicU64::new(0) }; MAX_CPUS];
 
 pub(crate) fn reset_secondary(logical_id: usize) {
     super::smp_bringup::reset_ap_state(&STATES, logical_id);
     if logical_id < MAX_CPUS {
         FACTS[logical_id].store(0, Ordering::Release);
         PARK_LOOP_ENTERED[logical_id].store(0, Ordering::Release);
+        IDLE_LOOP_READY[logical_id].store(0, Ordering::Release);
+        WFI_ENTERED[logical_id].store(0, Ordering::Release);
+        WFI_WOKEN[logical_id].store(0, Ordering::Release);
     }
 }
 
@@ -50,6 +56,32 @@ pub(crate) fn park_loop_entered_for(logical_id: usize) -> bool {
 pub(crate) fn mark_park_loop_entered(logical_id: usize) {
     require_state(logical_id, State::Online, "park-source");
     PARK_LOOP_ENTERED[logical_id].store(1, Ordering::Release);
+}
+
+pub(crate) fn mark_idle_loop_ready(logical_id: usize) {
+    require_state(logical_id, State::Online, "idle-loop-source");
+    IDLE_LOOP_READY[logical_id].store(1, Ordering::Release);
+}
+
+pub(crate) fn record_wfi_enter(logical_id: usize) {
+    if let Some(count) = WFI_ENTERED.get(logical_id) {
+        count.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+pub(crate) fn record_wfi_wake(logical_id: usize) {
+    if let Some(count) = WFI_WOKEN.get(logical_id) {
+        count.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+#[cfg(app_smoke)]
+pub(crate) fn idle_runtime_observation(logical_id: usize) -> Option<(bool, u64, u64)> {
+    Some((
+        IDLE_LOOP_READY.get(logical_id)?.load(Ordering::Acquire) != 0,
+        WFI_ENTERED.get(logical_id)?.load(Ordering::Acquire),
+        WFI_WOKEN.get(logical_id)?.load(Ordering::Acquire),
+    ))
 }
 
 pub(crate) fn preset(logical_id: usize) -> ! {

@@ -353,6 +353,7 @@ formal_event_entry_save_context:
 
     mv      s11, t6
     mv      a0, sp
+    mv      a1, t6
     call    formal_event_entry_rust
     mv      t6, s11
     li      t0, {trap_return_token_magic}
@@ -755,7 +756,15 @@ impl TrapFrame {
 }
 
 #[unsafe(no_mangle)]
-extern "C" fn formal_event_entry_rust(frame: &mut TrapFrame) -> usize {
+extern "C" fn formal_event_entry_rust(
+    frame: &mut TrapFrame,
+    entry_context: &TrapEntryContext,
+) -> usize {
+    if frame.scause == SCAUSE_INTERRUPT_BIT | crate::arch::riscv64::SUPERVISOR_SOFTWARE_IRQ {
+        crate::arch::riscv64::csr::clear_supervisor_software_interrupt();
+        crate::objects::kernel_task::handle_reschedule_ipi(entry_context.cpu_logical_id());
+        return TRAP_RETURN_TOKEN_MAGIC;
+    }
     let record_ptr = unsafe {
         (frame as *mut TrapFrame)
             .cast::<u8>()

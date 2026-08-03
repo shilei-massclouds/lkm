@@ -475,3 +475,34 @@ object ApIdleFlow: TaskFlow {
         }
     }
 }
+
+object KernelTaskFlow: TaskFlow {
+    lifecycle_override: true;
+    initial_context: Action::RunKernelTask;
+    initial_state: State::Base;
+    parent: KernelTask;
+    state State::Base {
+        transitions {
+            on Transition::Preset -> State::Prepared {
+                ensures { task_fixed_flow_is(KernelTask, self); }
+            }
+        }
+    }
+    state State::Prepared { transitions { on Transition::Setup -> State::Ready { } } }
+    state State::Ready {
+        transitions {
+            on Transition::Enable -> State::Online {
+                depends_on { task_initial_context_complete(KernelTask, self); }
+                ensures { task_flow_published_with_task(self, KernelTask); }
+            }
+        }
+    }
+    state State::Online {
+        actions {
+            on Action::RunKernelTask {
+                state_effect: StateEffect::None;
+                depends_on { KernelTask.state == State::OnCpu; }
+            }
+        }
+    }
+}

@@ -5,5 +5,9 @@ begin OnCpu with Reserved authority; startup grants Live authority and the archi
 the prepared `ApIdleFlow.RunIdle` body coordinate directly without Dispatch/Enter. The first switch out publishes the Task's first
 recoverable Online breakpoint; later dispatch uses the common Dispatch/Enter path.
 
-The deterministic per-CPU lane representation removes all Flow-selection and dispatch-kind branches.
-Global arbitration, cross-CPU mailbox protocol, migration and complete schedule replay remain P2.
+After the three AP bringup actions, RunIdle installs the CPU-local scheduler lease and SSIP gate, publishes
+idle-loop readiness, and enters the common mailbox/runqueue/safe-`wfi` loop. A first idle switch saves the real AP
+continuation; restoring AP idle and restoring a dynamic kernel task both use the generic contextual Enter path.
+
+The first SMP slice implements only explicit-target activation/wake mailbox delivery. Global arbitration, load
+balancing, running-task migration, AP user tasks, timer preemption and complete schedule replay remain deferred.

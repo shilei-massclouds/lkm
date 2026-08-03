@@ -12,6 +12,7 @@ const FLOW_SLOT_KERNEL_INIT: u16 = 3;
 const FLOW_SLOT_KTHREADD: u16 = 4;
 const FLOW_SLOT_SMOKE_BASE: u16 = 8;
 const FLOW_SLOT_AP_IDLE_BASE: u16 = 16;
+const FLOW_SLOT_KERNEL_BASE: u16 = 48;
 const FLOW_SLOT_USER_BASE: u16 = 64;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -131,6 +132,14 @@ impl TaskFlow {
 
     pub const fn new_user(task_slot: usize) -> Self {
         Self::new_dynamic(FLOW_SLOT_USER_BASE + task_slot as u16)
+    }
+
+    pub const fn new_kernel(task_slot: usize) -> Self {
+        Self::new_dynamic(FLOW_SLOT_KERNEL_BASE + task_slot as u16)
+    }
+
+    pub const fn new_kernel_with_generation(task_slot: usize, generation: u32) -> Self {
+        Self::new_dynamic_with_generation(FLOW_SLOT_KERNEL_BASE + task_slot as u16, generation)
     }
 
     pub const fn new_user_with_generation(task_slot: usize, generation: u32) -> Self {
@@ -368,6 +377,21 @@ impl TaskFlow {
         self.declared = false;
         self.lifecycle
             .adopt_transition(LifecycleEvent::Cleanup, State::Offline, State::Destroyed)
+    }
+
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
+    pub(crate) fn disable_owned(&mut self, owner_ref: TaskRef) -> EventResult {
+        if self.lifecycle.state() != State::Online || self.owner != owner_ref {
+            return failed_condition(
+                LifecycleEvent::Disable,
+                self.lifecycle.state(),
+                State::Online,
+                State::Offline,
+            );
+        }
+        self.disabled = true;
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Disable, State::Online, State::Offline)
     }
 
     #[allow(dead_code)]

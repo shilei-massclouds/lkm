@@ -195,6 +195,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::smp_bringup::run,
     },
     SmokeCase {
+        name: "smp_ap_scheduler",
+        run: cases::smp_ap_scheduler::run,
+    },
+    SmokeCase {
         name: "runtime_core",
         run: cases::runtime_core::run,
     },

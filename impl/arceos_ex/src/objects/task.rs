@@ -7,6 +7,7 @@ use super::{
 };
 
 pub const USER_TASK_SLOT_COUNT: usize = 8;
+pub const KERNEL_TASK_SLOT_COUNT: usize = 8;
 pub const TASK_STACK_GUARD_VALUE: usize = 0x57AC6E9D;
 
 const TASK_SLOT_BOOT: u16 = 1;
@@ -18,6 +19,7 @@ const TASK_SLOT_SMOKE_RWSEM: u16 = 6;
 const TASK_SLOT_SMOKE_RWLOCK: u16 = 7;
 const TASK_SLOT_AP_IDLE_BASE: u16 = 16;
 const TASK_SLOT_USER_BASE: u16 = 32;
+const TASK_SLOT_KERNEL_BASE: u16 = 48;
 
 /// Stable identity for a Task storage occurrence.
 ///
@@ -51,6 +53,10 @@ impl TaskRef {
         Self::new(TASK_SLOT_USER_BASE + slot as u16, generation)
     }
 
+    pub(crate) const fn kernel(slot: usize, generation: u32) -> Self {
+        Self::new(TASK_SLOT_KERNEL_BASE + slot as u16, generation)
+    }
+
     pub const fn is_valid(self) -> bool {
         self.slot != 0 && self.generation != 0
     }
@@ -78,6 +84,19 @@ impl TaskRef {
             && self.slot < TASK_SLOT_USER_BASE + USER_TASK_SLOT_COUNT as u16
     }
 
+    pub const fn is_kernel(self) -> bool {
+        self.slot >= TASK_SLOT_KERNEL_BASE
+            && self.slot < TASK_SLOT_KERNEL_BASE + KERNEL_TASK_SLOT_COUNT as u16
+    }
+
+    pub const fn is_ap_idle(self) -> bool {
+        self.slot >= TASK_SLOT_AP_IDLE_BASE && self.slot < TASK_SLOT_AP_IDLE_BASE + 8
+    }
+
+    pub const fn is_scheduler_ref(self) -> bool {
+        self.is_boot_scheduler_ref() || self.is_ap_idle() || self.is_kernel()
+    }
+
     pub const fn is_boot_scheduler_ref(self) -> bool {
         self.same_identity(Self::BOOT)
             || self.same_identity(Self::KERNEL_INIT)
@@ -97,6 +116,14 @@ impl TaskRef {
         }
     }
 
+    pub const fn kernel_slot(self) -> Option<usize> {
+        if self.is_kernel() {
+            Some((self.slot - TASK_SLOT_KERNEL_BASE) as usize)
+        } else {
+            None
+        }
+    }
+
     #[allow(dead_code)]
     pub const fn name(self) -> &'static str {
         match self.slot {
@@ -110,6 +137,7 @@ impl TaskRef {
             TASK_SLOT_SMOKE_RWLOCK => "SmokeRwLockTask",
             TASK_SLOT_AP_IDLE_BASE..=23 => "ApIdleTask",
             TASK_SLOT_USER_BASE..=39 => "UserTask",
+            TASK_SLOT_KERNEL_BASE..=55 => "KernelTask",
             _ => "UnknownTask",
         }
     }
@@ -124,6 +152,8 @@ pub enum TaskEntry {
     UserChild,
     ApIdle,
     SmokeScheduler,
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
+    KernelTask,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -354,6 +384,9 @@ impl Task {
             TASK_SLOT_USER_BASE..=39 => {
                 TaskFlow::new_user((task_ref.slot - TASK_SLOT_USER_BASE) as usize)
             }
+            TASK_SLOT_KERNEL_BASE..=55 => {
+                TaskFlow::new_kernel((task_ref.slot - TASK_SLOT_KERNEL_BASE) as usize)
+            }
             _ => TaskFlow::new_static(TaskFlowRef::NONE),
         }
     }
@@ -391,6 +424,16 @@ impl Task {
             None => 0,
         };
         task.flow = TaskFlow::new_user_with_generation(slot, flow_generation);
+        task
+    }
+
+    pub const fn new_kernel(task_ref: TaskRef, flow_generation: u32) -> Self {
+        let mut task = Self::with_ref(task_ref);
+        let slot = match task_ref.kernel_slot() {
+            Some(slot) => slot,
+            None => 0,
+        };
+        task.flow = TaskFlow::new_kernel_with_generation(slot, flow_generation);
         task
     }
 
@@ -708,6 +751,22 @@ impl Task {
 
     pub fn cleanup_embedded_flow(&mut self) -> EventResult {
         self.flow.cleanup_owned(self.task_ref)
+    }
+
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
+    pub(crate) fn disable_embedded_flow_for_exit(&mut self) -> EventResult {
+        if self.state() != State::OnCpu
+            || self.execution_authority != TaskExecutionAuthority::Live
+            || !self.owns_flow(self.flow_ref())
+        {
+            return failed_condition(
+                LifecycleEvent::Disable,
+                self.state(),
+                State::OnCpu,
+                State::OnCpu,
+            );
+        }
+        self.flow.disable_owned(self.task_ref)
     }
 
     pub const fn stack_guard_installed(&self) -> bool {

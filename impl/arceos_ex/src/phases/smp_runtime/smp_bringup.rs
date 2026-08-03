@@ -249,12 +249,43 @@ pub(crate) fn ap_after_online_idle(logical_id: usize) -> ! {
         );
     }
     super::ap_online_idle::mark_park_loop_entered(logical_id);
+    while !crate::context::secondary_runtime_open(logical_id) {
+        core::hint::spin_loop();
+    }
+    crate::arch::riscv64::csr::enable_supervisor_software_interrupt();
+    crate::arch::riscv64::csr::enable_supervisor_interrupts();
+    super::ap_online_idle::mark_idle_loop_ready(logical_id);
 
+    let idle_ref = crate::objects::task::TaskRef::ap_idle(logical_id);
     loop {
+        let had_inbound = crate::objects::kernel_task::has_inbound(logical_id);
+        if had_inbound && crate::context::process_secondary_inbound(logical_id).is_err() {
+            ap_phase_fail_stop("ApIdleFlow", logical_id, State::Online, "consume-inbound");
+        }
+        let need_resched = crate::objects::kernel_task::take_need_resched(logical_id);
+        if (had_inbound || need_resched)
+            && crate::context::schedule_secondary_current(logical_id, idle_ref).is_err()
+        {
+            ap_phase_fail_stop("ApIdleFlow", logical_id, State::Online, "schedule-idle");
+        }
+
+        crate::arch::riscv64::csr::disable_supervisor_interrupts();
+        if crate::objects::kernel_task::has_inbound(logical_id)
+            || crate::objects::kernel_task::need_resched_pending(logical_id)
+        {
+            crate::arch::riscv64::csr::enable_supervisor_interrupts();
+            continue;
+        }
+        super::ap_online_idle::record_wfi_enter(logical_id);
+        // Keep the global SIE gate closed across WFI. RISC-V wakes WFI when a
+        // locally enabled SSIP becomes pending independently of the global
+        // gate; reopening only after wake prevents the handler from clearing
+        // the sole wake event in the check-to-WFI window.
         unsafe {
             core::arch::asm!("wfi", options(nomem, nostack));
         }
-        core::hint::spin_loop();
+        super::ap_online_idle::record_wfi_wake(logical_id);
+        crate::arch::riscv64::csr::enable_supervisor_interrupts();
     }
 }
 

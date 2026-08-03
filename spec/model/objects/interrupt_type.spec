@@ -60,6 +60,17 @@ type InterruptType: ResourceObject {
                 SavedDisabled: Success(restored_disabled);
             }
         }
+
+        Action::HandleRescheduleIpi {
+            state_effect: StateEffect::None;
+            depends_on { self.state == State::Online; }
+            ensures {
+                interrupt_ssip_pending_cleared(self);
+                interrupt_need_resched_recorded_cpu_local(self);
+                interrupt_reschedule_ipi_does_not_switch_in_handler(self);
+                interrupt_duplicate_reschedule_ipi_coalesced(self);
+            }
+        }
     }
 
     state State::Base {
@@ -126,3 +137,7 @@ predicate interrupt_pending_clear_write_completed<I: InterruptType>(interrupt: I
 predicate interrupt_class_gates_closed_before_pending_clear_write_completed<I: InterruptType>(interrupt: I) -> bool;
 predicate interrupt_handler_bindings_ready<I: InterruptType>(interrupt: I) -> bool;
 predicate interrupt_dispatch_ready<I: InterruptType>(interrupt: I) -> bool;
+predicate interrupt_ssip_pending_cleared<I: InterruptType>(interrupt: I) -> bool;
+predicate interrupt_need_resched_recorded_cpu_local<I: InterruptType>(interrupt: I) -> bool;
+predicate interrupt_reschedule_ipi_does_not_switch_in_handler<I: InterruptType>(interrupt: I) -> bool;
+predicate interrupt_duplicate_reschedule_ipi_coalesced<I: InterruptType>(interrupt: I) -> bool;

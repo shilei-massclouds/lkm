@@ -767,8 +767,8 @@ object ApSmpCallinPhase: PhaseObject {
 /*
  * ApOnlineIdlePhase 表示 AP 在 complete(cpu_running) 之后打开本地中断，
  * 进入 cpu_startup_entry(CPUHP_AP_ONLINE_IDLE)，并由 CPUHP AP online
- * idle 边界产生 done_up completion。当前不展开完整 idle loop、AP 调度
- * 或 hotplug callback，只要求 AP 已进入独立 idle/park 运行线。该对象按
+ * idle 边界产生 done_up completion。RunIdle 随后进入完整的 CPU-local
+ * idle/scheduler loop；hotplug callback 仍延期。该对象按
  * secondary logical_id replicate，并 pointwise 依赖 callin family Online。
  */
 object ApOnlineIdlePhase: PhaseObject {
@@ -791,6 +791,9 @@ object ApOnlineIdlePhase: PhaseObject {
                     ap_cpuhp_online_idle_reached(ApOnlineIdlePhase);
                     ap_done_up_completion_produced(CpuHotplugSyncSet);
                     ap_idle_or_park_loop_selected(CpuGroup);
+                    ap_scheduler_idle_loop_selected(CpuGroup);
+                    ap_scheduler_mailbox_acquire_ready(CpuGroup);
+                    ap_scheduler_reschedule_ipi_ready(CpuGroup);
                     ap_does_not_run_bp_payload_or_syscalls(CpuGroup);
                 }
 
@@ -808,6 +811,9 @@ object ApOnlineIdlePhase: PhaseObject {
             ap_cpuhp_online_idle_reached(ApOnlineIdlePhase);
             ap_done_up_completion_produced(CpuHotplugSyncSet);
             ap_idle_or_park_loop_selected(CpuGroup);
+            ap_scheduler_idle_loop_selected(CpuGroup);
+            ap_scheduler_mailbox_acquire_ready(CpuGroup);
+            ap_scheduler_reschedule_ipi_ready(CpuGroup);
             ap_does_not_run_bp_payload_or_syscalls(CpuGroup);
         }
 
@@ -839,6 +845,8 @@ object ApOnlineIdlePhase: PhaseObject {
                     ap_done_up_completion_produced(CpuHotplugSyncSet);
                     ap_idle_or_park_loop_selected(CpuGroup);
                     ap_idle_or_park_loop_entered(CpuGroup);
+                    ap_scheduler_idle_loop_entered(CpuGroup);
+                    ap_scheduler_idle_sleep_recheck_ready(CpuGroup);
                 }
             }
         }
@@ -850,6 +858,8 @@ object ApOnlineIdlePhase: PhaseObject {
             ap_done_up_completion_produced(CpuHotplugSyncSet);
             ap_idle_or_park_loop_selected(CpuGroup);
             ap_idle_or_park_loop_entered(CpuGroup);
+            ap_scheduler_idle_loop_entered(CpuGroup);
+            ap_scheduler_idle_sleep_recheck_ready(CpuGroup);
             ap_does_not_run_bp_payload_or_syscalls(CpuGroup);
         }
     }

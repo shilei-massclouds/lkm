@@ -3081,6 +3081,289 @@ class SignalPipelineTests(_ShortcutTestSupport, unittest.TestCase):
         self.assertEqual(checked["verdict"], "failed")
         self.assertIn("unbound system reference", derivation["signals"][0]["reason"])
 
+    def test_cpu_local_mailbox_ipi_idle_lane_and_rejections(self) -> None:
+        source = """
+            type CpuRef { }
+            type TaskRef { }
+            type MailboxOrdinal { }
+
+            predicate task_ref_ready<T: TaskRef>(task_ref: T) -> bool;
+            predicate mailbox_owner_cpu_is<S, C: CpuRef>(scheduler: S, cpu_ref: C) -> bool;
+            predicate mailbox_ordinal_fresh<O: MailboxOrdinal>(ordinal: O) -> bool;
+            predicate mailbox_target_generation_valid<T: TaskRef, C: CpuRef>(
+                task_ref: T,
+                cpu_ref: C
+            ) -> bool;
+            predicate mailbox_published_release<T: TaskRef, C: CpuRef, O: MailboxOrdinal>(
+                task_ref: T,
+                cpu_ref: C,
+                ordinal: O
+            ) -> bool;
+            predicate reschedule_ipi_after_release<C: CpuRef>(cpu_ref: C) -> bool;
+            predicate ssip_pending_cleared<C: CpuRef>(cpu_ref: C) -> bool;
+            predicate need_resched_cpu_local<C: CpuRef>(cpu_ref: C) -> bool;
+            predicate duplicate_ipi_coalesced<C: CpuRef>(cpu_ref: C) -> bool;
+            predicate handler_did_not_switch<C: CpuRef>(cpu_ref: C) -> bool;
+            predicate mailbox_consumed_once<T: TaskRef, O: MailboxOrdinal>(
+                task_ref: T,
+                ordinal: O
+            ) -> bool;
+            predicate target_runqueue_enqueued<T: TaskRef, C: CpuRef>(
+                task_ref: T,
+                cpu_ref: C
+            ) -> bool;
+            predicate idle_switched_through_common_context<C: CpuRef>(cpu_ref: C) -> bool;
+            predicate mailbox_not_consumed<C: CpuRef>(cpu_ref: C) -> bool;
+            predicate idle_wfi_recheck_safe<C: CpuRef>(cpu_ref: C) -> bool;
+
+            system Remote {
+                initial_state: State::Base;
+                state State::Base {
+                    invariant {
+                        task_ref_ready(WorkerRef);
+                        task_ref_ready(StaleWorkerRef);
+                        mailbox_owner_cpu_is(Scheduler, Cpu1Ref);
+                        mailbox_ordinal_fresh(Ordinal1);
+                        mailbox_target_generation_valid(WorkerRef, Cpu1Ref);
+                    }
+                    actions {
+                        on Action::Dispatch {
+                            drives {
+                                Scheduler.Transition::PublishInbound(WorkerRef, Cpu1Ref, Ordinal1);
+                                IpiMux.Transition::SendReschedule(Cpu1Ref);
+                                IpiMux.Transition::HandleReschedule(Cpu1Ref);
+                                IpiMux.Action::CoalesceReschedule(Cpu1Ref);
+                                Scheduler.Transition::ConsumeInbound(WorkerRef, Cpu1Ref, Ordinal1);
+                                Scheduler.Action::RunIdle(Cpu1Ref);
+                            }
+                        }
+                        on Action::IpiBeforeMailbox {
+                            drives {
+                                IpiMux.Action::HandleEarly(Cpu1Ref);
+                                IpiMux.Action::HandleEarly(Cpu1Ref);
+                                Scheduler.Action::RunIdleWithoutMailbox(Cpu1Ref);
+                            }
+                        }
+                        on Action::WrongTarget {
+                            drives {
+                                Scheduler.Transition::ConsumeInbound(WorkerRef, Cpu2Ref, Ordinal1);
+                            }
+                        }
+                        on Action::StaleGeneration {
+                            drives {
+                                Scheduler.Transition::ConsumeInbound(StaleWorkerRef, Cpu1Ref, Ordinal1);
+                            }
+                        }
+                        on Action::DuplicateConsume {
+                            drives {
+                                Scheduler.Transition::ConsumeInbound(WorkerRef, Cpu1Ref, Ordinal1);
+                            }
+                        }
+                    }
+                }
+            }
+
+            system Scheduler {
+                initial_state: State::Base;
+                state State::Base {
+                    transitions {
+                        on Transition::PublishInbound(
+                            task_ref: TaskRef,
+                            target_cpu: CpuRef,
+                            ordinal: MailboxOrdinal
+                        ) -> State::Ready {
+                            depends_on {
+                                task_ref_ready(task_ref);
+                                mailbox_owner_cpu_is(self, target_cpu);
+                                mailbox_ordinal_fresh(ordinal);
+                                mailbox_target_generation_valid(task_ref, target_cpu);
+                            }
+                            ensures {
+                                mailbox_published_release(task_ref, target_cpu, ordinal);
+                            }
+                        }
+                    }
+                    actions {
+                        on Action::RunIdleWithoutMailbox(cpu_ref: CpuRef) {
+                            depends_on { need_resched_cpu_local(cpu_ref); }
+                            ensures {
+                                mailbox_not_consumed(cpu_ref);
+                                idle_wfi_recheck_safe(cpu_ref);
+                            }
+                        }
+                    }
+                }
+                state State::Ready {
+                    transitions {
+                        on Transition::ConsumeInbound(
+                            task_ref: TaskRef,
+                            target_cpu: CpuRef,
+                            ordinal: MailboxOrdinal
+                        ) -> State::Online {
+                            depends_on {
+                                mailbox_published_release(task_ref, target_cpu, ordinal);
+                                mailbox_owner_cpu_is(self, target_cpu);
+                                mailbox_ordinal_fresh(ordinal);
+                                mailbox_target_generation_valid(task_ref, target_cpu);
+                                need_resched_cpu_local(target_cpu);
+                            }
+                            ensures {
+                                mailbox_consumed_once(task_ref, ordinal);
+                                target_runqueue_enqueued(task_ref, target_cpu);
+                            }
+                        }
+                    }
+                }
+                state State::Online {
+                    actions {
+                        on Action::RunIdle(cpu_ref: CpuRef) {
+                            depends_on {
+                                target_runqueue_enqueued(WorkerRef, cpu_ref);
+                                mailbox_consumed_once(WorkerRef, Ordinal1);
+                            }
+                            ensures { idle_switched_through_common_context(cpu_ref); }
+                        }
+                    }
+                }
+            }
+
+            system IpiMux {
+                initial_state: State::Base;
+                state State::Base {
+                    transitions {
+                        on Transition::SendReschedule(cpu_ref: CpuRef) -> State::Prepared {
+                            depends_on {
+                                mailbox_published_release(WorkerRef, cpu_ref, Ordinal1);
+                            }
+                            ensures { reschedule_ipi_after_release(cpu_ref); }
+                        }
+                    }
+                    actions {
+                        on Action::HandleEarly(cpu_ref: CpuRef) {
+                            ensures {
+                                ssip_pending_cleared(cpu_ref);
+                                need_resched_cpu_local(cpu_ref);
+                                duplicate_ipi_coalesced(cpu_ref);
+                                handler_did_not_switch(cpu_ref);
+                            }
+                        }
+                    }
+                }
+                state State::Prepared {
+                    transitions {
+                        on Transition::HandleReschedule(cpu_ref: CpuRef) -> State::Online {
+                            depends_on { reschedule_ipi_after_release(cpu_ref); }
+                            ensures {
+                                ssip_pending_cleared(cpu_ref);
+                                need_resched_cpu_local(cpu_ref);
+                                handler_did_not_switch(cpu_ref);
+                            }
+                        }
+                    }
+                }
+                state State::Online {
+                    actions {
+                        on Action::CoalesceReschedule(cpu_ref: CpuRef) {
+                            ensures {
+                                need_resched_cpu_local(cpu_ref);
+                                duplicate_ipi_coalesced(cpu_ref);
+                                handler_did_not_switch(cpu_ref);
+                            }
+                        }
+                    }
+                }
+            }
+        """
+
+        derivation, checked, _ = self.run_source(
+            source,
+            "Remote.Dispatch",
+            max_depth="all",
+            max_breadth="all",
+        )
+        self.assertEqual(checked["verdict"], "complete", derivation)
+        self.assertEqual(
+            [(item["target"], item["name"], item["outcome"]) for item in derivation["signals"]],
+            [
+                ("Remote", "Dispatch", "completed"),
+                ("Scheduler", "PublishInbound", "completed"),
+                ("IpiMux", "SendReschedule", "completed"),
+                ("IpiMux", "HandleReschedule", "completed"),
+                ("IpiMux", "CoalesceReschedule", "completed"),
+                ("Scheduler", "ConsumeInbound", "completed"),
+                ("Scheduler", "RunIdle", "completed"),
+            ],
+        )
+        facts = set(derivation["last_stable_snapshot"]["facts"])
+        for fact in (
+            "mailbox_published_release(WorkerRef,Cpu1Ref,Ordinal1)",
+            "reschedule_ipi_after_release(Cpu1Ref)",
+            "mailbox_consumed_once(WorkerRef,Ordinal1)",
+            "target_runqueue_enqueued(WorkerRef,Cpu1Ref)",
+            "duplicate_ipi_coalesced(Cpu1Ref)",
+            "handler_did_not_switch(Cpu1Ref)",
+            "idle_switched_through_common_context(Cpu1Ref)",
+        ):
+            self.assertIn(fact, facts)
+
+        early, early_checked, _ = self.run_source(
+            source,
+            "Remote.IpiBeforeMailbox",
+            max_depth="all",
+            max_breadth="all",
+        )
+        self.assertEqual(early_checked["verdict"], "complete", early)
+        early_facts = set(early["last_stable_snapshot"]["facts"])
+        self.assertIn("mailbox_not_consumed(Cpu1Ref)", early_facts)
+        self.assertIn("idle_wfi_recheck_safe(Cpu1Ref)", early_facts)
+
+        rejection_scenarios = (
+            (
+                "WrongTarget",
+                {
+                    "states": {"Scheduler": "Ready", "IpiMux": "Online"},
+                    "facts": [
+                        "mailbox_published_release(WorkerRef,Cpu1Ref,Ordinal1)",
+                        "need_resched_cpu_local(Cpu1Ref)",
+                    ],
+                },
+            ),
+            (
+                "StaleGeneration",
+                {
+                    "states": {"Scheduler": "Ready", "IpiMux": "Online"},
+                    "facts": [
+                        "mailbox_published_release(StaleWorkerRef,Cpu1Ref,Ordinal1)",
+                        "need_resched_cpu_local(Cpu1Ref)",
+                    ],
+                },
+            ),
+            (
+                "DuplicateConsume",
+                {
+                    "states": {"Scheduler": "Online", "IpiMux": "Online"},
+                    "facts": [
+                        "mailbox_consumed_once(WorkerRef,Ordinal1)",
+                        "target_runqueue_enqueued(WorkerRef,Cpu1Ref)",
+                    ],
+                },
+            ),
+        )
+        for action, scenario in rejection_scenarios:
+            rejected, rejected_checked, _ = self.run_source(
+                source,
+                f"Remote.{action}",
+                max_depth="all",
+                max_breadth="all",
+                scenario=scenario,
+            )
+            self.assertEqual(rejected_checked["verdict"], "failed", rejected)
+            self.assertEqual(rejected["signals"][-1]["outcome"], "rejected")
+            self.assertNotIn(
+                "mailbox_consumed_once(StaleWorkerRef,Ordinal1)",
+                rejected["last_stable_snapshot"]["facts"],
+            )
+
     def test_current_selectors_inherit_only_through_synchronous_task_flow_drives(self) -> None:
         source = """
             type LogicId { }
@@ -6648,14 +6931,14 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
             self.assertEqual(snapshot.read_bytes(), BOOT_INIT_SETUP_SCENARIO.read_bytes())
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "f52b224441fa1d6dec464b5565530b12654f26f3140e0def373a68f2cb57d455",
+                "dd21ebcde544e43880cb77933766ad9a7ae95959a220495dca7737d3c17e036b",
             )
             self.assertEqual(
                 {
                     derivation["model_fingerprint"], model["model_fingerprint"],
                     view["model_fingerprint"], saved["model_fingerprint"],
                 },
-                {"sha256:ead1048315ec8563113a6188b864b392d8f1decbbc2cae8301b7993e14aecef8"},
+                {"sha256:0ec952a9db974b006ca4b0d2a33f3b88d71decaf09328ff3495947dd6300b697"},
             )
             with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
                 compact_text = render_text(view)
@@ -6994,7 +7277,7 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
             )
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "2aba19d510db011fbd5d6ff3b3cf71f058f74f6c0b75d916235ac38e1bccba55",
+                "499f8c3a62c552d3680f82db848bfb08a323242e0785629e2ec01a286951af9f",
             )
             model = self.prepared_model_document
             assert view is not None
@@ -7006,8 +7289,78 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
                     view["model_fingerprint"],
                     saved["model_fingerprint"],
                 },
-                {"sha256:ead1048315ec8563113a6188b864b392d8f1decbbc2cae8301b7993e14aecef8"},
+                {"sha256:0ec952a9db974b006ca4b0d2a33f3b88d71decaf09328ff3495947dd6300b697"},
             )
+
+    def test_main_model_all_cpu_schedulers_expose_ap_mailbox_ipi_idle_protocol(self) -> None:
+        model = self.prepared_model_document["model"]
+
+        def facts(handler: dict, section: str) -> set[str]:
+            return {
+                entry["name"]
+                for item in handler["body"]
+                if item["kind"] == section
+                for entry in item["entries"]
+                if entry["kind"] == "fact"
+            }
+
+        required_handlers = {
+            "PublishInbound",
+            "ConsumeInbound",
+            "MarkNeedResched",
+            "RunIdle",
+        }
+        for index in range(8):
+            scheduler = model["systems"][f"Cpu{index}Scheduler"]
+            handlers = scheduler["handlers_by_name"]
+            self.assertTrue(required_handlers.issubset(handlers))
+
+            publish = handlers["PublishInbound"][0]
+            self.assertTrue(
+                {
+                    "scheduler_mailbox_message_published_release",
+                    "scheduler_reschedule_ipi_requested_after_release",
+                    "scheduler_mailbox_rejects_stale_wrong_target_or_duplicate",
+                }.issubset(facts(publish, "ensures"))
+            )
+
+            consume = handlers["ConsumeInbound"][0]
+            self.assertTrue(
+                {
+                    "scheduler_mailbox_message_published_release",
+                    "scheduler_mailbox_message_target_and_generation_valid",
+                    "scheduler_mailbox_ordinal_fresh",
+                }.issubset(facts(consume, "depends_on"))
+            )
+            self.assertTrue(
+                {
+                    "scheduler_mailbox_message_consumed_once",
+                    "scheduler_mailbox_rejects_stale_wrong_target_or_duplicate",
+                }.issubset(facts(consume, "ensures"))
+            )
+
+            run_idle = handlers["RunIdle"][0]
+            self.assertTrue(
+                {
+                    "scheduler_idle_sleep_recheck_complete",
+                    "scheduler_idle_wfi_only_without_visible_work",
+                    "scheduler_idle_uses_common_switch_protocol",
+                }.issubset(facts(run_idle, "ensures"))
+            )
+
+        interrupt_process = next(
+            process
+            for process in model["types"]["InterruptType"]["effective_processes"]
+            if process["name"] == "HandleRescheduleIpi"
+        )
+        self.assertTrue(
+            {
+                "interrupt_ssip_pending_cleared",
+                "interrupt_need_resched_recorded_cpu_local",
+                "interrupt_reschedule_ipi_does_not_switch_in_handler",
+                "interrupt_duplicate_reschedule_ipi_coalesced",
+            }.issubset(facts(interrupt_process, "ensures"))
+        )
 
     def test_main_model_boot_init_entry_stops_at_first_missing_guard(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

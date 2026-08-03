@@ -1,0 +1,32 @@
+schema_version = 2
+name = "smp-ap-scheduler"
+purpose = "acceptance"
+timeout_seconds = 120
+post_script = "kernel-smoke-order.py"
+
+[kernel]
+app = "smoke"
+provider = "native"
+probe = ["announce"]
+profile = "release"
+
+[disk]
+mode = "template-readonly"
+profile = "canonical"
+
+[qemu]
+memory_mb = 128
+smp = 2
+kernel_cmdline = "earlycon=sbi"
+rng = true
+exit_policy = "guest-shutdown"
+interaction = "none"
+
+[expect]
+process_exit = 0
+markers = ["smp_ap_scheduler cpu=1", "result:", " failed=0 total="]
+forbidden_markers = ["FAILED", "arceos_ex panic", "kernel task failure"]
+marker_counts = [
+  { marker = "smp_ap_scheduler cpu=1", exactly = 1 },
+  { marker = "checkpoint: Kernel.Online", exactly = 1 },
+]

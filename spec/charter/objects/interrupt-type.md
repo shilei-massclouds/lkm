@@ -13,6 +13,11 @@ IRQ chip 资源拥有。
 IRQ 再入；只有 handler 明确重新开放的返回或 softirq 区间才允许嵌套。每次到达正式分派边界时声明
 独立 `InterruptFlowType`，其 parent 固定为本资源。
 
+SMP runtime 为每个 online CPU 开放 supervisor software interrupt 分路。reschedule IPI sender 必须先
+release 发布目标 mailbox，再经 SBI 向目标 hart 请求 IPI。SSIP handler 清除本 hart 的硬件 pending，
+把 CPU-local `need_resched` 合并置位，并正常返回；handler 内禁止消费 runqueue、调用 Scheduler 或执行
+context switch。中断返回后的 idle/Task 安全点负责 acquire 观察 mailbox 与 `need_resched` 并调度。
+
 ## Mapping
 
 - Model: `spec/model/objects/interrupt_type.spec`

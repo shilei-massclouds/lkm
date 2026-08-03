@@ -55,6 +55,7 @@ pub mod irqchip_macros;
 pub mod kernel_addr_space;
 pub mod kernel_cmdline;
 pub mod kernel_image;
+pub mod kernel_task;
 pub mod lds;
 pub mod linear_map;
 #[cfg(plic_provider_linux_object)]

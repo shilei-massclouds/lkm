@@ -20,7 +20,13 @@
 - UP 覆盖 rejection-before-commit、post-commit terminal failure、stale/错误绑定/重复恢复、A→B→A、
   nested yield、blocked/wakeup、trap leaf 恢复与普通 IRQ 无 Task lifecycle delta。
 
-## P2：GlobalArbiter 与跨 CPU mailbox
+## 已闭合：显式目标 AP activation/wake mailbox
+
+首轮已闭合普通内核 Task 的显式目标 CpuRef、generation-checked inbound mailbox、reschedule IPI 与 AP
+idle/scheduler continuation。该路径不选择目标 CPU、不迁移运行中 Task，也不引入全局仲裁；它只是把
+调用者已经选择的 online CPU 安全交付给 owner Scheduler。
+
+## P2：GlobalArbiter、负载选择与迁移
 
 P2 引入确定性的全局仲裁 occurrence，而不改变上述 Task/Flow/yields 语义：
 
@@ -29,7 +35,7 @@ P2 引入确定性的全局仲裁 occurrence，而不改变上述 Task/Flow/yiel
 3. 跨 CPU wake/migrate 通过 generation-checked mailbox 交付，目标 CPU 在持有本地 rq lock 的提交点消费。
 4. 迁移只更新同一 lifetime Flow 的 CpuRef，并与 source dequeue、destination enqueue、context epoch 和
    CPU-local binding 构成不可拆分 commit；不存在 Flow replacement 分支。
-5. stale mailbox、重复 occurrence、错误 source/destination epoch 和部分提交一律 terminal failure，不回滚、
+5. stale migration mailbox、重复 occurrence、错误 source/destination epoch 和部分提交一律 terminal failure，不回滚、
    不重试，也不静默重算仲裁。
 
 ## P2 artifact/replay
@@ -43,7 +49,7 @@ P2 引入确定性的全局仲裁 occurrence，而不改变上述 Task/Flow/yiel
 - exact total order、failure outcome 和最终 snapshot fingerprint。
 
 Replay 必须只消费 artifact 决策，验证而不重新仲裁；record/replay 的对象状态、Signal/YieldToken 轨迹和
-failure position 必须一致。本轮不实现 artifact writer、GlobalArbiter、cross-CPU mailbox、迁移 commit
+failure position 必须一致。本轮不实现 artifact writer、GlobalArbiter、自动负载选择、迁移 commit
 或完整 replay。
 
 ## Closure record

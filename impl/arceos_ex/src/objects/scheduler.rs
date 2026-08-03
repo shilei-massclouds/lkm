@@ -1018,6 +1018,10 @@ impl Scheduler {
                 State::Online,
             );
         }
+        self.boot_idle_preemption.adopt_secondary_ready()?;
+        // The HSM architectural entry is the one allowed non-contextual AP
+        // entry. Every scheduler switch from this point uses saved contexts.
+        self.task_stack_switching_online = true;
         self.scheduler_running = true;
         self.lifecycle.transition(
             LifecycleEvent::Enable,
@@ -1041,13 +1045,13 @@ impl Scheduler {
         if !self.scheduler_running {
             return Err(self.failed_schedule_entry("scheduler-running"));
         }
-        if self.idle_task_id() != self.boot_idle_setup_state.task_id() {
+        if !self.idle_binding_valid() {
             return Err(self.failed_schedule_entry("idle-task-binding"));
         }
         if local_interrupt.local_state() != State::Ready {
             return Err(self.failed_schedule_entry("local-interrupt-ready"));
         }
-        if !current_task_ref.is_boot_scheduler_ref() {
+        if !current_task_ref.is_scheduler_ref() {
             return Err(self.failed_schedule_entry("current-task-ref-resolves"));
         }
         if current_cpu_ref != self.cpu_ref() {
@@ -1094,6 +1098,9 @@ impl Scheduler {
                         Some(self.switch_to(prev_ref, next_ref, current_task_ref, task_access)?);
                 } else {
                     self.identity_switch_passes = self.identity_switch_passes.wrapping_add(1);
+                    if !self.cpu_ref().is_boot_cpu() {
+                        crate::objects::kernel_task::record_identity_schedule(self.cpu_id());
+                    }
                 }
                 self.schedule_passes = self.schedule_passes.wrapping_add(1);
                 crate::checkpoint::checkpoint(Checkpoint::SchedulerSchedule);
@@ -1144,7 +1151,7 @@ impl Scheduler {
     ) -> EventResult {
         if self.lifecycle.state() != State::Online
             || !self.scheduler_running
-            || !current_task_ref.same_identity(TaskRef::BOOT)
+            || !current_task_ref.same_identity(self.idle_ref())
         {
             return Err(self.failed_schedule_condition());
         }
@@ -1159,7 +1166,7 @@ impl Scheduler {
         self.idle_schedule_passes = self.idle_schedule_passes.wrapping_add(1);
         self.idle_schedule_returned_passes = self.idle_schedule_returned_passes.wrapping_add(1);
         if task_access
-            .task_on_cpu_identity_matches(TaskRef::BOOT, crate::arch::riscv64::csr::read_tp())
+            .task_on_cpu_identity_matches(self.idle_ref(), crate::arch::riscv64::csr::read_tp())
         {
             self.idle_schedule_identity_passes = self.idle_schedule_identity_passes.wrapping_add(1);
         }
@@ -1241,8 +1248,8 @@ impl Scheduler {
         disposition: PrevDisposition,
     ) -> Result<TaskRef, EventError> {
         if current_scheduler_ref != self.cpu_ref()
-            || !prev_ref.is_boot_scheduler_ref()
-            || self.idle_task_id() != self.boot_idle_setup_state.task_id()
+            || !prev_ref.is_scheduler_ref()
+            || !self.idle_binding_valid()
         {
             return Err(self.failed_schedule_condition());
         }
@@ -1309,10 +1316,10 @@ impl Scheduler {
         current_task_ref: TaskRef,
         task_access: &mut SchedulerTaskAccess<'_>,
     ) -> Result<SwitchPreflight, EventError> {
-        if !prev_ref.is_boot_scheduler_ref() {
+        if !prev_ref.is_scheduler_ref() {
             return Err(self.failed_switch_preflight("prev-ref-resolves"));
         }
-        if !next_ref.is_boot_scheduler_ref() {
+        if !next_ref.is_scheduler_ref() {
             return Err(self.failed_switch_preflight("next-ref-resolves"));
         }
         if prev_ref.same_identity(next_ref) {
@@ -1321,7 +1328,7 @@ impl Scheduler {
         if !self.curr_ref().same_identity(prev_ref) {
             return Err(self.failed_switch_preflight("scheduler-curr-matches-prev"));
         }
-        if self.idle_task_id() != self.boot_idle_setup_state.task_id() {
+        if !self.idle_binding_valid() {
             return Err(self.failed_switch_preflight("idle-binding-is-current"));
         }
         if current_task_ref != prev_ref {
@@ -1561,6 +1568,9 @@ impl Scheduler {
         self.flow_enter_signal_passes = self.flow_enter_signal_passes.wrapping_add(1);
         self.switch_protocol_sequence = self.switch_protocol_sequence.wrapping_add(1);
         self.flow_signal_sequence = self.switch_protocol_sequence;
+        if task_ref.is_ap_idle() {
+            crate::objects::kernel_task::record_idle_restore(self.cpu_id());
+        }
 
         Ok(())
     }
@@ -1600,6 +1610,9 @@ impl Scheduler {
             self.kernel_init_stack_switch_started_count =
                 self.kernel_init_stack_switch_started_count.wrapping_add(1);
             crate::arch::riscv64::sbi::putstr("-> switch BootTask -> KernelInitTask\n");
+        }
+        if !self.cpu_ref().is_boot_cpu() {
+            crate::objects::kernel_task::record_nonidentity_switch(self.cpu_id());
         }
 
         self.curr = next_ref;
@@ -2156,6 +2169,9 @@ fn task_id_for_current_task_ref(task_ref: TaskRef) -> Option<usize> {
     if task_ref.is_user() {
         return Some(USER_CHILD_PID);
     }
+    if task_ref.is_kernel() {
+        return crate::objects::kernel_task::task_by_ref(task_ref).map(Task::pid);
+    }
     match task_ref {
         TaskRef::KERNEL_INIT => Some(crate::objects::rest_init::KERNEL_INIT_PID),
         TaskRef::KTHREADD => Some(crate::objects::rest_init::KTHREADD_PID),
@@ -2169,9 +2185,10 @@ fn task_id_for_current_task_ref(task_ref: TaskRef) -> Option<usize> {
 }
 
 const fn default_sched_class(task_ref: TaskRef) -> SchedClassRef {
-    match task_ref {
-        TaskRef::BOOT => SchedClassRef::Idle,
-        _ => SchedClassRef::Fair,
+    if task_ref.is_ap_idle() || task_ref.same_identity(TaskRef::BOOT) {
+        SchedClassRef::Idle
+    } else {
+        SchedClassRef::Fair
     }
 }
 
@@ -2244,10 +2261,6 @@ impl SmokeSchedulerTask {
 
     pub(crate) fn task_mut(&mut self) -> &mut Task {
         &mut self.task
-    }
-
-    pub(crate) const fn task(&self) -> &Task {
-        &self.task
     }
 
     fn current_task_candidate(&self) -> super::current_task::CurrentTaskCandidate<'_> {
@@ -2374,10 +2387,6 @@ impl SmokeSchedulerTask {
 
         self.yielded_back = true;
         Ok(())
-    }
-
-    pub(crate) fn switch_context(&self) -> &TaskSwitchContext {
-        self.task.switch_context()
     }
 
     pub(crate) fn switch_context_mut(&mut self) -> &mut TaskSwitchContext {
@@ -2510,6 +2519,15 @@ impl Scheduler {
 
     pub const fn idle_task_id(&self) -> usize {
         self.idle_task_id
+    }
+
+    const fn idle_binding_valid(&self) -> bool {
+        if self.cpu_ref.is_boot_cpu() {
+            self.idle.same_identity(TaskRef::BOOT)
+                && self.idle_task_id == self.boot_idle_setup_state.task_id()
+        } else {
+            self.idle.same_identity(TaskRef::ap_idle(self.cpu_id())) && self.idle_task_id == 0
+        }
     }
 
     pub const fn class_queues_ready(&self) -> bool {
@@ -2852,7 +2870,7 @@ impl Scheduler {
         task_id: usize,
     ) -> EventResult {
         if scheduler_ref != self.cpu_ref()
-            || !task_ref.is_boot_scheduler_ref()
+            || !task_ref.is_scheduler_ref()
             || task_ref.same_identity(TaskRef::BOOT)
             || task_id == usize::MAX
         {
@@ -2864,6 +2882,61 @@ impl Scheduler {
             return self.failed_setup();
         }
         self.enqueue_task_with_class_and_id(task_ref, default_sched_class(task_ref), task_id)
+    }
+
+    pub fn commit_inbound_kernel_task(
+        &mut self,
+        task_ref: TaskRef,
+        kind: super::kernel_task::InboundKind,
+        task_id: usize,
+        local_interrupt: &mut InterruptType,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Online
+            || self.cpu_ref().is_boot_cpu()
+            || !task_ref.is_kernel()
+            || task_id_for_current_task_ref(task_ref) != Some(task_id)
+            || self.contains_task(task_id)
+            || self.contains_task_ref(task_ref)
+            || self.fair_queue.len() == SCHED_CLASS_QUEUE_CAPACITY
+        {
+            return self.failed_setup();
+        }
+        let task_preflight = super::kernel_task::task_by_ref(task_ref).is_some_and(|task| {
+            task.flow_cpu_ref() == Some(self.cpu_ref())
+                && match kind {
+                    super::kernel_task::InboundKind::Activate => task.state() == State::Ready,
+                    super::kernel_task::InboundKind::Wake => {
+                        task.state() == State::Online
+                            && task.scheduler_sleep_declared()
+                            && !task.runqueue_published()
+                    }
+                }
+        });
+        if !task_preflight {
+            return self.failed_setup();
+        }
+
+        self.boot_idle_preemption.disable()?;
+        local_interrupt.save_and_disable()?;
+        self.lock
+            .lock_irqsave(local_interrupt, &mut self.boot_idle_preemption)?;
+        let commit = (|| {
+            match kind {
+                super::kernel_task::InboundKind::Activate => {
+                    super::kernel_task::activate_for_enqueue(task_ref, self.cpu_id())?;
+                }
+                super::kernel_task::InboundKind::Wake => {
+                    super::kernel_task::wake_for_enqueue(task_ref, self.cpu_id())?;
+                }
+            }
+            self.enqueue_task_with_class_and_id(task_ref, SchedClassRef::Fair, task_id)
+        })();
+        let unlock = self
+            .lock
+            .unlock_irqrestore(local_interrupt, &mut self.boot_idle_preemption);
+        let restore = local_interrupt.restore();
+        let enable = self.boot_idle_preemption.enable_no_resched();
+        commit.and(unlock).and(restore).and(enable)
     }
 
     #[cfg_attr(not(app_smoke), allow(dead_code))]
@@ -2948,10 +3021,7 @@ impl Scheduler {
         prev_ref: TaskRef,
         disposition: PrevDisposition,
     ) -> Result<TaskRef, EventError> {
-        if scheduler_ref != self.cpu_ref()
-            || !self.runqueue_ready
-            || !prev_ref.is_boot_scheduler_ref()
-        {
+        if scheduler_ref != self.cpu_ref() || !self.runqueue_ready || !prev_ref.is_scheduler_ref() {
             return Err(self.failed_setup_error());
         }
 

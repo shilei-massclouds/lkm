@@ -35,3 +35,22 @@
 差分 case 比较 Schedule entry、PreparePrev exit、PickNext、仅 non-identity 出现的 SwitchTo entry、
 next-stack finish/return 等只读 checkpoint 字段与顺序。具体 Linux symbol/source/checkpoint 映射只进入
 Testing cross-reference，不进入 Coding。最终实现变更门禁为从仓库根直接运行 `make test`。
+
+## AP 普通内核 Task 闭环
+
+- `smp=2` acceptance 固定 CPU1：CPU1 已进入真实安全 `wfi` 后，CPU0 创建带独立栈与完整初始 context 的
+  普通内核 Task，并按 release mailbox → SBI IPI 的顺序发布。CPU1 必须记录 SSIP 接收，精确一次消费
+  activation，并完成 idle→task。
+- worker 在 CPU1 验证实际 logical CPU/hart，执行一次 identity yield，再声明 blocked 并完成 task→idle。
+  CPU0 只发布 wake mailbox 和 IPI；CPU1 完成 idle→task，从已保存 continuation 恢复而不重跑入口，随后
+  终止 Flow 并回到 idle。至少观察三次 non-identity switch，完成事实只能由 CPU1 写入。
+- 错误目标、stale generation、重复/倒退 ordinal、重复消费和 IPI 先于 release publication 必须在目标
+  runqueue 变化前失败或安全合并。唯一 runnable Task 的 identity yield 不得制造伪 switch。
+- 同一路径以 `smp=8` 运行，未选中的 AP 保持 idle；显式目标可替换为任一 online AP。UP scheduler、
+  boot/AP bringup、user/rootfs/LTP gates 保持通过。
+- 默认 composite stress 的 `kernel-smoke-native` 样本必须在每次 `smp=8` 重跑中通过上述 AP 闭环 basic
+  gate；任何缺失 marker、panic、失败计数或超时都按该次压力样本失败分类，不能只比较聚合成功率。
+- 本轮 AP 普通内核 Task 没有 Linux 用户/内核任务的同构执行对象，因此不制造伪造的 AP worker
+  checkpoint 对照。默认 Linux/arceos_ex `rc-local` exact-checkpoint difftest 负责证明共享 boot、SMP bringup
+  与后续用户路径没有差分回退；AP 专属 mailbox/IPI/context-switch 语义由 tools2 正反场景和 QEMU exact
+  acceptance 负责。

@@ -21,6 +21,9 @@ CPU 归属只保存在固定 `TaskFlow.cpu_ref`；Task 不保存同义 CPU assig
 - 每次 fork/clone 都创建 fresh Task、fresh `UserTaskFlow` 和该 Flow 创建的 fresh
   `UserAppRuntime`；三者都不得与 parent 或其它 child 共享。child 后续 exec 仍不替换 Flow。
 - `ApIdleTask[logical_id]` 与 `ApIdleFlow[logical_id]` pointwise、终身绑定。
+- `TaskCreationCore` 创建的普通动态内核 Task 使用同一 Task/TaskFlow aggregate；每个实例拥有 fresh
+  generation、独立内核栈、完整初始 context 和内核正文入口。它不借用创建者栈，也不使用 smoke-only
+  carrier。
 
 运行期实例 identity、slot/generation 和声明规则由
 [运行期实例声明](dynamic-instance-declaration.md)统一定义。Task 的 `flow` 必须在 Preset 时一次性绑定；
@@ -117,6 +120,11 @@ coordinate；初始 coordinate 落到正文 Action，保存后的 coordinate 落
 TaskFlow，TaskRef 必须与 CurrentTaskRef 一致。Online、Reserved、非 current 或 stale reference 在修改
 destination 前拒绝。
 
+普通动态内核 Task 在首次发布前必须把固定 Flow 的 CpuRef 绑定为调用者显式指定的 online 目标 CPU。
+首次 activation 和 blocked 后的 wake 都通过目标 Scheduler inbound mailbox 发布；发布者不直接改目标
+runqueue。TaskRef 的 slot 复用必须递增 generation，mailbox lookup 同时校验 slot/generation。首次发布后
+本轮禁止改写 CpuRef；运行中迁移另行建模。
+
 ## Scheduler switch 与 `yields`
 
 固定 TaskFlow 的可挂起 Action 用 `yields Scheduler.Schedule` 表达立即交付 Schedule 并挂起 source
@@ -161,5 +169,7 @@ ApplicationInstance，fork 才创建新的 Task/Flow/Runtime。
 
 ## 当前能力边界
 
-本轮关闭单 CPU `yields`/schedule-return 基础。完整 SMP GlobalArbiter、cross-CPU mailbox、迁移仲裁与
-schedule replay 保持 `P2 / 延期`；Task/Flow 固定关系不得为这些未来能力重新引入兼容字段或双写路径。
+本轮在单 CPU `yields`/schedule-return 基础上关闭显式目标 CPU 的普通内核 Task activation/wake、AP
+idle/scheduler continuation 与 reschedule IPI。完整 SMP GlobalArbiter、自动负载选择、运行中迁移仲裁、
+用户任务 AP 执行、时钟抢占与 schedule replay 保持延期；Task/Flow 固定关系不得为这些未来能力重新
+引入兼容字段或双写路径。

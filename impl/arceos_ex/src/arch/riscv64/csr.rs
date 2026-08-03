@@ -1,6 +1,6 @@
 use core::arch::global_asm;
 
-use super::{SUPERVISOR_EXTERNAL_IRQ, SUPERVISOR_TIMER_IRQ};
+use super::{SUPERVISOR_EXTERNAL_IRQ, SUPERVISOR_SOFTWARE_IRQ, SUPERVISOR_TIMER_IRQ};
 
 #[allow(dead_code)]
 pub const SSTATUS_SIE: usize = 1 << 1;
@@ -9,6 +9,7 @@ pub const SSTATUS_SPP: usize = 1 << 8;
 pub const SSTATUS_SUM: usize = 1 << 18;
 const SIE_STIE: usize = 1 << SUPERVISOR_TIMER_IRQ;
 const SIE_SEIE: usize = 1 << SUPERVISOR_EXTERNAL_IRQ;
+const SIE_SSIE: usize = 1 << SUPERVISOR_SOFTWARE_IRQ;
 pub const SSTATUS_VS: usize = 0b11 << 9;
 pub const SSTATUS_FS: usize = 0b11 << 13;
 pub const SSTATUS_FS_INITIAL: usize = 0b01 << 13;
@@ -197,6 +198,16 @@ pub fn disable_supervisor_interrupts() {
 
 pub fn enable_supervisor_interrupts() {
     set_sstatus_bits(SSTATUS_SIE);
+}
+
+pub fn enable_supervisor_software_interrupt() {
+    set_sie_bits(SIE_SSIE);
+}
+
+pub fn clear_supervisor_software_interrupt() {
+    unsafe {
+        core::arch::asm!("csrrc zero, sip, {mask}", mask = in(reg) SIE_SSIE, options(nostack, nomem));
+    }
 }
 
 pub fn disable_supervisor_timer_interrupt() {

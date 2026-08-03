@@ -109,6 +109,12 @@ predicate task_authority_activated_by_hsm<T: Task>(task: T) -> bool;
 predicate task_ap_idle_reserved_for_cpu<T: Task>(task: T) -> bool;
 predicate task_creation_copy_process_committed<C, P: Task, T: Task>(core: C, parent: P, task: T) -> bool;
 predicate task_creation_bound_flow<C, T: Task, F: TaskFlow>(core: C, task: T, flow: F) -> bool;
+predicate kernel_task_generation_fresh<T: Task>(task: T) -> bool;
+predicate kernel_task_target_cpu_explicit<T: Task, C: CpuRef>(task: T, cpu_ref: C) -> bool;
+predicate kernel_task_target_cpu_immutable_after_publish<T: Task>(task: T) -> bool;
+predicate kernel_task_initial_entry_and_stack_complete<T: Task>(task: T) -> bool;
+predicate kernel_task_activation_uses_target_mailbox<T: Task>(task: T) -> bool;
+predicate kernel_task_wake_uses_target_mailbox<T: Task>(task: T) -> bool;
 predicate current_stack_binding_matches_task<C, T: Task, S: Stack>(cpu: C, task: T, stack: S) -> bool;
 predicate current_task_ref_derived_from_selector<R: TaskRef, T: Task>(task_ref: R, task: T) -> bool;
 predicate boot_task_preemption_is_static_initial_property<T: Task>(task: T) -> bool;
@@ -443,6 +449,8 @@ object BootTask: Task {
 
 object KernelInitTask: Task { associations { flow = KernelInitFlow; } }
 object KthreaddTask: Task { associations { flow = KthreaddFlow; } }
+
+object KernelTask: Task { associations { flow = KernelTaskFlow; } }
 
 object ApIdleTask: Task {
     lifecycle_override: true;

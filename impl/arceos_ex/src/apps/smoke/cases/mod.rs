@@ -44,6 +44,7 @@ pub mod rwlock;
 pub mod scheduler;
 pub mod scheduler_schedule;
 pub mod slub;
+pub mod smp_ap_scheduler;
 pub mod smp_bringup;
 pub mod stack_depot;
 pub mod stack_guard;

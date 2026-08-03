@@ -27,6 +27,13 @@ Scheduler 随 boot CPU 的可调度交接进入 Online；其它 CPU 的 Schedule
 Scheduler 的当前任务和候选队列都只属于 owner CPU。跨 CPU 的 root/sched domain、负载协调和其它
 全局资源是独立的共享对象，不属于某一个 Scheduler 的私有队列，也不复制 CPU 或 Scheduler 本体。
 
+每个 Scheduler 还拥有一个有界的 CPU-local inbound mailbox。其它 CPU 只能向 mailbox 发布目标明确的
+activation/wake 消息，不能直接取得目标 runqueue 或改写目标 Scheduler。消息携带稳定 TaskRef 及其
+generation、目标 CpuRef 和单调 ordinal；发布者先以 release 顺序提交完整消息，再请求目标 CPU 的
+reschedule IPI。目标 CPU 以 acquire 顺序精确一次消费，验证 generation、目标与 ordinal 后，才在持有
+本地 runqueue lock 的提交点完成入队或唤醒。stale generation、错误目标、重复 ordinal 或重复消费必须在
+runqueue 修改前拒绝。重复 IPI 可以合并为同一个 `need_resched`，但不能制造第二次 mailbox 消费。
+
 ## 调度与交换
 
 当前任务通过自己的固定 TaskFlow，请求 owner CPU 的 Scheduler 重新选择任务。Scheduler 结合以下事实
@@ -48,6 +55,11 @@ Scheduler 的当前任务和候选队列都只属于 owner CPU。跨 CPU 的 roo
 首次运行与恢复运行使用同一个任务交换概念。候选任务的执行位置本身决定它是进入首次准备好的位置，
 还是回到先前暂停的位置；Scheduler 不保存两种派发类型，也不据此选择两套交换协议。
 
+owner CPU 的 idle Task 也使用同一交换协议。CPU-local idle loop 先消费 inbound mailbox 并检查本地候选
+集合；有工作或 `need_resched` 时请求 owner Scheduler。没有工作时，它在关闭本地总中断门后重检 mailbox
+和 `need_resched`，只有重检仍为空才进入可由 IPI 唤醒的 `wfi`。idle 首次真实切出保存其架构 continuation；
+以后恢复 idle 与恢复普通任务一样执行 `Restore -> Dispatch -> Enter`，不建立 AP 专用派发分支。
+
 ## `yields` 与交换边界
 
 `yields Scheduler.Schedule` 表示当前执行过程把重新选择请求交给 Scheduler，并等待 Scheduler 返回。
@@ -64,6 +76,9 @@ Scheduler 接受请求前必须完成所有可能拒绝该请求的检查。交�
 当前任务或候选队列。任务迁移、跨 CPU 协调、共享调度域和全局仲裁由独立机制决定；这些机制可以改变
 任务之后属于哪个 CPU 的候选集合，但不改变每次任务交换必须在目标 Scheduler 所属 CPU 上完成这一
 边界。
+
+首轮远程放置只接受调用者显式给出的 online CpuRef。普通内核 Task 首次发布后固定在该 CPU；运行中
+迁移、负载均衡、跨 CPU 候选选择和 GlobalArbiter 仍不属于本轮。
 
 ## Mapping
 

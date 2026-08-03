@@ -422,6 +422,7 @@ impl CpuGroup {
             };
             cpu.scheduler_mut().enable_secondary()?;
             cpu.mark_online();
+            crate::context::open_secondary_runtime(logical_id);
             logical_id += 1;
         }
         self.smp_concurrency_open = true;

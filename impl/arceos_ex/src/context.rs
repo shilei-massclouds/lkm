@@ -123,6 +123,7 @@ use crate::objects::{
     workqueue::Workqueue,
     zones::Zones,
 };
+use core::sync::atomic::{AtomicBool, Ordering};
 
 pub struct Context {
     pub config: Config,
@@ -773,6 +774,7 @@ impl Context {
             return Some(candidate.task.task_ref());
         }
         crate::objects::smp_bringup::ap_current_task_candidate_by_identity(identity)
+            .or_else(|| crate::objects::kernel_task::task_candidate_by_identity(identity))
             .map(|candidate| candidate.task.task_ref())
     }
 
@@ -796,7 +798,8 @@ impl Context {
                 Some(self.scheduler_test_tasks.smoke_rwlock_task_mut().task_mut())
             }
             _ if task_ref.is_user() => self.user_task_set.task_mut_by_ref(task_ref),
-            _ => crate::objects::smp_bringup::ap_task_mut_by_ref(task_ref),
+            _ if task_ref.is_ap_idle() => crate::objects::smp_bringup::ap_task_mut_by_ref(task_ref),
+            _ => None,
         }
     }
 
@@ -822,8 +825,12 @@ impl Context {
             Some(candidate)
         } else if let Some(candidate) = self.user_task_set.current_task_candidate_by_ref(task_ref) {
             Some(candidate)
-        } else {
+        } else if let Some(candidate) =
             crate::objects::smp_bringup::ap_current_task_candidate_by_ref(task_ref)
+        {
+            Some(candidate)
+        } else {
+            crate::objects::kernel_task::task_candidate_by_ref(task_ref)
         }?;
         Some(candidate)
     }
@@ -1060,6 +1067,16 @@ impl Context {
             current_task.task_ref(),
             current_cpu.cpu_ref(),
         )
+    }
+
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
+    pub(crate) fn create_kernel_task(
+        &mut self,
+        target_cpu: crate::objects::cpu::CpuRef,
+        entry: extern "C" fn() -> !,
+    ) -> Result<TaskRef, EventError> {
+        self.task_creation_core
+            .create_kernel_task(&self.cpu_group, target_cpu, entry)
     }
 
     fn schedule_from_refs(
@@ -1565,6 +1582,123 @@ fn missing_scheduler_error() -> EventError {
 }
 
 static mut CONTEXT: Context = Context::new();
+
+static SECONDARY_RUNTIME_OPEN: [AtomicBool; crate::objects::cpu::MAX_CPUS] =
+    [const { AtomicBool::new(false) }; crate::objects::cpu::MAX_CPUS];
+
+pub(crate) fn open_secondary_runtime(logical_id: usize) {
+    if logical_id > 0 && logical_id < crate::objects::cpu::MAX_CPUS {
+        SECONDARY_RUNTIME_OPEN[logical_id].store(true, Ordering::Release);
+    }
+}
+
+pub(crate) fn secondary_runtime_open(logical_id: usize) -> bool {
+    SECONDARY_RUNTIME_OPEN
+        .get(logical_id)
+        .is_some_and(|open| open.load(Ordering::Acquire))
+}
+
+/// Resolve only the CPU-owned runtime pair. AP code never obtains the global
+/// `&'static mut Context`; after SMP opens, its mutable authority is restricted
+/// to its own Scheduler/InterruptType plus target-owned task storage.
+fn secondary_runtime_parts(
+    logical_id: usize,
+) -> Option<(
+    &'static mut crate::objects::scheduler::Scheduler,
+    &'static mut crate::objects::interrupt_type::InterruptType,
+)> {
+    if !secondary_runtime_open(logical_id) {
+        return None;
+    }
+    // SAFETY: each secondary CPU calls this only for its own logical ID. CPU0
+    // publishes the open flag after finishing that CPU's setup and never
+    // mutates its Scheduler or local InterruptType afterwards.
+    unsafe {
+        let context = core::ptr::addr_of_mut!(CONTEXT);
+        let cpu_group = core::ptr::addr_of_mut!((*context).cpu_group);
+        let cpu = (&mut *cpu_group).cpu_mut(logical_id)?;
+        let (scheduler, interrupt) = cpu.scheduler_and_local_interrupt_mut();
+        let scheduler = scheduler as *mut crate::objects::scheduler::Scheduler;
+        let interrupt = interrupt as *mut crate::objects::interrupt_type::InterruptType;
+        Some((&mut *scheduler, &mut *interrupt))
+    }
+}
+
+pub(crate) fn process_secondary_inbound(logical_id: usize) -> EventResult {
+    let Some(message) = crate::objects::kernel_task::take_inbound(logical_id) else {
+        return Ok(());
+    };
+    if message.target_cpu.logical_id() != logical_id || message.ordinal == 0 {
+        return Err(missing_scheduler_error());
+    }
+    let task_id = crate::objects::kernel_task::task_by_ref(message.task_ref)
+        .map(Task::pid)
+        .ok_or_else(missing_scheduler_error)?;
+    let (scheduler, local_interrupt) =
+        secondary_runtime_parts(logical_id).ok_or_else(missing_scheduler_error)?;
+    scheduler.commit_inbound_kernel_task(message.task_ref, message.kind, task_id, local_interrupt)
+}
+
+pub(crate) fn schedule_secondary_current(
+    logical_id: usize,
+    current_task_ref: TaskRef,
+) -> EventResult {
+    let candidate = crate::objects::smp_bringup::ap_current_task_candidate_by_ref(current_task_ref)
+        .or_else(|| crate::objects::kernel_task::task_candidate_by_ref(current_task_ref))
+        .ok_or_else(missing_scheduler_error)?;
+    let flow_ref = candidate.flow.flow_ref();
+    let cpu_ref = candidate
+        .flow
+        .cpu_ref()
+        .ok_or_else(missing_scheduler_error)?;
+    if cpu_ref.logical_id() != logical_id {
+        return Err(missing_scheduler_error());
+    }
+    let (scheduler, local_interrupt) =
+        secondary_runtime_parts(logical_id).ok_or_else(missing_scheduler_error)?;
+    let mut task_access = SchedulerTaskAccess::new_secondary(logical_id);
+    if current_task_ref.is_ap_idle() {
+        scheduler.schedule_idle(
+            flow_ref,
+            current_task_ref,
+            cpu_ref,
+            &mut task_access,
+            local_interrupt,
+        )
+    } else {
+        scheduler.schedule(
+            flow_ref,
+            current_task_ref,
+            cpu_ref,
+            &mut task_access,
+            local_interrupt,
+        )
+    }
+}
+
+#[cfg_attr(not(app_smoke), allow(dead_code))]
+pub(crate) fn finish_secondary_task_switch(logical_id: usize, task_ref: TaskRef) -> EventResult {
+    let (scheduler, _) = secondary_runtime_parts(logical_id).ok_or_else(missing_scheduler_error)?;
+    let mut task_access = SchedulerTaskAccess::new_secondary(logical_id);
+    scheduler.dispatch_task_after_switch(task_ref, &mut task_access)
+}
+
+#[cfg_attr(not(app_smoke), allow(dead_code))]
+pub(crate) fn declare_secondary_task_sleep(logical_id: usize, task_ref: TaskRef) -> EventResult {
+    crate::objects::kernel_task::task_mut_by_ref_on_cpu(task_ref, logical_id)
+        .ok_or_else(missing_scheduler_error)?
+        .declare_scheduler_sleep()
+}
+
+#[cfg_attr(not(app_smoke), allow(dead_code))]
+pub(crate) fn disable_secondary_task_flow_for_exit(
+    logical_id: usize,
+    task_ref: TaskRef,
+) -> EventResult {
+    crate::objects::kernel_task::task_mut_by_ref_on_cpu(task_ref, logical_id)
+        .ok_or_else(missing_scheduler_error)?
+        .disable_embedded_flow_for_exit()
+}
 
 pub fn context() -> &'static mut Context {
     // SAFETY: the current boot path is single-hart and system-exclusive. The

@@ -20,5 +20,6 @@ Kernel owner；它不自行发送 payload handoff。Kernel 在验证应用环境
 KernelInitTask OnCpu、`CurrentTask` 解析为 KernelInitTask，并验证当前 SP 位于
 PID 1 的 vmalloc stack。首次叶阶段不得由 scheduler 的 BootTask 调用栈同步预执行。
 
-SmpBringup 的 BP 协调属于 KernelInitFlow；AP Entry/Callin/OnlineIdle 不属于 PID 1 Flow 的执行
-所有权，继续等待逐 AP TaskFlow 正式化。旧 `SmpRuntimePhase.*` checkpoint 全部删除并重编号。
+SmpBringup 的 BP 协调属于 KernelInitFlow；AP Entry/Callin/OnlineIdle 与后续 idle/scheduler loop 属于各自
+keyed ApIdleFlow，不属于 PID 1 Flow 的执行所有权。AP runtime 只通过 per-CPU mailbox/IPI 与 BP 协调，
+不借用 PID 1 的 Context continuation。旧 `SmpRuntimePhase.*` checkpoint 全部删除并重编号。

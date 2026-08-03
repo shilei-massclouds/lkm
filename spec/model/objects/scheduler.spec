@@ -18,6 +18,9 @@ enum SchedClassKind {
     Idle,
 }
 
+enum SchedulerMailboxMessageKind { Activate, Wake }
+type SchedulerMailboxOrdinal { }
+
 type SchedulerRef {
 }
 
@@ -49,6 +52,30 @@ predicate scheduler_class_queues_store_only_task_refs<S>(scheduler: S) -> bool;
 predicate scheduler_root_domains_are_shared_separate_objects<S>(scheduler: S) -> bool;
 predicate scheduler_fairness_bandwidth_migration_deferred<S>(scheduler: S) -> bool;
 predicate scheduler_scx_trimmed_for_reference_config<S>(scheduler: S) -> bool;
+predicate scheduler_inbound_mailbox_cpu_local<S>(scheduler: S) -> bool;
+predicate scheduler_mailbox_message_published_release<S, T: TaskRef, C: CpuRef>(
+    scheduler: S,
+    task_ref: T,
+    target_cpu: C,
+    ordinal: SchedulerMailboxOrdinal
+) -> bool;
+predicate scheduler_reschedule_ipi_requested_after_release<S, C: CpuRef>(
+    scheduler: S,
+    target_cpu: C
+) -> bool;
+predicate scheduler_mailbox_message_target_and_generation_valid<S, T: TaskRef, C: CpuRef>(
+    scheduler: S,
+    task_ref: T,
+    target_cpu: C
+) -> bool;
+predicate scheduler_mailbox_ordinal_fresh<S>(scheduler: S, ordinal: SchedulerMailboxOrdinal) -> bool;
+predicate scheduler_mailbox_message_consumed_once<S>(scheduler: S, ordinal: SchedulerMailboxOrdinal) -> bool;
+predicate scheduler_mailbox_rejects_stale_wrong_target_or_duplicate<S>(scheduler: S) -> bool;
+predicate scheduler_need_resched_set<S>(scheduler: S) -> bool;
+predicate scheduler_need_resched_coalesces_duplicate_ipi<S>(scheduler: S) -> bool;
+predicate scheduler_idle_sleep_recheck_complete<S>(scheduler: S) -> bool;
+predicate scheduler_idle_wfi_only_without_visible_work<S>(scheduler: S) -> bool;
+predicate scheduler_idle_uses_common_switch_protocol<S>(scheduler: S) -> bool;
 
 predicate scheduler_queue_runtime_state_is<S>(scheduler: S, state: SchedulerQueueRuntimeState) -> bool;
 predicate scheduler_queue_task_refs_empty<S>(scheduler: S) -> bool;
@@ -152,6 +179,61 @@ type Scheduler: ResourceObject {
     }
 
     processes {
+        Action::PublishInbound(
+            task_ref: TaskRef,
+            target_cpu: CpuRef,
+            ordinal: SchedulerMailboxOrdinal
+        ) {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Online;
+                task_ref_ready(task_ref);
+                scheduler_mailbox_ordinal_fresh(self, ordinal);
+            }
+            ensures {
+                scheduler_mailbox_message_published_release(self, task_ref, target_cpu, ordinal);
+                scheduler_reschedule_ipi_requested_after_release(self, target_cpu);
+                scheduler_mailbox_rejects_stale_wrong_target_or_duplicate(self);
+            }
+        }
+
+        Action::ConsumeInbound(
+            task_ref: TaskRef,
+            target_cpu: CpuRef,
+            ordinal: SchedulerMailboxOrdinal
+        ) {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Online;
+                scheduler_mailbox_message_published_release(self, task_ref, target_cpu, ordinal);
+                scheduler_mailbox_message_target_and_generation_valid(self, task_ref, target_cpu);
+                scheduler_mailbox_ordinal_fresh(self, ordinal);
+            }
+            drives { self.Transition::EnqueueTask(task_ref); }
+            ensures {
+                scheduler_mailbox_message_consumed_once(self, ordinal);
+                scheduler_mailbox_rejects_stale_wrong_target_or_duplicate(self);
+            }
+        }
+
+        Action::MarkNeedResched {
+            state_effect: StateEffect::None;
+            ensures {
+                scheduler_need_resched_set(self);
+                scheduler_need_resched_coalesces_duplicate_ipi(self);
+            }
+        }
+
+        Action::RunIdle {
+            state_effect: StateEffect::None;
+            depends_on { self.state == State::Online; }
+            ensures {
+                scheduler_idle_sleep_recheck_complete(self);
+                scheduler_idle_wfi_only_without_visible_work(self);
+                scheduler_idle_uses_common_switch_protocol(self);
+            }
+        }
+
         Transition::EnqueueTask(task_ref: TaskRef) {
             state_effect: StateEffect::Conditional;
             depends_on {
@@ -461,6 +543,7 @@ type Scheduler: ResourceObject {
                     scheduler_root_domains_are_shared_separate_objects(self);
                     scheduler_fairness_bandwidth_migration_deferred(self);
                     scheduler_scx_trimmed_for_reference_config(self);
+                    scheduler_inbound_mailbox_cpu_local(self);
                 }
             }
         }
@@ -496,6 +579,8 @@ type Scheduler: ResourceObject {
             scheduler_schedule_event_available(self);
             scheduler_class_priority_order_is_linux(self);
             scheduler_class_queues_store_only_task_refs(self);
+            scheduler_inbound_mailbox_cpu_local(self);
+            scheduler_mailbox_rejects_stale_wrong_target_or_duplicate(self);
         }
     }
 }

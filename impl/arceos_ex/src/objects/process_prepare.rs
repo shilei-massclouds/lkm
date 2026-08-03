@@ -1,6 +1,7 @@
 use super::{
     boot_task::BootTask,
     config::Config,
+    cpu::CpuRef,
     cpu_capabilities::CpuCapabilities,
     cpu_group::CpuGroup,
     current_task::CurrentTask,
@@ -388,6 +389,7 @@ pub struct TaskCreationCore {
     user_child_created: bool,
     system_scheduling: bool,
     copy_process_source: TaskRef,
+    kernel_task_created_count: usize,
 }
 
 impl TaskCreationCore {
@@ -412,6 +414,7 @@ impl TaskCreationCore {
             user_child_created: false,
             system_scheduling: false,
             copy_process_source: TaskRef::NONE,
+            kernel_task_created_count: 0,
         }
     }
 
@@ -489,6 +492,11 @@ impl TaskCreationCore {
         self.system_scheduling
     }
 
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
+    pub const fn kernel_task_created_count(&self) -> usize {
+        self.kernel_task_created_count
+    }
+
     #[cfg(app_smoke)]
     pub const fn copy_process_source(&self) -> TaskRef {
         self.copy_process_source
@@ -554,6 +562,7 @@ impl TaskCreationCore {
         self.user_child_created = false;
         self.system_scheduling = false;
         self.copy_process_source = TaskRef::NONE;
+        self.kernel_task_created_count = 0;
 
         if self.vector_context.state() != State::Prepared
             || self.uprobe_core.state() != State::Ready
@@ -624,7 +633,8 @@ impl TaskCreationCore {
             | TaskEntry::BootIdle
             | TaskEntry::UserChild
             | TaskEntry::ApIdle
-            | TaskEntry::SmokeScheduler => {}
+            | TaskEntry::SmokeScheduler
+            | TaskEntry::KernelTask => {}
         }
         self.copy_process_source = inputs.src_task_ref;
 
@@ -636,6 +646,44 @@ impl TaskCreationCore {
             task_state_new: true,
             task_not_enqueued: true,
         })
+    }
+
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
+    pub fn create_kernel_task(
+        &mut self,
+        cpu_group: &CpuGroup,
+        target_cpu: CpuRef,
+        entry: extern "C" fn() -> !,
+    ) -> Result<TaskRef, EventError> {
+        let target_ready = cpu_group.cpu(target_cpu.logical_id()).is_some_and(|cpu| {
+            cpu.cpu_ref() == target_cpu
+                && cpu.is_online()
+                && cpu.scheduler().state() == State::Online
+        });
+        if self.lifecycle.state() != State::Ready
+            || !self.entry_contract_ready
+            || !target_ready
+            || target_cpu.is_boot_cpu()
+        {
+            return Err(EventError::failed(
+                super::state::EventErrorCode::ConditionFailed,
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            ));
+        }
+        let task_ref = super::kernel_task::create(target_cpu, entry).map_err(|_| {
+            EventError::failed(
+                super::state::EventErrorCode::ConditionFailed,
+                LifecycleEvent::Setup,
+                State::Ready,
+                State::Ready,
+                State::Ready,
+            )
+        })?;
+        self.kernel_task_created_count = self.kernel_task_created_count.wrapping_add(1);
+        Ok(task_ref)
     }
 
     pub fn copy_user_process(

@@ -14,9 +14,14 @@ The static mappings are:
 - KernelInitTask -> KernelInitFlow;
 - KthreaddTask -> KthreaddFlow;
 - each AP idle Task -> its keyed ApIdleFlow;
+- each dynamic kernel Task -> a fresh KernelTaskFlow;
 - each dynamic user Task -> a fresh UserTaskFlow.
 
 BootInitFlow directly owns idle setup, scheduling return, idle entry and idle-loop actions.
+
+`ApIdleFlow.RunIdle` remains the one AP execution continuation after bringup and lowers to the common mailbox,
+need-resched and safe-`wfi` loop. A dynamic KernelTaskFlow binds its caller-supplied kernel entry as the initial
+coordinate and keeps the same identity across identity yield, block/wake and continuation resume.
 
 ## Lifecycle and execution
 

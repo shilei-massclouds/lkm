@@ -17,6 +17,8 @@ Task carrier、TaskRef、TaskThreadContext 和 Task lifecycle 见 [`Task`](task.
 - 每次 fork/clone 创建 fresh child Task 与 fresh `UserTaskFlow`；child exec 不创建后继 Flow。
 - `ApIdleFlow[logical_id]` 与 `ApIdleTask[logical_id]` pointwise 固定，在 HSM 交付前完成不可调度的
   Online 预初始化。
+- 每个普通动态内核 Task 创建 fresh `KernelTaskFlow`，其初始正文坐标绑定调用者提供的内核入口；
+  blocked、wake、yield 和恢复不替换该 Flow。
 
 每个用户型 TaskFlow 最多创建一个终身稳定、不可共享的 `UserAppRuntime` owned child。PID 1 的 Runtime
 属于 `KernelInitFlow`，child Runtime 属于各自 `UserTaskFlow`。exec 只以事务方式替换 Runtime 内部
@@ -63,6 +65,11 @@ Online、`StateEffect::None` 正文 Action；保存后的 coordinate 指向 Yiel
 这些都是普通正文 Action，不携带一次性属性。BootInitFlow 继续由 `_start` 驱动 Preset/Setup/Enable，
 不制造首次 Enter；BootTask 与 AP idle 的首次架构直入不伪造 Dispatch/Enter，只有首次真实切出后的恢复
 才走通用 Dispatch/Enter。
+
+`ApIdleFlow.RunIdle` 在三段 AP 初始化完成后持续执行 owner CPU 的通用 idle/scheduler loop：消费本地
+inbound mailbox，观察本地 runqueue 与 `need_resched`，必要时请求 owner Scheduler；无工作时采用关中断
+重检后 `wfi` 的不丢唤醒协议。reschedule IPI handler 只清除硬件 pending 并记录本地
+`need_resched`，不在 hardirq handler 内切换 Task。
 
 除声明期 Bind 和明确的 Boot/AP 架构入口例外，普通 lifecycle/action 每次执行都即时要求：固定 parent
 Task 为 OnCpu/Live、Flow 为该 Task 的唯一 flow、FlowRef/generation 有效、CpuRef 与 CPU-local
@@ -115,5 +122,6 @@ alias 离开词法范围不表示销毁。下一动态实例使用新 generation
 
 ## 当前能力边界
 
-本轮闭合 UP 的通用 yields、identity return、non-identity contextual resume 与 trap leaf 恢复基础。
-完整 SMP balancing、跨 CPU mailbox、迁移和 deterministic replay 保持 P2 延期。
+本轮在既有 UP 基础上闭合显式目标 CPU 的普通内核 Task activation/wake mailbox、reschedule IPI 与
+AP idle/scheduler continuation。GlobalArbiter、自动负载选择、运行中迁移、用户任务 AP 执行、时钟抢占
+和 deterministic replay 保持延期。

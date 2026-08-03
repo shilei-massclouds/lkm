@@ -2,8 +2,12 @@ const EID_LEGACY_CONSOLE_PUTCHAR: usize = 1;
 #[cfg_attr(not(app_smoke), allow(dead_code))]
 const EID_LEGACY_SET_TIMER: usize = 0;
 const EID_HSM: usize = 0x0048_534d;
+#[cfg_attr(not(app_smoke), allow(dead_code))]
+const EID_IPI: usize = 0x0073_5049;
 const EID_SRST: usize = 0x5352_5354;
 const FID_HSM_HART_START: usize = 0;
+#[cfg_attr(not(app_smoke), allow(dead_code))]
+const FID_IPI_SEND_IPI: usize = 0;
 const FID_SYSTEM_RESET: usize = 0;
 const RESET_TYPE_SHUTDOWN: usize = 0;
 const RESET_REASON_NONE: usize = 0;
@@ -27,6 +31,15 @@ pub fn read_time() -> u64 {
 pub fn hart_start(hartid: usize, start_addr: usize, opaque: usize) -> Result<usize, usize> {
     let (error, value) = sbi_call_3(EID_HSM, FID_HSM_HART_START, hartid, start_addr, opaque);
     if error == 0 { Ok(value) } else { Err(error) }
+}
+
+#[cfg_attr(not(app_smoke), allow(dead_code))]
+pub fn send_ipi(hartid: usize) -> Result<(), usize> {
+    if hartid >= usize::BITS as usize {
+        return Err(usize::MAX);
+    }
+    let (error, _) = sbi_call_2(EID_IPI, FID_IPI_SEND_IPI, 1usize << hartid, 0);
+    if error == 0 { Ok(()) } else { Err(error) }
 }
 
 pub fn putchar(byte: u8) {

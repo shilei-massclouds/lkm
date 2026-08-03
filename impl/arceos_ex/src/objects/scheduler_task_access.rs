@@ -78,10 +78,11 @@ impl NextDispatch {
 /// Resolves stable scheduler references into task/flow carriers owned by the
 /// surrounding Context. Scheduler itself never owns or names those carriers.
 pub struct SchedulerTaskAccess<'a> {
-    kernel_init_task: &'a mut KernelInitTask,
-    kthreadd_task: &'a mut KthreaddTask,
-    user_task_set: &'a mut UserTaskSet,
-    test_tasks: &'a mut SchedulerTestTasks,
+    kernel_init_task: Option<&'a mut KernelInitTask>,
+    kthreadd_task: Option<&'a mut KthreaddTask>,
+    user_task_set: Option<&'a mut UserTaskSet>,
+    test_tasks: Option<&'a mut SchedulerTestTasks>,
+    owner_cpu: usize,
 }
 
 impl<'a> SchedulerTaskAccess<'a> {
@@ -92,23 +93,42 @@ impl<'a> SchedulerTaskAccess<'a> {
         test_tasks: &'a mut SchedulerTestTasks,
     ) -> Self {
         Self {
-            kernel_init_task,
-            kthreadd_task,
-            user_task_set,
-            test_tasks,
+            kernel_init_task: Some(kernel_init_task),
+            kthreadd_task: Some(kthreadd_task),
+            user_task_set: Some(user_task_set),
+            test_tasks: Some(test_tasks),
+            owner_cpu: 0,
+        }
+    }
+
+    pub fn new_secondary(owner_cpu: usize) -> Self {
+        Self {
+            kernel_init_task: None,
+            kthreadd_task: None,
+            user_task_set: None,
+            test_tasks: None,
+            owner_cpu,
         }
     }
 
     pub fn effective_cpu_ref(&self, task_ref: TaskRef) -> Option<CpuRef> {
         match task_ref {
             TaskRef::BOOT => BootTask::canonical_task().flow_cpu_ref(),
-            TaskRef::KERNEL_INIT => self.kernel_init_task.task().flow_cpu_ref(),
-            TaskRef::KTHREADD => self.kthreadd_task.task().flow_cpu_ref(),
-            TaskRef::SMOKE_SCHEDULER => self.test_tasks.smoke_scheduler_task().cpu_ref(),
-            TaskRef::SMOKE_MUTEX => self.test_tasks.smoke_mutex_task().cpu_ref(),
-            TaskRef::SMOKE_RWSEM => self.test_tasks.smoke_rwsem_task().cpu_ref(),
-            TaskRef::SMOKE_RWLOCK => self.test_tasks.smoke_rwlock_task().cpu_ref(),
-            _ if task_ref.is_user() => self.user_task_set.cpu_ref_for_task(task_ref),
+            TaskRef::KERNEL_INIT => self.kernel_init_task.as_deref()?.task().flow_cpu_ref(),
+            TaskRef::KTHREADD => self.kthreadd_task.as_deref()?.task().flow_cpu_ref(),
+            TaskRef::SMOKE_SCHEDULER => {
+                self.test_tasks.as_deref()?.smoke_scheduler_task().cpu_ref()
+            }
+            TaskRef::SMOKE_MUTEX => self.test_tasks.as_deref()?.smoke_mutex_task().cpu_ref(),
+            TaskRef::SMOKE_RWSEM => self.test_tasks.as_deref()?.smoke_rwsem_task().cpu_ref(),
+            TaskRef::SMOKE_RWLOCK => self.test_tasks.as_deref()?.smoke_rwlock_task().cpu_ref(),
+            _ if task_ref.is_user() => self.user_task_set.as_deref()?.cpu_ref_for_task(task_ref),
+            _ if task_ref.is_ap_idle() => {
+                super::smp_bringup::ap_current_task_candidate_by_ref(task_ref)?
+                    .task
+                    .flow_cpu_ref()
+            }
+            _ if task_ref.is_kernel() => super::kernel_task::task_by_ref(task_ref)?.flow_cpu_ref(),
             _ => None,
         }
     }
@@ -147,18 +167,28 @@ impl<'a> SchedulerTaskAccess<'a> {
                 flow: BootTask::canonical_task().embedded_flow(),
             }),
             TaskRef::KERNEL_INIT => Some(super::current_task::CurrentTaskCandidate {
-                task: self.kernel_init_task.task(),
-                flow: self.kernel_init_task.task().embedded_flow(),
+                task: self.kernel_init_task.as_deref()?.task(),
+                flow: self.kernel_init_task.as_deref()?.task().embedded_flow(),
             }),
             TaskRef::KTHREADD => Some(super::current_task::CurrentTaskCandidate {
-                task: self.kthreadd_task.task(),
-                flow: self.kthreadd_task.task().embedded_flow(),
+                task: self.kthreadd_task.as_deref()?.task(),
+                flow: self.kthreadd_task.as_deref()?.task().embedded_flow(),
             }),
             TaskRef::SMOKE_SCHEDULER
             | TaskRef::SMOKE_MUTEX
             | TaskRef::SMOKE_RWSEM
-            | TaskRef::SMOKE_RWLOCK => self.test_tasks.current_task_candidate_by_ref(task_ref),
-            _ if task_ref.is_user() => self.user_task_set.current_task_candidate_by_ref(task_ref),
+            | TaskRef::SMOKE_RWLOCK => self
+                .test_tasks
+                .as_deref()?
+                .current_task_candidate_by_ref(task_ref),
+            _ if task_ref.is_user() => self
+                .user_task_set
+                .as_deref()?
+                .current_task_candidate_by_ref(task_ref),
+            _ if task_ref.is_ap_idle() => {
+                super::smp_bringup::ap_current_task_candidate_by_ref(task_ref)
+            }
+            _ if task_ref.is_kernel() => super::kernel_task::task_candidate_by_ref(task_ref),
             _ => None,
         }
     }
@@ -166,36 +196,58 @@ impl<'a> SchedulerTaskAccess<'a> {
     pub fn prepare_prev_runnable(&mut self, task_ref: TaskRef) -> Option<bool> {
         match task_ref {
             TaskRef::BOOT => Some(BootTask::canonical_prepare_prev_runnable()),
-            TaskRef::KERNEL_INIT => Some(self.kernel_init_task.task_mut().prepare_prev_runnable()),
-            TaskRef::KTHREADD => Some(self.kthreadd_task.task_mut().prepare_prev_runnable()),
+            TaskRef::KERNEL_INIT => Some(
+                self.kernel_init_task
+                    .as_deref_mut()?
+                    .task_mut()
+                    .prepare_prev_runnable(),
+            ),
+            TaskRef::KTHREADD => Some(
+                self.kthreadd_task
+                    .as_deref_mut()?
+                    .task_mut()
+                    .prepare_prev_runnable(),
+            ),
             TaskRef::SMOKE_SCHEDULER => Some(
                 self.test_tasks
+                    .as_deref_mut()?
                     .smoke_scheduler_task_mut()
                     .task_mut()
                     .prepare_prev_runnable(),
             ),
             TaskRef::SMOKE_MUTEX => Some(
                 self.test_tasks
+                    .as_deref_mut()?
                     .smoke_mutex_task_mut()
                     .task_mut()
                     .prepare_prev_runnable(),
             ),
             TaskRef::SMOKE_RWSEM => Some(
                 self.test_tasks
+                    .as_deref_mut()?
                     .smoke_rwsem_task_mut()
                     .task_mut()
                     .prepare_prev_runnable(),
             ),
             TaskRef::SMOKE_RWLOCK => Some(
                 self.test_tasks
+                    .as_deref_mut()?
                     .smoke_rwlock_task_mut()
                     .task_mut()
                     .prepare_prev_runnable(),
             ),
             _ if task_ref.is_user() => self
                 .user_task_set
+                .as_deref_mut()?
                 .task_mut_by_ref(task_ref)
                 .map(Task::prepare_prev_runnable),
+            _ if task_ref.is_ap_idle() => {
+                Some(super::smp_bringup::ap_task_mut_by_ref(task_ref)?.prepare_prev_runnable())
+            }
+            _ if task_ref.is_kernel() => Some(
+                super::kernel_task::task_mut_by_ref_on_cpu(task_ref, self.owner_cpu)?
+                    .prepare_prev_runnable(),
+            ),
             _ => None,
         }
     }
@@ -203,33 +255,50 @@ impl<'a> SchedulerTaskAccess<'a> {
     pub fn deactivate(&mut self, task_ref: TaskRef) -> Option<EventResult> {
         match task_ref {
             TaskRef::BOOT => Some(BootTask::canonical_deactivate_from_scheduler()),
-            TaskRef::KERNEL_INIT => {
-                Some(self.kernel_init_task.task_mut().deactivate_from_scheduler())
-            }
-            TaskRef::KTHREADD => Some(self.kthreadd_task.task_mut().deactivate_from_scheduler()),
+            TaskRef::KERNEL_INIT => Some(
+                self.kernel_init_task
+                    .as_deref_mut()?
+                    .task_mut()
+                    .deactivate_from_scheduler(),
+            ),
+            TaskRef::KTHREADD => Some(
+                self.kthreadd_task
+                    .as_deref_mut()?
+                    .task_mut()
+                    .deactivate_from_scheduler(),
+            ),
             TaskRef::SMOKE_SCHEDULER => Some(
                 self.test_tasks
+                    .as_deref_mut()?
                     .smoke_scheduler_task_mut()
                     .deactivate_from_scheduler(),
             ),
             TaskRef::SMOKE_MUTEX => Some(
                 self.test_tasks
+                    .as_deref_mut()?
                     .smoke_mutex_task_mut()
                     .deactivate_from_scheduler(),
             ),
             TaskRef::SMOKE_RWSEM => Some(
                 self.test_tasks
+                    .as_deref_mut()?
                     .smoke_rwsem_task_mut()
                     .deactivate_from_scheduler(),
             ),
             TaskRef::SMOKE_RWLOCK => Some(
                 self.test_tasks
+                    .as_deref_mut()?
                     .smoke_rwlock_task_mut()
                     .deactivate_from_scheduler(),
             ),
             _ if task_ref.is_user() => Some(
                 self.user_task_set
+                    .as_deref_mut()?
                     .task_mut_by_ref(task_ref)?
+                    .deactivate_from_scheduler(),
+            ),
+            _ if task_ref.is_kernel() => Some(
+                super::kernel_task::task_mut_by_ref_on_cpu(task_ref, self.owner_cpu)?
                     .deactivate_from_scheduler(),
             ),
             _ => None,
@@ -237,49 +306,15 @@ impl<'a> SchedulerTaskAccess<'a> {
     }
 
     pub fn switch_out_ready(&self, task_ref: TaskRef) -> bool {
-        match task_ref {
-            TaskRef::BOOT => BootTask::canonical_task().switch_out_ready(),
-            TaskRef::KERNEL_INIT => {
-                self.kernel_init_task.task().switch_out_ready()
-                    || self.kernel_init_task.task().terminal_switch_out_ready()
-            }
-            TaskRef::KTHREADD => {
-                self.kthreadd_task.task().switch_out_ready()
-                    || self.kthreadd_task.task().terminal_switch_out_ready()
-            }
-            TaskRef::SMOKE_SCHEDULER => self
-                .test_tasks
-                .smoke_scheduler_task()
-                .task()
-                .switch_out_ready(),
-            TaskRef::SMOKE_MUTEX => self.test_tasks.smoke_mutex_task().task().switch_out_ready(),
-            TaskRef::SMOKE_RWSEM => self.test_tasks.smoke_rwsem_task().task().switch_out_ready(),
-            TaskRef::SMOKE_RWLOCK => self
-                .test_tasks
-                .smoke_rwlock_task()
-                .task()
-                .switch_out_ready(),
-            _ if task_ref.is_user() => self.user_task_set.task_switch_out_ready(task_ref),
-            _ => false,
-        }
+        self.current_task_candidate(task_ref)
+            .is_some_and(|candidate| {
+                candidate.task.switch_out_ready() || candidate.task.terminal_switch_out_ready()
+            })
     }
 
     pub fn switch_in_ready(&self, task_ref: TaskRef) -> bool {
-        match task_ref {
-            TaskRef::BOOT => BootTask::canonical_task().switch_in_ready(),
-            TaskRef::KERNEL_INIT => self.kernel_init_task.task().switch_in_ready(),
-            TaskRef::KTHREADD => self.kthreadd_task.task().switch_in_ready(),
-            TaskRef::SMOKE_SCHEDULER => self
-                .test_tasks
-                .smoke_scheduler_task()
-                .task()
-                .switch_in_ready(),
-            TaskRef::SMOKE_MUTEX => self.test_tasks.smoke_mutex_task().task().switch_in_ready(),
-            TaskRef::SMOKE_RWSEM => self.test_tasks.smoke_rwsem_task().task().switch_in_ready(),
-            TaskRef::SMOKE_RWLOCK => self.test_tasks.smoke_rwlock_task().task().switch_in_ready(),
-            _ if task_ref.is_user() => self.user_task_set.task_switch_in_ready(task_ref),
-            _ => false,
-        }
+        self.current_task_candidate(task_ref)
+            .is_some_and(|candidate| candidate.task.switch_in_ready())
     }
 
     /// Resolves the one fixed Task/Flow pair before any context is saved.
@@ -328,7 +363,7 @@ impl<'a> SchedulerTaskAccess<'a> {
         if !task_ref.is_user() && !task_ref.same_identity(TaskRef::KERNEL_INIT) {
             return None;
         }
-        let (stack_base, stack_top) = self.user_task_set.carrier_stack_bounds()?;
+        let (stack_base, stack_top) = self.user_task_set.as_deref()?.carrier_stack_bounds()?;
         let live_sp = crate::arch::riscv64::csr::read_sp();
         if live_sp < stack_base || live_sp > stack_top {
             return None;
@@ -338,52 +373,63 @@ impl<'a> SchedulerTaskAccess<'a> {
     }
 
     pub fn first_boot_handoff_preflight_ready(&self, dispatch: NextDispatch) -> bool {
+        let Some(kernel_init_task) = self.kernel_init_task.as_deref() else {
+            return false;
+        };
         BootTask::canonical_task().switch_out_ready()
-            && self.kernel_init_task.task().switch_in_ready()
+            && kernel_init_task.task().switch_in_ready()
             && dispatch.task_ref().same_identity(TaskRef::KERNEL_INIT)
             && dispatch
                 .flow_ref()
-                .same_identity(self.kernel_init_task.task().flow_ref())
+                .same_identity(kernel_init_task.task().flow_ref())
     }
 
     pub fn task_on_cpu_identity_matches(&self, task_ref: TaskRef, identity: usize) -> bool {
         self.task_identity_ptr(task_ref) == Some(identity)
-            && match task_ref {
-                TaskRef::BOOT => BootTask::canonical_task().state() == State::OnCpu,
-                TaskRef::KERNEL_INIT => self.kernel_init_task.state() == State::OnCpu,
-                TaskRef::KTHREADD => self.kthreadd_task.state() == State::OnCpu,
-                TaskRef::SMOKE_SCHEDULER => {
-                    self.test_tasks.smoke_scheduler_task().state() == State::OnCpu
-                }
-                TaskRef::SMOKE_MUTEX => self.test_tasks.smoke_mutex_task().state() == State::OnCpu,
-                TaskRef::SMOKE_RWSEM => self.test_tasks.smoke_rwsem_task().state() == State::OnCpu,
-                TaskRef::SMOKE_RWLOCK => {
-                    self.test_tasks.smoke_rwlock_task().state() == State::OnCpu
-                }
-                _ if task_ref.is_user() => self
-                    .user_task_set
-                    .task_state(task_ref)
-                    .is_some_and(|state| state == State::OnCpu),
-                _ => false,
-            }
+            && self
+                .current_task_candidate(task_ref)
+                .is_some_and(|candidate| candidate.task.state() == State::OnCpu)
     }
 
     pub fn suspend(&mut self, task_ref: TaskRef) -> Option<EventResult> {
         match task_ref {
             TaskRef::BOOT => Some(BootTask::suspend_canonical()),
-            TaskRef::KERNEL_INIT => Some(self.kernel_init_task.suspend_from_cpu()),
-            TaskRef::KTHREADD => Some(self.kthreadd_task.suspend_from_cpu()),
+            TaskRef::KERNEL_INIT => Some(self.kernel_init_task.as_deref_mut()?.suspend_from_cpu()),
+            TaskRef::KTHREADD => Some(self.kthreadd_task.as_deref_mut()?.suspend_from_cpu()),
             TaskRef::SMOKE_SCHEDULER => Some(
                 self.test_tasks
+                    .as_deref_mut()?
                     .smoke_scheduler_task_mut()
                     .suspend_from_cpu(),
             ),
-            TaskRef::SMOKE_MUTEX => Some(self.test_tasks.smoke_mutex_task_mut().suspend_from_cpu()),
-            TaskRef::SMOKE_RWSEM => Some(self.test_tasks.smoke_rwsem_task_mut().suspend_from_cpu()),
-            TaskRef::SMOKE_RWLOCK => {
-                Some(self.test_tasks.smoke_rwlock_task_mut().suspend_from_cpu())
+            TaskRef::SMOKE_MUTEX => Some(
+                self.test_tasks
+                    .as_deref_mut()?
+                    .smoke_mutex_task_mut()
+                    .suspend_from_cpu(),
+            ),
+            TaskRef::SMOKE_RWSEM => Some(
+                self.test_tasks
+                    .as_deref_mut()?
+                    .smoke_rwsem_task_mut()
+                    .suspend_from_cpu(),
+            ),
+            TaskRef::SMOKE_RWLOCK => Some(
+                self.test_tasks
+                    .as_deref_mut()?
+                    .smoke_rwlock_task_mut()
+                    .suspend_from_cpu(),
+            ),
+            _ if task_ref.is_user() => {
+                Some(self.user_task_set.as_deref_mut()?.suspend_task(task_ref))
             }
-            _ if task_ref.is_user() => Some(self.user_task_set.suspend_task(task_ref)),
+            _ if task_ref.is_ap_idle() => {
+                Some(super::smp_bringup::ap_task_mut_by_ref(task_ref)?.suspend_from_cpu())
+            }
+            _ if task_ref.is_kernel() => Some(
+                super::kernel_task::task_mut_by_ref_on_cpu(task_ref, self.owner_cpu)?
+                    .suspend_from_cpu(),
+            ),
             _ => None,
         }
     }
@@ -393,41 +439,55 @@ impl<'a> SchedulerTaskAccess<'a> {
             TaskRef::BOOT => Some(BootTask::save_core_context_canonical()),
             TaskRef::KERNEL_INIT => Some(
                 self.kernel_init_task
+                    .as_deref_mut()?
                     .task_mut()
                     .save_core_context_for_suspend(),
             ),
             TaskRef::KTHREADD => Some(
                 self.kthreadd_task
+                    .as_deref_mut()?
                     .task_mut()
                     .save_core_context_for_suspend(),
             ),
             TaskRef::SMOKE_SCHEDULER => Some(
                 self.test_tasks
+                    .as_deref_mut()?
                     .smoke_scheduler_task_mut()
                     .task_mut()
                     .save_core_context_for_suspend(),
             ),
             TaskRef::SMOKE_MUTEX => Some(
                 self.test_tasks
+                    .as_deref_mut()?
                     .smoke_mutex_task_mut()
                     .task_mut()
                     .save_core_context_for_suspend(),
             ),
             TaskRef::SMOKE_RWSEM => Some(
                 self.test_tasks
+                    .as_deref_mut()?
                     .smoke_rwsem_task_mut()
                     .task_mut()
                     .save_core_context_for_suspend(),
             ),
             TaskRef::SMOKE_RWLOCK => Some(
                 self.test_tasks
+                    .as_deref_mut()?
                     .smoke_rwlock_task_mut()
                     .task_mut()
                     .save_core_context_for_suspend(),
             ),
             _ if task_ref.is_user() => Some(
                 self.user_task_set
+                    .as_deref_mut()?
                     .task_mut_by_ref(task_ref)?
+                    .save_core_context_for_suspend(),
+            ),
+            _ if task_ref.is_ap_idle() => Some(
+                super::smp_bringup::ap_task_mut_by_ref(task_ref)?.save_core_context_for_suspend(),
+            ),
+            _ if task_ref.is_kernel() => Some(
+                super::kernel_task::task_mut_by_ref_on_cpu(task_ref, self.owner_cpu)?
                     .save_core_context_for_suspend(),
             ),
             _ => None,
@@ -439,41 +499,55 @@ impl<'a> SchedulerTaskAccess<'a> {
             TaskRef::BOOT => Some(BootTask::suspend_after_core_context_save_canonical()),
             TaskRef::KERNEL_INIT => Some(
                 self.kernel_init_task
+                    .as_deref_mut()?
                     .task_mut()
                     .suspend_after_core_context_save(),
             ),
             TaskRef::KTHREADD => Some(
                 self.kthreadd_task
+                    .as_deref_mut()?
                     .task_mut()
                     .suspend_after_core_context_save(),
             ),
             TaskRef::SMOKE_SCHEDULER => Some(
                 self.test_tasks
+                    .as_deref_mut()?
                     .smoke_scheduler_task_mut()
                     .task_mut()
                     .suspend_after_core_context_save(),
             ),
             TaskRef::SMOKE_MUTEX => Some(
                 self.test_tasks
+                    .as_deref_mut()?
                     .smoke_mutex_task_mut()
                     .task_mut()
                     .suspend_after_core_context_save(),
             ),
             TaskRef::SMOKE_RWSEM => Some(
                 self.test_tasks
+                    .as_deref_mut()?
                     .smoke_rwsem_task_mut()
                     .task_mut()
                     .suspend_after_core_context_save(),
             ),
             TaskRef::SMOKE_RWLOCK => Some(
                 self.test_tasks
+                    .as_deref_mut()?
                     .smoke_rwlock_task_mut()
                     .task_mut()
                     .suspend_after_core_context_save(),
             ),
             _ if task_ref.is_user() => Some(
                 self.user_task_set
+                    .as_deref_mut()?
                     .task_mut_by_ref(task_ref)?
+                    .suspend_after_core_context_save(),
+            ),
+            _ if task_ref.is_ap_idle() => Some(
+                super::smp_bringup::ap_task_mut_by_ref(task_ref)?.suspend_after_core_context_save(),
+            ),
+            _ if task_ref.is_kernel() => Some(
+                super::kernel_task::task_mut_by_ref_on_cpu(task_ref, self.owner_cpu)?
                     .suspend_after_core_context_save(),
             ),
             _ => None,
@@ -483,13 +557,37 @@ impl<'a> SchedulerTaskAccess<'a> {
     fn task_mut_for_dispatch(&mut self, task_ref: TaskRef) -> Option<&mut Task> {
         match task_ref {
             TaskRef::BOOT => Some(BootTask::canonical_task_mut()),
-            TaskRef::KERNEL_INIT => Some(self.kernel_init_task.task_mut()),
-            TaskRef::KTHREADD => Some(self.kthreadd_task.task_mut()),
-            TaskRef::SMOKE_SCHEDULER => Some(self.test_tasks.smoke_scheduler_task_mut().task_mut()),
-            TaskRef::SMOKE_MUTEX => Some(self.test_tasks.smoke_mutex_task_mut().task_mut()),
-            TaskRef::SMOKE_RWSEM => Some(self.test_tasks.smoke_rwsem_task_mut().task_mut()),
-            TaskRef::SMOKE_RWLOCK => Some(self.test_tasks.smoke_rwlock_task_mut().task_mut()),
-            _ if task_ref.is_user() => self.user_task_set.task_mut_by_ref(task_ref),
+            TaskRef::KERNEL_INIT => Some(self.kernel_init_task.as_deref_mut()?.task_mut()),
+            TaskRef::KTHREADD => Some(self.kthreadd_task.as_deref_mut()?.task_mut()),
+            TaskRef::SMOKE_SCHEDULER => Some(
+                self.test_tasks
+                    .as_deref_mut()?
+                    .smoke_scheduler_task_mut()
+                    .task_mut(),
+            ),
+            TaskRef::SMOKE_MUTEX => Some(
+                self.test_tasks
+                    .as_deref_mut()?
+                    .smoke_mutex_task_mut()
+                    .task_mut(),
+            ),
+            TaskRef::SMOKE_RWSEM => Some(
+                self.test_tasks
+                    .as_deref_mut()?
+                    .smoke_rwsem_task_mut()
+                    .task_mut(),
+            ),
+            TaskRef::SMOKE_RWLOCK => Some(
+                self.test_tasks
+                    .as_deref_mut()?
+                    .smoke_rwlock_task_mut()
+                    .task_mut(),
+            ),
+            _ if task_ref.is_user() => self.user_task_set.as_deref_mut()?.task_mut_by_ref(task_ref),
+            _ if task_ref.is_ap_idle() => super::smp_bringup::ap_task_mut_by_ref(task_ref),
+            _ if task_ref.is_kernel() => {
+                super::kernel_task::task_mut_by_ref_on_cpu(task_ref, self.owner_cpu)
+            }
             _ => None,
         }
     }
@@ -525,9 +623,10 @@ impl<'a> SchedulerTaskAccess<'a> {
                 DispatchStackBinding::SimulatedUserCarrier => {
                     (dispatch.task_ref().is_user()
                         || dispatch.task_ref().same_identity(TaskRef::KERNEL_INIT))
-                        && self
-                            .user_task_set
-                            .carrier_stack_matches(dispatch.stack_base, dispatch.stack_top)
+                        && self.user_task_set.as_deref().is_some_and(|user_task_set| {
+                            user_task_set
+                                .carrier_stack_matches(dispatch.stack_base, dispatch.stack_top)
+                        })
                 }
             };
             let live_sp = crate::arch::riscv64::csr::read_sp();
@@ -558,17 +657,8 @@ impl<'a> SchedulerTaskAccess<'a> {
     }
 
     pub fn task_identity_ptr(&self, task_ref: TaskRef) -> Option<usize> {
-        match task_ref {
-            TaskRef::BOOT => Some(BootTask::canonical_task() as *const Task as usize),
-            TaskRef::KERNEL_INIT => Some(self.kernel_init_task.task() as *const Task as usize),
-            TaskRef::KTHREADD => Some(self.kthreadd_task.task() as *const Task as usize),
-            TaskRef::SMOKE_SCHEDULER => Some(self.test_tasks.smoke_scheduler_task().task_ptr()),
-            TaskRef::SMOKE_MUTEX => Some(self.test_tasks.smoke_mutex_task().task_ptr()),
-            TaskRef::SMOKE_RWSEM => Some(self.test_tasks.smoke_rwsem_task().task_ptr()),
-            TaskRef::SMOKE_RWLOCK => Some(self.test_tasks.smoke_rwlock_task().task_ptr()),
-            _ if task_ref.is_user() => self.user_task_set.task_identity_ptr(task_ref),
-            _ => None,
-        }
+        let candidate = self.current_task_candidate(task_ref)?;
+        Some(candidate.task as *const Task as usize)
     }
 
     /// Resolves stable Task identity metadata independently of class-queue
@@ -582,39 +672,52 @@ impl<'a> SchedulerTaskAccess<'a> {
     pub fn switch_context_mut_ptr(&mut self, task_ref: TaskRef) -> Option<*mut TaskSwitchContext> {
         match task_ref {
             TaskRef::BOOT => Some(BootTask::canonical_switch_context_mut()),
-            TaskRef::KERNEL_INIT => Some(self.kernel_init_task.switch_context_mut()),
-            TaskRef::KTHREADD => Some(self.kthreadd_task.switch_context_mut()),
+            TaskRef::KERNEL_INIT => {
+                Some(self.kernel_init_task.as_deref_mut()?.switch_context_mut())
+            }
+            TaskRef::KTHREADD => Some(self.kthreadd_task.as_deref_mut()?.switch_context_mut()),
             TaskRef::SMOKE_SCHEDULER => Some(
                 self.test_tasks
+                    .as_deref_mut()?
                     .smoke_scheduler_task_mut()
                     .switch_context_mut(),
             ),
-            TaskRef::SMOKE_MUTEX => {
-                Some(self.test_tasks.smoke_mutex_task_mut().switch_context_mut())
-            }
-            TaskRef::SMOKE_RWSEM => {
-                Some(self.test_tasks.smoke_rwsem_task_mut().switch_context_mut())
-            }
-            TaskRef::SMOKE_RWLOCK => {
-                Some(self.test_tasks.smoke_rwlock_task_mut().switch_context_mut())
+            TaskRef::SMOKE_MUTEX => Some(
+                self.test_tasks
+                    .as_deref_mut()?
+                    .smoke_mutex_task_mut()
+                    .switch_context_mut(),
+            ),
+            TaskRef::SMOKE_RWSEM => Some(
+                self.test_tasks
+                    .as_deref_mut()?
+                    .smoke_rwsem_task_mut()
+                    .switch_context_mut(),
+            ),
+            TaskRef::SMOKE_RWLOCK => Some(
+                self.test_tasks
+                    .as_deref_mut()?
+                    .smoke_rwlock_task_mut()
+                    .switch_context_mut(),
+            ),
+            _ if task_ref.is_user() => self
+                .user_task_set
+                .as_deref_mut()?
+                .task_mut_by_ref(task_ref)
+                .map(|task| task.switch_context_mut() as *mut TaskSwitchContext),
+            _ if task_ref.is_ap_idle() => super::smp_bringup::ap_task_mut_by_ref(task_ref)
+                .map(|task| task.switch_context_mut() as *mut TaskSwitchContext),
+            _ if task_ref.is_kernel() => {
+                super::kernel_task::task_mut_by_ref_on_cpu(task_ref, self.owner_cpu)
+                    .map(|task| task.switch_context_mut() as *mut TaskSwitchContext)
             }
             _ => None,
         }
     }
 
     pub fn switch_context_ptr(&self, task_ref: TaskRef) -> Option<*const TaskSwitchContext> {
-        match task_ref {
-            TaskRef::BOOT => Some(BootTask::canonical_switch_context()),
-            TaskRef::KERNEL_INIT => Some(self.kernel_init_task.switch_context()),
-            TaskRef::KTHREADD => Some(self.kthreadd_task.switch_context()),
-            TaskRef::SMOKE_SCHEDULER => {
-                Some(self.test_tasks.smoke_scheduler_task().switch_context())
-            }
-            TaskRef::SMOKE_MUTEX => Some(self.test_tasks.smoke_mutex_task().switch_context()),
-            TaskRef::SMOKE_RWSEM => Some(self.test_tasks.smoke_rwsem_task().switch_context()),
-            TaskRef::SMOKE_RWLOCK => Some(self.test_tasks.smoke_rwlock_task().switch_context()),
-            _ => None,
-        }
+        let candidate = self.current_task_candidate(task_ref)?;
+        Some(candidate.task.switch_context())
     }
 }
 

@@ -31,6 +31,13 @@ the KernelInitTask range when that is the stack on which the simulated Enter act
 is companion state inside the UserTask aggregate, not a new context specification object and not a
 parallel TaskFlow owner.
 
+A bounded dynamic kernel-task registry physically embeds each Task, fixed KernelTaskFlow, dedicated aligned stack
+and `TaskSwitchContext`. The first slice publishes a slot at most once; any later slot-reuse extension must increment
+both TaskRef and FlowRef generations before republishing. Creation initializes the entry,
+stack bounds and first context, then binds one explicit online CpuRef before release publication. After publication
+the CpuRef is immutable in this slice. Remote activation/wake changes only the target mailbox; the target CPU is the
+only writer of the Task's scheduler/runtime fields while it is published.
+
 ## Stack guard representation
 
 `Task` owns the stack-guard installation flag and the lowering of `Action::EnableStackGuard`; `InitStack`
@@ -76,6 +83,12 @@ effective trap leaf before the underlying TaskFlow continuation.
 
 The initial BootTask and AP-idle architecture entries call their Flow actions directly without a false
 Dispatch/Enter. After either Task has really switched out, every restoration uses the common proof path.
+
+Once SMP concurrency is open, the BP remains the sole whole-`Context` owner and must not mutate a secondary CPU's
+opened runtime pair. AP runtime code never creates an `&'static mut Context`: it obtains a narrow owner-CPU lease
+for exactly one Scheduler/Interrupt pair and a generation-checked registry lease for the addressed Task. Shared
+registry/mailbox metadata uses atomics or a lock; no secondary hart can acquire a mutable reference to the whole
+Context.
 
 ## Teardown
 

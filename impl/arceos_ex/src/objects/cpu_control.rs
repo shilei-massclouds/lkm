@@ -55,6 +55,23 @@ impl PreemptionControl {
         self.setup_with_depth(boot_task, 1, checkpoint)
     }
 
+    /// Secondary schedulers are constructed before their owner CPU executes.
+    /// Their owner adopts an enabled local preemption coordinate at the
+    /// online boundary; no BootTask carrier participates in that handoff.
+    pub fn adopt_secondary_ready(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Base {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+        self.disable_depth = 0;
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
+    }
+
     fn setup_with_depth(
         &mut self,
         boot_task: &BootTask,
