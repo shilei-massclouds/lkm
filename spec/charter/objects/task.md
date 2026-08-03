@@ -83,6 +83,11 @@ root TrapFlowRef 通过短期 child FlowRef 链定位当前 Trap/Interrupt/Excep
 真实 task switch，Suspend 保存的是当前 trap leaf 的架构 continuation；未来恢复先回到该 leaf，再按
 trap return token 返回固定 TaskFlow。
 
+Scheduler 的 next-dispatch preflight 必须读取 context 中的可选 root TrapFlowRef。root 存在时，preflight
+和随后的 contextual Enter 共同验证 root/active child/concrete leaf、入口 TaskRef/FlowRef、owner CpuRef、
+generation、context epoch 及尚未 Cleanup；Enter 精确一次记录 leaf continuation 已恢复。root 为空时不得
+伪造 leaf resume。该证明不携带或选择机器 PC/SP，实际坐标只来自 TaskThreadContext。
+
 每个 Task 恰有一个 `stack: Stack` 值类型属性。context 中 `sp` 是该 storage/range 内的恢复游标，
 不是 CurrentStack 副本。`tp`、CPU-local CurrentTask/CurrentStack binding、runqueue、锁和中断状态都
 不属于 TaskThreadContext 的可恢复核心寄存器集合。

@@ -88,6 +88,8 @@ predicate task_dispatch_sent_only_by_scheduler<T: Task>(task: T) -> bool;
 predicate task_initial_context_coordinate_bound<T: Task, F: TaskFlow>(task: T, flow: F) -> bool;
 predicate task_initial_context_complete<T: Task, F: TaskFlow>(task: T, flow: F) -> bool;
 predicate task_dispatch_enter_proof_created<T: Task, F: TaskFlow>(task: T, flow: F) -> bool;
+predicate task_context_optional_root_generation_checked<T: Task>(task: T) -> bool;
+predicate task_context_active_trap_leaf_checked<T: Task>(task: T) -> bool;
 predicate task_suspend_sent_only_by_scheduler<T: Task>(task: T) -> bool;
 predicate task_online_has_recoverable_context<T: Task>(task: T) -> bool;
 predicate task_online_eligibility_is_scheduler_owned<T: Task>(task: T) -> bool;
@@ -269,6 +271,8 @@ type Task: ResourceObject {
                     task_breakpoint_bound_to_flow_ref(self, self.flow);
                     task_breakpoint_flow_ref_generation_valid(self);
                     task_breakpoint_published_on_suspend(self, self.flow);
+                    task_context_optional_root_generation_checked(self);
+                    task_context_active_trap_leaf_checked(self);
                 }
             }
             on Transition::Disable -> State::Offline {

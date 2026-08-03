@@ -137,13 +137,13 @@ pub(crate) fn create(
     target_cpu: CpuRef,
     entry: extern "C" fn() -> !,
 ) -> Result<TaskRef, &'static str> {
-    let slot = target_cpu.logical_id();
-    if !target_cpu.is_valid() || target_cpu.is_boot_cpu() || slot >= KERNEL_TASK_SLOT_COUNT {
+    if !target_cpu.is_valid() || target_cpu.is_boot_cpu() {
         return Err("kernel-task-target");
     }
-    if PUBLISHED[slot].load(Ordering::Acquire) {
-        return Err("kernel-task-slot-already-published");
-    }
+    let slot = PUBLISHED
+        .iter()
+        .position(|published| !published.load(Ordering::Acquire))
+        .ok_or("kernel-task-slots-exhausted")?;
 
     // SAFETY: before the release store this unpublished slot is owned only by
     // the creating CPU. No target-CPU accessor accepts it yet.

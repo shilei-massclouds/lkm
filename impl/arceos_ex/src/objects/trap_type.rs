@@ -7,7 +7,6 @@ use crate::{arch::riscv64::csr, checkpoint::Checkpoint};
 
 use super::{
     cpu::{CpuRef, MAX_CPUS},
-    current_task::CurrentTaskError,
     exception_type::ExceptionType,
     interrupt_type::InterruptType,
     kernel_image::KernelImage,
@@ -20,6 +19,7 @@ use super::{
     task_flow::TaskFlowRef,
     trap_flow_type::{
         TRAP_RETURN_TOKEN_MAGIC, TrapCauseClass, TrapEntrySnapshot, TrapExecutionRecord,
+        TrapFlowType,
     },
     vm::Vm,
 };
@@ -53,6 +53,67 @@ const TRAP_ENTRY_CONTEXT_SAVED_T6_OFFSET: usize = 112;
 #[unsafe(no_mangle)]
 static FORMAL_TRAP_ENTRY_CONTEXTS: [AtomicUsize; MAX_CPUS] =
     [const { AtomicUsize::new(0) }; MAX_CPUS];
+
+struct TrapObservation {
+    roots_completed: AtomicUsize,
+    interrupts_completed: AtomicUsize,
+    exceptions_completed: AtomicUsize,
+    ssip_completed: AtomicUsize,
+    return_tokens_consumed: AtomicUsize,
+    leaf_switch_resumes: AtomicUsize,
+    last_generation: AtomicU32,
+}
+
+impl TrapObservation {
+    const fn new() -> Self {
+        Self {
+            roots_completed: AtomicUsize::new(0),
+            interrupts_completed: AtomicUsize::new(0),
+            exceptions_completed: AtomicUsize::new(0),
+            ssip_completed: AtomicUsize::new(0),
+            return_tokens_consumed: AtomicUsize::new(0),
+            leaf_switch_resumes: AtomicUsize::new(0),
+            last_generation: AtomicU32::new(0),
+        }
+    }
+}
+
+static TRAP_OBSERVATIONS: [TrapObservation; MAX_CPUS] =
+    [const { TrapObservation::new() }; MAX_CPUS];
+
+#[cfg(app_smoke)]
+#[derive(Clone, Copy)]
+pub(crate) struct TrapObservationSnapshot {
+    pub roots_completed: usize,
+    pub interrupts_completed: usize,
+    pub exceptions_completed: usize,
+    pub ssip_completed: usize,
+    pub return_tokens_consumed: usize,
+    pub leaf_switch_resumes: usize,
+    pub last_generation: u32,
+}
+
+#[cfg(app_smoke)]
+pub(crate) fn observation(logical_id: usize) -> Option<TrapObservationSnapshot> {
+    let observation = TRAP_OBSERVATIONS.get(logical_id)?;
+    Some(TrapObservationSnapshot {
+        roots_completed: observation.roots_completed.load(Ordering::Acquire),
+        interrupts_completed: observation.interrupts_completed.load(Ordering::Acquire),
+        exceptions_completed: observation.exceptions_completed.load(Ordering::Acquire),
+        ssip_completed: observation.ssip_completed.load(Ordering::Acquire),
+        return_tokens_consumed: observation.return_tokens_consumed.load(Ordering::Acquire),
+        leaf_switch_resumes: observation.leaf_switch_resumes.load(Ordering::Acquire),
+        last_generation: observation.last_generation.load(Ordering::Acquire),
+    })
+}
+
+pub(crate) fn record_leaf_switch_resume(logical_id: usize) {
+    if let Some(observation) = TRAP_OBSERVATIONS.get(logical_id) {
+        observation
+            .leaf_switch_resumes
+            .fetch_add(1, Ordering::Relaxed);
+    }
+}
 
 #[repr(C, align(16))]
 pub struct TrapEntryContext {
@@ -182,7 +243,7 @@ impl TrapEntryContext {
         true
     }
 
-    fn refresh_task_root(
+    pub(crate) fn refresh_task_root(
         &mut self,
         task_identity: usize,
         root_ref: super::trap_flow_type::TrapFlowRef,
@@ -200,7 +261,7 @@ impl TrapEntryContext {
         true
     }
 
-    fn entry_authority_matches(
+    pub(crate) fn entry_authority_matches(
         &self,
         cpu_ref: CpuRef,
         task_identity: usize,
@@ -760,11 +821,6 @@ extern "C" fn formal_event_entry_rust(
     frame: &mut TrapFrame,
     entry_context: &TrapEntryContext,
 ) -> usize {
-    if frame.scause == SCAUSE_INTERRUPT_BIT | crate::arch::riscv64::SUPERVISOR_SOFTWARE_IRQ {
-        crate::arch::riscv64::csr::clear_supervisor_software_interrupt();
-        crate::objects::kernel_task::handle_reschedule_ipi(entry_context.cpu_logical_id());
-        return TRAP_RETURN_TOKEN_MAGIC;
-    }
     let record_ptr = unsafe {
         (frame as *mut TrapFrame)
             .cast::<u8>()
@@ -773,7 +829,7 @@ extern "C" fn formal_event_entry_rust(
     };
     unsafe { record_ptr.write(TrapExecutionRecord::new()) };
     let record = unsafe { &mut *record_ptr };
-    let entry = capture_entry_authority(frame, record);
+    let entry = capture_entry_authority(frame, record, entry_context);
     match dispatch_trap_occurrence(record, frame, entry) {
         Ok(token) => token,
         Err(error) => trap_occurrence_failed(frame, record, entry, error),
@@ -1019,6 +1075,9 @@ impl TrapType {
         Some(entry as *const () as usize)
     }
 
+    // Keep the formal entry publication as one disassemblable commit boundary
+    // for the long-term stvec/sscratch instruction-order acceptance.
+    #[inline(never)]
     pub fn setup(
         &mut self,
         vm: &Vm,
@@ -1101,7 +1160,7 @@ impl TrapType {
         self.service_online
     }
 
-    fn allocate_occurrence_generation(&self) -> u32 {
+    pub(crate) fn allocate_occurrence_generation(&self) -> u32 {
         let mut current = self.next_occurrence_generation.load(Ordering::Relaxed);
         loop {
             let next = super::next_generation(current);
@@ -1120,10 +1179,14 @@ impl TrapType {
 
 #[derive(Clone, Copy)]
 struct TrapEntryAuthority {
+    runtime: crate::context::TrapRuntimeLease,
     task_ref: TaskRef,
     task_flow_ref: TaskFlowRef,
     cpu_ref: CpuRef,
     generation: u32,
+    context_epoch: u64,
+    nested_trap: bool,
+    hardirq_context: bool,
     trap_state: State,
     interrupt_state: State,
     exception_state: State,
@@ -1147,26 +1210,25 @@ enum ConcreteExceptionKind {
     Unexpected,
 }
 
-fn capture_entry_authority(frame: &TrapFrame, record: &TrapExecutionRecord) -> TrapEntryAuthority {
-    let ctx = crate::context::context_ref();
-    let task_ref = match ctx.current_task_ref() {
-        Ok(task_ref) => task_ref,
-        Err(error) => trap_selector_failed(frame, record, error),
-    };
-    let task_flow_ref = match ctx.current_task_flow_ref() {
-        Ok(flow_ref) => flow_ref,
-        Err(error) => trap_selector_failed(frame, record, error),
-    };
-    let cpu_ref = match ctx.current_cpu() {
-        Ok(current_cpu) => current_cpu.cpu_ref(),
-        Err(error) => trap_selector_failed(frame, record, error),
-    };
-    let Some(cpu) = ctx.cpu_group.dereference(cpu_ref) else {
-        trap_authority_failed(frame, record, task_ref, task_flow_ref, cpu_ref)
-    };
-    let trap = cpu.trap();
-    let task_identity = csr::read_tp();
-    let task_root = ctx.task_root_trap_flow_ref_raw(task_ref);
+fn capture_entry_authority(
+    frame: &TrapFrame,
+    record: &TrapExecutionRecord,
+    entry_context: &TrapEntryContext,
+) -> TrapEntryAuthority {
+    let runtime = crate::context::TrapRuntimeLease::open(entry_context)
+        .unwrap_or_else(|reason| trap_runtime_lease_failed(frame, record, reason));
+    let task_access = runtime.task_access();
+    let task_ref = task_access.task_ref();
+    let task_flow_ref = task_access.flow_ref();
+    let cpu_ref = runtime.cpu_ref();
+    let trap = runtime.trap();
+    let task_identity = task_access.task_identity();
+    let task_root = task_access.root_trap_flow_ref();
+    let nested_trap = task_root.is_valid();
+    let hardirq_context = nested_trap && TrapFlowType::active_child_is_interrupt(task_root);
+    let context_epoch = task_access
+        .context_epoch()
+        .unwrap_or_else(|| trap_runtime_lease_failed(frame, record, "trap_context_epoch_missing"));
     if csr::read_sscratch() != 0
         || TrapType::installed_entry_context_address(cpu_ref.logical_id())
             != trap.entry_context_address()
@@ -1199,10 +1261,14 @@ fn capture_entry_authority(frame: &TrapFrame, record: &TrapExecutionRecord) -> T
     }
     let exception = trap.exception();
     TrapEntryAuthority {
+        runtime,
         task_ref,
         task_flow_ref,
         cpu_ref,
         generation: trap.allocate_occurrence_generation(),
+        context_epoch,
+        nested_trap,
+        hardirq_context,
         trap_state: trap.state(),
         interrupt_state: trap.interrupt().state(),
         exception_state: exception.state(),
@@ -1226,8 +1292,10 @@ fn dispatch_trap_occurrence(
         matches!(entry.trap_state, State::Ready | State::Online),
     )?;
     let root_ref = record.root.flow_ref();
-    let root_binding_created = crate::context::context()
-        .bind_task_root_trap_flow(entry.task_ref, root_ref)
+    let root_binding_created = entry
+        .runtime
+        .task_access()
+        .bind_root_trap_flow(entry.runtime.entry_context(), root_ref)
         .map_err(|first_failed| {
             trap_return_condition_error().with_diagnostic(FailureDiagnostic::new(
                 "TrapOccurrence",
@@ -1253,6 +1321,7 @@ fn dispatch_trap_occurrence(
         stval: frame.stval,
         entry_task: entry.task_ref,
         effective_task_flow: entry.task_flow_ref,
+        context_epoch: entry.context_epoch,
     })?;
 
     match cause_class {
@@ -1265,13 +1334,23 @@ fn dispatch_trap_occurrence(
     let token = record.root.enable()?;
     record.root.disable()?;
     record.root.cleanup(return_authority.cpu_ref)?;
+    if let Some(observation) = TRAP_OBSERVATIONS.get(entry.cpu_ref.logical_id()) {
+        observation.roots_completed.fetch_add(1, Ordering::Relaxed);
+        observation
+            .last_generation
+            .store(entry.generation, Ordering::Release);
+    }
     let root_binding_valid = if root_binding_created {
-        match crate::context::context().clear_task_root_trap_flow(entry.task_ref, root_ref) {
+        match entry
+            .runtime
+            .task_access()
+            .clear_root_trap_flow(entry.runtime.entry_context(), root_ref)
+        {
             Some(cleared) => cleared,
             None => return_authority.committed_terminal_switch,
         }
     } else {
-        match crate::context::context().task_root_trap_flow_resolves(entry.task_ref) {
+        match entry.runtime.task_access().root_trap_flow_resolves() {
             Some(resolves) => resolves,
             None => return_authority.committed_terminal_switch,
         }
@@ -1292,9 +1371,15 @@ fn dispatch_trap_occurrence(
             )),
         );
     }
-    token
+    let magic = token
         .consume_after_cleanup(&record.root)
-        .ok_or_else(trap_return_condition_error)
+        .ok_or_else(trap_return_condition_error)?;
+    if let Some(observation) = TRAP_OBSERVATIONS.get(entry.cpu_ref.logical_id()) {
+        observation
+            .return_tokens_consumed
+            .fetch_add(1, Ordering::Relaxed);
+    }
+    Ok(magic)
 }
 
 fn dispatch_interrupt_occurrence(
@@ -1322,12 +1407,21 @@ fn dispatch_interrupt_occurrence(
     }
     let child_ref = record.interrupt.flow_ref();
     record.root.select_child(child_ref)?;
-    crate::objects::interrupt_type::dispatch_scause(frame.scause);
+    let reschedule =
+        crate::objects::interrupt_type::dispatch_scause(frame.scause, entry.cpu_ref.logical_id());
     capture_return_cpu(frame, record, entry, false);
     record.interrupt.setup_after_handler()?;
     record.interrupt.enable()?;
     record.interrupt.disable()?;
     record.interrupt.cleanup()?;
+    if let Some(observation) = TRAP_OBSERVATIONS.get(entry.cpu_ref.logical_id()) {
+        observation
+            .interrupts_completed
+            .fetch_add(1, Ordering::Relaxed);
+        if reschedule {
+            observation.ssip_completed.fetch_add(1, Ordering::Relaxed);
+        }
+    }
     record.root.mark_child_completed(child_ref)
 }
 
@@ -1367,8 +1461,32 @@ fn dispatch_exception_occurrence(
                 .preset(frame.scause, frame.stval, from_user)?;
             let child_ref = record.page_fault.flow_ref();
             record.exception.select_child(child_ref)?;
-            record.page_fault.setup_context(!from_user, false)?;
-            crate::objects::exception_type::dispatch_trap(frame);
+            let fixup_address = (!from_user)
+                .then(|| entry.runtime.exception_fixup(frame.sepc))
+                .flatten();
+            record.page_fault.setup_context(
+                entry.nested_trap,
+                entry.hardirq_context,
+                frame.sstatus & csr::SSTATUS_SPIE != 0,
+                fixup_address,
+            )?;
+            if from_user || record.page_fault.fatal_selected() {
+                crate::objects::exception_type::dispatch_trap(frame);
+            } else {
+                let fixup = record
+                    .page_fault
+                    .fixup_address()
+                    .ok_or_else(|| page_fault_recovery_failed("validated_fixup_present"))?;
+                if record.page_fault.schedulable() {
+                    schedule_from_kernel_page_fault(record.root.flow_ref(), entry)?;
+                } else if !record.page_fault.atomic_context() {
+                    return Err(page_fault_recovery_failed(
+                        "kernel_fixup_context_classified",
+                    ));
+                }
+                frame.sepc = fixup;
+                record.page_fault.commit_kernel_fixup(fixup)?;
+            }
             record.page_fault.enable_after_handler()?;
             record.page_fault.disable()?;
             record.page_fault.cleanup()?;
@@ -1436,7 +1554,86 @@ fn dispatch_exception_occurrence(
     record.exception.enable()?;
     record.exception.disable()?;
     record.exception.cleanup()?;
+    if let Some(observation) = TRAP_OBSERVATIONS.get(entry.cpu_ref.logical_id()) {
+        observation
+            .exceptions_completed
+            .fetch_add(1, Ordering::Relaxed);
+    }
     record.root.mark_child_completed(exception_ref)
+}
+
+fn schedule_from_kernel_page_fault(
+    root_ref: super::trap_flow_type::TrapFlowRef,
+    entry: TrapEntryAuthority,
+) -> EventResult {
+    let logical_id = entry.cpu_ref.logical_id();
+    let had_inbound = crate::objects::kernel_task::has_inbound(logical_id);
+    let had_need_resched = crate::objects::kernel_task::need_resched_pending(logical_id);
+    if !had_inbound && !had_need_resched {
+        return Ok(());
+    }
+    if had_inbound {
+        crate::context::process_secondary_inbound(logical_id)?;
+    }
+    let need_resched = crate::objects::kernel_task::take_need_resched(logical_id);
+    if !had_inbound && !need_resched {
+        return Ok(());
+    }
+
+    crate::context::schedule_secondary_current(logical_id, entry.task_ref)?;
+    if !entry.runtime.revalidate_current() {
+        return Err(page_fault_recovery_failed(
+            "entry_task_flow_cpu_revalidated_after_schedule",
+        ));
+    }
+    let task_access = entry.runtime.task_access();
+    if !task_access.root_trap_flow_ref().same_identity(root_ref) {
+        return Err(page_fault_recovery_failed(
+            "root_generation_revalidated_after_schedule",
+        ));
+    }
+    let context_epoch = task_access
+        .context_epoch()
+        .ok_or_else(|| page_fault_recovery_failed("context_epoch_resolves_after_schedule"))?;
+    let active_leaf_valid = if context_epoch == entry.context_epoch {
+        TrapFlowType::active_leaf_matches(
+            root_ref,
+            entry.task_ref,
+            entry.task_flow_ref,
+            entry.cpu_ref,
+        )
+    } else {
+        TrapFlowType::active_leaf_resumed(
+            root_ref,
+            entry.task_ref,
+            entry.task_flow_ref,
+            entry.cpu_ref,
+            context_epoch,
+        )
+    };
+    if !active_leaf_valid {
+        return Err(page_fault_recovery_failed(
+            "active_leaf_and_enter_proof_revalidated_after_schedule",
+        ));
+    }
+    Ok(())
+}
+
+fn page_fault_recovery_failed(first_failed: &'static str) -> EventError {
+    EventError::failed(
+        EventErrorCode::ConditionFailed,
+        LifecycleEvent::Enable,
+        State::Ready,
+        State::Ready,
+        State::Online,
+    )
+    .with_diagnostic(FailureDiagnostic::new(
+        "PageFaultExceptionOccurrence",
+        "kernel_fixup",
+        "PageFaultExceptionFlowType",
+        "kernel extable recovery and optional scheduler round trip",
+        first_failed,
+    ))
 }
 
 const fn classify_exception(scause: usize) -> ConcreteExceptionKind {
@@ -1454,29 +1651,17 @@ fn capture_return_cpu(
     entry: TrapEntryAuthority,
     migration_allowed: bool,
 ) -> TrapReturnAuthority {
-    let ctx = crate::context::context_ref();
-    let task_ref = match ctx.current_task_ref() {
-        Ok(task_ref) => task_ref,
-        Err(error) => trap_selector_failed(frame, record, error),
-    };
-    let task_flow_ref = match ctx.current_task_flow_ref() {
-        Ok(flow_ref) => flow_ref,
-        Err(error) => trap_selector_failed(frame, record, error),
-    };
-    let return_cpu = match ctx.current_cpu() {
-        Ok(current_cpu) => current_cpu.cpu_ref(),
-        Err(error) => trap_selector_failed(frame, record, error),
-    };
+    let entry_context = unsafe { &*entry.runtime.entry_context() };
+    let current = crate::context::TrapRuntimeLease::open(entry_context)
+        .unwrap_or_else(|reason| trap_runtime_lease_failed(frame, record, reason));
+    let task_ref = current.task_access().task_ref();
+    let task_flow_ref = current.task_access().flow_ref();
+    let return_cpu = current.cpu_ref();
     let same_continuation =
         task_ref.same_identity(entry.task_ref) && task_flow_ref.same_identity(entry.task_flow_ref);
     let committed_terminal_switch = migration_allowed
         && !task_ref.same_identity(entry.task_ref)
-        && ctx.scheduler().switch_to_entry_prev_ref() == entry.task_ref
-        && ctx.scheduler().switch_to_entry_next_ref() == task_ref
-        && ctx.scheduler().switch_to_exit_prev_ref() == entry.task_ref
-        && ctx.scheduler().switch_to_exit_next_ref() == task_ref
-        && ctx.scheduler().switch_to_exit_current_ref() == task_ref
-        && ctx.scheduler().switch_to_exit_count() != 0;
+        && current.committed_terminal_switch_from(entry.task_ref);
     if (!same_continuation && !committed_terminal_switch)
         || !return_cpu.is_valid()
         || (!migration_allowed && return_cpu != entry.cpu_ref)
@@ -1507,22 +1692,19 @@ const fn trap_return_condition_error() -> EventError {
     )
 }
 
-fn trap_selector_failed(
+fn trap_runtime_lease_failed(
     frame: &TrapFrame,
     record: &TrapExecutionRecord,
-    error: CurrentTaskError,
+    reason: &'static str,
 ) -> ! {
-    let diagnostic = error.diagnostic();
-    crate::arch::riscv64::sbi::putstr("trap selector resolution failure code=");
-    sbi_put_hex(error.code() as usize);
-    crate::arch::riscv64::sbi::putstr(" tp=");
-    sbi_put_hex(diagnostic.tp());
+    crate::arch::riscv64::sbi::putstr("trap runtime lease failure reason=");
+    crate::arch::riscv64::sbi::putstr(reason);
     print_trap_identity(
         frame,
         record,
-        diagnostic.task_ref(),
-        diagnostic.flow_ref(),
-        diagnostic.cpu_ref(),
+        TaskRef::NONE,
+        TaskFlowRef::NONE,
+        CpuRef::invalid(),
     )
 }
 
@@ -1582,7 +1764,7 @@ fn trap_occurrence_failed(
         crate::arch::riscv64::sbi::putstr(" first_failed=");
         crate::arch::riscv64::sbi::putstr(diagnostic.first_failed);
     }
-    let stored_root = crate::context::context().task_root_trap_flow_ref(entry.task_ref);
+    let stored_root = entry.runtime.task_access().root_trap_flow_ref();
     crate::arch::riscv64::sbi::putstr(" stored_root=");
     sbi_put_hex(stored_root.address());
     crate::arch::riscv64::sbi::putstr(":");

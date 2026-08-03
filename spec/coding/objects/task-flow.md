@@ -35,6 +35,10 @@ effective-flow execution, then consumes the proof so duplicate Enter fails deter
 no first/resume or concrete-Flow branch and owns no one-shot entry state. The already restored
 `ContextCoordinate` selects a handler body, YieldToken resume coordinate, or machine continuation.
 
+When the dispatch context contains a root TrapFlowRef, the Scheduler bridge supplies a separate validated
+root/leaf proof to `Task::enter_flow_contextual`; it is consumed exactly once together with the Dispatch proof.
+No-switch trap returns never call this path.
+
 `Task` exposes paired internal operations for Setup/Enable, Save/Suspend, Dispatch/Enter and teardown so
 the embedded Flow never requires a self-referential pointer or unsafe alias. Concrete Flows do not
 override `Enter`; their `initial_context` declaration names an Online `StateEffect::None` body Action.

@@ -1,8 +1,10 @@
 # PageFaultExceptionType
 
-`PageFaultExceptionType` is the CPU-local binding for RISC-V instruction/load/store page-fault causes. User and other
-recoverable faults may schedule and migrate while their root TrapFlow remains parented to the entry CPU. A fault in
-hardirq/atomic context may only complete an exception-table fixup; otherwise it is terminal.
+`PageFaultExceptionType` is the CPU-local binding for RISC-V instruction/load/store page-fault causes. Source and
+atomicity are separate classifications. User recovery is normally schedulable. A kernel-origin fault must match the
+sorted `ExceptionTable`; only a non-nested, non-hardirq, entry-irq-enabled current Task context may schedule before
+fixup. Nested, hardirq or entry-irq-disabled faults may only apply the validated fixup immediately. Missing/stale
+entries and illegal context are terminal.
 
 `Preset` installs only the terminal page-fault fallback consumed by `TrapType.Setup`; handler and fixup bindings
 remain later lifecycle work.

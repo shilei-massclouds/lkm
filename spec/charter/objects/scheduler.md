@@ -55,6 +55,10 @@ runqueue 修改前拒绝。重复 IPI 可以合并为同一个 `need_resched`，
 首次运行与恢复运行使用同一个任务交换概念。候选任务的执行位置本身决定它是进入首次准备好的位置，
 还是回到先前暂停的位置；Scheduler 不保存两种派发类型，也不据此选择两套交换协议。
 
+候选 context 可以携带 root TrapFlowRef。此时 next-dispatch preflight 必须验证该 root 的 generation、
+入口 Task/Flow、owner CPU、活动 child 与 concrete leaf、context epoch 和未 Cleanup 状态；Dispatch 后的
+TaskFlow.Enter 精确一次记录 leaf resume。Scheduler 不按 leaf 类型分支，机器 `ra/sp` 决定恢复坐标。
+
 owner CPU 的 idle Task 也使用同一交换协议。CPU-local idle loop 先消费 inbound mailbox 并检查本地候选
 集合；有工作或 `need_resched` 时请求 owner Scheduler。没有工作时，它在关闭本地总中断门后重检 mailbox
 和 `need_resched`，只有重检仍为空才进入可由 IPI 唤醒的 `wfi`。idle 首次真实切出保存其架构 continuation；

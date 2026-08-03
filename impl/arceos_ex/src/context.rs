@@ -123,7 +123,7 @@ use crate::objects::{
     workqueue::Workqueue,
     zones::Zones,
 };
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 pub struct Context {
     pub config: Config,
@@ -633,85 +633,6 @@ impl Context {
             )
         })?;
         Ok(candidate.flow.flow_ref())
-    }
-
-    pub(crate) fn bind_task_root_trap_flow(
-        &mut self,
-        task_ref: TaskRef,
-        root_ref: crate::objects::trap_flow_type::TrapFlowRef,
-    ) -> Result<bool, &'static str> {
-        let candidate = self
-            .current_task_candidate(task_ref)
-            .ok_or("current_task_candidate_missing")?;
-        let effective_flow_ref = candidate.flow.flow_ref();
-        let cpu_ref = candidate
-            .flow
-            .cpu_ref()
-            .ok_or("current_task_flow_cpu_missing")?;
-        let task_identity = crate::arch::riscv64::csr::read_tp();
-        let installed = self
-            .task_mut_for_ref(task_ref)
-            .ok_or("mutable_task_ref_missing")?
-            .bind_root_trap_flow(effective_flow_ref, root_ref)?;
-        if installed
-            && !self
-                .cpu_group
-                .cpu_mut(cpu_ref.logical_id())
-                .ok_or("current_cpu_missing")?
-                .trap_mut()
-                .refresh_entry_task_root(task_identity, root_ref)
-        {
-            return Err("trap_entry_task_root_refresh_failed");
-        }
-        Ok(installed)
-    }
-
-    pub(crate) fn task_root_trap_flow_resolves(&mut self, task_ref: TaskRef) -> Option<bool> {
-        self.task_mut_for_ref(task_ref)
-            .map(|task| task.root_trap_flow_resolves())
-    }
-
-    pub(crate) fn task_root_trap_flow_ref(
-        &mut self,
-        task_ref: TaskRef,
-    ) -> crate::objects::trap_flow_type::TrapFlowRef {
-        self.task_mut_for_ref(task_ref)
-            .map(|task| task.root_trap_flow_ref())
-            .unwrap_or(crate::objects::trap_flow_type::TrapFlowRef::NONE)
-    }
-
-    pub(crate) fn task_root_trap_flow_ref_raw(
-        &self,
-        task_ref: TaskRef,
-    ) -> crate::objects::trap_flow_type::TrapFlowRef {
-        self.current_task_candidate(task_ref)
-            .map(|candidate| candidate.task.root_trap_flow_ref())
-            .unwrap_or(crate::objects::trap_flow_type::TrapFlowRef::NONE)
-    }
-
-    pub(crate) fn clear_task_root_trap_flow(
-        &mut self,
-        task_ref: TaskRef,
-        root_ref: crate::objects::trap_flow_type::TrapFlowRef,
-    ) -> Option<bool> {
-        let cpu_ref = self.current_task_candidate(task_ref)?.flow.cpu_ref()?;
-        let task_identity = crate::arch::riscv64::csr::read_tp();
-        let cleared = self
-            .task_mut_for_ref(task_ref)
-            .map(|task| task.clear_root_trap_flow(root_ref))?;
-        if cleared
-            && !self
-                .cpu_group
-                .cpu_mut(cpu_ref.logical_id())?
-                .trap_mut()
-                .refresh_entry_task_root(
-                    task_identity,
-                    crate::objects::trap_flow_type::TrapFlowRef::NONE,
-                )
-        {
-            return None;
-        }
-        Some(cleared)
     }
 
     pub fn current_cpu(&self) -> Result<crate::objects::cpu_group::CurrentCpu, CurrentTaskError> {
@@ -1585,9 +1506,12 @@ static mut CONTEXT: Context = Context::new();
 
 static SECONDARY_RUNTIME_OPEN: [AtomicBool; crate::objects::cpu::MAX_CPUS] =
     [const { AtomicBool::new(false) }; crate::objects::cpu::MAX_CPUS];
+static SECONDARY_TRAP_RUNTIME: [AtomicUsize; crate::objects::cpu::MAX_CPUS] =
+    [const { AtomicUsize::new(0) }; crate::objects::cpu::MAX_CPUS];
 
-pub(crate) fn open_secondary_runtime(logical_id: usize) {
-    if logical_id > 0 && logical_id < crate::objects::cpu::MAX_CPUS {
+pub(crate) fn open_secondary_runtime(logical_id: usize, trap_address: usize) {
+    if logical_id > 0 && logical_id < crate::objects::cpu::MAX_CPUS && trap_address != 0 {
+        SECONDARY_TRAP_RUNTIME[logical_id].store(trap_address, Ordering::Relaxed);
         SECONDARY_RUNTIME_OPEN[logical_id].store(true, Ordering::Release);
     }
 }
@@ -1621,6 +1545,284 @@ fn secondary_runtime_parts(
         let scheduler = scheduler as *mut crate::objects::scheduler::Scheduler;
         let interrupt = interrupt as *mut crate::objects::interrupt_type::InterruptType;
         Some((&mut *scheduler, &mut *interrupt))
+    }
+}
+
+fn secondary_trap_runtime(logical_id: usize) -> Option<*const crate::objects::trap_type::TrapType> {
+    if !secondary_runtime_open(logical_id) {
+        return None;
+    }
+    let address = SECONDARY_TRAP_RUNTIME
+        .get(logical_id)?
+        .load(Ordering::Acquire);
+    (address != 0).then_some(address as *const crate::objects::trap_type::TrapType)
+}
+
+fn secondary_scheduler_curr_ref(logical_id: usize) -> Option<TaskRef> {
+    if !secondary_runtime_open(logical_id) {
+        return None;
+    }
+    // SAFETY: CPU0 release-published the secondary runtime only after setup;
+    // this read exposes only the target CPU Scheduler's stable curr identity.
+    unsafe {
+        let context = core::ptr::addr_of!(CONTEXT);
+        (&*core::ptr::addr_of!((*context).cpu_group))
+            .cpu(logical_id)
+            .map(|cpu| cpu.scheduler().curr_ref())
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct TrapTaskAccess {
+    logical_id: usize,
+    task_ref: TaskRef,
+    flow_ref: TaskFlowRef,
+    task_identity: usize,
+}
+
+impl TrapTaskAccess {
+    fn candidate(self) -> Option<CurrentTaskCandidate<'static>> {
+        if self.task_ref.is_kernel() {
+            crate::objects::kernel_task::task_candidate_by_ref(self.task_ref)
+        } else if self.task_ref.is_ap_idle() {
+            crate::objects::smp_bringup::ap_current_task_candidate_by_ref(self.task_ref)
+        } else if self.logical_id == 0 {
+            context_ref().current_task_candidate(self.task_ref)
+        } else {
+            None
+        }
+    }
+
+    fn task_mut(self) -> Option<&'static mut Task> {
+        if self.task_ref.is_kernel() {
+            crate::objects::kernel_task::task_mut_by_ref_on_cpu(self.task_ref, self.logical_id)
+        } else if self.task_ref.is_ap_idle() {
+            crate::objects::smp_bringup::ap_task_mut_by_ref(self.task_ref)
+        } else if self.logical_id == 0 {
+            // SAFETY: CPU0 is the only owner allowed to mutate boot-runtime
+            // Task storage through this lease.
+            unsafe { (&mut *core::ptr::addr_of_mut!(CONTEXT)).task_mut_for_ref(self.task_ref) }
+        } else {
+            None
+        }
+    }
+
+    pub(crate) const fn task_ref(self) -> TaskRef {
+        self.task_ref
+    }
+
+    pub(crate) const fn flow_ref(self) -> TaskFlowRef {
+        self.flow_ref
+    }
+
+    pub(crate) const fn task_identity(self) -> usize {
+        self.task_identity
+    }
+
+    pub(crate) fn context_epoch(self) -> Option<u64> {
+        self.candidate()
+            .map(|candidate| candidate.task.context_epoch())
+    }
+
+    pub(crate) fn root_trap_flow_ref(self) -> crate::objects::trap_flow_type::TrapFlowRef {
+        self.candidate()
+            .map(|candidate| candidate.task.root_trap_flow_ref())
+            .unwrap_or(crate::objects::trap_flow_type::TrapFlowRef::NONE)
+    }
+
+    pub(crate) fn bind_root_trap_flow(
+        self,
+        entry_context: *mut crate::objects::trap_type::TrapEntryContext,
+        root_ref: crate::objects::trap_flow_type::TrapFlowRef,
+    ) -> Result<bool, &'static str> {
+        let candidate = self.candidate().ok_or("trap_task_candidate_missing")?;
+        if candidate.task as *const Task as usize != self.task_identity
+            || !candidate.flow.flow_ref().same_identity(self.flow_ref)
+            || candidate.flow.cpu_id() != self.logical_id
+        {
+            return Err("trap_task_candidate_binding_mismatch");
+        }
+        let installed = self
+            .task_mut()
+            .ok_or("trap_task_mut_missing")?
+            .bind_root_trap_flow(self.flow_ref, root_ref)?;
+        if installed {
+            // SAFETY: the entry CPU exclusively owns its installed entry
+            // context and updates only the active Task/root binding fields.
+            let refreshed =
+                unsafe { (&mut *entry_context).refresh_task_root(self.task_identity, root_ref) };
+            if !refreshed {
+                return Err("trap_entry_root_refresh_failed");
+            }
+        }
+        Ok(installed)
+    }
+
+    pub(crate) fn root_trap_flow_resolves(self) -> Option<bool> {
+        self.candidate()
+            .map(|candidate| candidate.task.root_trap_flow_resolves())
+    }
+
+    pub(crate) fn clear_root_trap_flow(
+        self,
+        entry_context: *mut crate::objects::trap_type::TrapEntryContext,
+        root_ref: crate::objects::trap_flow_type::TrapFlowRef,
+    ) -> Option<bool> {
+        let cleared = self.task_mut()?.clear_root_trap_flow(root_ref);
+        if cleared {
+            // SAFETY: see bind_root_trap_flow; this is the matching owner-CPU
+            // release of the installed root identity.
+            let refreshed = unsafe {
+                (&mut *entry_context).refresh_task_root(
+                    self.task_identity,
+                    crate::objects::trap_flow_type::TrapFlowRef::NONE,
+                )
+            };
+            if !refreshed {
+                return None;
+            }
+        }
+        Some(cleared)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct TrapRuntimeLease {
+    cpu_ref: crate::objects::cpu::CpuRef,
+    trap: *const crate::objects::trap_type::TrapType,
+    entry_context: *mut crate::objects::trap_type::TrapEntryContext,
+    exception_table: *const ExceptionTable,
+    task_access: TrapTaskAccess,
+}
+
+impl TrapRuntimeLease {
+    pub(crate) fn open(
+        entry_context: &crate::objects::trap_type::TrapEntryContext,
+    ) -> Result<Self, &'static str> {
+        let logical_id = entry_context.cpu_logical_id();
+        if logical_id >= crate::objects::cpu::MAX_CPUS
+            || (logical_id != 0 && !secondary_runtime_open(logical_id))
+        {
+            return Err("trap_cpu_runtime_not_open");
+        }
+        let task_identity = crate::arch::riscv64::csr::read_tp();
+        let candidate = if logical_id == 0 {
+            let task_ref = context_ref()
+                .task_ref_from_identity(task_identity)
+                .ok_or("trap_task_identity_unknown")?;
+            context_ref().current_task_candidate(task_ref)
+        } else {
+            crate::objects::kernel_task::task_candidate_by_identity(task_identity).or_else(|| {
+                crate::objects::smp_bringup::ap_current_task_candidate_by_identity(task_identity)
+            })
+        }
+        .ok_or("trap_task_candidate_missing")?;
+        let task_ref = candidate.task.task_ref();
+        let flow_ref = candidate.flow.flow_ref();
+        let cpu_ref = candidate.flow.cpu_ref().ok_or("trap_task_cpu_missing")?;
+        if cpu_ref.logical_id() != logical_id
+            || candidate.task as *const Task as usize != task_identity
+            || !candidate.task.task_ref().same_identity(task_ref)
+            || !candidate.task.owns_flow(flow_ref)
+        {
+            return Err("trap_task_flow_cpu_binding_mismatch");
+        }
+
+        let scheduler_curr = if logical_id == 0 {
+            context_ref().scheduler().curr_ref()
+        } else {
+            secondary_scheduler_curr_ref(logical_id).ok_or("trap_scheduler_lease_missing")?
+        };
+        if !scheduler_curr.same_identity(task_ref) {
+            return Err("trap_scheduler_curr_mismatch");
+        }
+
+        let trap = if logical_id == 0 {
+            context_ref().boot_cpu_trap() as *const crate::objects::trap_type::TrapType
+        } else {
+            secondary_trap_runtime(logical_id).ok_or("trap_cpu_missing")?
+        };
+        if crate::objects::trap_type::TrapType::installed_entry_context_address(logical_id)
+            != entry_context as *const _ as usize
+            || unsafe { (&*trap).entry_context_address() } != entry_context as *const _ as usize
+        {
+            return Err("trap_entry_context_not_owner_cpu");
+        }
+
+        Ok(Self {
+            cpu_ref,
+            trap,
+            entry_context: entry_context as *const _ as *mut _,
+            exception_table: unsafe {
+                core::ptr::addr_of!((*core::ptr::addr_of!(CONTEXT)).exception_table)
+            },
+            task_access: TrapTaskAccess {
+                logical_id,
+                task_ref,
+                flow_ref,
+                task_identity,
+            },
+        })
+    }
+
+    pub(crate) const fn cpu_ref(self) -> crate::objects::cpu::CpuRef {
+        self.cpu_ref
+    }
+
+    pub(crate) const fn task_access(self) -> TrapTaskAccess {
+        self.task_access
+    }
+
+    pub(crate) const fn entry_context(self) -> *mut crate::objects::trap_type::TrapEntryContext {
+        self.entry_context
+    }
+
+    pub(crate) fn trap(self) -> &'static crate::objects::trap_type::TrapType {
+        // SAFETY: the pointer names the stable TrapType embedded in the
+        // entry CPU. This lease exposes only read/atomic TrapType operations.
+        unsafe { &*self.trap }
+    }
+
+    pub(crate) fn exception_fixup(self, instruction: usize) -> Option<usize> {
+        // SAFETY: ExceptionTable is immutable after boot-time Setup and the
+        // lease exposes only its lookup operation.
+        unsafe { (&*self.exception_table).lookup(instruction) }.map(|entry| entry.fixup_addr())
+    }
+
+    pub(crate) fn revalidate_current(self) -> bool {
+        let entry_context = unsafe { &*self.entry_context };
+        Self::open(entry_context).is_ok_and(|current| {
+            current.cpu_ref == self.cpu_ref
+                && current
+                    .task_access
+                    .task_ref
+                    .same_identity(self.task_access.task_ref)
+                && current
+                    .task_access
+                    .flow_ref
+                    .same_identity(self.task_access.flow_ref)
+        })
+    }
+
+    pub(crate) fn committed_terminal_switch_from(self, prev_ref: TaskRef) -> bool {
+        let next_ref = self.task_access.task_ref;
+        if next_ref.same_identity(prev_ref) {
+            return false;
+        }
+        let matches = |scheduler: &crate::objects::scheduler::Scheduler| {
+            scheduler.switch_to_entry_prev_ref() == prev_ref
+                && scheduler.switch_to_entry_next_ref() == next_ref
+                && scheduler.switch_to_exit_prev_ref() == prev_ref
+                && scheduler.switch_to_exit_next_ref() == next_ref
+                && scheduler.switch_to_exit_current_ref() == next_ref
+                && scheduler.switch_to_exit_count() != 0
+        };
+        if self.cpu_ref.is_boot_cpu() {
+            matches(context_ref().scheduler())
+        } else {
+            secondary_runtime_parts(self.cpu_ref.logical_id())
+                .is_some_and(|(scheduler, _)| matches(scheduler))
+        }
     }
 }
 

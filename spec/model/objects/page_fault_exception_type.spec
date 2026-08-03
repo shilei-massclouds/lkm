@@ -14,6 +14,8 @@ type PageFaultExceptionType: ResourceObject {
                 ensures {
                     page_fault_handler_ready(self);
                     page_fault_context_matrix_ready(self);
+                    page_fault_kernel_origin_independent_of_atomic(self);
+                    page_fault_exception_table_fixup_required_for_kernel(self);
                 }
             }
         }
@@ -30,4 +32,6 @@ type PageFaultExceptionType: ResourceObject {
 predicate page_fault_fallback_ready<P: PageFaultExceptionType>(page_fault: P) -> bool;
 predicate page_fault_handler_ready<P: PageFaultExceptionType>(page_fault: P) -> bool;
 predicate page_fault_context_matrix_ready<P: PageFaultExceptionType>(page_fault: P) -> bool;
+predicate page_fault_kernel_origin_independent_of_atomic<P: PageFaultExceptionType>(page_fault: P) -> bool;
+predicate page_fault_exception_table_fixup_required_for_kernel<P: PageFaultExceptionType>(page_fault: P) -> bool;
 predicate page_fault_recovery_online<P: PageFaultExceptionType>(page_fault: P) -> bool;

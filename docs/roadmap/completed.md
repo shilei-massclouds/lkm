@@ -6,6 +6,7 @@
 
 | 领域 | 已完成任务 | 专题证据 |
 | --- | --- | --- |
+| charter/model/coding/arceos_ex/trap/scheduler | TaskFlow 正式 trap overlay 与 page-fault leaf 内 A->B->A 返回首轮 | [确定性 SMP TaskFlow lanes 专题](deterministic-smp-lanes.md#已闭合taskflow-trap-overlay-与-leaf-内切换返回) |
 | model/tools2/animate | tools2 Signal 交互式离线 HTML 动画 v1 | [交互式 model trace HTML 动画](interactive-model-animation.md) |
 | model/tools2/validation | tools2 Deferred / Trimmed / Obligation v9 语义闭环 | [Signal-driven tools2 完成证据](signal-driven-tools2.md#deferred--trimmed--obligation-v9-完成证据) |
 | tools2/testing/performance | tools2 主模型集成测试去重与阶段复用 | [Signal-driven tools2 完成证据](signal-driven-tools2.md#主模型集成测试时长优化完成证据) |

@@ -28,9 +28,14 @@ pub struct PageFaultExceptionFlowType {
     fault_address: usize,
     access: PageFaultAccess,
     source: PageFaultSource,
+    nested: bool,
+    hardirq_context: bool,
+    entry_interrupts_enabled: bool,
     atomic_context: bool,
     schedulable: bool,
     fixup_selected: bool,
+    fixup_address: usize,
+    fixup_committed: bool,
     fatal_selected: bool,
     handler_completed: bool,
 }
@@ -44,9 +49,14 @@ impl PageFaultExceptionFlowType {
             fault_address: 0,
             access: PageFaultAccess::Read,
             source: PageFaultSource::Kernel,
+            nested: false,
+            hardirq_context: false,
+            entry_interrupts_enabled: false,
             atomic_context: false,
             schedulable: false,
             fixup_selected: false,
+            fixup_address: 0,
+            fixup_committed: false,
             fatal_selected: false,
             handler_completed: false,
         }
@@ -94,16 +104,67 @@ impl PageFaultExceptionFlowType {
             .transition(LifecycleEvent::Preset, State::Base, State::Prepared)
     }
 
-    pub fn setup_context(&mut self, atomic_context: bool, fixup_available: bool) -> EventResult {
-        self.atomic_context = atomic_context;
-        self.schedulable = !atomic_context && matches!(self.source, PageFaultSource::User);
-        self.fixup_selected = atomic_context && fixup_available;
-        self.fatal_selected = atomic_context && !fixup_available;
+    pub fn setup_context(
+        &mut self,
+        nested: bool,
+        hardirq_context: bool,
+        entry_interrupts_enabled: bool,
+        fixup_address: Option<usize>,
+    ) -> EventResult {
+        if self.core.state() != State::Prepared || fixup_address == Some(0) {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.core.state(),
+                State::Prepared,
+                State::Ready,
+            );
+        }
+        self.nested = nested;
+        self.hardirq_context = hardirq_context;
+        self.entry_interrupts_enabled = entry_interrupts_enabled;
+        self.atomic_context = nested || hardirq_context || !entry_interrupts_enabled;
+        self.schedulable = match self.source {
+            PageFaultSource::User => !self.atomic_context,
+            PageFaultSource::Kernel => fixup_address.is_some() && !self.atomic_context,
+        };
+        self.fixup_selected =
+            matches!(self.source, PageFaultSource::Kernel) && fixup_address.is_some();
+        self.fixup_address = fixup_address.unwrap_or(0);
+        self.fixup_committed = false;
+        self.fatal_selected =
+            matches!(self.source, PageFaultSource::Kernel) && fixup_address.is_none();
         self.core
             .transition(LifecycleEvent::Setup, State::Prepared, State::Ready)
     }
 
+    pub fn commit_kernel_fixup(&mut self, address: usize) -> EventResult {
+        if self.core.state() != State::Ready
+            || !matches!(self.source, PageFaultSource::Kernel)
+            || !self.fixup_selected
+            || address == 0
+            || address != self.fixup_address
+            || self.fixup_committed
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.core.state(),
+                State::Ready,
+                State::Online,
+            );
+        }
+        self.fixup_committed = true;
+        Ok(())
+    }
+
     pub fn enable_after_handler(&mut self) -> EventResult {
+        if matches!(self.source, PageFaultSource::Kernel) && !self.fixup_committed {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.core.state(),
+                State::Ready,
+                State::Online,
+            );
+        }
         self.handler_completed = true;
         self.core
             .transition(LifecycleEvent::Enable, State::Ready, State::Online)
@@ -128,6 +189,22 @@ impl PageFaultExceptionFlowType {
 
     pub const fn schedulable(&self) -> bool {
         self.schedulable
+    }
+
+    pub const fn atomic_context(&self) -> bool {
+        self.atomic_context
+    }
+
+    pub const fn fatal_selected(&self) -> bool {
+        self.fatal_selected
+    }
+
+    pub const fn fixup_address(&self) -> Option<usize> {
+        if self.fixup_selected {
+            Some(self.fixup_address)
+        } else {
+            None
+        }
     }
 
     pub const fn parent_cpu(&self) -> CpuRef {

@@ -13,6 +13,11 @@
 尚未闭合的具体处理能力可以保留为 deferred obligation，不能被解释为 `Setup` 已经提供的保证；
 `Enable` 的语义由后续校准继续补充。
 
+正式入口只能取得入口 CPU 自有 TrapType、Scheduler/InterruptType 和当前 Task 的窄运行期 lease；AP
+不得取得全局 mutable Context。共享 ExceptionTable 只通过运行期只读引用查询。每 CPU 还维护稳定的
+trap observation：root/interrupt/exception/SSIP 完成数、return-token 消费数、leaf-switch resume 数和
+最后 generation；这些只用于长期诊断与验收，不改变 checkpoint 语义。
+
 ## Mapping
 
 - Model: `spec/model/objects/trap_type.spec`

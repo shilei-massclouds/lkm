@@ -91,6 +91,7 @@ type TrapFlowType: FlowObject {
                 ensures {
                     trap_flow_handler_completed(self);
                     trap_return_token_created_once(self);
+                    trap_formal_occurrence_never_bypassed(self);
                 }
             }
         }
@@ -140,6 +141,7 @@ predicate trap_flow_has_one_active_child<F: TrapFlowType>(flow: F) -> bool;
 predicate trap_flow_child_completed<F: TrapFlowType>(flow: F) -> bool;
 predicate trap_flow_handler_completed<F: TrapFlowType>(flow: F) -> bool;
 predicate trap_return_token_created_once<F: TrapFlowType>(flow: F) -> bool;
+predicate trap_formal_occurrence_never_bypassed<F: TrapFlowType>(flow: F) -> bool;
 predicate trap_flow_child_destroyed<F: TrapFlowType>(flow: F) -> bool;
 predicate trap_flow_disabled<F: TrapFlowType>(flow: F) -> bool;
 predicate trap_flow_occurrence_released<F: TrapFlowType>(flow: F) -> bool;

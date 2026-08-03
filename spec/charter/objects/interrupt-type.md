@@ -17,6 +17,8 @@ SMP runtime 为每个 online CPU 开放 supervisor software interrupt 分路。r
 release 发布目标 mailbox，再经 SBI 向目标 hart 请求 IPI。SSIP handler 清除本 hart 的硬件 pending，
 把 CPU-local `need_resched` 合并置位，并正常返回；handler 内禁止消费 runqueue、调用 Scheduler 或执行
 context switch。中断返回后的 idle/Task 安全点负责 acquire 观察 mailbox 与 `need_resched` 并调度。
+SSIP 是正式 trap，必须像其它中断一样创建 fresh TrapFlow/InterruptFlow、完成全部 lifecycle、Cleanup
+并消费一次 TrapReturnToken；handler policy 不得以“快速返回”绕过 effective-flow 栈。
 
 ## Mapping
 

@@ -742,7 +742,17 @@ UserTaskFlow 随所属 Task 发布为 Online，运行主体由 contextual Enter 
 
 TaskFlow lifecycle/action 必须校验 parent OnCpu/Live、固定 pair、FlowRef/generation、CpuRef、
 CurrentTask/CurrentStack 和 effective-flow guard。陷入不改变 Task.OnCpu 或 TaskFlow.Online，只把
-effective-flow 栈叠加到 Trap/Interrupt/Exception leaf。若陷入内切出，恢复 context 先落到该 leaf。
+effective-flow 栈叠加到 Trap/Interrupt/Exception leaf。所有正式入口事件（包括 reschedule SSIP）都
+创建 fresh、generation-checked occurrence，并按 child→root Cleanup 后消费一次 TrapReturnToken；SSIP
+handler 只清 pending 和合并 CPU-local need_resched，不消费 mailbox 或调度。若陷入内切出，保存的
+root TrapFlowRef 定位 active child/concrete leaf；恢复 preflight 与 contextual Enter 校验 root/leaf、
+入口 Task/Flow、owner CPU、generation、context epoch 和未 Cleanup 状态后精确一次记录 leaf resume。
+无切换 trap 返回不制造 Dispatch/Enter，Enter 也不按 leaf 类型选择机器坐标。
+
+Page fault 的 user/kernel 来源与 atomic 分类正交。user recovery 默认可睡眠；kernel fault 必须命中
+只读 ExceptionTable。非嵌套、非 hardirq、入口前可中断的当前 Task context 可以在 leaf 内经 owner
+Scheduler 切换，恢复后重新验证同一 root/leaf 再提交 fixup `sepc`；nested、hardirq 或入口前 irq-off
+路径只能立即 fixup。缺失/stale fixup、错误 CPU/epoch 或已 Cleanup leaf 都是 terminal failure。
 
 普通 Task terminal exit 要先使固定 Flow Offline并清理 Runtime/Trap/token，Task 再从 OnCpu 直接
 Disable 到 Offline，由 next stack Cleanup。Task.Cleanup 要求固定 Flow Destroyed；BootTask 不退出。

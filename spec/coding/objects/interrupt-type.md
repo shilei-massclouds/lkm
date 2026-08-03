@@ -21,6 +21,8 @@ own device-source gates.
 - Online secondary CPUs enable `sie.SSIE`. The SBI IPI sender runs only after release mailbox publication. SSIP
   dispatch clears the local pending bit and release-sets the per-CPU `need_resched` flag; it does not borrow a
   Scheduler, consume a mailbox or switch context. Duplicate SSIP occurrences are idempotent at that flag.
+- Software interrupt cause has an explicit reschedule handler policy. It runs inside the same fresh
+  TrapFlow→InterruptFlow lifecycle as other interrupts and cannot bypass Cleanup/token consumption.
 
 Mapping: charter [`interrupt-type.md`](../../charter/objects/interrupt-type.md), model
 [`interrupt_type.spec`](../../model/objects/interrupt_type.spec), implementation

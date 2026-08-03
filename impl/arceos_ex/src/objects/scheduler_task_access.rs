@@ -1,3 +1,4 @@
+use super::trap_flow_type::{TrapFlowRef as RootTrapFlowRef, TrapFlowType};
 use super::{
     boot_task::BootTask,
     cpu::CpuRef,
@@ -25,6 +26,7 @@ pub struct NextDispatch {
     flow_ref: TaskFlowRef,
     cpu_ref: CpuRef,
     context_epoch: u64,
+    root_trap_flow_ref: RootTrapFlowRef,
     stack_base: usize,
     stack_top: usize,
     stack_binding: DispatchStackBinding,
@@ -36,8 +38,8 @@ impl NextDispatch {
         flow_ref: TaskFlowRef,
         cpu_ref: CpuRef,
         context_epoch: u64,
-        stack_base: usize,
-        stack_top: usize,
+        root_trap_flow_ref: RootTrapFlowRef,
+        stack_bounds: (usize, usize),
         stack_binding: DispatchStackBinding,
     ) -> Self {
         Self {
@@ -45,8 +47,9 @@ impl NextDispatch {
             flow_ref,
             cpu_ref,
             context_epoch,
-            stack_base,
-            stack_top,
+            root_trap_flow_ref,
+            stack_base: stack_bounds.0,
+            stack_top: stack_bounds.1,
             stack_binding,
         }
     }
@@ -65,6 +68,10 @@ impl NextDispatch {
 
     pub const fn context_epoch(self) -> u64 {
         self.context_epoch
+    }
+
+    pub const fn root_trap_flow_ref(self) -> RootTrapFlowRef {
+        self.root_trap_flow_ref
     }
 
     fn with_simulated_user_carrier(mut self, stack_base: usize, stack_top: usize) -> Self {
@@ -336,21 +343,32 @@ impl<'a> SchedulerTaskAccess<'a> {
         }
 
         let flow_ref = task.flow();
+        let context_epoch = task.context_epoch();
+        let root_ref = task.root_trap_flow_ref();
         let cpu_matches =
             flow.cpu_ref() == Some(cpu_ref) || (task_ref.is_user() && flow.cpu_ref().is_none());
+        let root_matches = !root_ref.is_valid()
+            || TrapFlowType::active_leaf_preflight(
+                root_ref,
+                task_ref,
+                flow_ref,
+                cpu_ref,
+                context_epoch,
+            );
         (task.state() == State::Online
             && flow_ref.is_valid()
             && flow_ref.same_identity(flow.flow_ref())
             && task.breakpoint_matches(flow_ref)
             && flow.state() == State::Online
-            && cpu_matches)
+            && cpu_matches
+            && root_matches)
             .then_some(NextDispatch::new(
                 task_ref,
                 flow_ref,
                 cpu_ref,
-                task.context_epoch(),
-                task.kernel_stack_base(),
-                task.kernel_stack_top(),
+                context_epoch,
+                root_ref,
+                (task.kernel_stack_base(), task.kernel_stack_top()),
                 DispatchStackBinding::TaskOwned,
             ))
     }
@@ -648,12 +666,17 @@ impl<'a> SchedulerTaskAccess<'a> {
                 stack_top,
             );
         }
-        Some(task.enter_flow_contextual(
+        let result = task.enter_flow_contextual(
             proof,
             current_task_ref,
             current_stack_matches,
             effective_flow_ref,
-        ))
+            dispatch.root_trap_flow_ref(),
+        );
+        if result.is_ok() && dispatch.root_trap_flow_ref().is_valid() {
+            crate::objects::trap_type::record_leaf_switch_resume(dispatch.cpu_ref().logical_id());
+        }
+        Some(result)
     }
 
     pub fn task_identity_ptr(&self, task_ref: TaskRef) -> Option<usize> {

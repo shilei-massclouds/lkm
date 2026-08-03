@@ -81,6 +81,20 @@ TaskFlow boundary from Charter, Model, and Coding.
   generation, context epoch, or duplicate continuation fails terminally after
   commit, while rejection before YieldToken commit preserves the exact before
   snapshot.
+- Every formal SSIP must produce a fresh TrapFlow/InterruptFlow generation,
+  complete child/root Cleanup and consume one token. Its handler may clear
+  pending and coalesce `need_resched`, but must not consume a mailbox, switch a
+  Task, or create Dispatch/Enter. Repeated IPI coverage checks both fresh
+  occurrences and coalesced scheduling intent.
+- A page-fault A→B→A switch checks that A's saved root resolves to the same
+  active ExceptionFlow and concrete PageFault leaf, and that contextual Enter
+  records exactly one leaf resume without replaying trap entry. Wrong CPU,
+  stale root/leaf generation or context epoch, a cleaned leaf, duplicate Enter,
+  and duplicate return-token consumption all fail deterministically.
+- Kernel exception-table coverage separates source from atomicity: nested,
+  hardirq and entry-irq-disabled faults can only fix up immediately; a
+  non-nested irq-enabled task-context fault may schedule and must revalidate
+  root/leaf before fixup. Missing or stale fixup remains terminal.
 - RISC-V switch coverage independently proves save/restore of
   `ra/sp/s0..s11`, `tp`/CurrentTask identity publication, stack rebinding, and
   that none of those changes are implicit effects of `yields`.

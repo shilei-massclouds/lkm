@@ -138,6 +138,7 @@ pub struct TrapEntrySnapshot {
     pub stval: usize,
     pub entry_task: TaskRef,
     pub effective_task_flow: TaskFlowRef,
+    pub context_epoch: u64,
 }
 
 pub(crate) struct OccurrenceCore {
@@ -250,6 +251,8 @@ pub struct TrapFlowType {
     task_flow_paused: bool,
     task_flow_resumed: bool,
     return_cpu: CpuRef,
+    suspended_context_epoch: u64,
+    resumed_context_epoch: u64,
 }
 
 #[cfg_attr(not(app_smoke), allow(dead_code))]
@@ -268,6 +271,8 @@ impl TrapFlowType {
             task_flow_paused: false,
             task_flow_resumed: false,
             return_cpu: CpuRef::invalid(),
+            suspended_context_epoch: 0,
+            resumed_context_epoch: 0,
         }
     }
 
@@ -430,6 +435,117 @@ impl TrapFlowType {
     pub const fn task_flow_resumed(&self) -> bool {
         self.task_flow_resumed
     }
+
+    pub fn record_suspended_context(
+        root_ref: TrapFlowRef,
+        task_ref: TaskRef,
+        flow_ref: TaskFlowRef,
+        cpu_ref: CpuRef,
+        context_epoch: u64,
+    ) -> bool {
+        let Some(root) = (unsafe { root_mut(root_ref) }) else {
+            return false;
+        };
+        if !root.context_identity_matches(task_ref, flow_ref, cpu_ref) || context_epoch == 0 {
+            return false;
+        }
+        root.suspended_context_epoch = context_epoch;
+        true
+    }
+
+    pub fn active_leaf_preflight(
+        root_ref: TrapFlowRef,
+        task_ref: TaskRef,
+        flow_ref: TaskFlowRef,
+        cpu_ref: CpuRef,
+        context_epoch: u64,
+    ) -> bool {
+        let Some(record) = (unsafe { record_ref(root_ref) }) else {
+            return false;
+        };
+        record
+            .root
+            .context_identity_matches(task_ref, flow_ref, cpu_ref)
+            && record.root.suspended_context_epoch == context_epoch
+            && record.active_leaf_alive(root_ref.generation())
+    }
+
+    pub fn active_leaf_matches(
+        root_ref: TrapFlowRef,
+        task_ref: TaskRef,
+        flow_ref: TaskFlowRef,
+        cpu_ref: CpuRef,
+    ) -> bool {
+        let Some(record) = (unsafe { record_ref(root_ref) }) else {
+            return false;
+        };
+        record
+            .root
+            .context_identity_matches(task_ref, flow_ref, cpu_ref)
+            && record.active_leaf_alive(root_ref.generation())
+    }
+
+    pub fn resume_active_leaf(
+        root_ref: TrapFlowRef,
+        task_ref: TaskRef,
+        flow_ref: TaskFlowRef,
+        cpu_ref: CpuRef,
+        context_epoch: u64,
+    ) -> bool {
+        if !Self::active_leaf_preflight(root_ref, task_ref, flow_ref, cpu_ref, context_epoch) {
+            return false;
+        }
+        let Some(root) = (unsafe { root_mut(root_ref) }) else {
+            return false;
+        };
+        if root.resumed_context_epoch == context_epoch {
+            return false;
+        }
+        root.resumed_context_epoch = context_epoch;
+        true
+    }
+
+    pub fn active_leaf_resumed(
+        root_ref: TrapFlowRef,
+        task_ref: TaskRef,
+        flow_ref: TaskFlowRef,
+        cpu_ref: CpuRef,
+        context_epoch: u64,
+    ) -> bool {
+        let Some(record) = (unsafe { record_ref(root_ref) }) else {
+            return false;
+        };
+        record
+            .root
+            .context_identity_matches(task_ref, flow_ref, cpu_ref)
+            && record.root.suspended_context_epoch == context_epoch
+            && record.root.resumed_context_epoch == context_epoch
+            && record.active_leaf_alive(root_ref.generation())
+    }
+
+    pub fn active_child_is_interrupt(root_ref: TrapFlowRef) -> bool {
+        let Some(record) = (unsafe { record_ref(root_ref) }) else {
+            return false;
+        };
+        record.root.active_child().kind() == TrapChildKind::Interrupt
+            && record.active_leaf_alive(root_ref.generation())
+    }
+
+    fn context_identity_matches(
+        &self,
+        task_ref: TaskRef,
+        flow_ref: TaskFlowRef,
+        cpu_ref: CpuRef,
+    ) -> bool {
+        self.resolves(self.root_ref)
+            && self.core.state() == State::Prepared
+            && self.parent_cpu() == cpu_ref
+            && self.snapshot.is_some_and(|snapshot| {
+                snapshot.entry_task.same_identity(task_ref)
+                    && snapshot.effective_task_flow.same_identity(flow_ref)
+                    && snapshot.context_epoch != 0
+            })
+    }
 }
 
 #[repr(C)]
@@ -455,6 +571,77 @@ impl TrapExecutionRecord {
             unexpected: UnexpectedExceptionFlowType::new(),
         }
     }
+
+    fn active_leaf_alive(&self, generation: u32) -> bool {
+        let child = self.root.active_child();
+        if child.generation() != generation {
+            return false;
+        }
+        match child.kind() {
+            TrapChildKind::Interrupt => {
+                child == self.interrupt.flow_ref()
+                    && matches!(
+                        self.interrupt.state(),
+                        State::Prepared | State::Ready | State::Online
+                    )
+            }
+            TrapChildKind::Exception => {
+                child == self.exception.flow_ref()
+                    && self.exception.state() == State::Prepared
+                    && self.active_exception_leaf_alive(generation)
+            }
+            TrapChildKind::None => false,
+        }
+    }
+
+    fn active_exception_leaf_alive(&self, generation: u32) -> bool {
+        let leaf = self.exception.active_child();
+        if leaf.generation() != generation {
+            return false;
+        }
+        let alive = |state| matches!(state, State::Prepared | State::Ready | State::Online);
+        match leaf.kind() {
+            super::exception_flow_type::ExceptionChildKind::PageFault => {
+                leaf == self.page_fault.flow_ref() && alive(self.page_fault.state())
+            }
+            super::exception_flow_type::ExceptionChildKind::Syscall => {
+                leaf == self.syscall.flow_ref() && alive(self.syscall.state())
+            }
+            super::exception_flow_type::ExceptionChildKind::Breakpoint => {
+                leaf == self.breakpoint.flow_ref() && alive(self.breakpoint.state())
+            }
+            super::exception_flow_type::ExceptionChildKind::Unexpected => {
+                leaf == self.unexpected.flow_ref() && alive(self.unexpected.state())
+            }
+            super::exception_flow_type::ExceptionChildKind::None => false,
+        }
+    }
+}
+
+unsafe fn record_ref(root_ref: TrapFlowRef) -> Option<&'static TrapExecutionRecord> {
+    if !root_ref.is_valid()
+        || !root_ref
+            .address()
+            .is_multiple_of(core::mem::align_of::<TrapExecutionRecord>())
+    {
+        return None;
+    }
+    let record = unsafe { &*(root_ref.address() as *const TrapExecutionRecord) };
+    (core::ptr::addr_of!(record.root) as usize == root_ref.address()
+        && record.root.resolves(root_ref))
+    .then_some(record)
+}
+
+unsafe fn root_mut(root_ref: TrapFlowRef) -> Option<&'static mut TrapFlowType> {
+    if !root_ref.is_valid()
+        || !root_ref
+            .address()
+            .is_multiple_of(core::mem::align_of::<TrapFlowType>())
+    {
+        return None;
+    }
+    let root = unsafe { &mut *(root_ref.address() as *mut TrapFlowType) };
+    root.resolves(root_ref).then_some(root)
 }
 
 /// Exercises the dynamic occurrence and generation contracts without relying
@@ -471,6 +658,7 @@ pub fn smoke_occurrence_contract() -> bool {
         stval: 0x3000,
         entry_task: TaskRef::BOOT,
         effective_task_flow: TaskFlowRef::BOOT_INIT,
+        context_epoch: 1,
     };
 
     let mut interrupt_record = TrapExecutionRecord::new();
@@ -570,7 +758,10 @@ fn smoke_page_fault_occurrence(cpu_ref: CpuRef) -> bool {
     }
     let child_ref = record.page_fault.flow_ref();
     record.exception.select_child(child_ref).is_ok()
-        && record.page_fault.setup_context(false, false).is_ok()
+        && record
+            .page_fault
+            .setup_context(false, false, true, None)
+            .is_ok()
         && record.page_fault.schedulable()
         && record.page_fault.parent_cpu() == cpu_ref
         && record.page_fault.enable_after_handler().is_ok()

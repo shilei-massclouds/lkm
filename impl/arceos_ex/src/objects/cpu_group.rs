@@ -420,9 +420,10 @@ impl CpuGroup {
                     State::Ready,
                 );
             };
+            let trap_address = cpu.trap() as *const crate::objects::trap_type::TrapType as usize;
             cpu.scheduler_mut().enable_secondary()?;
             cpu.mark_online();
-            crate::context::open_secondary_runtime(logical_id);
+            crate::context::open_secondary_runtime(logical_id, trap_address);
             logical_id += 1;
         }
         self.smp_concurrency_open = true;

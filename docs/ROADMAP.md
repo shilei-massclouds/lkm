@@ -75,7 +75,7 @@
 | `P2` | 待办 | arceos_ex/console | 用户态标准输入输出机制 | `irq_time.011` | [user boot coding](../spec/coding/objects/user-boot.md) |
 | `P1` | 待办 | trace/view | 收口 trace/SVG 输出体验 | 改善 depends_on 长线、图高、标签、事实展示和 action 展开深度。 | [pyveri DEVELOPMENT](../tools/pyveri/DEVELOPMENT.md#step-c1-收口-trace-输出和注释数据流) |
 | `P1` | 本轮闭合 | charter/model/tools2/signal | tools2 Signal 与通用 yields | 独立工具链统一为 v10 AST/Model/Derive/Check/View/Snapshot 与 animation v4；通用 yields、YieldToken、TaskFlowLane resume、严格旧协议互拒和根 verify 入口已闭合。完整 SMP schedule artifact/arbiter/replay 保持 P2。 | [专题](roadmap/signal-driven-tools2.md) |
-| `P2` | 延期 | charter/model/tools2/scheduler/smp | tools2 确定性 TaskFlow/CpuLane 与 SMP schedule replay | 未来按 charter-first 建立 Schedule-return TaskFlow lane、确定性 GlobalArbiter/CpuLane、cross-CPU mailbox、迁移事务和可重放 schedule artifact；不扩大当前 P1 tools2 启动语义校准边界，通用 Signal pending/timeout/cancel 仍属独立后续语义。 | [专题](roadmap/deterministic-smp-lanes.md) |
+| `P2` | 延期 | charter/model/tools2/scheduler/smp | tools2 确定性 GlobalArbiter、迁移与 SMP schedule replay | 固定 TaskFlow/CpuLane、Schedule-return、显式目标 AP activation/wake mailbox 与首轮正式 trap overlay 已闭合；未来按 charter-first 增加确定性 GlobalArbiter、自动 CPU 选择、迁移事务和可重放 schedule artifact。通用 Signal pending/timeout/cancel 仍属独立后续语义。 | [专题](roadmap/deterministic-smp-lanes.md) |
 | `P1` | 待办 | trace/view | 优化 trace context 框显示 | 优化 context 高度、文本锚定、跨行标签和视觉层级。 | [pyveri DEVELOPMENT](../tools/pyveri/DEVELOPMENT.md#view) |
 | `P2` | 待办 | validation/stress/arceos_ex | `stress-mem` 共享内存后端 | 先用 host-backed shared memory 与 FDT 描述固定 ABI；doorbell/IRQ/专用设备后置。 | 本文档 |
 | `P2` | 待办 | arceos_ex/checkpoint | 清除 `LOG=trace` 兼容入口 | README、脚本、stress case 与历史命令迁完后删除 alias，把 trace 名称留给 Linux-like trace。 | [checkpoint mapping](../spec/coding/mapping.md) |

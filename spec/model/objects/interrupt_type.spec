@@ -69,6 +69,8 @@ type InterruptType: ResourceObject {
                 interrupt_need_resched_recorded_cpu_local(self);
                 interrupt_reschedule_ipi_does_not_switch_in_handler(self);
                 interrupt_duplicate_reschedule_ipi_coalesced(self);
+                interrupt_reschedule_ipi_uses_formal_overlay(self);
+                interrupt_reschedule_ipi_does_not_consume_mailbox(self);
             }
         }
     }
@@ -141,3 +143,5 @@ predicate interrupt_ssip_pending_cleared<I: InterruptType>(interrupt: I) -> bool
 predicate interrupt_need_resched_recorded_cpu_local<I: InterruptType>(interrupt: I) -> bool;
 predicate interrupt_reschedule_ipi_does_not_switch_in_handler<I: InterruptType>(interrupt: I) -> bool;
 predicate interrupt_duplicate_reschedule_ipi_coalesced<I: InterruptType>(interrupt: I) -> bool;
+predicate interrupt_reschedule_ipi_uses_formal_overlay<I: InterruptType>(interrupt: I) -> bool;
+predicate interrupt_reschedule_ipi_does_not_consume_mailbox<I: InterruptType>(interrupt: I) -> bool;

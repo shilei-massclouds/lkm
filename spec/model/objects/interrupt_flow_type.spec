@@ -31,7 +31,12 @@ type InterruptFlowType: FlowObject {
     }
     state State::Prepared {
         transitions {
-            on Transition::Setup -> State::Ready { ensures { interrupt_flow_handler_completed(self); } }
+            on Transition::Setup -> State::Ready {
+                ensures {
+                    interrupt_flow_handler_completed(self);
+                    interrupt_flow_handler_policy_does_not_schedule(self);
+                }
+            }
         }
     }
     state State::Ready {
@@ -60,6 +65,7 @@ predicate interrupt_flow_entry_saved<F: InterruptFlowType>(flow: F) -> bool;
 predicate hardirq_schedule_forbidden<F: InterruptFlowType>(flow: F) -> bool;
 predicate hardirq_ordinary_reentry_forbidden<F: InterruptFlowType>(flow: F) -> bool;
 predicate interrupt_flow_handler_completed<F: InterruptFlowType>(flow: F) -> bool;
+predicate interrupt_flow_handler_policy_does_not_schedule<F: InterruptFlowType>(flow: F) -> bool;
 predicate interrupt_flow_completion_committed<F: InterruptFlowType>(flow: F) -> bool;
 predicate interrupt_flow_disabled<F: InterruptFlowType>(flow: F) -> bool;
 predicate interrupt_flow_occurrence_released<F: InterruptFlowType>(flow: F) -> bool;

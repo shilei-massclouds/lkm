@@ -148,6 +148,9 @@ predicate scheduler_preflight_dispatch_refs_stable<S, T: TaskRef, F: TaskFlow>(s
 predicate scheduler_fixed_flow_preflight_valid<S, T: TaskRef, F: TaskFlow>(scheduler: S, task_ref: T, flow: F) -> bool;
 predicate scheduler_dispatch_flow_generation_valid<S, F: TaskFlow>(scheduler: S, flow: F) -> bool;
 predicate scheduler_dispatch_signal_capacity_ready<S, F: TaskFlow>(scheduler: S, flow: F) -> bool;
+predicate scheduler_optional_root_trap_preflight_valid<S, T: TaskRef>(scheduler: S, task_ref: T) -> bool;
+predicate scheduler_active_trap_leaf_generation_valid<S, T: TaskRef>(scheduler: S, task_ref: T) -> bool;
+predicate scheduler_trap_leaf_context_epoch_matches<S, T: TaskRef>(scheduler: S, task_ref: T) -> bool;
 predicate scheduler_task_does_not_forward_flow_dispatch<T: TaskRef>(task_ref: T) -> bool;
 predicate scheduler_switch_signal_capacity_preflight_complete<S, T: TaskRef>(scheduler: S, next_ref: T) -> bool;
 predicate scheduler_switch_order_save_suspend_restore_finish<S, T: TaskRef, U: TaskRef>(
@@ -458,6 +461,10 @@ type Scheduler: ResourceObject {
                 scheduler_preflight_dispatch_flow_is(next_ref, next_ref.flow);
                 scheduler_preflight_dispatch_refs_stable(self, next_ref, next_ref.flow);
                 scheduler_dispatch_flow_generation_valid(self, next_ref.flow);
+                scheduler_optional_root_trap_preflight_valid(self, next_ref);
+                scheduler_active_trap_leaf_generation_valid(self, next_ref);
+                scheduler_trap_leaf_context_epoch_matches(self, next_ref);
+                task_flow_optional_root_preflight_valid(next_ref, next_ref.flow);
             }
         }
 

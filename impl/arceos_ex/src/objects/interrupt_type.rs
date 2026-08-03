@@ -1,7 +1,7 @@
 use core::sync::atomic::{AtomicU8, Ordering};
 
 use crate::{
-    arch::riscv64::{SUPERVISOR_EXTERNAL_IRQ, SUPERVISOR_TIMER_IRQ, csr},
+    arch::riscv64::{SUPERVISOR_EXTERNAL_IRQ, SUPERVISOR_SOFTWARE_IRQ, SUPERVISOR_TIMER_IRQ, csr},
     checkpoint::Checkpoint,
 };
 
@@ -14,6 +14,7 @@ const LOCAL_INTERRUPT_SAVE_STACK: usize = 8;
 const HANDLER_FALLBACK: u8 = 0;
 const HANDLER_TIMER: u8 = 1;
 const HANDLER_EXTERNAL: u8 = 2;
+const HANDLER_RESCHEDULE: u8 = 3;
 
 static INTERRUPT_HANDLER_POLICY: [AtomicU8; INTERRUPT_HANDLER_COUNT] =
     [const { AtomicU8::new(HANDLER_FALLBACK) }; INTERRUPT_HANDLER_COUNT];
@@ -380,14 +381,15 @@ impl InterruptType {
     }
 }
 
-pub fn dispatch_scause(scause: usize) {
-    dispatch_handler_policy(read_interrupt_handler_policy(scause), scause)
+pub fn dispatch_scause(scause: usize, logical_id: usize) -> bool {
+    dispatch_handler_policy(read_interrupt_handler_policy(scause), scause, logical_id)
 }
 
 fn reset_interrupt_handlers() {
     for cause in 0..INTERRUPT_HANDLER_COUNT {
         bind_interrupt_policy(cause, FALLBACK_POLICY);
     }
+    bind_interrupt_policy(SUPERVISOR_SOFTWARE_IRQ, InterruptPolicy(HANDLER_RESCHEDULE));
 }
 
 fn read_interrupt_handler_policy(scause: usize) -> u8 {
@@ -407,12 +409,27 @@ fn bind_interrupt_policy(cause: usize, policy: InterruptPolicy) {
     INTERRUPT_HANDLER_POLICY[cause].store(policy.0, Ordering::Relaxed);
 }
 
-fn dispatch_handler_policy(handler: u8, scause: usize) {
+fn dispatch_handler_policy(handler: u8, scause: usize, logical_id: usize) -> bool {
     match handler {
-        HANDLER_TIMER => timer_interrupt_handler(),
-        HANDLER_EXTERNAL => external_interrupt_handler(),
+        HANDLER_TIMER => {
+            timer_interrupt_handler();
+            false
+        }
+        HANDLER_EXTERNAL => {
+            external_interrupt_handler();
+            false
+        }
+        HANDLER_RESCHEDULE => {
+            reschedule_interrupt_handler(logical_id);
+            true
+        }
         _ => default_interrupt_handler(scause),
     }
+}
+
+fn reschedule_interrupt_handler(logical_id: usize) {
+    csr::clear_supervisor_software_interrupt();
+    crate::objects::kernel_task::handle_reschedule_ipi(logical_id);
 }
 
 fn timer_interrupt_handler() {

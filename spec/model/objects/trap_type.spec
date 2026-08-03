@@ -86,6 +86,10 @@ type TrapType: ResourceObject {
                     trap_entry_context_ready(self, self.parent);
                     trap_entry_capacity_checked_per_occurrence(self);
                     trap_emergency_fail_stop_ready(self, self.parent);
+                    trap_runtime_lease_cpu_local(self, self.parent);
+                    trap_runtime_lease_has_narrow_task_access(self);
+                    trap_exception_table_access_read_only(self);
+                    trap_observation_per_cpu_stable(self, self.parent);
                 }
             }
         }
@@ -154,4 +158,8 @@ predicate trap_formal_entry_creates_fresh_trap_flow<T: TrapType>(trap: T) -> boo
 predicate trap_entry_context_ready<T: TrapType, P: CPU>(trap: T, cpu: P) -> bool;
 predicate trap_entry_capacity_checked_per_occurrence<T: TrapType>(trap: T) -> bool;
 predicate trap_emergency_fail_stop_ready<T: TrapType, P: CPU>(trap: T, cpu: P) -> bool;
+predicate trap_runtime_lease_cpu_local<T: TrapType, P: CPU>(trap: T, cpu: P) -> bool;
+predicate trap_runtime_lease_has_narrow_task_access<T: TrapType>(trap: T) -> bool;
+predicate trap_exception_table_access_read_only<T: TrapType>(trap: T) -> bool;
+predicate trap_observation_per_cpu_stable<T: TrapType, P: CPU>(trap: T, cpu: P) -> bool;
 predicate trap_service_online<T: TrapType>(trap: T) -> bool;

@@ -92,6 +92,12 @@ ApplicationInstance，因此不存在 successful-exec successor/predecessor Flow
 Dispatch 后，contextual TaskFlow.Enter 先恢复 leaf 模型/架构 continuation；普通 IRQ 未切换 Task 时
 Task lifecycle、Flow lifecycle 和 CPU binding 都不变。
 
+TaskFlow.Enter 只用于真实 task-switch 后的恢复。若 `TaskThreadContext` 不含 root TrapFlowRef，Enter
+恢复普通 TaskFlow coordinate；若含 root，则必须先验证 root generation、入口 Task/固定 Flow、owner
+CpuRef、活动 child 与 concrete leaf、context epoch 以及 leaf 尚未 Cleanup，再记录精确一次 leaf-resume
+proof。无 Task switch 的 trap 返回只按 leaf→root Cleanup、token、`sret` 回到原机器坐标，不发送
+Dispatch/Enter，也不重新执行 trap 入口。
+
 ## `yields` 与 Schedule
 
 任意 StateEffect::None Action 可用通用 `yields Target.Signal`：立即预检并交付目标，创建可序列化

@@ -6931,14 +6931,14 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
             self.assertEqual(snapshot.read_bytes(), BOOT_INIT_SETUP_SCENARIO.read_bytes())
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "dd21ebcde544e43880cb77933766ad9a7ae95959a220495dca7737d3c17e036b",
+                "bc3ff127ade5b81dc6830eed37a2a59427703a16a4742cbff4d1573d225c07de",
             )
             self.assertEqual(
                 {
                     derivation["model_fingerprint"], model["model_fingerprint"],
                     view["model_fingerprint"], saved["model_fingerprint"],
                 },
-                {"sha256:0ec952a9db974b006ca4b0d2a33f3b88d71decaf09328ff3495947dd6300b697"},
+                {"sha256:a0407175dbcb300fd146babf7744eb1b0af891f7e4dbc92a4bd982c466b05fc8"},
             )
             with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
                 compact_text = render_text(view)
@@ -7277,7 +7277,7 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
             )
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "499f8c3a62c552d3680f82db848bfb08a323242e0785629e2ec01a286951af9f",
+                "c59fbc7810b74e95ba40a6d92ffd268bbc92a4b996ea06e1416b489f86003321",
             )
             model = self.prepared_model_document
             assert view is not None
@@ -7289,7 +7289,7 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
                     view["model_fingerprint"],
                     saved["model_fingerprint"],
                 },
-                {"sha256:0ec952a9db974b006ca4b0d2a33f3b88d71decaf09328ff3495947dd6300b697"},
+                {"sha256:a0407175dbcb300fd146babf7744eb1b0af891f7e4dbc92a4bd982c466b05fc8"},
             )
 
     def test_main_model_all_cpu_schedulers_expose_ap_mailbox_ipi_idle_protocol(self) -> None:
@@ -7360,6 +7360,81 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
                 "interrupt_reschedule_ipi_does_not_switch_in_handler",
                 "interrupt_duplicate_reschedule_ipi_coalesced",
             }.issubset(facts(interrupt_process, "ensures"))
+        )
+
+    def test_main_model_trap_overlay_and_page_fault_resume_contract(self) -> None:
+        model = self.prepared_model_document["model"]
+
+        def facts(handler: dict, section: str = "ensures") -> set[str]:
+            return {
+                entry["name"]
+                for item in handler["body"]
+                if item["kind"] == section
+                for entry in item["entries"]
+                if entry["kind"] == "fact"
+            }
+
+        def state_handler(type_name: str, state_name: str, name: str) -> dict:
+            state = model["types"][type_name]["states"][state_name]
+            return next(handler for handler in state["handlers"] if handler["name"] == name)
+
+        def process_handler(type_name: str, name: str) -> dict:
+            return next(
+                handler
+                for handler in model["types"][type_name]["effective_processes"]
+                if handler["name"] == name
+            )
+
+        self.assertTrue(
+            {
+                "trap_runtime_lease_cpu_local",
+                "trap_runtime_lease_has_narrow_task_access",
+                "trap_exception_table_access_read_only",
+                "trap_observation_per_cpu_stable",
+            }.issubset(facts(state_handler("TrapType", "Prepared", "Setup")))
+        )
+        self.assertTrue(
+            {
+                "trap_return_token_created_once",
+                "trap_formal_occurrence_never_bypassed",
+            }.issubset(facts(state_handler("TrapFlowType", "Ready", "Enable")))
+        )
+        self.assertTrue(
+            {
+                "interrupt_reschedule_ipi_uses_formal_overlay",
+                "interrupt_reschedule_ipi_does_not_consume_mailbox",
+                "interrupt_reschedule_ipi_does_not_switch_in_handler",
+                "interrupt_duplicate_reschedule_ipi_coalesced",
+            }.issubset(facts(process_handler("InterruptType", "HandleRescheduleIpi")))
+        )
+        self.assertTrue(
+            {
+                "page_fault_flow_user_recovery_can_schedule",
+                "page_fault_flow_kernel_task_context_fixup_can_schedule",
+                "page_fault_flow_atomic_fixup_or_fatal",
+                "page_fault_flow_nested_hardirq_or_irqoff_never_schedules",
+                "page_fault_flow_missing_or_stale_fixup_is_terminal",
+            }.issubset(
+                facts(state_handler("PageFaultExceptionFlowType", "Prepared", "Setup"))
+            )
+        )
+        self.assertIn(
+            "page_fault_flow_root_leaf_revalidated_after_schedule",
+            facts(state_handler("PageFaultExceptionFlowType", "Ready", "Enable")),
+        )
+        self.assertTrue(
+            {
+                "task_flow_optional_root_preflight_valid",
+                "task_flow_active_trap_leaf_resumed_exactly_once_or_absent",
+                "task_flow_enter_does_not_select_machine_coordinate",
+            }.issubset(facts(process_handler("TaskFlow", "Enter")))
+        )
+        self.assertTrue(
+            {
+                "scheduler_optional_root_trap_preflight_valid",
+                "scheduler_active_trap_leaf_generation_valid",
+                "scheduler_trap_leaf_context_epoch_matches",
+            }.issubset(facts(process_handler("Scheduler", "PreflightNextDispatch")))
         )
 
     def test_main_model_boot_init_entry_stops_at_first_missing_guard(self) -> None:

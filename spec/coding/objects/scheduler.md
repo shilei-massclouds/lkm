@@ -23,7 +23,7 @@ PreparePrev -> PickNext -> SaveCoreContext(prev) -> prev.Suspend
             -> next.Dispatch -> next.flow.Enter
 ```
 
-`NextDispatch` carries the preflight Flow identity, context epoch and exact stack-binding identity. A
+`NextDispatch` carries the preflight Flow identity, context epoch, optional root TrapFlowRef and exact stack-binding identity. A
 physical switch binds the selected Task's own stack. The explicitly simulated user handoff binds the
 UserTaskSet's already-prepared shared carrier range; this representation bit distinguishes physical
 versus simulated stack commit, never first versus resume. `finish_task_switch` runs on that preflighted
@@ -31,6 +31,10 @@ stack and performs both Dispatch and Enter for initial and restored contexts. A 
 stale generation, wrong CPU/Flow/epoch/stack or duplicate Enter terminates deterministically without
 rollback or retry. Scheduler access resolves only the Task, then reaches its embedded Flow; it never
 branches on a concrete Flow wrapper.
+
+For a nonempty root, preflight resolves root→active child→concrete leaf and checks generation, entry Task/Flow,
+owner CPU, context epoch and non-cleaned state. Contextual Enter repeats that validation after Dispatch and records
+one leaf resume. The Scheduler stores no exception-kind dispatch mode; restored machine state selects continuation.
 
 At SMP runtime each `Scheduler` logically owns one lane in a bounded, CPU-indexed static mailbox companion. Only
 that Scheduler's owner CPU consumes the lane. A remote producer writes only immutable

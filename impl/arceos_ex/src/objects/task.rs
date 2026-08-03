@@ -1057,8 +1057,9 @@ impl Task {
     pub(crate) fn dispatch_and_enter_for_test(&mut self) -> EventResult {
         let flow_ref = self.flow_ref();
         let cpu_ref = self.flow.cpu_ref().unwrap_or(super::cpu::CpuRef::invalid());
+        let root_ref = self.root_trap_flow_ref();
         let proof = self.dispatch_on_cpu(flow_ref, self.context_epoch(), cpu_ref)?;
-        self.enter_flow_contextual(proof, self.task_ref, true, flow_ref)
+        self.enter_flow_contextual(proof, self.task_ref, true, flow_ref, root_ref)
     }
 
     #[cfg(app_smoke)]
@@ -1083,8 +1084,15 @@ impl Task {
         record.entered = false;
         let task_ref = self.task_ref;
         let flow_ref = self.flow_ref();
-        self.enter_flow_contextual(TaskFlowEnterProof { record }, task_ref, true, flow_ref)
-            .is_err()
+        let root_ref = self.root_trap_flow_ref();
+        self.enter_flow_contextual(
+            TaskFlowEnterProof { record },
+            task_ref,
+            true,
+            flow_ref,
+            root_ref,
+        )
+        .is_err()
     }
 
     pub(crate) fn enter_flow_contextual(
@@ -1093,6 +1101,7 @@ impl Task {
         current_task_ref: TaskRef,
         current_stack_matches: bool,
         effective_flow_ref: TaskFlowRef,
+        expected_root_ref: TrapFlowRef,
     ) -> EventResult {
         let record = proof.record;
         let first_failed = if !record.task_ref.same_identity(self.task_ref) {
@@ -1107,6 +1116,18 @@ impl Task {
             Some("current_stack_binding")
         } else if !effective_flow_ref.same_identity(self.flow_ref()) {
             Some("effective_flow_binding")
+        } else if self.root_trap_flow_ref() != expected_root_ref {
+            Some("root_trap_flow_binding")
+        } else if expected_root_ref.is_valid()
+            && !TrapFlowType::active_leaf_preflight(
+                expected_root_ref,
+                self.task_ref,
+                self.flow_ref(),
+                record.cpu_ref,
+                record.context_epoch,
+            )
+        {
+            Some("active_trap_leaf_preflight")
         } else if self.thread_context.dispatch_record != Some(record) {
             Some("dispatch_record")
         } else if record.entered {
@@ -1130,6 +1151,23 @@ impl Task {
                     first_failed,
                 ))
             });
+        }
+
+        if expected_root_ref.is_valid()
+            && !TrapFlowType::resume_active_leaf(
+                expected_root_ref,
+                self.task_ref,
+                self.flow_ref(),
+                record.cpu_ref,
+                record.context_epoch,
+            )
+        {
+            return failed_condition(
+                LifecycleEvent::Dispatch,
+                self.state(),
+                State::OnCpu,
+                State::OnCpu,
+            );
         }
 
         self.flow.enter_contextual(
@@ -1165,6 +1203,25 @@ impl Task {
             );
         }
         self.thread_context.record_save();
+        let root_ref = self.root_trap_flow_ref();
+        if root_ref.is_valid()
+            && !self.flow.cpu_ref().is_some_and(|cpu_ref| {
+                TrapFlowType::record_suspended_context(
+                    root_ref,
+                    self.task_ref,
+                    self.flow_ref(),
+                    cpu_ref,
+                    self.context_epoch(),
+                )
+            })
+        {
+            return failed_condition(
+                LifecycleEvent::Suspend,
+                self.state(),
+                State::OnCpu,
+                State::Online,
+            );
+        }
         self.core_save_pending_suspend = true;
         Ok(())
     }

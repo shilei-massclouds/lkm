@@ -81,6 +81,11 @@ coordinates resume their continuation. Machine entry is selected only by the res
 Trap entry does not change Task lifecycle; the optional root TrapFlowRef in the context restores the
 effective trap leaf before the underlying TaskFlow continuation.
 
+`NextDispatch` copies that optional root only as an identity proof. A nonempty root requires
+generation-checked resolution of root, active child and concrete leaf against the fixed Task/Flow, CpuRef and
+context epoch before Dispatch and again at Enter. Enter records leaf resume but never writes `ra/sp` or selects a
+handler by leaf kind. An empty root produces no leaf-resume observation.
+
 The initial BootTask and AP-idle architecture entries call their Flow actions directly without a false
 Dispatch/Enter. After either Task has really switched out, every restoration uses the common proof path.
 

@@ -56,6 +56,12 @@ failure path.
   prospective complete record against the installed stack bounds. Insufficient capacity switches to the owning
   CPU's emergency stack and fail-stops; emergency reentry fail-stops without another switch.
 - `sret` is reachable only after Rust returns a consumed, one-shot `TrapReturnToken` produced after Cleanup.
+- Formal Rust entry resolves a `TrapRuntimeLease` from the entry context, `tp`, owner Scheduler `curr`, fixed
+  TaskFlow CpuRef and the target-owned task registry. CPU0 may use its boot-owner lease; an AP may use only its
+  published secondary lease and target-CPU task access, never a global `&'static mut Context`. Exception-table
+  lookup uses one read-only runtime reference.
+- A bounded per-CPU atomic observation records root/interrupt/exception/SSIP completions, token consumption,
+  leaf-switch resume and last generation. It is diagnostic state, not a checkpoint provider.
 
 Mapping: charter [`trap-type.md`](../../charter/objects/trap-type.md), model
 [`trap_type.spec`](../../model/objects/trap_type.spec), implementation

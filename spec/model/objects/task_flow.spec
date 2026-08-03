@@ -89,6 +89,9 @@ type TaskFlow: PhaseObject {
                 task_flow_current_coordinate_consumed(self);
                 task_flow_machine_entry_comes_from_context(self);
                 task_flow_pending_yield_resumed_exactly_once_or_absent(self);
+                task_flow_optional_root_preflight_valid(self.parent, self);
+                task_flow_active_trap_leaf_resumed_exactly_once_or_absent(self);
+                task_flow_enter_does_not_select_machine_coordinate(self);
             }
         }
     }
@@ -109,6 +112,9 @@ predicate task_flow_dispatch_proof_consumed_exactly_once<F: TaskFlow>(flow: F) -
 predicate task_flow_current_coordinate_consumed<F: TaskFlow>(flow: F) -> bool;
 predicate task_flow_machine_entry_comes_from_context<F: TaskFlow>(flow: F) -> bool;
 predicate task_flow_pending_yield_resumed_exactly_once_or_absent<F: TaskFlow>(flow: F) -> bool;
+predicate task_flow_optional_root_preflight_valid<T: Task, F: TaskFlow>(task: T, flow: F) -> bool;
+predicate task_flow_active_trap_leaf_resumed_exactly_once_or_absent<F: TaskFlow>(flow: F) -> bool;
+predicate task_flow_enter_does_not_select_machine_coordinate<F: TaskFlow>(flow: F) -> bool;
 predicate task_flow_published_with_task<F: TaskFlow, T: Task>(flow: F, task: T) -> bool;
 predicate task_flow_terminal_runtime_quiesced<F: TaskFlow>(flow: F) -> bool;
 predicate task_flow_no_pending_yield<F: TaskFlow>(flow: F) -> bool;
