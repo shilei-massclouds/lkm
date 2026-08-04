@@ -168,6 +168,10 @@ preflight rejection 发生在 token/任何对象提交前。post-commit failure�
 Task 只维护唯一 Flow association，不复制 Flow lifecycle。terminal Disable 要求固定 Flow 已 Offline，
 Cleanup 要求 Flow 已 Destroyed；终止路径不先制造可恢复 Online context。BootTask 不退出。
 
+用户 COW fault 的资源失败可以用 `TaskTerminalReason::OutOfMemory` 终止当前用户 Task；该原因沿既有
+child exit/wait/SIGCHLD 生命周期传递，wait word 按 signal 9 编码，但不表示已运行 OOM killer 或已向
+用户 handler 交付 signal frame。mm、PTE 和 `UserFrame` 引用必须在 Task Cleanup 前只释放一次。
+
 用户地址空间、files、credentials、signal 和 exec transaction 属于稳定 Task/Runtime 资源。每个用户型
 TaskFlow 最多创建一个终身稳定、不可共享的 `UserAppRuntime` owned child；exec 只替换 Runtime 内的
 ApplicationInstance，fork 才创建新的 Task/Flow/Runtime。

@@ -65,6 +65,7 @@ Classification meanings:
 | [`unexpected_exception_flow_type.spec`](../../model/objects/unexpected_exception_flow_type.spec) | `dedicated` | [`unexpected-exception-flow-type.md`](unexpected-exception-flow-type.md) |
 | [`unexpected_exception_type.spec`](../../model/objects/unexpected_exception_type.spec) | `dedicated` | [`unexpected-exception-type.md`](unexpected-exception-type.md) |
 | [`user_boot.spec`](../../model/objects/user_boot.spec) | `dedicated` | [`user-boot.md`](user-boot.md) |
+| [`user_frame.spec`](../../model/objects/user_frame.spec) | `dedicated` | [`user-frame.md`](user-frame.md) |
 | [`user_space_reserve.spec`](../../model/objects/user_space_reserve.spec) | `dedicated` | [`user-space-reserve.md`](user-space-reserve.md) |
 | [`user_stack.spec`](../../model/objects/user_stack.spec) | `dedicated` | [`user-stack.md`](user-stack.md) |
 | [`vfs.spec`](../../model/objects/vfs.spec) | `dedicated` | [`vfs.md`](vfs.md) |

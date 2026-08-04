@@ -452,7 +452,7 @@ object TaskCreationCore: KernelObject {
                     user_child_process_signal_state_copied(dst_process, src_process);
                     user_child_process_independent_mm_owned(dst_process, address_space);
                     user_child_process_root_and_satp_distinct(dst_process, src_process);
-                    user_child_process_eager_private_pages_copied(dst_process, address_space);
+                    user_child_process_cow_private_pages_shared(dst_process, address_space);
                     user_child_process_dup_mm_failure_atomic(dst_process, src_process);
                     user_child_process_trap_frame_copied(dst_process, trap_frame);
                     user_child_process_trap_frame_child_return_zero(dst_process);

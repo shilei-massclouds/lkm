@@ -16,6 +16,8 @@ const PTE_X: usize = 1 << 3;
 const PTE_U: usize = 1 << 4;
 const PTE_A: usize = 1 << 6;
 const PTE_D: usize = 1 << 7;
+pub const USER_PTE_COW: usize = 1 << 8;
+const USER_PTE_RSW_RESERVED: usize = 1 << 9;
 const PTE_TABLE: usize = PTE_V;
 const PTE_LEAF_RW: usize = PTE_V | PTE_R | PTE_W | PTE_A | PTE_D;
 const PTE_LEAF_RWX: usize = PTE_V | PTE_R | PTE_W | PTE_X | PTE_A | PTE_D;
@@ -631,13 +633,17 @@ pub fn table_pte_from_phys(table_phys: usize) -> usize {
     table_pte(table_phys)
 }
 
-pub fn user_leaf_pte_from_phys(
+pub fn user_leaf_pte_from_phys_with_cow(
     phys: usize,
     readable: bool,
     writable: bool,
     executable: bool,
+    cow: bool,
 ) -> Option<usize> {
     if phys & 0xfff != 0 || (!readable && writable) || (!readable && !writable && !executable) {
+        return None;
+    }
+    if cow && (!readable || writable) {
         return None;
     }
 
@@ -651,7 +657,26 @@ pub fn user_leaf_pte_from_phys(
     if executable {
         flags |= PTE_X;
     }
+    if cow {
+        flags |= USER_PTE_COW;
+    }
+    debug_assert_eq!(flags & USER_PTE_RSW_RESERVED, 0);
     Some(leaf_pte(phys, flags))
+}
+
+pub fn user_leaf_pte_phys(pte: usize) -> Option<usize> {
+    const SV39_PPN_MASK: usize = (1usize << 44) - 1;
+    let leaf_permissions = PTE_R | PTE_W | PTE_X;
+    (pte & PTE_V != 0 && pte & PTE_U != 0 && pte & leaf_permissions != 0)
+        .then_some(((pte >> 10) & SV39_PPN_MASK) << 12)
+}
+
+pub const fn user_leaf_pte_is_cow(pte: usize) -> bool {
+    pte & USER_PTE_COW != 0 && pte & USER_PTE_RSW_RESERVED == 0
+}
+
+pub const fn user_leaf_pte_is_writable(pte: usize) -> bool {
+    pte & PTE_W != 0
 }
 
 pub fn copy_high_half_root_entries(dst: &mut PageTablePage, src: &PageTablePage) -> usize {

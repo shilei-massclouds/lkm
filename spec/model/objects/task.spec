@@ -3,6 +3,7 @@
 enum TaskRuntimeState { New, Running }
 enum TaskExecutionAuthority { None, Reserved, Live }
 enum TaskBreakpointState { Invalid, Prepared, Valid }
+enum TaskTerminalReason { OutOfMemory }
 
 type TaskRef {
     processes {
@@ -95,6 +96,12 @@ predicate task_online_has_recoverable_context<T: Task>(task: T) -> bool;
 predicate task_online_eligibility_is_scheduler_owned<T: Task>(task: T) -> bool;
 predicate task_online_does_not_imply_dispatched<T: Task>(task: T) -> bool;
 predicate task_terminal_disable_keeps_breakpoint_invalid<T: Task>(task: T) -> bool;
+predicate task_terminal_reason_is<T: Task>(task: T, reason: TaskTerminalReason) -> bool;
+predicate task_oom_terminal_wait_signal_nine<T: Task>(task: T) -> bool;
+predicate task_oom_terminal_generates_sigchld<T: Task>(task: T) -> bool;
+predicate task_oom_terminal_has_no_user_signal_frame<T: Task>(task: T) -> bool;
+predicate task_oom_terminal_has_no_oom_killer_selection<T: Task>(task: T) -> bool;
+predicate task_oom_terminal_releases_mm_once<T: Task>(task: T) -> bool;
 predicate task_fixed_flow_offline<T: Task>(task: T) -> bool;
 predicate task_fixed_flow_destroyed<T: Task>(task: T) -> bool;
 predicate task_destroyed_only_after_flow_cleanup<T: Task>(task: T) -> bool;
@@ -297,6 +304,22 @@ type Task: ResourceObject {
     state State::Destroyed { invariant { task_destroyed_only_after_flow_cleanup(self); } }
 
     processes {
+        Action::TerminateForOutOfMemory {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::OnCpu;
+                task_execution_authority_is(self, TaskExecutionAuthority::Live);
+            }
+            ensures {
+                task_terminal_reason_is(self, TaskTerminalReason::OutOfMemory);
+                task_oom_terminal_wait_signal_nine(self);
+                task_oom_terminal_generates_sigchld(self);
+                task_oom_terminal_has_no_user_signal_frame(self);
+                task_oom_terminal_has_no_oom_killer_selection(self);
+                task_oom_terminal_releases_mm_once(self);
+            }
+        }
+
         Action::EnableStackGuard {
             state_effect: StateEffect::None;
             depends_on {

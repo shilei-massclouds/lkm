@@ -126,8 +126,14 @@ predicate user_clone_tls_ignored_without_clone_settls<T>(boundaries: T) -> bool;
 predicate user_clone_full_clone3_deferred<T>(boundaries: T) -> bool;
 predicate user_clone_full_thread_group_deferred<T>(boundaries: T) -> bool;
 predicate user_clone_full_clone_vm_vfork_deferred<T>(boundaries: T) -> bool;
-predicate user_clone_full_cow_mm_deferred<T>(boundaries: T) -> bool;
-predicate user_clone_independent_mm_eager_copy_bound<T>(boundaries: T) -> bool;
+predicate user_clone_independent_mm_cow_bound<T>(boundaries: T) -> bool;
+predicate user_clone_cow_private_frame_sharing_bound<T>(boundaries: T) -> bool;
+predicate user_clone_cow_parent_child_ro_lowered<T>(boundaries: T) -> bool;
+predicate user_clone_cow_readonly_shared_without_promotion<T>(boundaries: T) -> bool;
+predicate user_clone_cow_prepare_before_commit<T>(boundaries: T) -> bool;
+predicate user_clone_cow_publish_after_commit<T>(boundaries: T) -> bool;
+predicate user_clone_cow_failure_atomic<T>(boundaries: T) -> bool;
+predicate user_clone_cow_teardown_refcount_conserving<T>(boundaries: T) -> bool;
 predicate user_clone_full_pidfd_file_ops_deferred<T>(boundaries: T) -> bool;
 predicate user_clone_full_ptrace_hooks_deferred<T>(boundaries: T) -> bool;
 predicate user_clone_full_seccomp_hooks_deferred<T>(boundaries: T) -> bool;
@@ -186,13 +192,21 @@ predicate user_address_space_terminal_handoff_fault_request_uses_committed_paren
 predicate user_address_space_fault_access_classified<T>(space: T) -> bool;
 predicate user_address_space_fault_classes_total_and_exclusive<T>(space: T) -> bool;
 predicate user_address_space_fault_not_present_bound<T>(space: T) -> bool;
+predicate user_address_space_fault_cow_write_protect_bound<T>(space: T) -> bool;
 predicate user_address_space_fault_protection_bound<T>(space: T) -> bool;
 predicate user_address_space_fault_unmapped_bound<T>(space: T) -> bool;
 predicate user_address_space_fault_retry_preserves_sepc<T>(space: T) -> bool;
 predicate user_address_space_fault_targeted_tlb_flush<T>(space: T) -> bool;
 predicate user_address_space_fault_failure_atomic<T>(space: T) -> bool;
 predicate user_address_space_fault_diagnostic_stable<T>(space: T) -> bool;
-predicate user_address_space_fault_cow_count_zero_first_slice<T>(space: T) -> bool;
+predicate user_address_space_fault_cow_requires_original_private_writable_vma<T>(space: T) -> bool;
+predicate user_address_space_fault_cow_shared_copy_bound<T, M>(space: T, metadata_map: M) -> bool;
+predicate user_address_space_fault_cow_unique_restore_bound<T, M>(space: T, metadata_map: M) -> bool;
+predicate user_address_space_fault_cow_refcount_conserved<T, M>(space: T, metadata_map: M) -> bool;
+predicate user_address_space_fault_cow_commit_failure_preserves_old_leaf<T, M>(space: T, metadata_map: M) -> bool;
+predicate user_address_space_fault_cow_oom_terminal_bound<T>(space: T) -> bool;
+predicate user_address_space_fault_cow_diagnostics_nonzero<T>(space: T) -> bool;
+predicate user_address_space_user_frame_refs_conserved<T, M>(space: T, metadata_map: M) -> bool;
 predicate user_address_space_owner_task_bound<T, K>(space: T, task: K) -> bool;
 predicate user_address_space_active_carrier_validated<T>(space: T) -> bool;
 predicate user_address_space_exec_replacement_atomic<T>(space: T) -> bool;
@@ -564,7 +578,7 @@ predicate user_child_process_credentials_copied<T, P>(process: T, parent: P) -> 
 predicate user_child_process_signal_state_copied<T, P>(process: T, parent: P) -> bool;
 predicate user_child_process_independent_mm_owned<T, A>(process: T, space: A) -> bool;
 predicate user_child_process_root_and_satp_distinct<T, P>(process: T, parent: P) -> bool;
-predicate user_child_process_eager_private_pages_copied<T, A>(process: T, space: A) -> bool;
+predicate user_child_process_cow_private_pages_shared<T, A>(process: T, space: A) -> bool;
 predicate user_child_process_dup_mm_failure_atomic<T, P>(process: T, parent: P) -> bool;
 predicate user_child_process_mm_published_after_copy<T>(process: T) -> bool;
 predicate user_child_process_task_mm_switched<T, P>(process: T, parent: P) -> bool;
@@ -737,8 +751,14 @@ object UserCloneDeferredBoundaries: KernelObject {
                     user_clone_full_clone3_deferred(self);
                     user_clone_full_thread_group_deferred(self);
                     user_clone_full_clone_vm_vfork_deferred(self);
-                    user_clone_full_cow_mm_deferred(self);
-                    user_clone_independent_mm_eager_copy_bound(self);
+                    user_clone_independent_mm_cow_bound(self);
+                    user_clone_cow_private_frame_sharing_bound(self);
+                    user_clone_cow_parent_child_ro_lowered(self);
+                    user_clone_cow_readonly_shared_without_promotion(self);
+                    user_clone_cow_prepare_before_commit(self);
+                    user_clone_cow_publish_after_commit(self);
+                    user_clone_cow_failure_atomic(self);
+                    user_clone_cow_teardown_refcount_conserving(self);
                     user_clone_full_pidfd_file_ops_deferred(self);
                     user_clone_full_ptrace_hooks_deferred(self);
                     user_clone_full_seccomp_hooks_deferred(self);
@@ -772,13 +792,6 @@ object UserCloneDeferredBoundaries: KernelObject {
                     summary: "Implement complete CLONE_VM and vfork completion scheduling.";
                     evidence { user_clone_full_clone_vm_vfork_deferred(self); }
                     close_when: "Parent blocking, child completion and concurrent scheduler semantics match Linux tests.";
-                }
-
-                deferred user_clone.004 {
-                    category: DeferredCategory::Feature;
-                    summary: "Replace eager private-page duplication with complete COW lowering and reference semantics.";
-                    evidence { user_clone_full_cow_mm_deferred(self); }
-                    close_when: "COW faults, shared-frame reference conservation, teardown and differential tests pass.";
                 }
 
                 deferred user_clone.005 {
@@ -890,8 +903,14 @@ object UserCloneDeferredBoundaries: KernelObject {
             user_clone_full_clone3_deferred(self);
             user_clone_full_thread_group_deferred(self);
             user_clone_full_clone_vm_vfork_deferred(self);
-            user_clone_full_cow_mm_deferred(self);
-            user_clone_independent_mm_eager_copy_bound(self);
+            user_clone_independent_mm_cow_bound(self);
+            user_clone_cow_private_frame_sharing_bound(self);
+            user_clone_cow_parent_child_ro_lowered(self);
+            user_clone_cow_readonly_shared_without_promotion(self);
+            user_clone_cow_prepare_before_commit(self);
+            user_clone_cow_publish_after_commit(self);
+            user_clone_cow_failure_atomic(self);
+            user_clone_cow_teardown_refcount_conserving(self);
             user_clone_full_pidfd_file_ops_deferred(self);
             user_clone_full_ptrace_hooks_deferred(self);
             user_clone_full_seccomp_hooks_deferred(self);
@@ -1026,6 +1045,7 @@ object UserAddressSpace: ResourceObject {
                     user_address_space_vmas_nonoverlapping(self);
                     user_address_space_heap_demand_paged(self);
                     user_address_space_anonymous_private_demand_paged(self);
+                    user_address_space_user_frame_refs_conserved(self, PageMetadataMap);
                 }
             }
         }
@@ -1046,6 +1066,7 @@ object UserAddressSpace: ResourceObject {
             user_address_space_vmas_nonoverlapping(self);
             user_address_space_heap_demand_paged(self);
             user_address_space_anonymous_private_demand_paged(self);
+            user_address_space_user_frame_refs_conserved(self, PageMetadataMap);
         }
 
         actions {
@@ -1087,13 +1108,20 @@ object UserAddressSpace: ResourceObject {
                     user_address_space_fault_access_classified(self);
                     user_address_space_fault_classes_total_and_exclusive(self);
                     user_address_space_fault_not_present_bound(self);
+                    user_address_space_fault_cow_write_protect_bound(self);
                     user_address_space_fault_protection_bound(self);
                     user_address_space_fault_unmapped_bound(self);
                     user_address_space_fault_retry_preserves_sepc(self);
                     user_address_space_fault_targeted_tlb_flush(self);
                     user_address_space_fault_failure_atomic(self);
                     user_address_space_fault_diagnostic_stable(self);
-                    user_address_space_fault_cow_count_zero_first_slice(self);
+                    user_address_space_fault_cow_requires_original_private_writable_vma(self);
+                    user_address_space_fault_cow_shared_copy_bound(self, PageMetadataMap);
+                    user_address_space_fault_cow_unique_restore_bound(self, PageMetadataMap);
+                    user_address_space_fault_cow_refcount_conserved(self, PageMetadataMap);
+                    user_address_space_fault_cow_commit_failure_preserves_old_leaf(self, PageMetadataMap);
+                    user_address_space_fault_cow_oom_terminal_bound(self);
+                    user_address_space_fault_cow_diagnostics_nonzero(self);
                     user_address_space_owner_task_bound(self, KernelInitTask);
                     user_address_space_active_carrier_validated(self);
                     user_address_space_exec_replacement_atomic(self);
@@ -2924,7 +2952,7 @@ object SyscallTable: ResourceObject {
                     user_task_child_process_group_visible(KernelInitTask, child);
                     user_child_process_independent_mm_owned(child, UserAddressSpace);
                     user_child_process_root_and_satp_distinct(child, KernelInitTask);
-                    user_child_process_eager_private_pages_copied(child, UserAddressSpace);
+                    user_child_process_cow_private_pages_shared(child, UserAddressSpace);
                     user_child_process_dup_mm_failure_atomic(child, KernelInitTask);
                     user_child_process_mm_published_after_copy(child);
                     user_child_process_parent_fd_snapshot_saved(child, FilesStruct);

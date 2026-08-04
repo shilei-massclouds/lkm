@@ -5919,10 +5919,10 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
             self.assertEqual(resumed_checked["verdict"], "complete")
             self.assertEqual(resumed_checked["exit_code"], 0)
             self.assertTrue(resumed_checked["allowed"])
-            self.assertEqual(resumed_data["summary"]["inventory_deferred"], 136)
+            self.assertEqual(resumed_data["summary"]["inventory_deferred"], 135)
             self.assertEqual(resumed_data["summary"]["inventory_trimmed"], 57)
             self.assertEqual(resumed_data["summary"]["unresolved_obligations"], 0)
-            self.assertEqual(len(resumed_data["boundary_inventory"]), 193)
+            self.assertEqual(len(resumed_data["boundary_inventory"]), 192)
             occurrence_by_boundary = {
                 item["boundary_id"]: item
                 for item in resumed_data["boundary_occurrences"]
@@ -6442,7 +6442,7 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
                     "boundary_occurrences": 2,
                     "completed": 51,
                     "failed": 0,
-                    "inventory_deferred": 136,
+                    "inventory_deferred": 135,
                     "inventory_trimmed": 57,
                     "pending": 0,
                     "rejected": 0,
@@ -6931,14 +6931,14 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
             self.assertEqual(snapshot.read_bytes(), BOOT_INIT_SETUP_SCENARIO.read_bytes())
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "6e7ad00146b30fd3508a46939855274a04fa93f74df9cd1f7713c9f003bb2b8b",
+                "86cb8bc5d4a3d608c2f4a6d88f738c3b6a894687a54e0c5ed0bd5968083b4adf",
             )
             self.assertEqual(
                 {
                     derivation["model_fingerprint"], model["model_fingerprint"],
                     view["model_fingerprint"], saved["model_fingerprint"],
                 },
-                {"sha256:29ad31b2d0fc269c59d1d5f8d76f2694205833775d3abb8c652ffeb2987ccb7d"},
+                {"sha256:3fc93c292767cc261a217f9e397bbfa2d4df610608173cccfb3dd734fae5ebc8"},
             )
             with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
                 compact_text = render_text(view)
@@ -7069,7 +7069,7 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
                     "boundary_occurrences": 2,
                     "completed": 61,
                     "failed": 0,
-                    "inventory_deferred": 136,
+                    "inventory_deferred": 135,
                     "inventory_trimmed": 57,
                     "pending": 0,
                     "rejected": 0,
@@ -7214,7 +7214,7 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
                     "boundary_occurrences": 120,
                     "completed": 342,
                     "failed": 0,
-                    "inventory_deferred": 136,
+                    "inventory_deferred": 135,
                     "inventory_trimmed": 57,
                     "pending": 0,
                     "rejected": 0,
@@ -7277,7 +7277,7 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
             )
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "1a01a4c1424e12426ba640af749d1b2df2861723a3f00877f8ba06c5bf56bf2d",
+                "fdffe2f8888418b5d59e7afc6a404f5a57a7678719ebed8ae86e5bc7dee4c9ab",
             )
             model = self.prepared_model_document
             assert view is not None
@@ -7289,7 +7289,7 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
                     view["model_fingerprint"],
                     saved["model_fingerprint"],
                 },
-                {"sha256:29ad31b2d0fc269c59d1d5f8d76f2694205833775d3abb8c652ffeb2987ccb7d"},
+                {"sha256:3fc93c292767cc261a217f9e397bbfa2d4df610608173cccfb3dd734fae5ebc8"},
             )
 
     def test_main_model_all_cpu_schedulers_expose_ap_mailbox_ipi_idle_protocol(self) -> None:

@@ -33,6 +33,7 @@ const BUDDY_ORDER_COUNT: usize = 11;
 const BUDDY_INVALID_INDEX: usize = usize::MAX;
 const PAGE_METADATA_FLAG_BUDDY_FREE: usize = 1 << 0;
 const PAGE_METADATA_FLAG_BUDDY_ALLOCATED: usize = 1 << 1;
+const PAGE_METADATA_FLAG_USER_FRAME: usize = 1 << 2;
 const KMALLOC_NULL: usize = 0;
 const PAGE_ALLOC_CPUHP_STEP: usize = 0x200;
 const SLUB_CPUHP_STEP: usize = 0x201;
@@ -481,6 +482,91 @@ impl PageRef {
     }
 }
 
+#[derive(Eq, PartialEq)]
+pub struct UserFrameRef {
+    page: PageRef,
+}
+
+#[cfg_attr(not(app_smoke), allow(dead_code))]
+impl UserFrameRef {
+    fn from_allocated(page: PageRef, page_metadata_map: &PageMetadataMap) -> Option<Self> {
+        let mut metadata = page_metadata_map.page_metadata(page)?;
+        if !metadata.is_buddy_allocated()
+            || metadata.is_user_frame()
+            || metadata.buddy_order() != 0
+            || metadata.refcount() != 1
+        {
+            return None;
+        }
+        metadata.mark_user_frame();
+        page_metadata_map
+            .write_metadata_by_index(page.metadata_index(), metadata)
+            .then_some(Self { page })
+    }
+
+    pub const fn page(&self) -> PageRef {
+        self.page
+    }
+
+    pub const fn phys(&self) -> PhysPageAddr {
+        self.page.phys()
+    }
+
+    pub fn refcount(&self, page_metadata_map: &PageMetadataMap) -> Option<usize> {
+        let metadata = page_metadata_map.page_metadata(self.page)?;
+        (metadata.is_buddy_allocated() && metadata.is_user_frame() && metadata.buddy_order() == 0)
+            .then_some(metadata.refcount())
+            .filter(|count| *count != 0)
+    }
+
+    pub fn acquire(&self, page_metadata_map: &PageMetadataMap) -> Option<Self> {
+        let mut metadata = page_metadata_map.page_metadata(self.page)?;
+        if !metadata.is_buddy_allocated()
+            || !metadata.is_user_frame()
+            || metadata.buddy_order() != 0
+            || metadata.refcount() == 0
+        {
+            return None;
+        }
+        metadata.refcount = metadata.refcount().checked_add(1)?;
+        page_metadata_map
+            .write_metadata_by_index(self.page.metadata_index(), metadata)
+            .then_some(Self { page: self.page })
+    }
+
+    pub fn release(
+        self,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) -> bool {
+        let Some(mut metadata) = page_metadata_map.page_metadata(self.page) else {
+            return false;
+        };
+        if !metadata.is_buddy_allocated()
+            || !metadata.is_user_frame()
+            || metadata.buddy_order() != 0
+            || metadata.refcount() == 0
+        {
+            return false;
+        }
+        if metadata.refcount() > 1 {
+            metadata.refcount -= 1;
+            return page_metadata_map.write_metadata_by_index(self.page.metadata_index(), metadata);
+        }
+
+        let original = metadata;
+        metadata.clear_user_frame();
+        if !page_metadata_map.write_metadata_by_index(self.page.metadata_index(), metadata) {
+            return false;
+        }
+        if page_allocator.free_pages(self.page, 0, page_metadata_map) {
+            return true;
+        }
+        let _ = page_metadata_map.write_metadata_by_index(self.page.metadata_index(), original);
+        false
+    }
+}
+
 const fn empty_page_ref() -> PageRef {
     PageRef {
         pfn: Pfn::new(0),
@@ -527,6 +613,14 @@ impl PageMetadata {
         self.flags & PAGE_METADATA_FLAG_BUDDY_ALLOCATED != 0
     }
 
+    pub const fn is_user_frame(self) -> bool {
+        self.flags & PAGE_METADATA_FLAG_USER_FRAME != 0
+    }
+
+    pub const fn refcount(self) -> usize {
+        self.refcount
+    }
+
     pub const fn buddy_order(self) -> usize {
         self.buddy_order
     }
@@ -548,7 +642,7 @@ impl PageMetadata {
     }
 
     fn mark_buddy_free(&mut self, order: usize, prev: usize, next: usize) {
-        self.flags &= !PAGE_METADATA_FLAG_BUDDY_ALLOCATED;
+        self.flags &= !(PAGE_METADATA_FLAG_BUDDY_ALLOCATED | PAGE_METADATA_FLAG_USER_FRAME);
         self.flags |= PAGE_METADATA_FLAG_BUDDY_FREE;
         self.refcount = 0;
         self.buddy_order = order;
@@ -557,7 +651,7 @@ impl PageMetadata {
     }
 
     fn mark_buddy_allocated(&mut self, order: usize) {
-        self.flags &= !PAGE_METADATA_FLAG_BUDDY_FREE;
+        self.flags &= !(PAGE_METADATA_FLAG_BUDDY_FREE | PAGE_METADATA_FLAG_USER_FRAME);
         self.flags |= PAGE_METADATA_FLAG_BUDDY_ALLOCATED;
         self.refcount = 1;
         self.buddy_order = order;
@@ -566,11 +660,21 @@ impl PageMetadata {
     }
 
     fn clear_buddy_state(&mut self) {
-        self.flags &= !(PAGE_METADATA_FLAG_BUDDY_FREE | PAGE_METADATA_FLAG_BUDDY_ALLOCATED);
+        self.flags &= !(PAGE_METADATA_FLAG_BUDDY_FREE
+            | PAGE_METADATA_FLAG_BUDDY_ALLOCATED
+            | PAGE_METADATA_FLAG_USER_FRAME);
         self.refcount = 0;
         self.buddy_order = 0;
         self.buddy_prev = BUDDY_INVALID_INDEX;
         self.buddy_next = BUDDY_INVALID_INDEX;
+    }
+
+    fn mark_user_frame(&mut self) {
+        self.flags |= PAGE_METADATA_FLAG_USER_FRAME;
+    }
+
+    fn clear_user_frame(&mut self) {
+        self.flags &= !PAGE_METADATA_FLAG_USER_FRAME;
     }
 }
 
@@ -1553,6 +1657,8 @@ pub struct PageAllocator {
     totalram_pages: usize,
     zone_facts: [ZoneRef; MAX_ZONE_SET_ZONES],
     zone_fact_count: usize,
+    #[cfg(app_smoke)]
+    fail_next_user_frame_allocation: bool,
 }
 
 #[cfg_attr(not(app_smoke), allow(dead_code))]
@@ -1590,6 +1696,8 @@ impl PageAllocator {
             totalram_pages: 0,
             zone_facts: [ZoneRef::empty(); MAX_ZONE_SET_ZONES],
             zone_fact_count: 0,
+            #[cfg(app_smoke)]
+            fail_next_user_frame_allocation: false,
         }
     }
 
@@ -1785,6 +1893,31 @@ impl PageAllocator {
         self.alloc_pages(0, gfp, page_metadata_map)
     }
 
+    pub fn alloc_user_frame(
+        &mut self,
+        gfp: GfpFlags,
+        page_metadata_map: &PageMetadataMap,
+    ) -> Option<UserFrameRef> {
+        #[cfg(app_smoke)]
+        if core::mem::take(&mut self.fail_next_user_frame_allocation) {
+            return None;
+        }
+        let page = self.alloc_page(gfp, page_metadata_map)?;
+        let Some(frame) = UserFrameRef::from_allocated(page, page_metadata_map) else {
+            assert!(
+                self.free_pages(page, 0, page_metadata_map),
+                "failed UserFrameRef conversion must release its fresh order-0 page"
+            );
+            return None;
+        };
+        Some(frame)
+    }
+
+    #[cfg(app_smoke)]
+    pub fn smoke_fail_next_user_frame_allocation(&mut self) {
+        self.fail_next_user_frame_allocation = true;
+    }
+
     pub fn free_pages(
         &mut self,
         page: PageRef,
@@ -1799,6 +1932,12 @@ impl PageAllocator {
             return false;
         }
 
+        let Some(metadata) = page_metadata_map.page_metadata(page) else {
+            return false;
+        };
+        if metadata.is_user_frame() || metadata.refcount() != 1 {
+            return false;
+        }
         let Some(zone_index) = self.zone_fact_index_for_page(page, order, page_metadata_map) else {
             return false;
         };

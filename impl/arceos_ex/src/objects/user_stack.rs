@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use super::{
     config::UserStackConfig,
     elf_object::ElfObject,
-    mm_core::{GfpFlags, PageAllocator, PageMetadataMap, PageRef},
+    mm_core::{GfpFlags, PageAllocator, PageMetadataMap, PageRef, UserFrameRef},
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     user_boot::UserAddressSpace,
 };
@@ -87,20 +87,23 @@ pub enum UserStackGrowReject {
     PteInstall,
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
 pub struct UserStackPage {
     vaddr: usize,
-    page: PageRef,
+    frame: UserFrameRef,
 }
 
 #[allow(dead_code)]
 impl UserStackPage {
-    pub const fn vaddr(self) -> usize {
+    pub const fn vaddr(&self) -> usize {
         self.vaddr
     }
 
-    pub const fn page(self) -> PageRef {
-        self.page
+    pub const fn page(&self) -> PageRef {
+        self.frame.page()
+    }
+
+    pub const fn frame(&self) -> &UserFrameRef {
+        &self.frame
     }
 }
 
@@ -225,7 +228,11 @@ impl UserStack {
     }
 
     pub fn backing_page(&self, index: usize) -> Option<PageRef> {
-        self.pages.get(index).map(|slot| slot.page)
+        self.pages.get(index).map(|slot| slot.frame.page())
+    }
+
+    pub fn backing_frame(&self, index: usize) -> Option<&UserFrameRef> {
+        self.pages.get(index).map(|slot| &slot.frame)
     }
 
     pub fn backing_page_vaddr(&self, index: usize) -> Option<usize> {
@@ -238,7 +245,16 @@ impl UserStack {
             .binary_search_by_key(&page_vaddr, |slot| slot.vaddr)
             .ok()
             .and_then(|index| self.pages.get(index))
-            .map(|slot| slot.page)
+            .map(|slot| slot.frame.page())
+    }
+
+    pub fn frame_for_vaddr(&self, vaddr: usize) -> Option<&UserFrameRef> {
+        let page_vaddr = align_down(vaddr, USER_PAGE_SIZE);
+        self.pages
+            .binary_search_by_key(&page_vaddr, |slot| slot.vaddr)
+            .ok()
+            .and_then(|index| self.pages.get(index))
+            .map(|slot| &slot.frame)
     }
 
     pub const fn fixed_size_bound(&self) -> bool {
@@ -296,7 +312,10 @@ impl UserStack {
     ) -> usize {
         let released = self.pages.len();
         while let Some(slot) = self.pages.pop() {
-            let _ = page_allocator.free_pages(slot.page, 0, page_metadata_map);
+            assert!(
+                slot.frame.release(page_allocator, page_metadata_map),
+                "user stack teardown must release each owned frame reference"
+            );
         }
         *self = Self::new();
         released
@@ -306,7 +325,7 @@ impl UserStack {
         *self = Self::new();
     }
 
-    pub(crate) fn eager_duplicate_from(
+    pub(crate) fn cow_duplicate_from(
         &mut self,
         parent: &Self,
         page_allocator: &mut PageAllocator,
@@ -351,27 +370,13 @@ impl UserStack {
             return false;
         }
         for parent_slot in &parent.pages {
-            let Some(page) = page_allocator.alloc_page(GfpFlags::kernel(), page_metadata_map)
-            else {
+            let Some(frame) = parent_slot.frame.acquire(page_metadata_map) else {
                 self.release_exec_backing(page_allocator, page_metadata_map);
                 return false;
             };
-            let Some(src) = page_metadata_map.page_address(parent_slot.page) else {
-                let _ = page_allocator.free_pages(page, 0, page_metadata_map);
-                self.release_exec_backing(page_allocator, page_metadata_map);
-                return false;
-            };
-            let Some(dst) = page_metadata_map.page_address(page) else {
-                let _ = page_allocator.free_pages(page, 0, page_metadata_map);
-                self.release_exec_backing(page_allocator, page_metadata_map);
-                return false;
-            };
-            unsafe {
-                core::ptr::copy_nonoverlapping(src as *const u8, dst as *mut u8, USER_PAGE_SIZE);
-            }
             self.pages.push(UserStackPage {
                 vaddr: parent_slot.vaddr,
-                page,
+                frame,
             });
         }
         true
@@ -713,11 +718,15 @@ impl UserStack {
         self.pages
             .try_reserve(1)
             .map_err(|_| UserStackGrowReject::BackingAllocation)?;
-        let page = page_allocator
-            .alloc_page(GfpFlags::kernel(), page_metadata_map)
+        let frame = page_allocator
+            .alloc_user_frame(GfpFlags::kernel(), page_metadata_map)
             .ok_or(UserStackGrowReject::BackingAllocation)?;
+        let page = frame.page();
         let Some(linear) = page_metadata_map.page_address(page) else {
-            let _ = page_allocator.free_pages(page, 0, page_metadata_map);
+            assert!(
+                frame.release(page_allocator, page_metadata_map),
+                "failed stack allocation must release its staged frame reference"
+            );
             return Err(UserStackGrowReject::BackingAllocation);
         };
         unsafe { core::ptr::write_bytes(linear as *mut u8, 0, USER_PAGE_SIZE) };
@@ -729,7 +738,7 @@ impl UserStack {
             index,
             UserStackPage {
                 vaddr: page_vaddr,
-                page,
+                frame,
             },
         );
         Ok(page)
@@ -751,8 +760,32 @@ impl UserStack {
             .binary_search_by_key(&page_vaddr, |slot| slot.vaddr)
         {
             let slot = self.pages.remove(index);
-            let _ = page_allocator.free_pages(slot.page, 0, page_metadata_map);
+            assert!(
+                slot.frame.release(page_allocator, page_metadata_map),
+                "stack fault rollback must release its staged frame reference"
+            );
         }
+    }
+
+    pub(crate) fn replace_frame(
+        &mut self,
+        page_vaddr: usize,
+        expected: PageRef,
+        replacement: UserFrameRef,
+    ) -> Result<UserFrameRef, UserFrameRef> {
+        let Ok(index) = self
+            .pages
+            .binary_search_by_key(&page_vaddr, |slot| slot.vaddr)
+        else {
+            return Err(replacement);
+        };
+        if self.pages[index].frame.page() != expected {
+            return Err(replacement);
+        }
+        Ok(core::mem::replace(
+            &mut self.pages[index].frame,
+            replacement,
+        ))
     }
 
     pub(crate) fn commit_vma_base(&mut self, base: usize) {

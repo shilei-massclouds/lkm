@@ -100,3 +100,9 @@ Context.
 The embedded Flow disables and cleans up first. Any logically Flow-owned UserAppRuntime and current
 ApplicationInstance are companion storage inside the Task aggregate and are quiesced before Flow cleanup.
 Task disable and cleanup follow; the FlowRef is never rebound during this sequence.
+
+A user COW allocation or commit resource failure records `TaskTerminalReason::OutOfMemory` before this terminal
+sequence. The child archive stores a fatal-signal wait word with low signal bits equal to 9 rather than the normal
+`exit_code << 8` encoding, wakes an eligible parent wait and queues SIGCHLD. The current Task's mm is released
+exactly once during terminal handoff; reap releases only the Task record. This reason does not construct a user
+signal frame, select an OOM victim or invoke a system-wide panic path.

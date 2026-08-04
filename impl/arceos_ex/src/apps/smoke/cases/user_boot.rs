@@ -2336,6 +2336,32 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
         assertions.assert("pid1 plain fork copy gate", false);
         return;
     }
+    let cow_probe_addr = context().user_stack.initial_sp();
+    let readonly_probe_addr = {
+        let ctx = context();
+        let mut index = 0usize;
+        let mut address = None;
+        while index < ctx.user_address_space.mapping_count() {
+            if let Some(mapping) = ctx.user_address_space.mapping(index)
+                && mapping.kind() == UserMappingKind::ElfSegment
+                && !mapping.writable()
+                && mapping.backing_page_count() != 0
+            {
+                address = mapping.backing_page_vaddr(0);
+                break;
+            }
+            index += 1;
+        }
+        address
+    };
+    let parent_leaf_before_failure = {
+        let ctx = context();
+        ctx.user_address_space.cow_leaf_diagnostic(
+            &ctx.user_stack,
+            cow_probe_addr,
+            &ctx.page_metadata_map,
+        )
+    };
     let (free_before_dup_failure, slots_before_dup_failure, pid_before_dup_failure, satp_before) = {
         let ctx = context();
         (
@@ -2347,14 +2373,14 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
     };
     context()
         .user_task_set
-        .smoke_fail_next_eager_child_mm_after_copy();
-    let eager_dup_failure = {
+        .smoke_fail_next_cow_child_mm_after_prepare();
+    let cow_prepare_failure = {
         let ctx = context();
         ctx.user_task_set
             .copy_plain_fork_from_parent(
                 &ctx.kernel_init_user_state,
                 &ctx.user_clone_deferred_boundaries,
-                &ctx.user_address_space,
+                &mut ctx.user_address_space,
                 &ctx.user_stack,
                 &ctx.user_trap_frame,
                 &ctx.fs_struct,
@@ -2373,49 +2399,60 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
     };
     {
         let ctx = context();
-        assertions.assert("pid1 eager dup failure injected", eager_dup_failure);
+        assertions.assert("pid1 COW prepare failure injected", cow_prepare_failure);
         assertions.assert(
-            "pid1 eager dup failure releases pages",
+            "pid1 COW prepare failure releases pages",
             ctx.page_allocator.buddy_total_free_pages() == free_before_dup_failure,
         );
         assertions.assert(
-            "pid1 eager dup rollback validates unpublished task",
+            "pid1 COW prepare rollback validates unpublished task",
             ctx.user_task_set.smoke_last_unpublished_rollback_stage() >= 1,
         );
         assertions.assert(
-            "pid1 eager dup rollback releases mm storage",
+            "pid1 COW prepare rollback releases mm storage",
             ctx.user_task_set.smoke_last_unpublished_rollback_stage() >= 2,
         );
         assertions.assert(
-            "pid1 eager dup rollback keeps task unpublished",
+            "pid1 COW prepare rollback keeps task unpublished",
             ctx.user_task_set.smoke_last_unpublished_rollback_stage() >= 3,
         );
         assertions.assert(
-            "pid1 eager dup rollback clears reserved task",
+            "pid1 COW prepare rollback clears reserved task",
             ctx.user_task_set.smoke_last_unpublished_rollback_stage() >= 4,
         );
         assertions.assert(
-            "pid1 eager dup rollback releases slot",
+            "pid1 COW prepare rollback releases slot",
             ctx.user_task_set.smoke_last_unpublished_rollback_stage() == 5,
         );
         assertions.assert(
-            "pid1 eager dup failure releases task slot",
+            "pid1 COW prepare failure releases task slot",
             ctx.user_task_set.free_task_slot_count() == slots_before_dup_failure,
         );
         assertions.assert(
-            "pid1 eager dup failure preserves pid allocation",
+            "pid1 COW prepare failure preserves pid allocation",
             ctx.user_task_set.next_child_pid() == pid_before_dup_failure,
         );
         assertions.assert(
-            "pid1 eager dup failure preserves reusable task record",
+            "pid1 COW prepare failure preserves reusable task record",
             ctx.user_task_set.active_task_record_available(),
         );
         assertions.assert(
-            "pid1 eager dup failure preserves parent mm",
+            "pid1 COW prepare failure preserves parent mm",
             ctx.user_address_space.satp_token() == satp_before
                 && ctx
                     .user_address_space
                     .owned_by(crate::objects::task::TaskRef::KERNEL_INIT),
+        );
+        assertions.assert(
+            "pid1 COW prepare failure preserves parent leaf and reference",
+            parent_leaf_before_failure.is_some()
+                && ctx.user_address_space.cow_leaf_diagnostic(
+                    &ctx.user_stack,
+                    cow_probe_addr,
+                    &ctx.page_metadata_map,
+                ) == parent_leaf_before_failure
+                && parent_leaf_before_failure
+                    .is_some_and(|leaf| leaf.writable() && !leaf.cow() && leaf.refcount() == 1),
         );
     }
     let outer_child_pid = {
@@ -2423,7 +2460,7 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
         let Some(child_pid) = ctx.user_task_set.copy_plain_fork_from_parent(
             &ctx.kernel_init_user_state,
             &ctx.user_clone_deferred_boundaries,
-            &ctx.user_address_space,
+            &mut ctx.user_address_space,
             &ctx.user_stack,
             &ctx.user_trap_frame,
             &ctx.fs_struct,
@@ -2465,6 +2502,70 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
         child_pid
     };
 
+    {
+        let ctx = context();
+        let child_ref = ctx.user_task_set.active_task_ref();
+        let parent_leaf = ctx.user_address_space.cow_leaf_diagnostic(
+            &ctx.user_stack,
+            cow_probe_addr,
+            &ctx.page_metadata_map,
+        );
+        let child_leaf = ctx.user_task_set.inactive_cow_leaf_diagnostic(
+            child_ref,
+            cow_probe_addr,
+            &ctx.page_metadata_map,
+        );
+        assertions.assert(
+            "plain fork shares stack frame as parent-child RO+COW",
+            parent_leaf.is_some_and(|leaf| {
+                leaf.task_ref()
+                    .same_identity(crate::objects::task::TaskRef::KERNEL_INIT)
+                    && leaf.mm_satp() == ctx.user_address_space.satp_token()
+                    && !leaf.writable()
+                    && leaf.cow()
+                    && leaf.refcount() == 2
+            }) && child_leaf.is_some_and(|leaf| {
+                parent_leaf.is_some_and(|parent| {
+                    leaf.task_ref().same_identity(child_ref)
+                        && leaf.mm_satp() != parent.mm_satp()
+                        && leaf.phys() == parent.phys()
+                        && !leaf.writable()
+                        && leaf.cow()
+                        && leaf.refcount() == 2
+                })
+            }),
+        );
+        let readonly_parent = readonly_probe_addr.and_then(|address| {
+            ctx.user_address_space.cow_leaf_diagnostic(
+                &ctx.user_stack,
+                address,
+                &ctx.page_metadata_map,
+            )
+        });
+        let readonly_child = readonly_probe_addr.and_then(|address| {
+            ctx.user_task_set.inactive_cow_leaf_diagnostic(
+                child_ref,
+                address,
+                &ctx.page_metadata_map,
+            )
+        });
+        assertions.assert(
+            "plain fork shares read-only ELF frame without COW",
+            readonly_parent.is_some_and(|parent| {
+                !parent.writable()
+                    && !parent.cow()
+                    && parent.refcount() == 2
+                    && readonly_child.is_some_and(|child| {
+                        child.phys() == parent.phys()
+                            && child.mm_satp() != parent.mm_satp()
+                            && !child.writable()
+                            && !child.cow()
+                            && child.refcount() == 2
+                    })
+            }),
+        );
+    }
+
     let outer_child_frame = {
         let mut wait_frame = TrapFrame::zeroed();
         wait_frame.sepc = 0x9010;
@@ -2494,6 +2595,79 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
             assertions.assert("pid1 plain fork dispatch", false);
             return;
         }
+    }
+    {
+        let ctx = context();
+        let active = ctx.user_task_set.active_task_ref();
+        let satp = ctx.user_address_space.satp_token();
+        let leaf_before = ctx.user_address_space.cow_leaf_diagnostic(
+            &ctx.user_stack,
+            cow_probe_addr,
+            &ctx.page_metadata_map,
+        );
+        let free_before = ctx.page_allocator.buddy_total_free_pages();
+        ctx.page_allocator.smoke_fail_next_user_frame_allocation();
+        let resolution = ctx.user_address_space.resolve_user_fault(
+            &mut ctx.user_stack,
+            UserFaultRequest::new(active, satp, cow_probe_addr, 0x9014, UserFaultAccess::Store),
+            &mut ctx.page_allocator,
+            &ctx.page_metadata_map,
+        );
+        assertions.assert(
+            "child COW allocation failure preserves shared leaf and references",
+            resolution.class() == UserFaultClass::CowWriteProtect
+                && resolution.result() == UserFaultResult::TaskOom
+                && resolution.sepc() == 0x9014
+                && leaf_before.is_some()
+                && ctx.user_address_space.cow_leaf_diagnostic(
+                    &ctx.user_stack,
+                    cow_probe_addr,
+                    &ctx.page_metadata_map,
+                ) == leaf_before
+                && ctx.page_allocator.buddy_total_free_pages() == free_before,
+        );
+    }
+    {
+        let ctx = context();
+        let active = ctx.user_task_set.active_task_ref();
+        let satp = ctx.user_address_space.satp_token();
+        let resolution = ctx.user_address_space.resolve_user_fault(
+            &mut ctx.user_stack,
+            UserFaultRequest::new(active, satp, cow_probe_addr, 0x9018, UserFaultAccess::Store),
+            &mut ctx.page_allocator,
+            &ctx.page_metadata_map,
+        );
+        let child_leaf = ctx.user_address_space.cow_leaf_diagnostic(
+            &ctx.user_stack,
+            cow_probe_addr,
+            &ctx.page_metadata_map,
+        );
+        let parent_leaf = ctx.user_task_set.inactive_cow_leaf_diagnostic(
+            crate::objects::task::TaskRef::KERNEL_INIT,
+            cow_probe_addr,
+            &ctx.page_metadata_map,
+        );
+        let diag = ctx.user_address_space.last_user_fault();
+        assertions.assert(
+            "child COW write fault copies frame and retries same instruction",
+            resolution.class() == UserFaultClass::CowWriteProtect
+                && resolution.result() == UserFaultResult::RetrySameInstruction
+                && resolution.sepc() == 0x9018
+                && diag.cow_shared_count() == 2
+                && diag.cow_copied_count() == 1
+                && diag.cow_unique_count() == 0
+                && child_leaf.is_some_and(|child| {
+                    child.writable()
+                        && !child.cow()
+                        && child.refcount() == 1
+                        && parent_leaf.is_some_and(|parent| {
+                            !parent.writable()
+                                && parent.cow()
+                                && parent.refcount() == 1
+                                && parent.phys() != child.phys()
+                        })
+                }),
+        );
     }
     {
         let child = &context().user_task_set;
@@ -2538,7 +2712,7 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
         let Some(child_pid) = ctx.user_task_set.copy_plain_fork_from_current_child(
             &ctx.kernel_init_user_state,
             &ctx.user_clone_deferred_boundaries,
-            &ctx.user_address_space,
+            &mut ctx.user_address_space,
             &ctx.user_stack,
             &ctx.user_trap_frame,
             &ctx.fs_struct,
@@ -2552,6 +2726,34 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
             assertions.assert("builtin grandchild clone", false);
             return;
         };
+        let grandchild_ref = ctx.user_task_set.pending_task_ref();
+        let parent_leaf = ctx.user_address_space.cow_leaf_diagnostic(
+            &ctx.user_stack,
+            cow_probe_addr,
+            &ctx.page_metadata_map,
+        );
+        let child_leaf = ctx.user_task_set.inactive_cow_leaf_diagnostic(
+            grandchild_ref,
+            cow_probe_addr,
+            &ctx.page_metadata_map,
+        );
+        assertions.assert(
+            "nested fork re-lowers unique parent page and shares it RO+COW",
+            parent_leaf.is_some_and(|parent| {
+                parent.address() == cow_probe_addr & !(USER_PAGE_SIZE - 1)
+                    && !parent.writable()
+                    && parent.cow()
+                    && parent.refcount() == 2
+                    && child_leaf.is_some_and(|child| {
+                        child.task_ref().same_identity(grandchild_ref)
+                            && child.phys() == parent.phys()
+                            && child.mm_satp() != parent.mm_satp()
+                            && !child.writable()
+                            && child.cow()
+                            && child.refcount() == 2
+                    })
+            }),
+        );
         if !ctx
             .kernel_init_user_state
             .observe_pending_plain_fork_child_process_group_visible(outer_child_pid, child_pid)
@@ -2565,7 +2767,7 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
             .copy_plain_fork_from_current_child(
                 &ctx.kernel_init_user_state,
                 &ctx.user_clone_deferred_boundaries,
-                &ctx.user_address_space,
+                &mut ctx.user_address_space,
                 &ctx.user_stack,
                 &ctx.user_trap_frame,
                 &ctx.fs_struct,
@@ -2666,7 +2868,7 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
             .copy_plain_fork_from_current_child(
                 &ctx.kernel_init_user_state,
                 &ctx.user_clone_deferred_boundaries,
-                &ctx.user_address_space,
+                &mut ctx.user_address_space,
                 &ctx.user_stack,
                 &ctx.user_trap_frame,
                 &ctx.fs_struct,
@@ -2933,7 +3135,7 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
             .copy_plain_fork_from_current_child(
                 &ctx.kernel_init_user_state,
                 &ctx.user_clone_deferred_boundaries,
-                &ctx.user_address_space,
+                &mut ctx.user_address_space,
                 &ctx.user_stack,
                 &ctx.user_trap_frame,
                 &ctx.fs_struct,
@@ -2952,7 +3154,7 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
             .copy_plain_fork_from_current_child(
                 &ctx.kernel_init_user_state,
                 &ctx.user_clone_deferred_boundaries,
-                &ctx.user_address_space,
+                &mut ctx.user_address_space,
                 &ctx.user_stack,
                 &ctx.user_trap_frame,
                 &ctx.fs_struct,
@@ -2991,6 +3193,16 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
             && !context().user_task_set.builtin_grandchild_bound()
             && context().user_task_set.pid1_plain_fork_child_continuation(),
     );
+
+    {
+        let ctx = context();
+        let active = ctx.user_task_set.active_task_ref();
+        assertions.assert(
+            "task OOM terminal encodes signal 9 wait status",
+            ctx.user_task_set.record_task_out_of_memory(active)
+                && ctx.user_task_set.task_wait_status(active, 0) == 9,
+        );
+    }
 
     let (outer_parent_frame, outer_exit_pid, exiting_task) = {
         let ctx = context();
@@ -3054,7 +3266,7 @@ fn exercise_builtin_grandchild_wait4_exec(
         let Some(pid) = ctx.user_task_set.copy_plain_fork_from_current_child(
             &ctx.kernel_init_user_state,
             &ctx.user_clone_deferred_boundaries,
-            &ctx.user_address_space,
+            &mut ctx.user_address_space,
             &ctx.user_stack,
             &ctx.user_trap_frame,
             &ctx.fs_struct,
@@ -3527,7 +3739,7 @@ fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
         let Some(child_pid) = ctx.user_task_set.copy_plain_fork_from_current_child(
             &ctx.kernel_init_user_state,
             &ctx.user_clone_deferred_boundaries,
-            &ctx.user_address_space,
+            &mut ctx.user_address_space,
             &ctx.user_stack,
             &ctx.user_trap_frame,
             &ctx.fs_struct,
@@ -3815,7 +4027,7 @@ fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
         let Some(second_child_pid) = ctx.user_task_set.copy_plain_fork_from_current_child(
             &ctx.kernel_init_user_state,
             &ctx.user_clone_deferred_boundaries,
-            &ctx.user_address_space,
+            &mut ctx.user_address_space,
             &ctx.user_stack,
             &ctx.user_trap_frame,
             &ctx.fs_struct,

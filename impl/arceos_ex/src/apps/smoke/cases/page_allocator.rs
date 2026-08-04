@@ -285,8 +285,48 @@ fn run_alloc_free_api_smoke(ctx: &mut Context) -> Option<(usize, usize, usize)> 
     if !run_order_alloc_free_smoke(ctx, 1, true) || !run_order_alloc_free_smoke(ctx, 2, false) {
         return None;
     }
+    if !run_user_frame_ref_smoke(ctx) {
+        return None;
+    }
 
     Some((page_address, page_phys, PAGE_ALLOCATOR_MAX_TEST_ORDER))
+}
+
+fn run_user_frame_ref_smoke(ctx: &mut Context) -> bool {
+    let free_before = ctx.page_allocator.buddy_total_free_pages();
+    let Some(owner) = ctx
+        .page_allocator
+        .alloc_user_frame(GfpFlags::kernel(), &ctx.page_metadata_map)
+    else {
+        printk::write_str("alloc_user_frame failed\n");
+        return false;
+    };
+    let page = owner.page();
+    if owner.refcount(&ctx.page_metadata_map) != Some(1)
+        || ctx
+            .page_allocator
+            .free_pages(page, 0, &ctx.page_metadata_map)
+    {
+        printk::write_str("live user frame accepted generic free\n");
+        return false;
+    }
+    let Some(shared) = owner.acquire(&ctx.page_metadata_map) else {
+        printk::write_str("user frame reference acquire failed\n");
+        return false;
+    };
+    if owner.refcount(&ctx.page_metadata_map) != Some(2)
+        || !shared.release(&mut ctx.page_allocator, &ctx.page_metadata_map)
+        || owner.refcount(&ctx.page_metadata_map) != Some(1)
+        || ctx
+            .page_allocator
+            .free_pages(page, 0, &ctx.page_metadata_map)
+        || !owner.release(&mut ctx.page_allocator, &ctx.page_metadata_map)
+        || ctx.page_allocator.buddy_total_free_pages() != free_before
+    {
+        printk::write_str("user frame reference lifecycle invalid\n");
+        return false;
+    }
+    true
 }
 
 fn run_order_alloc_free_smoke(ctx: &mut Context, order: usize, check_wrong_order: bool) -> bool {

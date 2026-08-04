@@ -179,6 +179,12 @@ pub enum TaskBreakpointState {
     Valid,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TaskTerminalReason {
+    None,
+    OutOfMemory,
+}
+
 /// The physical core-register context and its recoverable continuation
 /// metadata. This wrapper is owned by exactly one Task.
 pub struct TaskThreadContext {
@@ -365,6 +371,7 @@ pub struct Task {
     affinity_cpu_id: usize,
     no_setaffinity: bool,
     stack_guard_installed: bool,
+    terminal_reason: TaskTerminalReason,
     thread_context: TaskThreadContext,
     flow: TaskFlow,
 }
@@ -412,6 +419,7 @@ impl Task {
             affinity_cpu_id: usize::MAX,
             no_setaffinity: false,
             stack_guard_installed: false,
+            terminal_reason: TaskTerminalReason::None,
             thread_context: TaskThreadContext::new(),
             flow: Self::initial_flow(task_ref),
         }
@@ -459,6 +467,7 @@ impl Task {
             affinity_cpu_id: usize::MAX,
             no_setaffinity: false,
             stack_guard_installed: false,
+            terminal_reason: TaskTerminalReason::None,
             thread_context: TaskThreadContext::new(),
             flow: TaskFlow::new_static_bound(TaskFlowRef::BOOT_INIT, TaskRef::BOOT),
         }
@@ -487,6 +496,7 @@ impl Task {
             affinity_cpu_id: usize::MAX,
             no_setaffinity: false,
             stack_guard_installed: false,
+            terminal_reason: TaskTerminalReason::None,
             thread_context: TaskThreadContext::new(),
             flow: TaskFlow::new_static_bound(flow_ref, task_ref),
         }
@@ -585,6 +595,21 @@ impl Task {
 
     pub const fn runqueue_published(&self) -> bool {
         self.runqueue_published
+    }
+
+    pub const fn terminal_reason(&self) -> TaskTerminalReason {
+        self.terminal_reason
+    }
+
+    pub fn record_out_of_memory_terminal(&mut self) -> bool {
+        if self.lifecycle.state() != State::OnCpu
+            || self.execution_authority != TaskExecutionAuthority::Live
+            || self.terminal_reason != TaskTerminalReason::None
+        {
+            return false;
+        }
+        self.terminal_reason = TaskTerminalReason::OutOfMemory;
+        true
     }
 
     pub const fn scheduler_sleep_declared(&self) -> bool {

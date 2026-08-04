@@ -16,16 +16,24 @@
   stack、brk 或匿名 VMA 的部分 `munmap`，拒绝不得改变既有 VMA、PTE 或 backing 所有权。
 - 每次 user fault 请求必须绑定当前 Task、当前 `UserAddressSpace`/SATP、fault address、原始
   `sepc` 和 instruction/load/store access。错误 Task、错误 mm 或 stale SATP 不能消费请求。
-- fault 互斥分类为：合法 VMA 内缺 leaf 的 `NotPresent`、已有 leaf 但 access 不被 VMA/PTE
-  允许的 `Protection`，以及不存在 VMA 的 `Unmapped`。COW 写保护在真实 COW 阶段提升为独立
-  分类；在此之前只读 leaf 的 store 属于 `Protection`。
+- fault 互斥分类为：合法 VMA 内缺 leaf 的 `NotPresent`；已有 leaf、store access、VMA 原本可写且
+  私有、PTE 为 RO+COW、backing 引用有效的 `CowWriteProtect`；已有 leaf 但 access 不被 VMA/PTE
+  允许且不满足完整 COW 资格的 `Protection`；以及不存在 VMA 的 `Unmapped`。只读 leaf、NX leaf、
+  非私有页、错误 Task/mm、stale PTE 或缺失 COW 标志不得进入 COW 分支。
 - `NotPresent` 成功结果只能是 `RetrySameInstruction`：保持原 `sepc`，安装 leaf 后对 fault VA
   执行定点 `sfence.vma`，由 trap return 重试原指令。分配、页表扩展或 leaf 安装任一步失败都
   保持原 VMA、PTE、backing 所有权和可见字节不变。
+- `CowWriteProtect` 在 refcount 大于一时分配并复制完整页，以新 frame/PTE/backing 引用原子替换
+  当前 leaf 后释放旧引用；refcount 等于一时不复制，只清除 COW 并恢复原写权限。两条成功路径都只在
+  定点 `sfence.vma` 后返回保持原 `sepc` 的 `RetrySameInstruction`。分配、复制或 commit 失败必须
+  保持原 PTE、frame 引用和父子可见字节不变。
 - `Protection` 与 `Unmapped` 必须形成稳定非法 fault 结果，不得被伪装为可恢复缺页；正式
   `SIGSEGV/SEGV_ACCERR/SEGV_MAPERR` task terminal delivery 在后续阶段闭合。
-- 诊断在固定处理边界记录 Task/mm 身份、地址、`sepc`、access、分类、结果以及 COW 计数（首轮为
-  零）。这些诊断不得插入、删除或重排既有外部 checkpoint。
+- 诊断在固定处理边界记录 Task/mm 身份、地址、`sepc`、access、分类、结果、fault 前后 frame
+  refcount、复制次数和唯一引用快路径次数。这些诊断不得插入、删除或重排既有外部 checkpoint。
+- COW 分配或 commit 资源失败产生 `TaskTerminalReason::OutOfMemory`：只终止当前 faulting Task，
+  parent wait 按 signal 9 编码并产生 SIGCHLD；不得伪装成 SIGSEGV、普通 exit、系统 panic 或 OOM
+  killer 选择。该 terminal 不构造用户 signal frame，也不进入已登记 handler。
 
 文件后备缺页、page cache、`MAP_SHARED`、swap、页面迁移和 SMP 页表并发不属于当前对象范围。
 kernel-origin exception-table fixup 属于 `PageFaultExceptionType` 的独立分支，不得读取或修改用户
@@ -36,10 +44,11 @@ VMA fault 状态。
 - 每个普通 fork parent/child Task 各自拥有一个 `UserAddressSpace` 身份、低半根页表和 SATP；高半
   仍只引用共享 `SwapperVm`。实现可以在调度切换期间把当前 Task 的 mm 暂存于唯一 active carrier，
   但 carrier 只是经 TaskRef 和 SATP 校验的借用位置，不能成为跨 Task 的全局地址空间所有者。
-- 当前 eager 过渡阶段在 child 发布前复制每个已驻留私有 backing page、稀疏 VMA 元数据和用户栈
-  backing，并用复制页建立 child 自己的 leaf PTE。父子初始字节相同，但 PFN、根页表和 SATP 均不同；
-  未驻留 VMA 仍未驻留。任一 page 或页表分配失败必须释放全部未发布 child 资源，parent 的 PTE、
-  backing、SATP 和可见字节保持不变。
+- child 发布前先建立独立稀疏 VMA 元数据、页表和用户栈引用。所有可失败的 child 页表分配、leaf
+  inventory 校验和共享引用 acquire 必须在 parent PTE commit 前完成；随后把双方原本可写的私有 leaf
+  降低为 RO+COW，把原本只读 leaf 建立为共享只读非 COW，并刷新 parent 的受影响 TLB。parent/child
+  初始 PFN 相同但根页表、SATP 和 mm identity 不同；未驻留 VMA 仍未驻留。任一步失败必须释放全部
+  未发布 child 资源，parent 的 PTE、frame 引用、SATP 和可见字节保持不变。
 - wait/schedule handoff 只切换 Task 所拥有的 mm 和 SATP，不得通过保存/恢复 parent writable page、
   stack 或整个 address-space 的字节快照实现隔离。trap 和 usercopy 必须按当前 TaskRef 解析并校验 active
   mm；错误 Task、错误 owner 或 stale SATP 不能访问 carrier。
@@ -47,9 +56,8 @@ VMA fault 状态。
   exit 释放 exiting Task 的 leaf、页表和 backing，reap 只释放 Task record，不得再次释放同一 mm。
   fork 失败的 Task/mm 在可见发布前共同回滚，禁止留下可调度 child 或双重释放。
 
-本阶段尚不共享普通 fork page。真实 COW 阶段会把 eager private-page copy 降低为 RO+COW 共享引用，
-但不改变上述 per-Task mm ownership、切换、exec 或 teardown 边界。`CLONE_VM`、完整 vfork mm sharing
-与 thread group 继续独立 deferred。
+普通 fork 的共享 frame 不改变上述 per-Task mm ownership、切换、exec 或 teardown 边界。
+`CLONE_VM`、完整 vfork mm sharing 与 thread group 继续独立 deferred。
 
 ## Mapping
 

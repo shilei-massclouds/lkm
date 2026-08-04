@@ -5,7 +5,7 @@ Model source: [`user_stack.spec`](../../model/objects/user_stack.spec). Implemen
 
 `UserStack` is one of four independent objects: stack backing owner, `UserAddressSpace` VMA/page tables,
 `UserTrapFrame`, and `ExecTransaction`. Its fallible `Vec<UserStackPage>` is sorted by virtual page address
-and owns every sparse stack `PageRef`. `UserMappingKind::Stack` must not copy a `PageRef`; it stores only
+and owns every sparse stack `UserFrameRef`. `UserMappingKind::Stack` must not copy a frame reference; it stores only
 range, RW/NX permissions and an ownership token referring to the current stack object.
 
 The Linux-default `UserStackConfig` values are 128 KiB initial downward expansion, 8 MiB rlimit, a 256-page
@@ -36,9 +36,10 @@ targeted `sfence.vma` and returns `RetrySameInstruction` without advancing `sepc
 
 Usercopy resolves every stack page in a valid range through the same mechanism and reports failure as
 `EFAULT`; the detailed rejection remains observable through `UserStack.GrowRejected`. Release and exec/current
-Task transfers use Rust move/swap. Raw byte copies of `UserStack` are forbidden. Ordinary fork eagerly allocates
-and copies each resident stack page into the unpublished child stack, preserving sorted virtual-page order and
-rolling back all child pages on failure; wait and exit do not copy stack bytes.
+Task transfers use Rust move/swap. Raw byte copies of `UserStack` are forbidden. Ordinary fork acquires one
+checked reference per resident stack page into the unpublished child stack, preserving sorted virtual-page order;
+both leaves become RO+COW because the stack VMA is originally writable. Rollback releases staged child references,
+and wait/exit never copy stack bytes.
 
 Exec obtains the complete 24-byte value from the current virtio HWRNG before point-of-no-return. No timestamp
 or early-mix fallback is allowed. Unavailable/short entropy is `EntropyUnavailable`; runtime maps it to
@@ -46,6 +47,6 @@ or early-mix fallback is allowed. Unavailable/short entropy is `EntropyUnavailab
 checkpoint owners expose top max, selected top, ASLR offset, execfn pointer and a computed auxv-complete fact
 without changing checkpoint IDs, names or order.
 
-Dynamic rlimit syscalls and `SIGSEGV/si_code`, COW lowering, multiple thread stacks, `MAP_STACK`/
+Dynamic rlimit syscalls and `SIGSEGV/si_code`, multiple thread stacks, `MAP_STACK`/
 `MAP_GROWSDOWN`, a complete CRNG, kernel compiler stack protector and
 per-task canaries remain separate roadmap work.

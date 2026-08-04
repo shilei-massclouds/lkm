@@ -1,8 +1,9 @@
 # UserStack
 
 `UserStack` 表示 exec 创建并由当前用户映像独占的可向下增长用户栈。它与
-`UserAddressSpace` 的 VMA 元数据、页表对象和 `UserTrapFrame` 分离：栈对象是稀疏物理 backing
-的唯一 owner，stack mapping 只保存 VMA 范围、RW/NX 权限和 ownership token。
+`UserAddressSpace` 的 VMA 元数据、页表对象和 `UserTrapFrame` 分离：栈对象拥有本 mm 的稀疏
+`UserFrame` backing 引用，普通 fork 后 parent/child 栈对象可以引用同一物理 frame，但两者的引用、
+VMA、页表和 ownership token 独立。
 
 ## 配置与初始映像
 
@@ -37,7 +38,7 @@ backing 与增长约束，不自行分类 instruction、权限、越界、冲突
 
 usercopy 对合法栈范围使用同一 range resolver 逐页 fault-in；失败仍返回 `EFAULT`。checkpoint
 诊断在既有稳定时点记录 top max、选定 top、offset、execfn pointer 和 auxv 完整性，不新增、插入或
-重排 checkpoint。普通 fork 的 eager 独立-mm 阶段在 child 发布前为每个已驻留 stack page 分配并复制
-独立 backing；parent/child 栈字节不得通过 wait/exit snapshot 回滚实现隔离。完整 SIGSEGV、动态
-`RLIMIT_STACK`、COW、多线程栈、
+重排 checkpoint。普通 fork 在 child 发布前为每个已驻留 stack page acquire 独立引用，并把双方 leaf
+降低为 RO+COW；任一方写缺页按 `UserAddressSpace` 统一策略解共享。parent/child 栈字节不得通过
+wait/exit snapshot 回滚实现隔离。完整 SIGSEGV、动态 `RLIMIT_STACK`、多线程栈、
 `MAP_STACK/MAP_GROWSDOWN`、完整 CRNG 和内核 compiler stack protector 不在本轮。

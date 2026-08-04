@@ -13,8 +13,7 @@ Rule IDs (MUST):
 - `arceos_ex_must_user_fault_diagnostic_identify_task_mm_access_and_result`
 - `arceos_ex_must_keep_kernel_extable_independent_from_user_fault_policy`
 
-对象 smoke 必须对同一统一入口覆盖 `NotPresent`、`Protection`、`Unmapped`，并在 COW 实现后覆盖
-`CowWriteProtect`。请求必须带当前 Task、mm/SATP、fault VA、`sepc` 与 read/write/execute access；测试
+对象 smoke 必须对同一统一入口覆盖 `NotPresent`、`CowWriteProtect`、`Protection` 和 `Unmapped`。请求必须带当前 Task、mm/SATP、fault VA、`sepc` 与 read/write/execute access；测试
 必须证明分类互斥，成功结果只有 `RetrySameInstruction`，且返回的 `sepc` 与请求完全相同。错误 Task/mm、
 未知 access、权限不足和无 VMA 必须返回确定结果；分配或 PTE 安装注入失败不得留下 backing page、leaf
 PTE 或页表页泄漏。稳定诊断必须可观察 Task/mm、VA、`sepc`、access、class、result 和 COW 计数。
@@ -39,10 +38,10 @@ Rule IDs (MUST after the corresponding implementation phase):
 - `arceos_ex_must_cow_refcounts_equal_all_live_pte_references`
 - `arceos_ex_must_cow_failure_leave_parent_and_child_unchanged`
 - `arceos_ex_must_exec_exit_and_reap_release_mm_once`
+- `arceos_ex_must_cow_oom_terminate_only_faulting_task_with_signal9_wait_word`
 
 普通 fork 的对象与真实 guest 测试必须证明父子 mm identity、根页表和 SATP 不同；child 发布前的任一
-dup_mm 分配失败都完整回滚。eager 过渡阶段先验证私有页字节隔离，且不得继续保存/恢复父 writable
-page、stack 或 address-space 字节快照。双 provider 运行的同一真实 fixture 必须让 child 分别修改 ELF
+dup_mm 分配失败都完整回滚，且不得保存/恢复父 writable page、stack 或 address-space 字节快照。双 provider 运行的同一真实 fixture 必须让 child 分别修改 ELF
 可写 data/BSS、当前 stack、已触页匿名 `MAP_PRIVATE` 和增长后的 brk，再由 parent wait 验证退出状态、
 全部父字节及父 brk 边界均保持不变；child exit/reap 后必须仍能继续执行并解除父匿名映射。
 
@@ -50,6 +49,8 @@ COW 阶段必须对已装入的 ELF 私有可写页、用户栈、brk 和匿名 
 RO+COW 和引用加一。child 与 parent 写、refcount=1 快路径、嵌套 fork、child exec、父先退、子先退及
 失败注入后，物理页引用数必须与所有 live PTE 精确相等。只读页可共享但不得获得 COW 写权限；stale
 PTE、重复释放和错误 mm 必须确定失败。exec、exit、失败 fork 和 reap 各自只释放一次 mm/PTE/frame。
+COW 分配失败注入还必须证明原 PTE、引用数与双方数据不变，只有 faulting Task 进入 OOM terminal，parent
+得到 signal 9 wait word 与 SIGCHLD；不得出现 SIGSEGV、用户 signal frame、OOM killer 或系统 panic。
 
 ## Fatal SIGSEGV closure
 

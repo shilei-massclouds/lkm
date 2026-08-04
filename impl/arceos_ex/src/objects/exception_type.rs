@@ -3634,6 +3634,15 @@ fn page_fault_exception_handler(frame: &mut TrapFrame) {
             debug_assert_eq!(result.sepc(), frame.sepc);
             return;
         }
+        if result.result() == UserFaultResult::TaskOom {
+            let _ = {
+                let ctx = crate::context::context();
+                ctx.user_task_set.record_task_out_of_memory(task_ref)
+            };
+            if complete_recorded_task_oom(frame, task_ref) {
+                return;
+            }
+        }
         if frame.stval >= crate::context::context_ref().user_stack.rlimit_base()
             && frame.stval < crate::context::context_ref().user_stack.top()
         {
@@ -3646,6 +3655,28 @@ fn page_fault_exception_handler(frame: &mut TrapFrame) {
     panic_dispatch_frame("page fault exception", frame)
 }
 
+fn complete_recorded_task_oom(frame: &mut TrapFrame, task_ref: super::task::TaskRef) -> bool {
+    if !crate::context::context_ref()
+        .user_task_set
+        .task_out_of_memory(task_ref)
+    {
+        return false;
+    }
+    if let Some(table) = syscall_table_ref()
+        && complete_observed_child_exit_to_parent_wait(table, frame, 0)
+    {
+        return true;
+    }
+    if complete_child_exit_to_parent_wait(frame, 0) {
+        return true;
+    }
+    crate::arch::riscv64::sbi::putstr("user task OOM terminal without wait parent\n");
+    if !cleanup_current_task_for_shutdown() {
+        crate::arch::riscv64::sbi::putstr("current Task/TaskFlow OOM cleanup failed\n");
+    }
+    crate::arch::riscv64::sbi::system_shutdown()
+}
+
 fn syscall_disabled_exception_handler(frame: &TrapFrame) -> ! {
     panic_dispatch_frame("syscall exception not enabled", frame)
 }
@@ -3654,6 +3685,9 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
     let Some(table) = syscall_table_ref() else {
         panic_dispatch("syscall table not ready\n");
     };
+    let entry_task_ref = crate::context::context_ref()
+        .current_task_ref()
+        .unwrap_or(super::task::TaskRef::NONE);
 
     match frame.reg(17) {
         SYSCALL_GETCWD => table.getcwd(frame),
@@ -3717,6 +3751,7 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
         SYSCALL_EXIT_GROUP => table.exit_group(frame),
         _ => complete_unsupported_syscall(frame),
     }
+    let _ = complete_recorded_task_oom(frame, entry_task_ref);
 }
 
 fn complete_unsupported_syscall(frame: &mut TrapFrame) {
@@ -6032,7 +6067,7 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
                 let Some(child_pid) = ctx.user_task_set.copy_plain_fork_from_current_child(
                     &ctx.kernel_init_user_state,
                     &ctx.user_clone_deferred_boundaries,
-                    &ctx.user_address_space,
+                    &mut ctx.user_address_space,
                     &ctx.user_stack,
                     &ctx.user_trap_frame,
                     &ctx.fs_struct,
@@ -6115,7 +6150,7 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
             let Some(child_pid) = ctx.user_task_set.copy_plain_fork_from_parent(
                 &ctx.kernel_init_user_state,
                 &ctx.user_clone_deferred_boundaries,
-                &ctx.user_address_space,
+                &mut ctx.user_address_space,
                 &ctx.user_stack,
                 &ctx.user_trap_frame,
                 &ctx.fs_struct,
@@ -7164,12 +7199,19 @@ fn cleanup_current_task_for_shutdown() -> bool {
 }
 
 #[cfg(app_user_boot)]
+fn current_user_wait_status(exit_status: usize) -> u32 {
+    let ctx = crate::context::context_ref();
+    let task_ref = ctx.current_task_ref().unwrap_or(super::task::TaskRef::NONE);
+    ctx.user_task_set.task_wait_status(task_ref, exit_status) as u32
+}
+
+#[cfg(app_user_boot)]
 fn complete_observed_child_exit_to_parent_wait(
     table: &SyscallTable,
     frame: &mut TrapFrame,
     status: usize,
 ) -> bool {
-    let wait_status = ((status & 0xff) << 8) as u32;
+    let wait_status = current_user_wait_status(status);
     let child_before_restore = &crate::context::context_ref().user_task_set;
     let pipe_read_resume = child_before_restore.builtin_grandchild_parent_resume_is_pipe_read();
     let builtin_restore_expected = child_before_restore.builtin_grandchild_active();
@@ -7508,7 +7550,7 @@ fn complete_child_exit_to_vfork_parent_clone(_frame: &mut TrapFrame, _status: us
 
 #[cfg(app_user_boot)]
 fn complete_child_exit_to_parent_wait(frame: &mut TrapFrame, status: usize) -> bool {
-    let wait_status = ((status & 0xff) << 8) as u32;
+    let wait_status = current_user_wait_status(status);
     let (mut parent_frame, status_ptr, child_pid, parent_satp, exiting_task) = {
         let ctx = crate::context::context();
         let Ok(exiting_task) = ctx.current_task() else {
@@ -7763,6 +7805,15 @@ fn user_copy_range_accessible_for_task(
         )
     };
     if !resolved {
+        if crate::context::context_ref()
+            .user_address_space
+            .last_user_fault()
+            .result()
+            == UserFaultResult::TaskOom
+        {
+            let ctx = crate::context::context();
+            let _ = ctx.user_task_set.record_task_out_of_memory(task_ref);
+        }
         print_user_copy_fault_diagnostic(task_ref, user_ptr, len, access, current_satp);
         if user_ptr >= crate::context::context_ref().user_stack.rlimit_base()
             && end <= crate::context::context_ref().user_stack.top()
@@ -8423,6 +8474,8 @@ fn print_user_page_fault_diagnostic(frame: &TrapFrame) {
     print_decimal(resolved.cow_shared_count());
     crate::arch::riscv64::sbi::putstr(" cow_copied=");
     print_decimal(resolved.cow_copied_count());
+    crate::arch::riscv64::sbi::putstr(" cow_unique=");
+    print_decimal(resolved.cow_unique_count());
 }
 
 fn page_fault_access(frame: &TrapFrame) -> UserFaultAccess {

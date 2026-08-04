@@ -2,7 +2,9 @@
 
 predicate user_stack_allocated<T>(stack: T) -> bool;
 predicate user_stack_config_linux_defaults_bound<T, C>(stack: T, config: C) -> bool;
-predicate user_stack_sparse_backing_unique_owner<T>(stack: T) -> bool;
+predicate user_stack_sparse_backing_per_mm_ref_owner<T>(stack: T) -> bool;
+predicate user_stack_backing_user_frame_shareable<T>(stack: T) -> bool;
+predicate user_stack_backing_refcount_conserved<T, M>(stack: T, metadata_map: M) -> bool;
 predicate user_stack_sparse_pages_sorted<T>(stack: T) -> bool;
 predicate user_stack_initial_vma_expanded<T>(stack: T) -> bool;
 predicate user_stack_initial_pages_demand_allocated<T>(stack: T) -> bool;
@@ -46,7 +48,9 @@ object UserStack: ResourceObject {
                 ensures {
                     user_stack_allocated(self);
                     user_stack_config_linux_defaults_bound(self, Config);
-                    user_stack_sparse_backing_unique_owner(self);
+                    user_stack_sparse_backing_per_mm_ref_owner(self);
+                    user_stack_backing_user_frame_shareable(self);
+                    user_stack_backing_refcount_conserved(self, PageMetadataMap);
                     user_stack_sparse_pages_sorted(self);
                     user_stack_initial_vma_expanded(self);
                     user_stack_initial_pages_demand_allocated(self);
@@ -82,7 +86,9 @@ object UserStack: ResourceObject {
         invariant {
             user_stack_allocated(self);
             user_stack_config_linux_defaults_bound(self, Config);
-            user_stack_sparse_backing_unique_owner(self);
+            user_stack_sparse_backing_per_mm_ref_owner(self);
+            user_stack_backing_user_frame_shareable(self);
+            user_stack_backing_refcount_conserved(self, PageMetadataMap);
             user_stack_sparse_pages_sorted(self);
             user_stack_rw_nx(self);
             user_stack_rlimit_bound(self);

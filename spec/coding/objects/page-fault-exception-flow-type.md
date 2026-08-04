@@ -8,6 +8,9 @@ generation, CPU and context epoch before writing `sepc`. Cleanup remains leaf→
 
 For a user occurrence, the flow snapshot contains Task/mm identity, VA, original `sepc`, access, VMA class and
 resolver result. `RetrySameInstruction` is accepted only when the returned `sepc` equals the captured value.
+The COW branch additionally snapshots the leaf PFN/COW bit and checked `UserFrameRef` count. A shared-copy or
+unique-reference commit must revalidate that tuple before changing the leaf, flush the one VA and retry the same
+instruction. Resource failure preserves the tuple and selects the Task `OutOfMemory` terminal result.
 User and kernel result variants are disjoint, so neither path can accidentally consume the other's recovery
 state.
 

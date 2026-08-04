@@ -40,6 +40,7 @@ Object-level charter notes live here when they need a dedicated topic file.
 | `ExecTransaction` | [`exec-transaction.md`](exec-transaction.md) |
 | `UserStack` | [`user-stack.md`](user-stack.md) |
 | `UserAddressSpace` | [`user-address-space.md`](user-address-space.md) |
+| `UserFrame` | [`user-frame.md`](user-frame.md) |
 | `BinaryFormatRegistry` | [`binary-format-registry.md`](binary-format-registry.md) |
 | `ExecSyncBoundaries` | [`exec-sync-boundaries.md`](exec-sync-boundaries.md) |
 | `ElfObject` | [`elf-object.md`](elf-object.md) |

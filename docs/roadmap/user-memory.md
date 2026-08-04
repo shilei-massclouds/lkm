@@ -16,9 +16,9 @@ trap 和 usercopy 按 TaskRef/owner/SATP 校验当前 carrier；exec 原子替�
 只释放 Task record。普通 fork/wait/exit 不再保存或恢复 parent writable-page、stack-byte 或整个
 address-space snapshot；vfork 的既有共享-VM 兼容片不由本阶段泛化。
 
-真实双 provider fixture 要求 child 修改 ELF data/BSS、当前 stack、brk 和已触页匿名
-`MAP_PRIVATE`，parent 在 wait 后验证退出状态、全部原字节和 brk 不变，并能继续 munmap。对象 smoke
-另以 eager-copy 后故障注入验证 page、未发布 Task 槽、PID 分配和 parent SATP 的原子回滚。
+第二阶段的 eager-copy fixture 要求 child 修改 ELF data/BSS、当前 stack、brk 和已触页匿名
+`MAP_PRIVATE`，parent 在 wait 后验证退出状态、全部原字节和 brk 不变，并能继续 munmap；该过渡实现已由
+第三阶段真实 COW 替换，不再是当前 fork 路径。
 
 ### 第二阶段完整回归证据（2026-08-04）
 
@@ -39,44 +39,50 @@ Compose 或 Impl 语义：
   无 missing/stale/mismatch；`rc-local-difftest` 为 1/1，class=`paired-checkpoint-diff-ok`，
   `first_divergence=None`。报告保存在
   `impl/arceos_ex/tests/stress/out/20260803T161138.191593Z-rc-local-difftest/`。
-- 全部命令结束后无残留 QEMU 进程；测试未产生 tracked 修改。后续仍从下述第三阶段开始，不因本轮
-  回归通过而把 eager dup_mm 视为 COW 完成。
+- 全部命令结束后无残留 QEMU 进程；测试未产生 tracked 修改。该轮证据只验收当时的 eager 过渡基线，
+  不把 eager dup_mm 视为真实 COW；真实 COW 的完成证据见下一节。
 
-## 第三阶段：真实 COW（最高优先级）
+## 已完成基线：第三阶段真实 COW
 
-下一执行窗口必须 charter-first 从本阶段开始，不能以 eager copy 长期替代 COW，也不能恢复 snapshot
-回退路径。
+第三阶段在独立 per-Task mm 基线上完成真实 COW，并关闭 Model deferred `user_clone.004`：
 
-实现责任：
+- `UserFrameRef` 与 `PageMetadataMap` 提供受检查的 user-frame 获取、共享引用和释放；普通 page-table
+  page 仍保持唯一 `PageRef`。RISC-V RSW bit 8 表示 COW，bit 9 保留。
+- fork prepare 先建立独立 child 根页表/SATP并获取 frame 引用，commit 再把双方原本可写的私有 leaf
+  降低为 RO+COW，最后发布 child。只读 ELF 页共享为 RO、不得获得 COW 写权限；失败 fork 不改变
+  parent leaf、frame 引用、可见字节、Task 槽或 PID。
+- store-page-fault 校验 Task/mm、VMA 原写权限、PTE COW 和 backing frame；共享引用路径复制整页并
+  原子替换 leaf，唯一引用路径直接清 COW/恢复 W。两条成功路径均执行目标 `sfence.vma` 并重试原
+  `sepc`。
+- COW 分配失败保持原 leaf、refcount、free-page 计数和双方数据不变，并进入明确 Task OOM terminal；
+  wait 观察 signal 9，既有退出路径产生 SIGCHLD，不把资源失败伪装为 SIGSEGV。
+- ELF data/BSS、用户栈、已驻留 brk 与匿名 `MAP_PRIVATE` 均进入 COW；exec、exit、失败 fork、嵌套
+  fork 和多轮 fork/write/wait 通过同一受检查引用生命周期回收。`user_clone.002` 与
+  `user_clone.003` 继续 deferred，不扩展 thread group、`CLONE_VM` 或完整 vfork。
 
-- 为用户物理 frame 建立受检查的共享引用生命周期；所有 PTE 引用总数必须与 frame refcount 一致，
-  stale PTE、重复释放和错误 Task/mm 必须确定拒绝。
-- 使用 RISC-V PTE software-reserved bit 表示 COW。只有“VMA 原本可写”且属于当前支持范围的私有页
-  能标记 COW：已装入 ELF 私有可写 data/BSS、用户栈、brk 和匿名 `MAP_PRIVATE`。只读页可以共享，
-  但绝不能因写 fault 获得写权限。
-- fork 把 parent/child 对应私有可写 leaf 同时变为 RO+COW并增加 frame 引用；双方 mm、根页表和 SATP
-  仍独立。PTE lowering 完成前 child 不可发布。
-- store-page-fault 必须校验当前 Task/mm、VMA 原写权限、PTE COW 状态和 frame 引用。refcount 大于一时
-  分配并复制完整页、原子替换 leaf 后减旧引用；等于一时走不复制快路径，清 COW 并恢复 W。成功只
-  `sfence.vma` 后重试原 `sepc`。
-- frame 分配或页表更新失败必须保持原 PTE、引用计数和父子可见字节不变；当前无 OOM killer，失败以
-  明确 task OOM terminal 收口，不得伪装成 SIGSEGV。
-- exec、exit、失败 fork 和 reap 覆盖 child 先退、parent 先退、嵌套 fork 和多轮复用，禁止悬空 PTE、
-  泄漏引用和 double release。完成后关闭 Model deferred `user_clone.004`；thread group
-  `user_clone.002` 与 `CLONE_VM`/完整 vfork `user_clone.003` 保持 deferred。
+### 第三阶段完整回归证据（2026-08-04）
 
-验收责任：
+- 仓库根直接执行最终 `make test`，结果 188/188；双 provider 的 KUnit 各 25/25、kernel smoke 各
+  58/58，user/rootfs/LTP acceptance 全部通过。真实 user fixture 覆盖 child 首次 COW、parent
+  refcount=1 快路径和单次启动内 8 轮 fork/COW/reap frame 复用。
+- `make -C tools2 test-all` 通过：106 个 Python 测试、16 个 frontend 测试、bundle check 与 9 个
+  Playwright E2E 均成功；canonical snapshot fingerprint 与关闭 `user_clone.004` 后的 192 项 boundary
+  inventory 已同步。
+- 默认 `make stress-test` 四组各执行 10 轮，合计 40/40、failure=0。报告位于
+  `impl/arceos_ex/tests/stress/out/20260804T004915.608953Z-df-0001-user-boot/`、
+  `impl/arceos_ex/tests/stress/out/20260804T004925.646238Z-df-0002-smoke-initcall/`、
+  `impl/arceos_ex/tests/stress/out/20260804T004951.499774Z-df-0003-distro-sh-ls/` 与
+  `impl/arceos_ex/tests/stress/out/20260804T005005.345550Z-rc-local-native-timeout-focused/`。
+- `make difftest` 确认 474 个 checkpoint mapping 当前有效、103 个 exact Linux marker 为
+  `0 missing / 0 stale / 0 mismatch`；`rc-local-difftest` 为 1/1、failure=0，报告位于
+  `impl/arceos_ex/tests/stress/out/20260804T005059.583426Z-rc-local-difftest/`。
+- 测试结束后无残留 QEMU 进程，未产生额外 tracked 修改。锁定的
+  `spec/charter/systems/computer.md` 仅审查、未解锁或修改。
 
-- Model/tools2 证明 fault 分类互斥完整、COW 资格、PTE/refcount 守恒、失败原子性、exec/exit/reap
-  teardown，以及 kernel extable 与用户 COW 状态隔离。
-- 真实 RISC-V 验证 fork 后同 PFN、双方 RO+COW；child 写获得私有页且 parent 不变，parent 后写覆盖
-  refcount=1 快路径；覆盖 ELF data/BSS、stack、brk、匿名私有映射、嵌套 fork、child exec、两种退出
-  顺序和多轮 fork/wait，退出后页/frame/page-table 计数回到基线。
-- 对分配与 PTE commit 注入失败，逐项验证原 PTE、refcount、Task 槽、PID、parent/child 字节不变。
+## 第四阶段：同步致命 SIGSEGV 与最终收口（最高优先级）
 
-## 第四阶段：同步致命 SIGSEGV 与最终收口
-
-只有第三阶段全部门禁通过并独立提交后才进入本阶段。
+第三阶段已经通过全部门禁并归档。下一执行窗口必须 charter-first 从本阶段开始；它是主 Roadmap
+当前唯一最高优先级执行项，不得由其他用户内存扩展、snapshot 回退或 handler delivery 抢占。
 
 实现责任：
 

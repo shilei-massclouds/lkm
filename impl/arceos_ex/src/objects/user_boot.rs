@@ -24,11 +24,14 @@ use super::{
     exception_type::{ExceptionType, SyscallTable},
     files::{FilesStruct, FilesStructSnapshot},
     kernel_image::KernelImage,
-    mm_core::{GfpFlags, KernelGlobalAllocator, PageAllocator, PageMetadataMap, PageRef},
+    mm_core::{
+        GfpFlags, KernelGlobalAllocator, PageAllocator, PageMetadataMap, PageRef, UserFrameRef,
+    },
     next_generation,
     page_table::{
         PageTablePage, copy_high_half_root_entries, page_table_storage_ready, sv39_indices,
-        table_pte_from_phys, user_leaf_pte_from_phys,
+        table_pte_from_phys, user_leaf_pte_from_phys_with_cow, user_leaf_pte_is_cow,
+        user_leaf_pte_is_writable, user_leaf_pte_phys,
     },
     rest_init::KernelInitTask,
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
@@ -829,6 +832,7 @@ pub struct UserFaultDiagnostic {
     result: UserFaultResult,
     cow_shared_count: usize,
     cow_copied_count: usize,
+    cow_unique_count: usize,
 }
 
 impl UserFaultDiagnostic {
@@ -843,6 +847,7 @@ impl UserFaultDiagnostic {
             result: UserFaultResult::InvalidContext,
             cow_shared_count: 0,
             cow_copied_count: 0,
+            cow_unique_count: 0,
         }
     }
 
@@ -861,6 +866,7 @@ impl UserFaultDiagnostic {
             result,
             cow_shared_count: 0,
             cow_copied_count: 0,
+            cow_unique_count: 0,
         }
     }
 
@@ -898,6 +904,52 @@ impl UserFaultDiagnostic {
 
     pub const fn cow_copied_count(self) -> usize {
         self.cow_copied_count
+    }
+
+    pub const fn cow_unique_count(self) -> usize {
+        self.cow_unique_count
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct UserCowLeafDiagnostic {
+    task_ref: TaskRef,
+    mm_satp: usize,
+    address: usize,
+    phys: usize,
+    writable: bool,
+    cow: bool,
+    refcount: usize,
+}
+
+#[cfg_attr(not(app_smoke), allow(dead_code))]
+impl UserCowLeafDiagnostic {
+    pub const fn task_ref(self) -> TaskRef {
+        self.task_ref
+    }
+
+    pub const fn mm_satp(self) -> usize {
+        self.mm_satp
+    }
+
+    pub const fn address(self) -> usize {
+        self.address
+    }
+
+    pub const fn phys(self) -> usize {
+        self.phys
+    }
+
+    pub const fn writable(self) -> bool {
+        self.writable
+    }
+
+    pub const fn cow(self) -> bool {
+        self.cow
+    }
+
+    pub const fn refcount(self) -> usize {
+        self.refcount
     }
 }
 
@@ -1040,7 +1092,7 @@ pub struct UserMapping {
     executable: bool,
     user_accessible: bool,
     bss_zero_bytes: usize,
-    backing_pages: [Option<PageRef>; MAX_MAPPING_BACKING_PAGES],
+    backing_pages: [Option<UserFrameRef>; MAX_MAPPING_BACKING_PAGES],
     backing_vaddrs: [usize; MAX_MAPPING_BACKING_PAGES],
     backing_page_count: usize,
     file_bytes_copied: usize,
@@ -1063,7 +1115,7 @@ impl UserMapping {
             executable: false,
             user_accessible: false,
             bss_zero_bytes: 0,
-            backing_pages: [None; MAX_MAPPING_BACKING_PAGES],
+            backing_pages: [const { None }; MAX_MAPPING_BACKING_PAGES],
             backing_vaddrs: [0; MAX_MAPPING_BACKING_PAGES],
             backing_page_count: 0,
             file_bytes_copied: 0,
@@ -1213,7 +1265,18 @@ impl UserMapping {
 
     pub const fn backing_page(&self, index: usize) -> Option<PageRef> {
         if index < self.backing_page_count {
-            self.backing_pages[index]
+            match &self.backing_pages[index] {
+                Some(frame) => Some(frame.page()),
+                None => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    pub const fn backing_frame(&self, index: usize) -> Option<&UserFrameRef> {
+        if index < self.backing_page_count {
+            self.backing_pages[index].as_ref()
         } else {
             None
         }
@@ -1705,6 +1768,37 @@ impl UserAddressSpace {
 
     pub const fn last_user_fault(&self) -> UserFaultDiagnostic {
         self.last_user_fault
+    }
+
+    pub fn cow_leaf_diagnostic(
+        &self,
+        stack: &UserStack,
+        address: usize,
+        page_metadata_map: &PageMetadataMap,
+    ) -> Option<UserCowLeafDiagnostic> {
+        let page_vaddr = align_down(address, USER_PAGE_SIZE);
+        let mapping_index = self.mapping_index_for_address(address)?;
+        let mapping = &self.mappings[mapping_index];
+        let frame = if mapping.kind() == UserMappingKind::Stack {
+            stack.frame_for_vaddr(page_vaddr)?
+        } else {
+            mapping
+                .backing_page_index(page_vaddr)
+                .and_then(|index| mapping.backing_frame(index))?
+        };
+        let pte = self.user_leaf_pte(page_vaddr, page_metadata_map)?;
+        if user_leaf_pte_phys(pte) != Some(frame.phys().value()) {
+            return None;
+        }
+        Some(UserCowLeafDiagnostic {
+            task_ref: self.owner_task_ref,
+            mm_satp: self.satp_token,
+            address: page_vaddr,
+            phys: frame.phys().value(),
+            writable: user_leaf_pte_is_writable(pte),
+            cow: user_leaf_pte_is_cow(pte),
+            refcount: frame.refcount(page_metadata_map)?,
+        })
     }
 
     fn vma_overlaps(&self, start: usize, end: usize) -> bool {
@@ -2255,6 +2349,23 @@ impl UserAddressSpace {
         UserFaultResolution::new(class, result, request.sepc)
     }
 
+    fn record_cow_user_fault(
+        &mut self,
+        request: UserFaultRequest,
+        result: UserFaultResult,
+        checked_refcount: usize,
+        copied_count: usize,
+        unique_count: usize,
+    ) -> UserFaultResolution {
+        let mut diagnostic =
+            UserFaultDiagnostic::from_request(request, UserFaultClass::CowWriteProtect, result);
+        diagnostic.cow_shared_count = checked_refcount;
+        diagnostic.cow_copied_count = copied_count;
+        diagnostic.cow_unique_count = unique_count;
+        self.last_user_fault = diagnostic;
+        UserFaultResolution::new(UserFaultClass::CowWriteProtect, result, request.sepc)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn resolve_user_fault(
         &mut self,
@@ -2278,6 +2389,7 @@ impl UserAddressSpace {
             );
         }
 
+        let fault_page = align_down(request.address, USER_PAGE_SIZE);
         let stack_growth_candidate = matches!(
             request.access,
             UserFaultAccess::Load | UserFaultAccess::Store
@@ -2290,6 +2402,64 @@ impl UserAddressSpace {
                 UserFaultClass::Unmapped,
                 UserFaultResult::SegvMaperr,
             );
+        }
+
+        if let Some(mapping_index) = mapping_index {
+            let mapping = &self.mappings[mapping_index];
+            let permitted = mapping.user_accessible()
+                && match request.access {
+                    UserFaultAccess::Instruction => mapping.executable(),
+                    UserFaultAccess::Load => mapping.readable(),
+                    UserFaultAccess::Store => mapping.writable(),
+                    UserFaultAccess::Unknown => false,
+                };
+            if !permitted {
+                return self.record_user_fault(
+                    request,
+                    UserFaultClass::Protection,
+                    UserFaultResult::SegvAccerr,
+                );
+            }
+
+            let frame = if mapping.kind() == UserMappingKind::Stack {
+                stack.frame_for_vaddr(fault_page)
+            } else {
+                mapping
+                    .backing_page_index(fault_page)
+                    .and_then(|index| mapping.backing_frame(index))
+            };
+            if let Some(frame) = frame {
+                let frame_page = frame.page();
+                let Some(pte) = self.user_leaf_pte(fault_page, page_metadata_map) else {
+                    return self.record_user_fault(
+                        request,
+                        UserFaultClass::Protection,
+                        UserFaultResult::InvalidContext,
+                    );
+                };
+                if request.access == UserFaultAccess::Store
+                    && mapping.writable()
+                    && user_leaf_pte_is_cow(pte)
+                    && !user_leaf_pte_is_writable(pte)
+                    && user_leaf_pte_phys(pte) == Some(frame_page.phys().value())
+                {
+                    return self.resolve_cow_write_fault(
+                        stack,
+                        mapping_index,
+                        fault_page,
+                        frame_page,
+                        pte,
+                        request,
+                        page_allocator,
+                        page_metadata_map,
+                    );
+                }
+                return self.record_user_fault(
+                    request,
+                    UserFaultClass::Protection,
+                    UserFaultResult::SegvAccerr,
+                );
+            }
         }
 
         if stack_growth_candidate
@@ -2326,31 +2496,6 @@ impl UserAddressSpace {
             );
         };
         let mapping = &self.mappings[mapping_index];
-        let permitted = mapping.user_accessible()
-            && match request.access {
-                UserFaultAccess::Instruction => mapping.executable(),
-                UserFaultAccess::Load => mapping.readable(),
-                UserFaultAccess::Store => mapping.writable(),
-                UserFaultAccess::Unknown => false,
-            };
-        if !permitted {
-            return self.record_user_fault(
-                request,
-                UserFaultClass::Protection,
-                UserFaultResult::SegvAccerr,
-            );
-        }
-
-        let fault_page = align_down(request.address, USER_PAGE_SIZE);
-        if mapping.kind() == UserMappingKind::Stack
-            || mapping.backing_page_index(fault_page).is_some()
-        {
-            return self.record_user_fault(
-                request,
-                UserFaultClass::Protection,
-                UserFaultResult::SegvAccerr,
-            );
-        }
         if !matches!(
             mapping.kind(),
             UserMappingKind::Heap | UserMappingKind::AnonymousPrivate
@@ -2376,6 +2521,192 @@ impl UserAddressSpace {
         self.record_user_fault(request, UserFaultClass::NotPresent, outcome)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn resolve_cow_write_fault(
+        &mut self,
+        stack: &mut UserStack,
+        mapping_index: usize,
+        fault_page: usize,
+        old_page: PageRef,
+        old_pte: usize,
+        request: UserFaultRequest,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) -> UserFaultResolution {
+        if mapping_index >= self.mapping_count
+            || self.mappings[mapping_index].kind() == UserMappingKind::Empty
+            || !self.mappings[mapping_index].writable()
+            || user_leaf_pte_phys(old_pte) != Some(old_page.phys().value())
+            || !user_leaf_pte_is_cow(old_pte)
+            || user_leaf_pte_is_writable(old_pte)
+        {
+            return self.record_cow_user_fault(request, UserFaultResult::InvalidContext, 0, 0, 0);
+        }
+        let old_frame = if self.mappings[mapping_index].kind() == UserMappingKind::Stack {
+            stack.frame_for_vaddr(fault_page)
+        } else {
+            self.mappings[mapping_index]
+                .backing_page_index(fault_page)
+                .and_then(|index| self.mappings[mapping_index].backing_frame(index))
+        };
+        let Some(old_frame) = old_frame.filter(|frame| frame.page() == old_page) else {
+            return self.record_cow_user_fault(request, UserFaultResult::InvalidContext, 0, 0, 0);
+        };
+        let Some(refcount) = old_frame.refcount(page_metadata_map) else {
+            return self.record_cow_user_fault(request, UserFaultResult::InvalidContext, 0, 0, 0);
+        };
+        let readable = self.mappings[mapping_index].readable();
+        let executable = self.mappings[mapping_index].executable();
+        let kind = self.mappings[mapping_index].kind();
+        let Some(writable_pte) = user_leaf_pte_from_phys_with_cow(
+            old_page.phys().value(),
+            readable,
+            true,
+            executable,
+            false,
+        ) else {
+            return self.record_cow_user_fault(
+                request,
+                UserFaultResult::InvalidContext,
+                refcount,
+                0,
+                0,
+            );
+        };
+
+        if refcount == 1 {
+            if !self.replace_user_leaf_pte(fault_page, old_pte, writable_pte, page_metadata_map) {
+                return self.record_cow_user_fault(
+                    request,
+                    UserFaultResult::InvalidContext,
+                    refcount,
+                    0,
+                    0,
+                );
+            }
+            csr::sfence_vma_addr(fault_page);
+            return self.record_cow_user_fault(
+                request,
+                UserFaultResult::RetrySameInstruction,
+                refcount,
+                0,
+                1,
+            );
+        }
+
+        let Some(new_frame) =
+            page_allocator.alloc_user_frame(GfpFlags::kernel(), page_metadata_map)
+        else {
+            return self.record_cow_user_fault(request, UserFaultResult::TaskOom, refcount, 0, 0);
+        };
+        let (Some(old_linear), Some(new_linear)) = (
+            page_metadata_map.page_address(old_page),
+            page_metadata_map.page_address(new_frame.page()),
+        ) else {
+            assert!(
+                new_frame.release(page_allocator, page_metadata_map),
+                "failed COW copy must release its staged frame reference"
+            );
+            return self.record_cow_user_fault(request, UserFaultResult::TaskOom, refcount, 0, 0);
+        };
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                old_linear as *const u8,
+                new_linear as *mut u8,
+                USER_PAGE_SIZE,
+            );
+        }
+        let new_page = new_frame.page();
+        let new_pte = user_leaf_pte_from_phys_with_cow(
+            new_frame.phys().value(),
+            readable,
+            true,
+            executable,
+            false,
+        )
+        .expect("validated writable COW replacement");
+        let old_frame = if kind == UserMappingKind::Stack {
+            stack.replace_frame(fault_page, old_page, new_frame)
+        } else {
+            self.replace_mapping_frame(mapping_index, fault_page, old_page, new_frame)
+        };
+        let old_frame = match old_frame {
+            Ok(old_frame) => old_frame,
+            Err(new_frame) => {
+                assert!(
+                    new_frame.release(page_allocator, page_metadata_map),
+                    "rejected COW backing swap must release its staged frame reference"
+                );
+                return self.record_cow_user_fault(
+                    request,
+                    UserFaultResult::InvalidContext,
+                    refcount,
+                    0,
+                    0,
+                );
+            }
+        };
+        if !self.replace_user_leaf_pte(fault_page, old_pte, new_pte, page_metadata_map) {
+            let rolled_back_frame = if kind == UserMappingKind::Stack {
+                stack.replace_frame(fault_page, new_page, old_frame)
+            } else {
+                self.replace_mapping_frame(mapping_index, fault_page, new_page, old_frame)
+            };
+            let new_frame = match rolled_back_frame {
+                Ok(frame) => frame,
+                Err(_) => panic!("COW backing rollback must restore the old owner"),
+            };
+            assert!(
+                new_frame.release(page_allocator, page_metadata_map),
+                "rolled-back COW PTE commit must release its staged frame reference"
+            );
+            return self.record_cow_user_fault(
+                request,
+                UserFaultResult::InvalidContext,
+                refcount,
+                0,
+                0,
+            );
+        }
+        csr::sfence_vma_addr(fault_page);
+        assert!(
+            old_frame.release(page_allocator, page_metadata_map),
+            "committed COW replacement must release one old frame reference"
+        );
+        self.record_cow_user_fault(
+            request,
+            UserFaultResult::RetrySameInstruction,
+            refcount,
+            1,
+            0,
+        )
+    }
+
+    fn replace_mapping_frame(
+        &mut self,
+        mapping_index: usize,
+        fault_page: usize,
+        expected: PageRef,
+        replacement: UserFrameRef,
+    ) -> Result<UserFrameRef, UserFrameRef> {
+        if mapping_index >= self.mapping_count {
+            return Err(replacement);
+        }
+        let mapping = &mut self.mappings[mapping_index];
+        let Some(page_index) = mapping.backing_page_index(fault_page) else {
+            return Err(replacement);
+        };
+        if mapping.backing_pages[page_index]
+            .as_ref()
+            .is_none_or(|frame| frame.page() != expected)
+        {
+            return Err(replacement);
+        }
+        Ok(mapping.backing_pages[page_index]
+            .replace(replacement)
+            .expect("validated mapping frame owner"))
+    }
+
     fn fault_in_sparse_mapping_page(
         &mut self,
         mapping_index: usize,
@@ -2388,17 +2719,22 @@ impl UserAddressSpace {
         {
             return false;
         }
-        let Some(page) = page_allocator.alloc_page(GfpFlags::kernel(), page_metadata_map) else {
+        let Some(frame) = page_allocator.alloc_user_frame(GfpFlags::kernel(), page_metadata_map)
+        else {
             return false;
         };
+        let page = frame.page();
         let Some(linear) = page_metadata_map.page_address(page) else {
-            let _ = page_allocator.free_pages(page, 0, page_metadata_map);
+            assert!(
+                frame.release(page_allocator, page_metadata_map),
+                "failed sparse fault must release its staged frame reference"
+            );
             return false;
         };
         unsafe { core::ptr::write_bytes(linear as *mut u8, 0, USER_PAGE_SIZE) };
 
         let slot = self.mappings[mapping_index].backing_page_count;
-        self.mappings[mapping_index].backing_pages[slot] = Some(page);
+        self.mappings[mapping_index].backing_pages[slot] = Some(frame);
         self.mappings[mapping_index].backing_vaddrs[slot] = fault_page;
         self.mappings[mapping_index].backing_page_count += 1;
         let old_l0_count = self.page_table_l0_count;
@@ -2415,9 +2751,14 @@ impl UserAddressSpace {
             self.rollback_l0_tables(old_l0_count, page_allocator, page_metadata_map);
             let mapping = &mut self.mappings[mapping_index];
             mapping.backing_page_count -= 1;
-            mapping.backing_pages[slot] = None;
+            let frame = mapping.backing_pages[slot]
+                .take()
+                .expect("sparse-fault rollback must retain its staged frame");
             mapping.backing_vaddrs[slot] = 0;
-            let _ = page_allocator.free_pages(page, 0, page_metadata_map);
+            assert!(
+                frame.release(page_allocator, page_metadata_map),
+                "sparse PTE rollback must release its staged frame reference"
+            );
             return false;
         }
         true
@@ -2449,7 +2790,11 @@ impl UserAddressSpace {
                 self.mappings[index].kind() != UserMappingKind::Stack
                     && self.mappings[index].backing_page_index(page).is_some()
             });
-            if !stack_page_present && !mapping_page_present {
+            let cow_write = access == UserFaultAccess::Store
+                && self
+                    .user_leaf_pte(page, page_metadata_map)
+                    .is_some_and(user_leaf_pte_is_cow);
+            if (!stack_page_present && !mapping_page_present) || cow_write {
                 let request = UserFaultRequest::new(task_ref, current_satp, page, 0, access);
                 if !self
                     .resolve_user_fault(stack, request, page_allocator, page_metadata_map)
@@ -2640,15 +2985,26 @@ impl UserAddressSpace {
         let end = addr.checked_add(len).ok_or(UserStackGrowReject::Rlimit)?;
         let mut page = align_down(addr, USER_PAGE_SIZE);
         while page < end {
-            if stack.page_for_vaddr(page).is_none() {
-                self.resolve_user_stack_fault(
+            let present = stack.page_for_vaddr(page).is_some();
+            let cow_write = access == UserFaultAccess::Store
+                && self
+                    .user_leaf_pte(page, page_metadata_map)
+                    .is_some_and(user_leaf_pte_is_cow);
+            if !present || cow_write {
+                let resolution = self.resolve_user_fault(
                     stack,
-                    page,
-                    access,
-                    current_satp,
+                    UserFaultRequest::new(self.owner_task_ref, current_satp, page, 0, access),
                     page_allocator,
                     page_metadata_map,
-                )?;
+                );
+                if !resolution.retry_same_instruction() {
+                    return Err(match resolution.result() {
+                        UserFaultResult::TaskOom => UserStackGrowReject::BackingAllocation,
+                        UserFaultResult::InvalidContext => UserStackGrowReject::WrongAddressSpace,
+                        UserFaultResult::SegvMaperr => UserStackGrowReject::Rlimit,
+                        _ => UserStackGrowReject::Permission,
+                    });
+                }
             }
             page = page
                 .checked_add(USER_PAGE_SIZE)
@@ -2657,9 +3013,9 @@ impl UserAddressSpace {
         Ok(())
     }
 
-    pub fn eager_duplicate_from(
+    pub fn cow_duplicate_from(
         &mut self,
-        parent: &Self,
+        parent: &mut Self,
         parent_stack: &UserStack,
         child_stack: &mut UserStack,
         owner_task_ref: TaskRef,
@@ -2674,14 +3030,14 @@ impl UserAddressSpace {
             || !owner_task_ref.is_valid()
             || owner_task_ref.same_identity(parent.owner_task_ref)
             || child_stack.state() != State::Base
-            || !child_stack.eager_duplicate_from(parent_stack, page_allocator, page_metadata_map)
+            || !child_stack.cow_duplicate_from(parent_stack, page_allocator, page_metadata_map)
         {
             return false;
         }
 
         // UserAddressSpace has fixed inline mapping storage and no Drop implementation.
-        // Copying the metadata first is safe only because every copied ownership-bearing
-        // PageRef is detached below before an allocation or failure path can observe it.
+        // Copying metadata first is safe because ownership-bearing UserFrameRefs are detached
+        // before any fallible acquisition and every staged reference is released on rollback.
         unsafe {
             core::ptr::copy_nonoverlapping(parent as *const Self, self as *mut Self, 1);
         }
@@ -2705,37 +3061,24 @@ impl UserAddressSpace {
         while mapping_index < self.mapping_count {
             self.mappings[mapping_index].clear_backing_pages();
             self.mappings[mapping_index].backing_page_count = 0;
+            mapping_index += 1;
+        }
+
+        mapping_index = 0;
+        while mapping_index < self.mapping_count {
             let parent_mapping = &parent.mappings[mapping_index];
             let mut page_index = 0usize;
             while page_index < parent_mapping.backing_page_count() {
-                let Some(parent_page) = parent_mapping.backing_page(page_index) else {
-                    self.discard_eager_duplicate(child_stack, page_allocator, page_metadata_map);
+                let Some(parent_frame) = parent_mapping.backing_frame(page_index) else {
+                    self.discard_cow_duplicate(child_stack, page_allocator, page_metadata_map);
                     return false;
                 };
-                let Some(page) = page_allocator.alloc_page(GfpFlags::kernel(), page_metadata_map)
-                else {
-                    self.discard_eager_duplicate(child_stack, page_allocator, page_metadata_map);
+                let Some(frame) = parent_frame.acquire(page_metadata_map) else {
+                    self.discard_cow_duplicate(child_stack, page_allocator, page_metadata_map);
                     return false;
                 };
-                let Some(src) = page_metadata_map.page_address(parent_page) else {
-                    let _ = page_allocator.free_pages(page, 0, page_metadata_map);
-                    self.discard_eager_duplicate(child_stack, page_allocator, page_metadata_map);
-                    return false;
-                };
-                let Some(dst) = page_metadata_map.page_address(page) else {
-                    let _ = page_allocator.free_pages(page, 0, page_metadata_map);
-                    self.discard_eager_duplicate(child_stack, page_allocator, page_metadata_map);
-                    return false;
-                };
-                unsafe {
-                    core::ptr::copy_nonoverlapping(
-                        src as *const u8,
-                        dst as *mut u8,
-                        USER_PAGE_SIZE,
-                    );
-                }
                 let slot = self.mappings[mapping_index].backing_page_count;
-                self.mappings[mapping_index].backing_pages[slot] = Some(page);
+                self.mappings[mapping_index].backing_pages[slot] = Some(frame);
                 self.mappings[mapping_index].backing_vaddrs[slot] =
                     parent_mapping.backing_vaddrs[page_index];
                 self.mappings[mapping_index].backing_page_count += 1;
@@ -2746,13 +3089,19 @@ impl UserAddressSpace {
 
         if !self.allocate_base_page_tables(page_allocator, page_metadata_map)
             || !self.copy_parent_high_half(parent, page_metadata_map)
-            || !self.install_all_user_leaf_ptes(child_stack, page_allocator, page_metadata_map)
+            || !self.install_all_user_leaf_ptes_mode(
+                child_stack,
+                page_allocator,
+                page_metadata_map,
+                true,
+            )
+            || !parent.prevalidate_cow_lowering(parent_stack, page_metadata_map)
         {
-            self.discard_eager_duplicate(child_stack, page_allocator, page_metadata_map);
+            self.discard_cow_duplicate(child_stack, page_allocator, page_metadata_map);
             return false;
         }
         let Some(root) = self.page_table_root else {
-            self.discard_eager_duplicate(child_stack, page_allocator, page_metadata_map);
+            self.discard_cow_duplicate(child_stack, page_allocator, page_metadata_map);
             return false;
         };
         self.satp_token = csr::SATP_MODE_SV39 | (root.phys().value() >> 12);
@@ -2761,9 +3110,21 @@ impl UserAddressSpace {
         self.runtime_ready = self.satp_token_ready;
         self.prepared_but_not_current = self.satp_token_ready;
         if !self.satp_token_ready || self.satp_token == parent.satp_token {
-            self.discard_eager_duplicate(child_stack, page_allocator, page_metadata_map);
+            self.discard_cow_duplicate(child_stack, page_allocator, page_metadata_map);
             return false;
         }
+        true
+    }
+
+    fn commit_prepared_cow_fork(
+        &mut self,
+        stack: &UserStack,
+        page_metadata_map: &PageMetadataMap,
+    ) -> bool {
+        if !self.prevalidate_cow_lowering(stack, page_metadata_map) {
+            return false;
+        }
+        self.commit_cow_lowering(stack, page_metadata_map);
         true
     }
 
@@ -2787,7 +3148,7 @@ impl UserAddressSpace {
         self.high_half_root_entries_shared
     }
 
-    fn discard_eager_duplicate(
+    fn discard_cow_duplicate(
         &mut self,
         child_stack: &mut UserStack,
         page_allocator: &mut PageAllocator,
@@ -2903,9 +3264,19 @@ impl UserAddressSpace {
         page_allocator: &mut PageAllocator,
         page_metadata_map: &PageMetadataMap,
     ) -> bool {
+        self.install_all_user_leaf_ptes_mode(stack, page_allocator, page_metadata_map, false)
+    }
+
+    fn install_all_user_leaf_ptes_mode(
+        &mut self,
+        stack: &UserStack,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+        cow_fork: bool,
+    ) -> bool {
         let mut index = 0usize;
         while index < self.mapping_count {
-            if !self.install_mapping_ptes(index, page_allocator, page_metadata_map) {
+            if !self.install_mapping_ptes(index, page_allocator, page_metadata_map, cow_fork) {
                 return false;
             }
             index += 1;
@@ -2918,12 +3289,13 @@ impl UserAddressSpace {
             let Some(page) = stack.backing_page(stack_page_index) else {
                 return false;
             };
-            if !self.install_user_leaf_pte(
+            if !self.install_user_leaf_pte_flags(
                 virt,
                 page.phys().value(),
                 true,
-                true,
+                !cow_fork,
                 false,
+                cow_fork,
                 page_allocator,
                 page_metadata_map,
             ) {
@@ -2943,6 +3315,7 @@ impl UserAddressSpace {
         mapping_index: usize,
         page_allocator: &mut PageAllocator,
         page_metadata_map: &PageMetadataMap,
+        cow_fork: bool,
     ) -> bool {
         if mapping_index >= self.mapping_count {
             return false;
@@ -2974,12 +3347,14 @@ impl UserAddressSpace {
             let Some(virt) = self.mappings[mapping_index].backing_page_vaddr(page_index) else {
                 return false;
             };
-            if !self.install_user_leaf_pte(
+            let cow = cow_fork && writable;
+            if !self.install_user_leaf_pte_flags(
                 virt,
                 page.phys().value(),
                 readable,
-                writable,
+                writable && !cow,
                 executable,
+                cow,
                 page_allocator,
                 page_metadata_map,
             ) {
@@ -2999,6 +3374,30 @@ impl UserAddressSpace {
         readable: bool,
         writable: bool,
         executable: bool,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) -> bool {
+        self.install_user_leaf_pte_flags(
+            virt,
+            phys,
+            readable,
+            writable,
+            executable,
+            false,
+            page_allocator,
+            page_metadata_map,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn install_user_leaf_pte_flags(
+        &mut self,
+        virt: usize,
+        phys: usize,
+        readable: bool,
+        writable: bool,
+        executable: bool,
+        cow: bool,
         page_allocator: &mut PageAllocator,
         page_metadata_map: &PageMetadataMap,
     ) -> bool {
@@ -3030,7 +3429,9 @@ impl UserAddressSpace {
         if !l1_table.set_entry(vpn1, table_pte_from_phys(l0_page.phys().value())) {
             return false;
         }
-        let Some(leaf) = user_leaf_pte_from_phys(phys, readable, writable, executable) else {
+        let Some(leaf) =
+            user_leaf_pte_from_phys_with_cow(phys, readable, writable, executable, cow)
+        else {
             return false;
         };
         let Some(l0_table) = page_table_page_mut(l0_page, page_metadata_map) else {
@@ -3041,6 +3442,145 @@ impl UserAddressSpace {
         }
         self.user_leaf_pte_count += 1;
         true
+    }
+
+    fn user_leaf_pte(&self, virt: usize, page_metadata_map: &PageMetadataMap) -> Option<usize> {
+        let (vpn2, vpn1, vpn0) = sv39_indices(virt);
+        if vpn2 != 0 {
+            return None;
+        }
+        let l0_page = self.existing_l0_page(vpn1)?;
+        page_table_page_mut(l0_page, page_metadata_map)?.entry(vpn0)
+    }
+
+    fn replace_user_leaf_pte(
+        &mut self,
+        virt: usize,
+        expected: usize,
+        replacement: usize,
+        page_metadata_map: &PageMetadataMap,
+    ) -> bool {
+        let (_, vpn1, vpn0) = sv39_indices(virt);
+        let Some(l0_page) = self.existing_l0_page(vpn1) else {
+            return false;
+        };
+        let Some(l0_table) = page_table_page_mut(l0_page, page_metadata_map) else {
+            return false;
+        };
+        if l0_table.entry(vpn0) != Some(expected) {
+            return false;
+        }
+        l0_table.set_entry(vpn0, replacement)
+    }
+
+    fn prevalidate_cow_lowering(
+        &self,
+        stack: &UserStack,
+        page_metadata_map: &PageMetadataMap,
+    ) -> bool {
+        let mut mapping_index = 0usize;
+        while mapping_index < self.mapping_count {
+            let mapping = &self.mappings[mapping_index];
+            if mapping.kind() != UserMappingKind::Stack {
+                let mut page_index = 0usize;
+                while page_index < mapping.backing_page_count() {
+                    let (Some(page), Some(virt)) = (
+                        mapping.backing_page(page_index),
+                        mapping.backing_page_vaddr(page_index),
+                    ) else {
+                        return false;
+                    };
+                    let Some(pte) = self.user_leaf_pte(virt, page_metadata_map) else {
+                        return false;
+                    };
+                    if user_leaf_pte_phys(pte) != Some(page.phys().value())
+                        || (mapping.writable()
+                            && !user_leaf_pte_is_writable(pte)
+                            && !user_leaf_pte_is_cow(pte))
+                        || (!mapping.writable()
+                            && (user_leaf_pte_is_writable(pte) || user_leaf_pte_is_cow(pte)))
+                    {
+                        return false;
+                    }
+                    page_index += 1;
+                }
+            }
+            mapping_index += 1;
+        }
+        let mut page_index = 0usize;
+        while page_index < stack.backing_page_count() {
+            let (Some(page), Some(virt)) = (
+                stack.backing_page(page_index),
+                stack.backing_page_vaddr(page_index),
+            ) else {
+                return false;
+            };
+            let Some(pte) = self.user_leaf_pte(virt, page_metadata_map) else {
+                return false;
+            };
+            if user_leaf_pte_phys(pte) != Some(page.phys().value())
+                || (!user_leaf_pte_is_writable(pte) && !user_leaf_pte_is_cow(pte))
+            {
+                return false;
+            }
+            page_index += 1;
+        }
+        true
+    }
+
+    fn commit_cow_lowering(&mut self, stack: &UserStack, page_metadata_map: &PageMetadataMap) {
+        let mut mapping_index = 0usize;
+        while mapping_index < self.mapping_count {
+            let kind = self.mappings[mapping_index].kind();
+            let writable = self.mappings[mapping_index].writable();
+            let readable = self.mappings[mapping_index].readable();
+            let executable = self.mappings[mapping_index].executable();
+            let backing_page_count = self.mappings[mapping_index].backing_page_count();
+            if kind != UserMappingKind::Stack && writable {
+                let mut page_index = 0usize;
+                while page_index < backing_page_count {
+                    let page = self.mappings[mapping_index]
+                        .backing_page(page_index)
+                        .expect("prevalidated COW mapping frame");
+                    let virt = self.mappings[mapping_index]
+                        .backing_page_vaddr(page_index)
+                        .expect("prevalidated COW mapping VA");
+                    let old = self
+                        .user_leaf_pte(virt, page_metadata_map)
+                        .expect("prevalidated COW mapping PTE");
+                    let replacement = user_leaf_pte_from_phys_with_cow(
+                        page.phys().value(),
+                        readable,
+                        false,
+                        executable,
+                        true,
+                    )
+                    .expect("prevalidated COW mapping permissions");
+                    assert!(self.replace_user_leaf_pte(virt, old, replacement, page_metadata_map,));
+                    csr::sfence_vma_addr(virt);
+                    page_index += 1;
+                }
+            }
+            mapping_index += 1;
+        }
+        let mut page_index = 0usize;
+        while page_index < stack.backing_page_count() {
+            let page = stack
+                .backing_page(page_index)
+                .expect("prevalidated COW stack frame");
+            let virt = stack
+                .backing_page_vaddr(page_index)
+                .expect("prevalidated COW stack VA");
+            let old = self
+                .user_leaf_pte(virt, page_metadata_map)
+                .expect("prevalidated COW stack PTE");
+            let replacement =
+                user_leaf_pte_from_phys_with_cow(page.phys().value(), true, false, false, true)
+                    .expect("stack COW permissions");
+            assert!(self.replace_user_leaf_pte(virt, old, replacement, page_metadata_map,));
+            csr::sfence_vma_addr(virt);
+            page_index += 1;
+        }
     }
 
     fn user_leaf_pte_maps_page(
@@ -4112,7 +4652,7 @@ pub struct UserTaskSet {
     #[cfg(app_smoke)]
     fail_next_builtin_grandchild_wait_capture: bool,
     #[cfg(app_smoke)]
-    fail_next_eager_child_mm_after_copy: bool,
+    fail_next_cow_child_mm_after_prepare: bool,
     #[cfg(app_smoke)]
     last_unpublished_rollback_stage: usize,
     next_child_pid: usize,
@@ -4255,7 +4795,7 @@ impl UserTaskSet {
             #[cfg(app_smoke)]
             fail_next_builtin_grandchild_wait_capture: false,
             #[cfg(app_smoke)]
-            fail_next_eager_child_mm_after_copy: false,
+            fail_next_cow_child_mm_after_prepare: false,
             #[cfg(app_smoke)]
             last_unpublished_rollback_stage: 0,
             next_child_pid: USER_CHILD_PID,
@@ -4458,10 +4998,56 @@ impl UserTaskSet {
         }
     }
 
-    fn prepare_eager_child_mm(
+    pub(crate) fn record_task_out_of_memory(&mut self, task_ref: TaskRef) -> bool {
+        self.task_mut_by_ref(task_ref)
+            .is_some_and(Task::record_out_of_memory_terminal)
+    }
+
+    pub(crate) fn task_out_of_memory(&self, task_ref: TaskRef) -> bool {
+        self.slot_for_ref(task_ref).is_some_and(|slot| {
+            slot.task.terminal_reason() == super::task::TaskTerminalReason::OutOfMemory
+        })
+    }
+
+    pub(crate) fn task_wait_status(&self, task_ref: TaskRef, exit_status: usize) -> usize {
+        self.slot_for_ref(task_ref)
+            .filter(|slot| {
+                slot.task.terminal_reason() == super::task::TaskTerminalReason::OutOfMemory
+            })
+            .map_or((exit_status & 0xff) << 8, |_| 9)
+    }
+
+    pub fn inactive_cow_leaf_diagnostic(
+        &self,
+        task_ref: TaskRef,
+        address: usize,
+        page_metadata_map: &PageMetadataMap,
+    ) -> Option<UserCowLeafDiagnostic> {
+        if task_ref.same_identity(TaskRef::KERNEL_INIT) {
+            return self.kernel_init_mm_present.then(|| {
+                self.kernel_init_inactive_address_space.cow_leaf_diagnostic(
+                    &self.kernel_init_inactive_stack,
+                    address,
+                    page_metadata_map,
+                )
+            })?;
+        }
+        let index = task_ref.user_slot()?;
+        let slot = &self.task_slots[index];
+        if !slot.occupied || !slot.task_ref().same_identity(task_ref) || !slot.mm_present {
+            return None;
+        }
+        slot.inactive_address_space.cow_leaf_diagnostic(
+            &slot.inactive_stack,
+            address,
+            page_metadata_map,
+        )
+    }
+
+    fn prepare_cow_child_mm(
         &mut self,
         child_ref: TaskRef,
-        parent_address_space: &UserAddressSpace,
+        parent_address_space: &mut UserAddressSpace,
         parent_stack: &UserStack,
         page_allocator: &mut PageAllocator,
         page_metadata_map: &PageMetadataMap,
@@ -4478,7 +5064,7 @@ impl UserTaskSet {
         {
             return false;
         }
-        if !slot.inactive_address_space.eager_duplicate_from(
+        if !slot.inactive_address_space.cow_duplicate_from(
             parent_address_space,
             parent_stack,
             &mut slot.inactive_stack,
@@ -4489,8 +5075,8 @@ impl UserTaskSet {
             return false;
         }
         #[cfg(app_smoke)]
-        if core::mem::take(&mut self.fail_next_eager_child_mm_after_copy) {
-            slot.inactive_address_space.discard_eager_duplicate(
+        if core::mem::take(&mut self.fail_next_cow_child_mm_after_prepare) {
+            slot.inactive_address_space.discard_cow_duplicate(
                 &mut slot.inactive_stack,
                 page_allocator,
                 page_metadata_map,
@@ -4762,6 +5348,20 @@ impl UserTaskSet {
         task_event_or_terminate(task.adopt_enable());
         task_event_or_terminate(runtime.bind_dynamic(task, task.embedded_flow(), pid));
         true
+    }
+
+    fn reserved_user_task_publish_ready(&self, task_ref: TaskRef) -> bool {
+        let Some(index) = task_ref.user_slot() else {
+            return false;
+        };
+        let slot = &self.task_slots[index];
+        slot.occupied
+            && slot.task_ref().same_identity(task_ref)
+            && slot.task.state() == State::Base
+            && slot.runtime.state() == State::Base
+            && slot.mm_present
+            && self.carrier_stack_base != 0
+            && self.carrier_stack_top > self.carrier_stack_base
     }
 
     fn allocate_user_task(&mut self, pid: usize, parent_ref: TaskRef) -> Option<TaskRef> {
@@ -5339,8 +5939,8 @@ impl UserTaskSet {
     }
 
     #[cfg(app_smoke)]
-    pub fn smoke_fail_next_eager_child_mm_after_copy(&mut self) {
-        self.fail_next_eager_child_mm_after_copy = true;
+    pub fn smoke_fail_next_cow_child_mm_after_prepare(&mut self) {
+        self.fail_next_cow_child_mm_after_prepare = true;
     }
 
     #[cfg(app_smoke)]
@@ -5765,7 +6365,7 @@ impl UserTaskSet {
         &mut self,
         parent: &KernelInitTaskUserState,
         boundaries: &UserCloneDeferredBoundaries,
-        address_space: &UserAddressSpace,
+        address_space: &mut UserAddressSpace,
         stack: &UserStack,
         trap_frame: &UserTrapFrame,
         fs_struct: &FsStruct,
@@ -5806,7 +6406,7 @@ impl UserTaskSet {
         child_frame.sepc = child_frame.sepc.wrapping_add(4);
         let child_pid = self.next_child_pid;
         let child_ref = self.reserve_user_task(child_pid)?;
-        if !self.prepare_eager_child_mm(
+        if !self.prepare_cow_child_mm(
             child_ref,
             address_space,
             stack,
@@ -5823,11 +6423,14 @@ impl UserTaskSet {
                 return None;
             }
         };
-        if !self.publish_reserved_user_task(child_ref, TaskRef::KERNEL_INIT) {
+        if !self.reserved_user_task_publish_ready(child_ref)
+            || !address_space.commit_prepared_cow_fork(stack, page_metadata_map)
+        {
             files_struct.discard_parent_fd_snapshot(&parent_fd_snapshot);
             self.rollback_unpublished_user_task(child_ref, page_allocator, page_metadata_map);
             return None;
         }
+        assert!(self.publish_reserved_user_task(child_ref, TaskRef::KERNEL_INIT));
         self.pid = child_pid;
         self.parent_pid = super::rest_init::KERNEL_INIT_PID;
         self.tgid = child_pid;
@@ -6255,7 +6858,7 @@ impl UserTaskSet {
         &mut self,
         parent: &KernelInitTaskUserState,
         boundaries: &UserCloneDeferredBoundaries,
-        address_space: &UserAddressSpace,
+        address_space: &mut UserAddressSpace,
         stack: &UserStack,
         trap_frame: &UserTrapFrame,
         fs_struct: &FsStruct,
@@ -6304,7 +6907,7 @@ impl UserTaskSet {
         child_frame.set_reg(10, 0);
         child_frame.sepc = child_frame.sepc.wrapping_add(4);
         let child_ref = self.reserve_user_task(child_pid)?;
-        if !self.prepare_eager_child_mm(
+        if !self.prepare_cow_child_mm(
             child_ref,
             address_space,
             stack,
@@ -6321,11 +6924,14 @@ impl UserTaskSet {
                 return None;
             }
         };
-        if !self.publish_reserved_user_task(child_ref, parent_task_ref) {
+        if !self.reserved_user_task_publish_ready(child_ref)
+            || !address_space.commit_prepared_cow_fork(stack, page_metadata_map)
+        {
             files_struct.discard_parent_fd_snapshot(&fork_fd_snapshot);
             self.rollback_unpublished_user_task(child_ref, page_allocator, page_metadata_map);
             return None;
         }
+        assert!(self.publish_reserved_user_task(child_ref, parent_task_ref));
         if builtin_grandchild_source {
             self.builtin_grandchild.reset_empty();
             self.builtin_grandchild.bound = true;
@@ -10693,17 +11299,22 @@ fn materialize_mapping(
 
     let mut index = 0usize;
     while index < page_count {
-        let Some(page) = page_allocator.alloc_page(GfpFlags::kernel(), page_metadata_map) else {
+        let Some(frame) = page_allocator.alloc_user_frame(GfpFlags::kernel(), page_metadata_map)
+        else {
             release_mapping_pages(mapping, page_allocator, page_metadata_map);
             return Err(ElfError::BackingAllocationFailed);
         };
+        let page = frame.page();
         let Some(linear) = page_metadata_map.page_address(page) else {
-            let _ = page_allocator.free_pages(page, 0, page_metadata_map);
+            assert!(
+                frame.release(page_allocator, page_metadata_map),
+                "failed ELF backing allocation must release its staged frame reference"
+            );
             release_mapping_pages(mapping, page_allocator, page_metadata_map);
             return Err(ElfError::BackingAllocationFailed);
         };
         unsafe { core::ptr::write_bytes(linear as *mut u8, 0, USER_PAGE_SIZE) };
-        mapping.backing_pages[index] = Some(page);
+        mapping.backing_pages[index] = Some(frame);
         mapping.backing_vaddrs[index] = mapping
             .vaddr()
             .saturating_sub(mapping.page_offset())
@@ -10742,9 +11353,11 @@ fn release_mapping_pages(
     }
     while mapping.backing_page_count > 0 {
         mapping.backing_page_count -= 1;
-        if let Some(page) = mapping.backing_pages[mapping.backing_page_count] {
-            let _ = page_allocator.free_pages(page, 0, page_metadata_map);
-            mapping.backing_pages[mapping.backing_page_count] = None;
+        if let Some(frame) = mapping.backing_pages[mapping.backing_page_count].take() {
+            assert!(
+                frame.release(page_allocator, page_metadata_map),
+                "mapping teardown must release each owned frame reference"
+            );
             mapping.backing_vaddrs[mapping.backing_page_count] = 0;
         }
     }
