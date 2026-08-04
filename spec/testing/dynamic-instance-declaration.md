@@ -1,4 +1,4 @@
-# Dynamic instance declaration testing contract
+# Dynamic instance declaration and snapshot materialization testing contract
 
 This file defines the required regression coverage for runtime `declare`
 statements. It supplements the Task/TaskFlow scenarios without redefining the
@@ -39,9 +39,29 @@ model semantics.
   indexed Signal target and snapshot round-trip with canonical identity
   `Parent.collection[key]`.
 
+## Snapshot materialization coverage
+
+- Parser/model JSON preserves a named `snapshot` block and ordered `materialize`
+  statements separately from ordinary `declare`, including owner-local ordinal,
+  declared Type, requested state and span.
+- Stateful materialization starts directly in the requested state and produces no
+  `Preset`, `Setup`, `Enable` or other lifecycle transition Signal. Stateless
+  materialization omits state and has no entry in the snapshot state map.
+- All fresh identities, references, facts and state invariants publish in one
+  `snapshot_committed` event after validation of the complete candidate.
+- Negative cases cover block-external materialize, nested snapshot, duplicate alias,
+  unknown Type/state, missing state for a stateful Type, state supplied for a
+  stateless Type, lifecycle Transition calls in a snapshot, missing binding and a
+  failing mid-block Action. Every failure must produce `snapshot_rolled_back` and
+  preserve the exact pre-block committed instances, states, references, facts and
+  occurrence counters.
+- Snapshot protocol round-trip, trace view, text render and animation must retain
+  `construction = materialize`, block site and committed state; no consumer may
+  infer materialization from an ordinary state delta.
+
 ## Task and Flow scenarios
 
-- Two fork executions yield different Task, TaskRef, UserTaskFlow, and
+- Two fork executions yield different Task, TaskRef, TaskFlow, and
   UserAppRuntime identities with independent occurrence/lifecycle state and Ref
   targets.
 - Two exec executions on one Task preserve Task, TaskFlow, and UserAppRuntime

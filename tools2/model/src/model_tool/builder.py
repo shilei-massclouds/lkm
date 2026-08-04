@@ -186,6 +186,34 @@ def _expression(entry: dict[str, Any], *, assignment: bool = False) -> dict[str,
 
 
 def _call(entry: dict[str, Any]) -> dict[str, Any]:
+    if entry.get("kind") == "snapshot":
+        return {
+            "kind": "snapshot",
+            "name": entry.get("name"),
+            "source_ordinal": entry.get("source_ordinal"),
+            "entries": [_call(child) for child in entry.get("entries", [])],
+            "span": entry["span"],
+            "text": entry["text"],
+        }
+    if entry.get("kind") == "materialize":
+        return {
+            "kind": "materialize",
+            "alias": entry.get("alias"),
+            "declared_type": entry.get("declared_type"),
+            "target_state": entry.get("target_state"),
+            "source_ordinal": entry.get("source_ordinal"),
+            "span": entry["span"],
+            "text": entry["text"],
+        }
+    if entry.get("kind") == "declare":
+        return {
+            "kind": "declare",
+            "alias": entry.get("alias"),
+            "declared_type": entry.get("declared_type"),
+            "source_ordinal": entry.get("source_ordinal"),
+            "span": entry["span"],
+            "text": entry["text"],
+        }
     text = entry["text"].strip()
     alternatives = _split_top_operator(text, "||")
     if len(alternatives) > 1:
@@ -224,6 +252,7 @@ def _call(entry: dict[str, Any]) -> dict[str, Any]:
             "field": field,
             "key": _value(key[:-1].strip()),
             "declared_type": indexed_declaration.group(2).strip(),
+            "source_ordinal": entry.get("source_ordinal"),
             "span": entry["span"],
             "text": entry["text"],
         }
@@ -233,6 +262,7 @@ def _call(entry: dict[str, Any]) -> dict[str, Any]:
             "kind": "declare",
             "alias": declaration.group(1),
             "declared_type": declaration.group(2).strip(),
+            "source_ordinal": entry.get("source_ordinal"),
             "span": entry["span"],
             "text": entry["text"],
         }
@@ -1430,9 +1460,147 @@ def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
                         call["span"],
                     )
 
-    def report_invalid_calls(members: list[dict[str, Any]]) -> None:
+    def report_invalid_calls(
+        members: list[dict[str, Any]],
+        *,
+        aliases: set[str] | None = None,
+        snapshot_names: set[str] | None = None,
+    ) -> None:
+        visible_aliases = set() if aliases is None else aliases
+        visible_snapshots = set() if snapshot_names is None else snapshot_names
+
+        def validate_call(call: dict[str, Any], *, in_snapshot: bool) -> None:
+            kind = call.get("kind")
+            if kind == "snapshot":
+                name = call.get("name")
+                if in_snapshot:
+                    _diagnostic(
+                        diagnostics,
+                        "error",
+                        "snapshot blocks cannot be nested",
+                        call["span"],
+                    )
+                    return
+                if not isinstance(name, str) or re.fullmatch(
+                    r"[a-z][A-Za-z0-9_]*", name
+                ) is None:
+                    _diagnostic(
+                        diagnostics,
+                        "error",
+                        f"invalid snapshot block name {name!r}",
+                        call["span"],
+                    )
+                elif name in visible_snapshots:
+                    _diagnostic(
+                        diagnostics,
+                        "error",
+                        f"duplicate snapshot block name {name}",
+                        call["span"],
+                    )
+                else:
+                    visible_snapshots.add(name)
+                candidate_aliases = set(visible_aliases)
+                for child in call.get("entries", []):
+                    child_kind = child.get("kind")
+                    if child_kind == "materialize":
+                        alias = child.get("alias")
+                        declared_type = child.get("declared_type")
+                        target_state = child.get("target_state")
+                        if alias in candidate_aliases or alias in systems:
+                            _diagnostic(
+                                diagnostics,
+                                "error",
+                                f"duplicate or shadowed snapshot alias {alias}",
+                                child["span"],
+                            )
+                        else:
+                            candidate_aliases.add(str(alias))
+                        declaration = types.get(str(declared_type))
+                        if declaration is None:
+                            _diagnostic(
+                                diagnostics,
+                                "error",
+                                f"unknown materialized Type {declared_type}",
+                                child["span"],
+                            )
+                            continue
+                        lifecycle = _nearest_lifecycle(types, str(declared_type))
+                        stateful = lifecycle is not None and lifecycle.get("initial_state") is not None
+                        if stateful and target_state is None:
+                            _diagnostic(
+                                diagnostics,
+                                "error",
+                                f"stateful materialization {alias} requires at State::<Name>",
+                                child["span"],
+                            )
+                        elif not stateful and target_state is not None:
+                            _diagnostic(
+                                diagnostics,
+                                "error",
+                                f"stateless materialization {alias} cannot specify State::{target_state}",
+                                child["span"],
+                            )
+                        elif stateful and target_state not in lifecycle.get("states", {}):
+                            _diagnostic(
+                                diagnostics,
+                                "error",
+                                f"unknown materialized state {declared_type}.State::{target_state}",
+                                child["span"],
+                            )
+                    elif child_kind == "snapshot":
+                        validate_call(child, in_snapshot=True)
+                    elif child_kind == "declare" or child_kind == "declare_indexed":
+                        _diagnostic(
+                            diagnostics,
+                            "error",
+                            "snapshot bodies must use materialize for fresh instances",
+                            child["span"],
+                        )
+                    elif child_kind == "call" and child.get("process_kind") == "Transition":
+                        _diagnostic(
+                            diagnostics,
+                            "error",
+                            "lifecycle Transition calls are not allowed in snapshot blocks",
+                            child["span"],
+                        )
+                    elif child_kind != "call":
+                        _diagnostic(
+                            diagnostics,
+                            "unsupported",
+                            f"invalid snapshot statement: {child.get('text')}",
+                            child["span"],
+                        )
+                visible_aliases.update(candidate_aliases)
+                return
+            if kind == "materialize":
+                _diagnostic(
+                    diagnostics,
+                    "error",
+                    "materialize is allowed only inside a snapshot block",
+                    call["span"],
+                )
+            elif kind == "declare":
+                alias = call.get("alias")
+                if call.get("declared_type") not in types:
+                    _diagnostic(
+                        diagnostics,
+                        "error",
+                        f"unknown declared Type {call.get('declared_type')}",
+                        call["span"],
+                    )
+                if alias in visible_aliases or alias in systems:
+                    _diagnostic(
+                        diagnostics,
+                        "error",
+                        f"duplicate or shadowed declaration alias {alias}",
+                        call["span"],
+                    )
+                else:
+                    visible_aliases.add(str(alias))
+
         for member in members:
             for entry in member.get("entries", []):
+                validate_call(entry, in_snapshot=False)
                 if entry.get("kind") == "invalid_call":
                     _diagnostic(
                         diagnostics,
@@ -1449,9 +1617,17 @@ def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
                                 f"invalid process call: {choice.get('text')}",
                                 choice["span"],
                             )
-            report_invalid_calls(member.get("members", []))
+            report_invalid_calls(
+                member.get("members", []),
+                aliases=set(visible_aliases),
+                snapshot_names=visible_snapshots,
+            )
             for variant in member.get("variants", []):
-                report_invalid_calls(variant.get("members", []))
+                report_invalid_calls(
+                    variant.get("members", []),
+                    aliases=set(visible_aliases),
+                    snapshot_names=visible_snapshots,
+                )
 
     def yield_calls(members: list[dict[str, Any]]) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []

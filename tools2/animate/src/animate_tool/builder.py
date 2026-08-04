@@ -1,4 +1,4 @@
-"""Validate tools2 v10 inputs and project causal animation v4 moments."""
+"""Validate tools2 v11 inputs and project causal animation v4 moments."""
 
 from __future__ import annotations
 
@@ -429,6 +429,9 @@ def _validate_events(
             "indexed_instance_declared",
             "dynamic_declared",
             "indexed_transaction_rolled_back",
+            "snapshot_candidate_materialized",
+            "snapshot_committed",
+            "snapshot_rolled_back",
             "yielded_response_completed",
         } and "snapshot" in event:
             replay = deepcopy(

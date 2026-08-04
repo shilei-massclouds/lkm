@@ -21,10 +21,10 @@ class LinkerCodegenTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Lds.Online is missing"):
             generate_riscv64_linker_script(model, _profile())
 
-    def test_rejects_v9_protocol(self) -> None:
+    def test_rejects_v10_protocol(self) -> None:
         model = _valid_tools2_model()
-        model["version"] = 9
-        with self.assertRaisesRegex(ValueError, "protocol v10"):
+        model["version"] = 10
+        with self.assertRaisesRegex(ValueError, "protocol v11"):
             generate_riscv64_linker_script(model, _profile())
 
 
@@ -61,7 +61,7 @@ def _valid_tools2_model() -> dict:
     )
     return {
         "schema": "lkm.spec.model",
-        "version": 10,
+        "version": 11,
         "producer": "tools2",
         "model": {
             "systems": {

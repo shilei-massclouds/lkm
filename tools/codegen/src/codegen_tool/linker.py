@@ -65,8 +65,8 @@ def _validate_model_contract(model: dict[str, Any]) -> None:
 
 
 def _validate_tools2_model_contract(envelope: dict[str, Any]) -> None:
-    if envelope.get("schema") != "lkm.spec.model" or envelope.get("version") != 10:
-        raise ValueError("linker codegen requires tools2 model protocol v10")
+    if envelope.get("schema") != "lkm.spec.model" or envelope.get("version") != 11:
+        raise ValueError("linker codegen requires tools2 model protocol v11")
     if envelope.get("producer") != "tools2":
         raise ValueError("linker codegen requires producer=tools2")
     model = envelope.get("model")

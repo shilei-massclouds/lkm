@@ -485,6 +485,8 @@ class Engine:
                 "indexed": False,
                 "owned_field": field_name,
                 "resident": True,
+                "construction": metadata.get("construction", "declare_owned"),
+                "snapshot_site": deepcopy(metadata.get("snapshot_site")),
                 "span": deepcopy(field.get("span", metadata.get("span", {}))),
             }
             self.current["references"][f"{identity}.{field_name}"] = child_identity
@@ -2556,6 +2558,223 @@ class Engine:
         bindings: dict[str, Any],
         context_stack: list[str],
     ) -> None:
+        if call.get("kind") == "snapshot":
+            snapshot_before = _snapshot(self.current)
+            systems_before = set(self.systems)
+            parents_before = {
+                name: system.get("parent") for name, system in self.systems.items()
+            }
+            next_instance_before = self.next_instance
+            next_generation_before = self.next_generation
+            bindings_before = deepcopy(bindings)
+            queue_before = deepcopy(self.queue)
+            boundary_len = len(self.boundary_occurrences)
+            obligation_len = len(self.obligations)
+            boundary_counts_before = deepcopy(self.boundary_occurrence_counts)
+            next_boundary_before = self.next_boundary_occurrence
+            local_bindings = deepcopy(bindings)
+            materialized: list[str] = []
+            self.event(
+                "snapshot_candidate_started",
+                signal_id=signal["id"],
+                name=call["name"],
+                source_ordinal=call.get("source_ordinal"),
+                context=list(context_stack),
+                span=call["span"],
+            )
+            try:
+                for statement in call.get("entries", []):
+                    if statement.get("kind") == "materialize":
+                        declared_type = statement["declared_type"]
+                        type_decl = self.model.get("types", {}).get(declared_type)
+                        if type_decl is None:
+                            raise DerivationProblem(
+                                f"unknown materialized Type {declared_type}"
+                            )
+                        lifecycle_name = type_decl.get("effective_lifecycle_type")
+                        lifecycle = self.model.get("types", {}).get(lifecycle_name)
+                        stateful = bool(
+                            lifecycle is not None
+                            and lifecycle.get("initial_state") is not None
+                        )
+                        target_state = statement.get("target_state")
+                        if stateful:
+                            if target_state is None:
+                                raise DerivationProblem(
+                                    f"stateful materialization {statement['alias']} requires a state"
+                                )
+                            if target_state not in lifecycle.get("states", {}):
+                                raise DerivationProblem(
+                                    f"unknown materialized state {declared_type}.State::{target_state}"
+                                )
+                        elif target_state is not None:
+                            raise DerivationProblem(
+                                f"stateless materialization {statement['alias']} cannot specify a state"
+                            )
+                        alias = statement["alias"]
+                        if alias in local_bindings or alias in self.systems:
+                            raise DerivationProblem(
+                                f"duplicate or shadowed snapshot alias {alias}"
+                            )
+                        identity = (
+                            f"materialized:{signal['id']}:{call['name']}:"
+                            f"{statement.get('source_ordinal')}:{self.next_instance}:{alias}"
+                        )
+                        self.next_instance += 1
+                        metadata = {
+                            "declared_type": declared_type,
+                            "parent": signal["target"],
+                            "indexed": False,
+                            "alias": alias,
+                            "generation": self.next_generation,
+                            "alive": True,
+                            "construction": "materialize",
+                            "materialized_state": target_state,
+                            "snapshot_site": {
+                                "name": call["name"],
+                                "owner_process": signal.get("handler", {}).get("id"),
+                                "source_ordinal": call.get("source_ordinal"),
+                                "statement_ordinal": statement.get("source_ordinal"),
+                            },
+                            "span": deepcopy(statement["span"]),
+                        }
+                        self.next_generation += 1
+                        self.current["instances"][identity] = metadata
+                        system = self._install_runtime_system(identity, metadata)
+                        if stateful:
+                            self.current["states"][identity] = target_state
+                        for field, target in system.get("references", {}).items():
+                            self.current["references"][f"{identity}.{field}"] = target
+                        local_bindings[alias] = identity
+                        materialized.append(identity)
+                        self.current = _snapshot(self.current)
+                        self.event(
+                            "snapshot_candidate_materialized",
+                            signal_id=signal["id"],
+                            name=call["name"],
+                            alias=alias,
+                            declared_type=declared_type,
+                            target_state=target_state,
+                            identity=identity,
+                            source_ordinal=statement.get("source_ordinal"),
+                            context=list(context_stack),
+                            span=statement["span"],
+                            snapshot=_snapshot(self.current),
+                        )
+                    elif statement.get("kind") == "call":
+                        if statement.get("process_kind") == "Transition":
+                            raise DerivationProblem(
+                                "lifecycle Transition calls are not allowed in snapshot blocks"
+                            )
+                        self._execute_call(
+                            statement,
+                            signal=signal,
+                            bindings=local_bindings,
+                            context_stack=context_stack,
+                        )
+                    else:
+                        raise DerivationProblem(
+                            f"invalid snapshot statement: {statement.get('text')}"
+                        )
+
+                candidate = _snapshot(self.current)
+                for identity in materialized:
+                    system = self.systems[identity]
+                    required_references = [
+                        field["name"]
+                        for field in system.get("fields", {}).get("associations", [])
+                        if field.get("value") is None
+                    ]
+                    for field in required_references:
+                        if f"{identity}.{field}" not in candidate["references"]:
+                            raise DerivationProblem(
+                                f"materialized instance {identity} is missing binding {field}"
+                            )
+                    metadata = candidate["instances"][identity]
+                    type_invariants = [
+                        expression
+                        for declaration in reversed(
+                            self._type_chain(metadata["declared_type"])
+                        )
+                        for expression in declaration.get("invariant", [])
+                    ]
+                    state_invariants: list[dict[str, Any]] = []
+                    state = metadata.get("materialized_state")
+                    if state is not None:
+                        state_invariants = system["states"][state].get("invariant", [])
+                    materialize_signal = {
+                        **signal,
+                        "target": identity,
+                        "_self_value": identity,
+                    }
+                    for invariant in [*type_invariants, *state_invariants]:
+                        self.current = _snapshot(candidate)
+                        result = self.expression_value(
+                            invariant,
+                            signal=materialize_signal,
+                            bindings=local_bindings,
+                            snapshot=candidate,
+                        )
+                        proof_source = "snapshot"
+                        if not result and self._intrinsic_invariant(invariant):
+                            result = True
+                            proof_source = "predicate_body_or_static_attribute"
+                            self.apply_effect(
+                                invariant,
+                                signal=materialize_signal,
+                                bindings=local_bindings,
+                                candidate=candidate,
+                                handler={"kind": "Snapshot", "target_state": state},
+                            )
+                        self.event(
+                            "snapshot_invariant_checked",
+                            signal_id=signal["id"],
+                            name=call["name"],
+                            identity=identity,
+                            expression=invariant["text"],
+                            result=result,
+                            proof_source=proof_source,
+                        )
+                        if not result:
+                            raise DerivationProblem(
+                                f"snapshot invariant_not_satisfied: {invariant['text']}"
+                            )
+                self.current = _snapshot(candidate)
+                bindings.update(local_bindings)
+                self.event(
+                    "snapshot_committed",
+                    signal_id=signal["id"],
+                    name=call["name"],
+                    identities=list(materialized),
+                    source_ordinal=call.get("source_ordinal"),
+                    snapshot=_snapshot(self.current),
+                )
+            except (DerivationProblem, UntilReached, YieldPending) as exc:
+                self.current = snapshot_before
+                for name in set(self.systems) - systems_before:
+                    del self.systems[name]
+                for name, parent in parents_before.items():
+                    if name in self.systems:
+                        self.systems[name]["parent"] = parent
+                self.next_instance = next_instance_before
+                self.next_generation = next_generation_before
+                bindings.clear()
+                bindings.update(bindings_before)
+                self.queue = queue_before
+                del self.boundary_occurrences[boundary_len:]
+                del self.obligations[obligation_len:]
+                self.boundary_occurrence_counts = boundary_counts_before
+                self.next_boundary_occurrence = next_boundary_before
+                self.event(
+                    "snapshot_rolled_back",
+                    signal_id=signal["id"],
+                    name=call.get("name"),
+                    reason=str(exc),
+                    source_ordinal=call.get("source_ordinal"),
+                    snapshot=_snapshot(self.current),
+                )
+                raise
+            return
         if call.get("kind") == "choice":
             rejected: list[str] = []
             selected: dict[str, Any] | None = None
@@ -2656,7 +2875,6 @@ class Engine:
             self._record_instance_boundary_occurrences(identity, signal=signal)
             return
         if call.get("kind") == "declare":
-            signal["_dynamic_transaction"] = True
             identity = (
                 f"dynamic:{signal['id']}:{self.next_instance}:{call['alias']}"
             )
@@ -2668,6 +2886,11 @@ class Engine:
                 "alias": call["alias"],
                 "generation": self.next_generation,
                 "alive": True,
+                "construction": "declare",
+                "declaration_site": {
+                    "owner_process": signal.get("handler", {}).get("id"),
+                    "source_ordinal": call.get("source_ordinal"),
+                },
                 "span": deepcopy(call["span"]),
             }
             self.next_generation += 1
@@ -4071,7 +4294,7 @@ class Engine:
                 )
             raise
         except DerivationProblem as exc:
-            if signal.get("_indexed_transaction") or signal.get("_dynamic_transaction"):
+            if signal.get("_indexed_transaction"):
                 self.current = transaction_snapshot
                 for name in set(self.systems) - transaction_system_names:
                     del self.systems[name]
@@ -4081,9 +4304,7 @@ class Engine:
                 self.next_instance = transaction_next_instance
                 self.next_generation = transaction_next_generation
                 self.event(
-                    "indexed_transaction_rolled_back"
-                    if signal.get("_indexed_transaction")
-                    else "dynamic_transaction_rolled_back",
+                    "indexed_transaction_rolled_back",
                     signal_id=signal["id"],
                     reason=str(exc),
                     snapshot=_snapshot(self.current),

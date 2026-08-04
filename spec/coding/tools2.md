@@ -33,7 +33,7 @@ parser/model 必须让 `spec/model/main.spec` 通过零 error、零 unsupported�
 enum、type/object/system 与传递继承、属性、owned、association/reference、predicate/function、context/
 lock、state、Type lifecycle/process、对象 lifecycle override、命名形参/result、`within`、结构化
 `deferred`/`trimmed` evidence、`depends_on`、`ensures`、`updates`、`external`、`drives`、`emits` 和
-`yields`。v10 不接受
+`yields`、`snapshot` 和 `materialize`。v11 不接受
 `lossy` 修饰；所有已发送 Signal 都必须被 handler 接受并处理。
 model 必须把 `drives` 的顶层 `A || B` 规范化为有序 choice 节点；derive 在发送前检查候选可接受性，未选择候选不得进入 Signal 序列或消耗预算。
 条件和 invariant 的顶层 `P || Q` 必须规范化为布尔 any-of 节点并按当前快照短路求值，不得保留为无法解释的 assertion 字符串。
@@ -63,8 +63,8 @@ external 编排；显式 `--signal` 只发送该单个根 Signal。三个 Human 
 ## 中间协议
 
 所有 JSON 顶层必须包含 `schema`、`version`、`producer: "tools2"` 和 `source`。schema 名沿用
-`lkm.spec.ast/model/derive/check/view/snapshot`，tools2 各自使用 version `10`。消费者必须在读取后立即
-验证三元组，不接受缺失 producer、老 producer、version 1 至 version 9 或其它 version。Signal/model/view JSON
+`lkm.spec.ast/model/derive/check/view/snapshot`，tools2 各自使用 version `11`。消费者必须在读取后立即
+验证三元组，不接受缺失 producer、老 producer、version 1 至 version 10 或其它 version。Signal/model/view JSON
 不包含 `lossy`/`strict` 字段，outcome 不包含 `discarded`。
 
 AST 保留 include 展开后的声明、source order 和每个声明/语句 span。model 建立 enum、system、parent、
@@ -98,7 +98,7 @@ deferred/trimmed、occurrence 和 unresolved obligation 计数。
 阶段工具都接受显式 `-o/--output`。parse 接收 `.spec`；model 接收 ast.json；derive 接收 model.json
 以及可选的 `--signal Target.Name`、`-u/--until Target.Name`、`--source`、`--scenario`、`--max-depth`、`--max-breadth`；check 和 view
 接收 derive.json；render 接收 view.json 且只实现 `--format text`；animate 接收 model.json、view.json
-并原子写出 HTML。animate 必须先分别验证两个输入的 v10 schema/version/producer、source 与 model
+并原子写出 HTML。animate 必须先分别验证两个输入的 v11 schema/version/producer、source 与 model
 fingerprint 身份，协议、身份、缺失端点或 I/O 错误返回 2 且不留下部分输出。
 
 driver 接收 `.spec` 和同一组 derive 参数，另提供 `--snapshot-out`、`--work-dir`、文本 `-o` 与
@@ -217,7 +217,7 @@ verbose renderer 保持本轮修改前的详细格式和 canonical `Preset` 名�
 明确标记 `drives wait`、`emits enqueue/dequeue`、payload、predicate proof source、effective context、
 到达时快照来源、selector resolutions、before/after state/fact/reference delta、reached boundary、stopped propagation、
 reject、truncated coordinate、source span 和完整因果链；还必须逐项显示 inventory、occurrence、
-proof source/classification 和 obligation 来源。当前 tools2 version 10 view 已包含两种
+proof source/classification 和 obligation 来源。当前 tools2 version 11 view 已包含两种
 renderer 所需字段，因此不得为文本模式升级协议或改写 view。
 当前 tools2 render 不实现 DOT、SVG 或 HTML。交互 HTML 由独立 animate 包及 Svelte 5 + TypeScript
 frontend 生成，不属于 `lkm-render --format text` 的格式分支。老静态 trace/SVG 任务继续保留，退役
@@ -225,7 +225,7 @@ frontend 生成，不属于 `lkm-render --format text` 的格式分支。老静�
 
 ## Animation v4 与确定帧
 
-animate 必须按 v10 view `events[].sequence` 重放并投影 `lkm.spec.signal-animation` version `4` 因果时刻。
+animate 必须按 v11 view `events[].sequence` 重放并投影 `lkm.spec.signal-animation` version `4` 因果时刻。
 `signal_sent` 只验证 Signal 已发送，不生成 moment；`signal_received` 生成 `<signal-id>:request`。
 completed/rejected/failed 的 `drives` 或同步根请求生成 `<signal-id>:feedback`，`emits` 生成
 `<signal-id>:settle`；truncated/stopped/response_stopped 生成 `<signal-id>:terminal`。moment kind 只取

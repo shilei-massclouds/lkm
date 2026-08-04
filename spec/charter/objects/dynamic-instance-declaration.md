@@ -1,4 +1,4 @@
-# 运行期实例声明
+# 运行期实例声明与快照物化
 
 `declare` 是 `.spec` 控制流在执行期建立 fresh Type instance 的正式机制。它解决同一 fork、exec
 或其它 action 声明点被多次执行时必须产生不同对象 identity 的问题；它不是静态 object 的简写，
@@ -11,7 +11,7 @@
 ```text
 drives {
     declare child of Task;
-    declare child_flow of UserTaskFlow;
+    declare child_flow of TaskFlow;
 
     child.Transition::Preset(...);
     child_flow.Transition::Preset(...);
@@ -63,6 +63,47 @@ indexed declaration 不建立词法 alias；canonical identity 就是完整 inde
 - object 若需要偏离 Type lifecycle，只能显式声明完整 override；禁止以 object 局部状态或迁移
   与 Type 状态图合并。运行期 `declare` 不具有 object declaration，因此不能建立实例专用 override。
 
+## `snapshot` 与 `materialize`
+
+`snapshot` 是一个具名、顺序执行、原子发布的 fresh aggregate 构造块；
+`materialize` 是该块内唯一可以为 fresh instance 指定出生 committed state
+的语句：
+
+```text
+drives {
+    snapshot fork_child {
+        materialize child of Task at State::Online;
+        materialize child_flow of TaskFlow at State::Online;
+        materialize child_runtime of UserAppRuntime at State::Online;
+        materialize child_application of ApplicationInstance;
+        child_ref.Action::Bind(task: child);
+        ForkSnapshot.Action::BindAggregate(...);
+    }
+}
+```
+
+- `snapshot name { ... }` 只允许出现在 transition/action 的 `drives` 中；块不得
+  嵌套。`materialize name of Type at State::Target;` 只允许作为 snapshot 的
+  直接顺序语句，块外使用必须拒绝。
+- 具有 lifecycle 的 Type 必须指定该 Type 有效的正式状态；stateless Type
+  必须省略 `at State`。`materialize` 不发送 `Preset/Setup/Enable`，不生成
+  lifecycle transition commit 或 Signal，也不更改普通 `declare` 从 `Base`
+  开始的语义。
+- 块内每个 materialization 都产生 fresh identity。后续 Action 可按源码顺序
+  建立 owner/parent/ref、generation、资源复制或共享关系与初始现场；
+  lifecycle Transition 不得在 snapshot 块内代替物化。
+- materialized state 的 invariant 只在完整 candidate 建立后评估，不得将
+  尚未绑定的中间候选当作已发布实例。应用块内更新后，所有受影响
+  instance 的 Type/state invariant 必须在同一 candidate snapshot 上成立。
+- 整个块只有一个 publish point。重复 alias、未知 Type/state、缺失绑定、
+  资源/PID/PTE/frame-ref 构造失败、Action 拒绝或 invariant 失败都必须丢弃
+  完整 candidate；不发布任何实例、引用、PID、PTE 或 frame ref，也不消耗
+  identity/generation occurrence。
+- snapshot alias 与 `declare`/`let`/参数共享词法 SSA namespace。alias 从各自
+  materialize 后对块内后续语句可见，全块成功后对所在 `drives` 的
+  后续语句可见；失败时一个 alias 都不泄漏。snapshot 块名在 owner process
+  内必须唯一，只用于稳定声明点与诊断，不是 runtime object。
+
 ## Instance 存活与重新定位
 
 alias 作用域结束不销毁 instance。只有该 instance 显式成功完成 `Disable/Cleanup` 等适用
@@ -98,6 +139,11 @@ Task 不得因 alias 重用或 Ref 误绑定而共享同一 Flow。
 object。derive/trace view 展示每次实际创建的 runtime instance 及其稳定 identity、独立 state 和
 后续 process 节点；多个 occurrence 不得折叠成一个 alias 节点。诊断可以附带源码文件和行号，
 但展示层不能用行号替代稳定 identity。
+
+snapshot declaration site 必须在静态 view 中显示 block 名、源码 ordinal 与每个
+`materialize` 的 alias/Type/target state；derive/trace 必须显示 candidate 开始、原子
+commit 或 rollback，并将 runtime instance 的 construction kind 明确标为
+`materialize`，不得伪装成 `declare` 或 lifecycle transition。
 
 ## 当前范围
 

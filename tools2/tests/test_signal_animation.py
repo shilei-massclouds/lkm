@@ -467,11 +467,11 @@ class SignalAnimationTests(unittest.TestCase):
             ("producer", "view", "producer", "tools", "view protocol mismatch"),
             *[
                 (f"model-v{version}", "model", "version", version, "model protocol mismatch")
-                for version in range(1, 10)
+                for version in range(1, 11)
             ],
             *[
                 (f"view-v{version}", "view", "version", version, "view protocol mismatch")
-                for version in range(1, 10)
+                for version in range(1, 11)
             ],
         ]
         for label, owner, field, value, message in cases:
@@ -878,7 +878,7 @@ class SignalAnimationTests(unittest.TestCase):
                 derivation["model_fingerprint"],
                 view["model_fingerprint"],
             },
-            {"sha256:39c7df6eb91a9acfa63953395336cd4c840a2c1e6646ef1b1268747e09ea1f3e"},
+            {"sha256:738c931757a9c60b06e1a249dcdb5cb18c54363fc53808961a96e6d3a652a682"},
         )
         animation = build_animation(model, view)
         self.assertEqual(animation["trace"]["total_signals"], 52)

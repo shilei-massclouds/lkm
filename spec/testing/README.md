@@ -41,7 +41,7 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
 `tools2.tests` 自动装载所有并列源码包。上述入口不得要求调用者组装 `PYTHONPATH`，并必须有
 清除外部 `PYTHONPATH` 后仍能导入 `pyveri` 及全部阶段包的回归测试。测试必须覆盖：
 
-- 每类 schema/version/producer 校验，含 version 10、拒绝 tools2 v1 至 v9、老工具/旧 snapshot 和老工具不被
+- 每类 schema/version/producer 校验，含 version 11、拒绝 tools2 v1 至 v10、老工具/旧 snapshot 和老工具不被
   tools2 产物误用的边界；
 - Transition/Action 调用规范化、命名 payload 绑定、受控值/系统引用类型错误和带 span unsupported；
 - self、向下、向上、同级、跨分支坐标，默认 `3/3`、整数、`all`、分支预算独立和 frontier truncation；
@@ -81,12 +81,12 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
 - until fixture 覆盖根发送前、同步 drives 发送前、emits 入队前、有序候选选择后、动态 receiver、已有
   FIFO、未提交祖先和重复目标；目标不得拥有 Signal ID、`signal_sent`、enqueue/receive/handler 事件，
   boundary snapshot 必须精确等于发送前稳定状态。
-- reached 且 obligation 为零返回 0并生成带 provenance 的 v9 snapshot；既有 completed response 保持 completed，未提交
+- reached 且 obligation 为零返回 0并生成带 provenance 的 v11 snapshot；既有 completed response 保持 completed，未提交
   ancestor 和未处理 FIFO 变为 stopped，summary 不产生 pending；failed/bounded/unreached 返回 1且不
   生成 snapshot。
 - 提交的 `tools2/scenarios/Kernel.Enable.snapshot.json` 必须与从仓库根运行
   `tools2/bin/pyveri -u Kernel.Enable --snapshot-out /tmp/kernel-enable-presend.snapshot.json` 得到的 canonical
-  bytes 逐字节一致，并验证 v9、稳定 model fingerprint、发送前 boundary provenance、关键状态、
+  bytes 逐字节一致，并验证 v11、稳定 model fingerprint、发送前 boundary provenance、关键状态、
   Linux RV64 boot spec 采纳及其 a0/a1/satp/物理 PMD 要求、kernel ELF/boot artifact 构造事实、精确 a0/a1/satp
   交接、ordered boot/DTB 和 BootTaskRef 事实。该边界必须有 `task_concurrency_closed()`，但尚未有
   `interrupt_concurrency_closed()`、`context_is(SystemExclusive)` 或旧的 firmware SIE 事实。
@@ -130,13 +130,13 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
 - 提交的 `tools2/scenarios/BootInitFlow.Setup.snapshot.json` 必须与从模型初态执行
   `tools2/bin/pyveri -u BootInitFlow.Setup --snapshot-out /tmp/boot-init-flow-setup-presend.snapshot.json`
   得到的 canonical bytes 逐字节一致，并从仓库根与其它 cwd 重建出相同结果。当前正式模型下其
-  SHA-256 固定为 `bd8f82a57de7fec4c9a90bc98a245e90180a65673ea8021ee382580b83a8f257`，model
-  fingerprint 固定为 `sha256:d68a339631ec34d17e403b5875a1d8b6a75723305bc77fd0c3fa7c1460b34af4`。
+  SHA-256 固定为 `db07eba83086dfe456274bd4f621c157af2dde53ca73411a5c50c9b83325c40d`，model
+  fingerprint 固定为 `sha256:738c931757a9c60b06e1a249dcdb5cb18c54363fc53808961a96e6d3a652a682`。
   `tools2/bin/pyveri -t BootInitFlow.Setup` 必须自动采用该第 3 组入口 scenario；显式 `-s` 仍优先，
   其它模型必须因 stale fingerprint 拒绝，缺失 canonical scenario 必须在 derive 前返回 2。
 - 提交的 `tools2/scenarios/Cpu0Scheduler.Schedule.snapshot.json` 必须与从模型初态执行
   `tools2/bin/pyveri -u Cpu0Scheduler.Schedule` 得到的 canonical bytes 逐字节一致；SHA-256 固定为
-  `f8b901553678c8c02265486a326fb7c0761084027804ab5574ff80353c72e02e`，model fingerprint 与上述
+  `fa899259368b51a152eef8ce26aa90b8ba68c7390ba1d08289af646d6bc351ae`，model fingerprint 与上述
   Setup scenario 相同。该 before-send 边界的真实 sender 必须是 `BootInitFlow`，delivery 为
   `yields`；边界处 BootInitFlow=Online、BootTask=OnCpu、Cpu0Scheduler=Online、
   Cpu1Scheduler..Cpu7Scheduler=Ready，且 8 个

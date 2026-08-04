@@ -22,6 +22,19 @@ def _snapshot_delta(before: dict[str, Any] | None, after: dict[str, Any] | None)
         old, new = before["references"].get(name), after["references"].get(name)
         if old != new:
             lines.append(f"reference {name}: {old} -> {new}")
+    before_instances = before.get("instances", {})
+    after_instances = after.get("instances", {})
+    for identity in sorted(set(after_instances) - set(before_instances)):
+        metadata = after_instances[identity]
+        construction = metadata.get("construction", "unknown")
+        declared_type = metadata.get("declared_type", "unknown")
+        state = metadata.get("materialized_state")
+        suffix = "" if state is None else f" at State::{state}"
+        lines.append(
+            f"instance + {identity}: {construction} {declared_type}{suffix}"
+        )
+    for identity in sorted(set(before_instances) - set(after_instances)):
+        lines.append(f"instance - {identity}")
     before_bindings = before.get("contextual_bindings", {})
     after_bindings = after.get("contextual_bindings", {})
     for kind in sorted(set(before_bindings) | set(after_bindings)):
@@ -102,6 +115,17 @@ def _render_compact(view: dict[str, Any]) -> str:
         if signal["outcome"] != "completed":
             line += f" !! {signal['outcome']}: {signal.get('reason')}"
         lines.append(line)
+
+    snapshots = [
+        event
+        for event in view.get("events", [])
+        if event.get("kind") in {"snapshot_committed", "snapshot_rolled_back"}
+    ]
+    if snapshots:
+        lines.append("snapshot materialization:")
+        for event in snapshots:
+            outcome = "commit" if event["kind"] == "snapshot_committed" else "rollback"
+            lines.append(f"  {outcome} {event['name']}")
 
     failure = view.get("failure")
     if failure is not None:
@@ -187,6 +211,23 @@ def _render_verbose(view: dict[str, Any]) -> str:
             else:
                 lines.append(
                     f"  #{event['sequence']} dequeue {event['signal_id']} remaining={event['remaining']}"
+                )
+    snapshots = [
+        event
+        for event in view["events"]
+        if event["kind"] in {"snapshot_committed", "snapshot_rolled_back"}
+    ]
+    if snapshots:
+        lines.append("snapshot materialization:")
+        for event in snapshots:
+            if event["kind"] == "snapshot_committed":
+                lines.append(
+                    f"  #{event['sequence']} commit {event['name']} "
+                    f"instances={len(event.get('identities', []))}"
+                )
+            else:
+                lines.append(
+                    f"  #{event['sequence']} rollback {event['name']}: {event.get('reason')}"
                 )
     if view["truncated_frontier"]:
         lines.append("truncated frontier:")

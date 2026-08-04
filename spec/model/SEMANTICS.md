@@ -370,6 +370,37 @@ Alias 规则：
 首版不新增循环、并发声明调度或通用垃圾回收语义；多 instance 来自同一 declaration site 在
 不同推导调用中的重复执行。
 
+## SEM-SNAPSHOT-001: Snapshot Materializes an Atomic Fresh Aggregate
+
+`snapshot block_name { ... }` 是 `drives` 内的具名顺序 statement block。块内
+`materialize alias of Type at State::Target;` 为 stateful Type 建立 fresh runtime
+instance 并指定出生 committed state；`materialize alias of StatelessType;` 为
+stateless Type 建立 fresh identity。
+
+- `materialize` 仅能出现在 snapshot 直接 body 中。stateful Type 缺少
+  target state、stateless Type 指定 state、未知/非正式 state、嵌套 snapshot 或
+  snapshot 内 lifecycle Transition 都是 model error。
+- materialization 不调用任何 lifecycle process，不创建 transition Signal/commit，
+  不经过 `Base`。该规则只适用于 `materialize`；普通 `declare` 继续在
+  `Base` 创建诊断实例，后续失败不获得 snapshot rollback。
+- derive 先复制当前 committed snapshot 为 candidate，在 candidate 中按源码顺序
+  分配 identity/generation、建立 Action effect 和 reference/resource 关系。所有
+  materialized Type invariant 与 target-state invariant 只在完整 candidate 上求值。
+- 完整 block 只有一个 commit event。任一语句、绑定、资源操作或 invariant
+  失败时，candidate 必须整体丢弃，committed snapshot、runtime system inventory、
+  identity/generation counters 与词法 bindings 全部恢复到块前值。不得留下
+  partial instance/ref/fact/PID/PTE/frame-ref。
+- alias 与 `declare`/`let`/参数使用同一 SSA namespace。块内按声明顺序可见；
+  块成功后一次性导出到所在 `drives` 后续语句，块失败不导出。
+- AST/model JSON 必须分别使用 `kind = "snapshot"`、`kind = "materialize"`
+  与 `kind = "declare"`。snapshot 记录 block name、owner process、source ordinal、
+  span 与有序 body；materialize 记录 alias、declared Type、可选 target state 与
+  span。runtime instance metadata 记录 `construction = "materialize"` 与 snapshot site；
+  snapshot protocol 必须保存这些 metadata，view/render/animation 不得从 state delta 猜测构造类型。
+
+首片只把该能力用于 fork child aggregate，不把 CPU、IRQ 或其它现有动态
+declaration 迁移到 snapshot。
+
 ## SEM-TRANSITION-EMITS-001: Completion Events Are Post-Commit Events
 
 状态机是惰性的；外部事件或迁移完成事件触发 transition，transition 自身不得在未被
@@ -428,7 +459,7 @@ on Transition::Preset -> State::Prepared {
 ## SEM-SIGNAL-YIELDS-001: Yielded Delivery Suspends a Serializable Model Continuation
 
 `yields` 是第三种 Signal delivery，可投递任意静态可解析且当前可接受的 Signal；receiver、Signal 名称
-和 handler kind 都不是其语义成立的特判条件。v10 首片只允许在
+和 handler kind 都不是其语义成立的特判条件。v11 首片只允许在
 `state_effect: StateEffect::None` 的 Action handler 中使用，每个 handler occurrence 最多执行一个
 yield call。
 
@@ -491,7 +522,7 @@ handler 不相互发送 Signal。后续运行启动固定为
 
 本节的完整 Signal envelope 语义只约束 `tools2/`；受支持的旧 `tools/` 路径必须用自身既有协议解析、
 建模、推导和展示同一 external 默认编排与显式单 Signal 边界，但不导入 tools2 实现。
-`tools2` 的 AST/Model/Derive/Check/View/Snapshot `lkm.spec.*` 协议统一使用 version `10` 并带
+`tools2` 的 AST/Model/Derive/Check/View/Snapshot `lkm.spec.*` 协议统一使用 version `11` 并带
 `producer: "tools2"`；动画协议使用 version `4`。每个阶段必须严格拒绝 producer/version 不匹配的
 输入，尤其不得兼容读取 v9、老工具 JSON 或旧 snapshot。
 

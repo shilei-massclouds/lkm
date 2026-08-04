@@ -65,7 +65,7 @@ def check_derivation(derivation: dict[str, Any]) -> dict[str, Any]:
     if unresolved:
         reasons.append(f"unresolved_obligations: {len(unresolved)}")
     return {
-        "policy": "tools2-signal-v10-yields-boundary-obligations",
+        "policy": "tools2-signal-v11-snapshot-yields-boundary-obligations",
         "verdict": verdict,
         "allowed": allowed,
         "exit_code": 0 if allowed else 1,

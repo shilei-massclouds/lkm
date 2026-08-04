@@ -1697,7 +1697,7 @@ class SignalPipelineTests(_ShortcutTestSupport, unittest.TestCase):
             data = read_json(ast)
             self.assertEqual((data["schema"], data["version"], data["producer"]), (AST_SCHEMA, AST_VERSION, PRODUCER))
 
-            for old_version in range(1, 10):
+            for old_version in range(1, 11):
                 old = root / f"old-v{old_version}.ast.json"
                 old.write_text(
                     json.dumps(
@@ -1714,7 +1714,7 @@ class SignalPipelineTests(_ShortcutTestSupport, unittest.TestCase):
                 stderr = io.StringIO()
                 with contextlib.redirect_stderr(stderr):
                     self.assertEqual(model_main([str(old), "-o", str(root / "no.json")]), 2)
-                self.assertIn("version=10", stderr.getvalue())
+                self.assertIn("version=11", stderr.getvalue())
 
                 old_snapshot = root / f"old-v{old_version}.snapshot.json"
                 old_snapshot.write_text(
@@ -2009,7 +2009,7 @@ class SignalPipelineTests(_ShortcutTestSupport, unittest.TestCase):
             self.assertEqual(len(modeled["model"]["boundary_inventory"]), 1)
             self.assertTrue(any("duplicate boundary id" in item["message"] for item in modeled["diagnostics"]))
 
-    def test_obligation_blocks_snapshot_create_or_overwrite_and_zero_allows_v10(self) -> None:
+    def test_obligation_blocks_snapshot_create_or_overwrite_and_zero_allows_v11(self) -> None:
         template = """
             system Root {{
                 initial_state: State::Base;
@@ -2073,7 +2073,7 @@ class SignalPipelineTests(_ShortcutTestSupport, unittest.TestCase):
                 )
             saved = read_json(allowed_snapshot)
             self.assertEqual(saved["version"], SNAPSHOT_VERSION)
-            self.assertEqual(saved["version"], 10)
+            self.assertEqual(saved["version"], 11)
             self.assertTrue(read_json(root / "allowed-work" / "check.json")["allowed"])
 
     def test_every_tools2_consumer_rejects_wrong_producer(self) -> None:
@@ -2098,7 +2098,7 @@ class SignalPipelineTests(_ShortcutTestSupport, unittest.TestCase):
                 self.assertEqual(exit_code, 2)
                 self.assertIn("producer='tools2'", stderr.getvalue())
 
-    def test_every_tools2_consumer_rejects_pre_v10_protocols(self) -> None:
+    def test_every_tools2_consumer_rejects_pre_v11_protocols(self) -> None:
         cases = [
             (model_main, AST_SCHEMA, []),
             (derive_main, MODEL_SCHEMA, ["--signal", "Root.Go"]),
@@ -2108,7 +2108,7 @@ class SignalPipelineTests(_ShortcutTestSupport, unittest.TestCase):
         ]
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            for old_version in range(1, 10):
+            for old_version in range(1, 11):
                 for index, (entry, schema, extra) in enumerate(cases):
                     source = root / f"input-v{old_version}-{index}.json"
                     source.write_text(
@@ -2123,7 +2123,7 @@ class SignalPipelineTests(_ShortcutTestSupport, unittest.TestCase):
                             [str(source), *extra, "-o", str(root / f"out-v{old_version}-{index}")]
                         )
                     self.assertEqual(exit_code, 2)
-                    self.assertIn("version=10", stderr.getvalue())
+                    self.assertIn("version=11", stderr.getvalue())
 
     def test_include_is_resolved_and_retains_child_source_span(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2344,7 +2344,7 @@ class SignalPipelineTests(_ShortcutTestSupport, unittest.TestCase):
         self.assertNotIn("pending", {item["outcome"] for item in derivation["signals"]})
         self.assertIn("!! rejected: condition_not_satisfied", text)
 
-    def test_lossy_signal_syntax_is_rejected_by_v10_model(self) -> None:
+    def test_lossy_signal_syntax_is_rejected_by_v11_model(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             spec = root / "input.spec"
@@ -2813,6 +2813,236 @@ class SignalPipelineTests(_ShortcutTestSupport, unittest.TestCase):
             resumed_data = read_json(resumed)
             self.assertEqual(resumed_data["verdict"], "complete")
             self.assertEqual(resumed_data["signals"][0]["target"], "CpuGroup.cpus[0]")
+
+    def test_snapshot_materializes_atomic_state_without_lifecycle_signals(self) -> None:
+        source = """
+            type Peer { }
+            type Stateful {
+                initial_state: State::Base;
+                associations { peer: Peer; }
+                processes {
+                    Action::Bind(peer: Peer) {
+                        state_effect: StateEffect::None;
+                        ensures { snapshot_item_ready(self, peer); }
+                        updates { self.peer = peer; }
+                    }
+                }
+                state State::Base { }
+                state State::Online {
+                    invariant { snapshot_item_ready(self, self.peer); }
+                }
+            }
+            type HarnessType {
+                initial_state: State::Base;
+                state State::Base {
+                    actions {
+                        on Action::Build {
+                            drives {
+                                snapshot fork_child {
+                                    materialize peer of Peer;
+                                    materialize child of Stateful at State::Online;
+                                    child.Action::Bind(peer: peer);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            object Harness: HarnessType { }
+            predicate snapshot_item_ready<T: Stateful, P: Peer>(item: T, peer: P) -> bool;
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            spec = root / "snapshot.spec"
+            ast = root / "ast.json"
+            model = root / "model.json"
+            spec.write_text(textwrap.dedent(source), encoding="utf-8")
+            self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+            self.assertEqual(model_main([str(ast), "-o", str(model)]), 0)
+            ast_data = read_json(ast)
+            harness = next(
+                item
+                for item in ast_data["document"]["types"]
+                if item["name"] == "HarnessType"
+            )
+            drives = harness["states"][0]["handlers"][0]["members"][0]
+            snapshot = drives["entries"][0]
+            self.assertEqual(snapshot["kind"], "snapshot")
+            self.assertEqual(snapshot["name"], "fork_child")
+            self.assertEqual(
+                [entry["kind"] for entry in snapshot["entries"]],
+                ["materialize", "materialize", "statement"],
+            )
+            self.assertEqual(snapshot["entries"][1]["target_state"], "Online")
+
+            model_data = read_json(model)
+            model_harness = model_data["model"]["systems"]["Harness"]
+            model_snapshot = model_harness["handlers_by_name"]["Build"][0]["body"][0][
+                "entries"
+            ][0]
+            self.assertEqual(model_snapshot["kind"], "snapshot")
+            self.assertEqual(
+                [entry["kind"] for entry in model_snapshot["entries"]],
+                ["materialize", "materialize", "call"],
+            )
+
+        derivation, checked, rendered = self.run_source(
+            source, "Harness.Build", max_depth="all", max_breadth="all"
+        )
+        self.assertTrue(checked["allowed"], derivation.get("failure"))
+        committed = next(
+            event
+            for event in derivation["events"]
+            if event["kind"] == "snapshot_committed"
+        )
+        self.assertEqual(committed["name"], "fork_child")
+        self.assertEqual(len(committed["identities"]), 2)
+        instances = derivation["last_stable_snapshot"]["instances"]
+        by_alias = {metadata.get("alias"): identity for identity, metadata in instances.items()}
+        peer = by_alias["peer"]
+        child = by_alias["child"]
+        self.assertNotIn(peer, derivation["last_stable_snapshot"]["states"])
+        self.assertEqual(derivation["last_stable_snapshot"]["states"][child], "Online")
+        self.assertEqual(instances[child]["construction"], "materialize")
+        self.assertEqual(instances[child]["materialized_state"], "Online")
+        self.assertEqual(instances[child]["snapshot_site"]["name"], "fork_child")
+        self.assertEqual(
+            [signal["handler"]["kind"] for signal in derivation["signals"]],
+            ["Action", "Action"],
+        )
+        self.assertFalse(
+            any(signal["handler"]["kind"] == "Transition" for signal in derivation["signals"])
+        )
+        self.assertIn("snapshot materialization:", rendered)
+
+        view = build_view(derivation)
+        animation_model = deepcopy(model_data)
+        animation_model["source"] = derivation["source"]
+        animation_model["model_fingerprint"] = derivation["model_fingerprint"]
+        animation = build_animation(
+            animation_model,
+            {
+                **view,
+                "schema": VIEW_SCHEMA,
+                "version": VIEW_VERSION,
+                "producer": PRODUCER,
+                "source": derivation["source"],
+            },
+        )
+        self.assertTrue(animation["frames"])
+
+    def test_snapshot_rejections_leave_no_partial_publication(self) -> None:
+        prefix = """
+            type Peer { }
+            type Stateful {
+                initial_state: State::Base;
+                associations { peer: Peer; }
+                processes {
+                    Action::Reject(peer: Peer) {
+                        state_effect: StateEffect::None;
+                        depends_on { snapshot_accepts(peer); }
+                        updates { self.peer = peer; }
+                    }
+                }
+                state State::Base { }
+                state State::Online { }
+            }
+            type HarnessType {
+                initial_state: State::Base;
+                state State::Base {
+                    actions { on Action::Build { BODY } }
+                }
+            }
+            object Harness: HarnessType { }
+            predicate snapshot_accepts<P: Peer>(peer: P) -> bool;
+        """
+        body = """
+            drives {
+                snapshot fork_child {
+                    materialize peer of Peer;
+                    materialize child of Stateful at State::Online;
+                    child.Action::Reject(peer: peer);
+                }
+            }
+        """
+        derivation, checked, _ = self.run_source(
+            prefix.replace("BODY", body),
+            "Harness.Build",
+            max_depth="all",
+            max_breadth="all",
+        )
+        self.assertFalse(checked["allowed"])
+        self.assertEqual(derivation["last_stable_snapshot"]["instances"], {})
+        self.assertEqual(derivation["last_stable_snapshot"]["states"], {"Harness": "Base"})
+        rolled_back = [
+            event
+            for event in derivation["events"]
+            if event["kind"] == "snapshot_rolled_back"
+        ]
+        self.assertEqual(len(rolled_back), 1)
+        self.assertIn("strict child", rolled_back[0]["reason"])
+
+        invalid_bodies = {
+            "outside": "drives { materialize child of Stateful at State::Online; }",
+            "missing-state": "drives { snapshot bad { materialize child of Stateful; } }",
+            "stateless-state": "drives { snapshot bad { materialize peer of Peer at State::Online; } }",
+            "unknown-state": "drives { snapshot bad { materialize child of Stateful at State::Missing; } }",
+            "duplicate": (
+                "drives { snapshot bad { materialize peer of Peer; "
+                "materialize peer of Peer; } }"
+            ),
+            "transition": (
+                "drives { snapshot bad { materialize child of Stateful at State::Online; "
+                "child.Transition::Preset; } }"
+            ),
+            "nested": (
+                "drives { snapshot outer { snapshot inner { materialize peer of Peer; } } }"
+            ),
+        }
+        for name, invalid_body in invalid_bodies.items():
+            with self.subTest(name=name):
+                invalid, invalid_check, rendered = self.run_source(
+                    prefix.replace("BODY", invalid_body), "Harness.Build"
+                )
+                self.assertFalse(invalid_check["allowed"])
+                self.assertEqual(invalid["last_stable_snapshot"]["instances"], {})
+                self.assertIn("model diagnostics", rendered)
+
+    def test_ordinary_declare_failure_keeps_diagnostic_instance(self) -> None:
+        source = """
+            type Child {
+                initial_state: State::Base;
+                processes {
+                    Action::Reject {
+                        state_effect: StateEffect::None;
+                        depends_on { declaration_accepts(self); }
+                    }
+                }
+                state State::Base { }
+            }
+            type HarnessType {
+                initial_state: State::Base;
+                state State::Base {
+                    actions {
+                        on Action::Build {
+                            drives {
+                                declare child of Child;
+                                child.Action::Reject;
+                            }
+                        }
+                    }
+                }
+            }
+            object Harness: HarnessType { }
+            predicate declaration_accepts<C: Child>(child: C) -> bool;
+        """
+        derivation, checked, _ = self.run_source(source, "Harness.Build")
+        self.assertFalse(checked["allowed"])
+        instances = derivation["last_stable_snapshot"]["instances"]
+        self.assertEqual(len(instances), 1)
+        metadata = next(iter(instances.values()))
+        self.assertEqual(metadata["construction"], "declare")
+        self.assertEqual(metadata["alias"], "child")
 
     def test_dynamic_occurrence_generation_parent_and_stale_reference_are_enforced(self) -> None:
         source = """
@@ -4734,7 +4964,7 @@ class SignalPipelineTests(_ShortcutTestSupport, unittest.TestCase):
             unreached_check = read_json(root / "work-2" / "check.json")
             self.assertIn("until_signal_not_reached", unreached_check["reasons"][0])
 
-    def test_reached_snapshot_is_v10_with_boundary_provenance_and_resumes(self) -> None:
+    def test_reached_snapshot_is_v11_with_boundary_provenance_and_resumes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             work = root / "work"
@@ -6931,14 +7161,14 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
             self.assertEqual(snapshot.read_bytes(), BOOT_INIT_SETUP_SCENARIO.read_bytes())
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "4892d5bad262dfa0b18e5499a0428fb7934ce4aa05b07afd58b4b09804c8922c",
+                "db07eba83086dfe456274bd4f621c157af2dde53ca73411a5c50c9b83325c40d",
             )
             self.assertEqual(
                 {
                     derivation["model_fingerprint"], model["model_fingerprint"],
                     view["model_fingerprint"], saved["model_fingerprint"],
                 },
-                {"sha256:39c7df6eb91a9acfa63953395336cd4c840a2c1e6646ef1b1268747e09ea1f3e"},
+                {"sha256:738c931757a9c60b06e1a249dcdb5cb18c54363fc53808961a96e6d3a652a682"},
             )
             with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
                 compact_text = render_text(view)
@@ -7277,7 +7507,7 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
             )
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "e725a8a2721af311cd73b43d71f15f621438bef6c3f3e46d58c2ecc6f6cf0785",
+                "fa899259368b51a152eef8ce26aa90b8ba68c7390ba1d08289af646d6bc351ae",
             )
             model = self.prepared_model_document
             assert view is not None
@@ -7289,7 +7519,7 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
                     view["model_fingerprint"],
                     saved["model_fingerprint"],
                 },
-                {"sha256:39c7df6eb91a9acfa63953395336cd4c840a2c1e6646ef1b1268747e09ea1f3e"},
+                {"sha256:738c931757a9c60b06e1a249dcdb5cb18c54363fc53808961a96e6d3a652a682"},
             )
 
     def test_main_model_all_cpu_schedulers_expose_ap_mailbox_ipi_idle_protocol(self) -> None:

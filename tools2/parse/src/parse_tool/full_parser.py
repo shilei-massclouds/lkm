@@ -353,12 +353,87 @@ def _entries(body: str, *, path: str, start_line: int) -> list[dict[str, Any]]:
     return result
 
 
+def _executable_entry(segment: Segment, *, source_ordinal: int) -> dict[str, Any]:
+    raw = segment.text.strip()
+    block = _BLOCK_RE.match(raw)
+    if block is not None:
+        kind = block.group(1)
+        if kind != "snapshot":
+            return {
+                "kind": "invalid_block",
+                "text": " ".join(raw.split()),
+                "source_ordinal": source_ordinal,
+                "span": segment.span(),
+            }
+        name = block.group("header").strip()
+        body, body_line, _header = _block_body(segment)
+        return {
+            "kind": "snapshot",
+            "name": name,
+            "source_ordinal": source_ordinal,
+            "entries": [
+                _executable_entry(child, source_ordinal=index)
+                for index, child in enumerate(
+                    _split_members(body, path=segment.path, start_line=body_line), start=1
+                )
+            ],
+            "text": " ".join(raw.split()),
+            "span": segment.span(),
+        }
+
+    text = raw[:-1].strip() if raw.endswith(";") else raw
+    declaration = re.fullmatch(r"declare\s+([a-z][A-Za-z0-9_]*)\s+of\s+(.+)", text, re.S)
+    if declaration is not None:
+        return {
+            "kind": "declare",
+            "alias": declaration.group(1),
+            "declared_type": declaration.group(2).strip(),
+            "source_ordinal": source_ordinal,
+            "text": " ".join(text.split()),
+            "span": segment.span(),
+        }
+    materialization = re.fullmatch(
+        r"materialize\s+([a-z][A-Za-z0-9_]*)\s+of\s+(.+?)"
+        r"(?:\s+at\s+State::([A-Za-z_][A-Za-z0-9_]*))?",
+        text,
+        re.S,
+    )
+    if materialization is not None:
+        return {
+            "kind": "materialize",
+            "alias": materialization.group(1),
+            "declared_type": materialization.group(2).strip(),
+            "target_state": materialization.group(3),
+            "source_ordinal": source_ordinal,
+            "text": " ".join(text.split()),
+            "span": segment.span(),
+        }
+    return {
+        "kind": "statement",
+        "source_ordinal": source_ordinal,
+        "text": " ".join(text.split()),
+        "span": segment.span(),
+    }
+
+
+def _executable_entries(body: str, *, path: str, start_line: int) -> list[dict[str, Any]]:
+    return [
+        _executable_entry(member, source_ordinal=index)
+        for index, member in enumerate(
+            _split_members(body, path=path, start_line=start_line), start=1
+        )
+    ]
+
+
 def _plain_block(segment: Segment, kind: str | None = None) -> dict[str, Any]:
     body, body_line, header = _block_body(segment)
+    block_kind = kind or (_TOP_RE.match(segment.text).group(1))
     return {
-        "kind": kind or (_TOP_RE.match(segment.text).group(1)),
+        "kind": block_kind,
         "header": header,
-        "entries": _entries(body, path=segment.path, start_line=body_line),
+        "entries": _executable_entries(body, path=segment.path, start_line=body_line)
+        if block_kind == "drives"
+        else _entries(body, path=segment.path, start_line=body_line),
         "span": segment.span(),
     }
 
