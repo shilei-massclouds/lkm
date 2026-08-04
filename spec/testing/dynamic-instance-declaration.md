@@ -61,9 +61,10 @@ model semantics.
 
 ## Task and Flow scenarios
 
-- Two fork executions yield different Task, TaskRef, TaskFlow, and
-  UserAppRuntime identities with independent occurrence/lifecycle state and Ref
-  targets.
+- Two fork executions yield different Task, TaskRef, TaskFlow, FlowRef,
+  UserAppRuntime, and ApplicationInstance identities with independent
+  occurrence/lifecycle state and Ref targets. Each successful child is born as
+  `Online/Online/Online`; no lifecycle transition signal initializes it.
 - Two exec executions on one Task preserve Task, TaskFlow, and UserAppRuntime
   identity while creating distinct internal ApplicationInstance generations.
 - A Flow cannot be owned by two Tasks, and Task terminal cleanup cannot complete

@@ -15,7 +15,7 @@ The static mappings are:
 - KthreaddTask -> KthreaddFlow;
 - each AP idle Task -> its keyed ApIdleFlow;
 - each dynamic kernel Task -> a fresh KernelTaskFlow;
-- each dynamic user Task -> a fresh UserTaskFlow.
+- each dynamic user Task -> a fresh ordinary TaskFlow.
 
 BootInitFlow directly owns idle setup, scheduling return, idle entry and idle-loop actions.
 
@@ -25,8 +25,10 @@ coordinate and keeps the same identity across identity yield, block/wake and con
 
 ## Lifecycle and execution
 
-KernelInitFlow, KthreaddFlow and UserTaskFlow are moved to `Online` before their owner Task is published
-`Online`. Ordinary TaskFlow state remains `Online` across every task switch. Terminal teardown uses
+KernelInitFlow, KthreaddFlow and dynamic ordinary TaskFlows are `Online` before their owner Task is published
+`Online`. From-scratch construction uses the lifecycle transitions; fork construction uses the checked aggregate
+snapshot constructor and directly commits `Task/TaskFlow/UserAppRuntime = Online/Online/Online` without invoking
+Preset, Setup, or Enable. Ordinary TaskFlow state remains `Online` across every task switch. Terminal teardown uses
 `Online -> Offline -> Destroyed`.
 
 `TaskFlow::enter_contextual` accepts only the private proof produced by its owner Task's Dispatch. It
@@ -55,3 +57,8 @@ the containing Task aggregate. The runtime owns a mutable reference to
 the current `ApplicationInstance`. Exec commits a fresh ApplicationInstance into that reference without
 changing Task, Flow, Runtime, TaskRef or FlowRef identity. Fork creates all three fresh Task/Flow/Runtime
 occurrences.
+
+The Runtime is passive: `Online` covers executing, runnable, blocked, and temporarily trap-overlaid
+continuations. It is not pushed onto the effective-flow stack and has no Running, Paused, or Trapped storage.
+Scheduling restores the Task context and calls only Dispatch and TaskFlow Enter; it never calls a Runtime Enter.
+Terminal code explicitly quiesces and cleans Runtime before Flow, and Flow before Task.

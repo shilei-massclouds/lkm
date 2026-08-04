@@ -939,6 +939,99 @@ impl Task {
         Ok(())
     }
 
+    /// Build the Task and its one embedded TaskFlow as an unpublished fork
+    /// snapshot candidate.  The caller publishes the completed aggregate in
+    /// one registry commit; no Base -> Online lifecycle events are replayed.
+    pub(crate) fn materialize_fork_child_snapshot(
+        &mut self,
+        pid: usize,
+        cpu_ref: super::cpu::CpuRef,
+        stack_base: usize,
+        stack_top: usize,
+    ) -> EventResult {
+        if pid == 0
+            || self.lifecycle.state() != State::Base
+            || !self.task_ref.is_valid()
+            || self.on_cpu
+            || self.execution_authority != TaskExecutionAuthority::None
+            || self.running
+            || self.runqueue_published
+            || self.thread_context.breakpoint_state() != TaskBreakpointState::Invalid
+            || self.root_trap_flow_ref().is_valid()
+            || stack_base == 0
+            || stack_top <= stack_base
+        {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Online,
+            );
+        }
+
+        self.flow
+            .materialize_fork_child_online(self.task_ref, cpu_ref)?;
+        self.pid = pid;
+        self.entry = TaskEntry::UserChild;
+        self.kind = TaskKind::UserModeThread;
+        self.thread_context.arch_mut().init_with_dummy();
+        if !self.set_kernel_stack_bounds(stack_base, stack_top) {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                State::Base,
+                State::Base,
+                State::Online,
+            );
+        }
+        self.thread_context.prepare();
+        self.lifecycle = Lifecycle::new(State::Online);
+        self.running = true;
+        self.runqueue_published = true;
+        self.thread_context.publish(self.flow_ref());
+
+        if !self.fork_snapshot_candidate_valid() {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Online,
+                State::Online,
+            );
+        }
+        Ok(())
+    }
+
+    pub(crate) const fn fork_snapshot_has_no_lifecycle_replay(&self) -> bool {
+        !self.lifecycle.event_seen(LifecycleEvent::Preset)
+            && !self.lifecycle.event_seen(LifecycleEvent::Setup)
+            && !self.lifecycle.event_seen(LifecycleEvent::Enable)
+            && self.flow.fork_snapshot_has_no_lifecycle_replay()
+    }
+
+    pub(crate) fn fork_snapshot_candidate_valid(&self) -> bool {
+        self.lifecycle.state() == State::Online
+            && !self.on_cpu
+            && self.execution_authority == TaskExecutionAuthority::None
+            && self.pid != 0
+            && matches!(self.entry, TaskEntry::UserChild)
+            && matches!(self.kind, TaskKind::UserModeThread)
+            && self.running
+            && self.runqueue_published
+            && self.flow.state() == State::Online
+            && self.flow.flow_ref().is_valid()
+            && self.flow.owner().same_identity(self.task_ref)
+            && matches!(
+                self.thread_context.breakpoint_state(),
+                TaskBreakpointState::Valid
+            )
+            && self
+                .thread_context
+                .flow_ref()
+                .same_identity(self.flow.flow_ref())
+            && self.thread_context.context_epoch() != 0
+            && !self.root_trap_flow_ref().is_valid()
+            && self.fork_snapshot_has_no_lifecycle_replay()
+    }
+
     pub fn preset(&mut self, checkpoint: Checkpoint) -> EventResult {
         if !self.task_ref.is_valid() {
             return failed_condition(

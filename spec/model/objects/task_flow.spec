@@ -1,10 +1,104 @@
 /* Lifetime TaskFlow, contextual dispatch, and Flow-owned user runtime. */
 
+type TaskFlowRef { }
+
 type TaskFlow: PhaseObject {
+    initial_context: Action::RunUserContinuation;
+    initial_state: State::Base;
     parent: Task;
-    associations { mutable cpu_ref: CpuRef; }
+    associations {
+        mutable cpu_ref: CpuRef;
+        flow_ref: TaskFlowRef;
+    }
+
+    state State::Base {
+        transitions {
+            on Transition::Preset -> State::Prepared {
+                depends_on {
+                    self.parent.state == State::Ready;
+                    task_fixed_flow_is(self.parent, self);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                depends_on { self.parent.state == State::Ready; }
+            }
+        }
+    }
+
+    state State::Ready {
+        transitions {
+            on Transition::Enable -> State::Online {
+                depends_on {
+                    self.parent.state == State::Ready;
+                    task_initial_context_complete(self.parent, self);
+                }
+                ensures { task_flow_published_with_task(self, self.parent); }
+            }
+        }
+    }
+
+    state State::Online {
+        invariant {
+            task_fixed_flow_is(self.parent, self);
+            task_flow_owner_is(self, self.parent);
+            task_flow_parent_is(self, self.parent);
+            task_flow_owner_exclusive(self);
+            task_flow_ref_generation_valid(self);
+        }
+        transitions {
+            on Transition::Disable -> State::Offline {
+                depends_on {
+                    task_flow_terminal_runtime_quiesced(self);
+                    task_flow_no_pending_yield(self);
+                }
+            }
+        }
+    }
+
+    state State::Offline {
+        transitions {
+            on Transition::Cleanup -> State::Destroyed {
+                depends_on {
+                    task_flow_terminal_runtime_quiesced(self);
+                    task_flow_no_pending_yield(self);
+                }
+            }
+        }
+    }
+    state State::Destroyed { }
 
     processes {
+        Action::BindOwner(owner_task: Task, flow_ref: TaskFlowRef) {
+            state_effect: StateEffect::None;
+            structural_binding: true;
+            ensures {
+                task_fixed_flow_is(owner_task, self);
+                task_flow_owner_is(self, owner_task);
+                task_flow_parent_is(self, owner_task);
+                task_flow_owner_exclusive(self);
+                task_flow_ref_generation_valid(self);
+                task_flow_ref_targets(flow_ref, self);
+            }
+            updates {
+                owner_task.flow = self;
+                self.flow_ref = flow_ref;
+            }
+        }
+
+        Action::RunUserContinuation {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Online;
+                self.parent.state == State::OnCpu;
+            }
+            ensures { task_flow_user_continuation_coordinate_resumed(self); }
+        }
+
         Action::BindTask(task_ref: TaskRef, dispatch_flow: TaskFlow) {
             state_effect: StateEffect::None;
             depends_on {
@@ -101,6 +195,7 @@ predicate task_flow_owner_is<F: TaskFlow, T: Task>(flow: F, task: T) -> bool;
 predicate task_flow_parent_is<F: TaskFlow, T: Task>(flow: F, task: T) -> bool;
 predicate task_flow_owner_exclusive<F: TaskFlow>(flow: F) -> bool;
 predicate task_flow_ref_generation_valid<F: TaskFlow>(flow: F) -> bool;
+predicate task_flow_ref_targets<R: TaskFlowRef, F: TaskFlow>(flow_ref: R, flow: F) -> bool;
 predicate task_flow_cpu_ref_is<F: TaskFlow, R: CpuRef>(flow: F, cpu_ref: R) -> bool;
 predicate task_flow_cpu_ref_write_boundary_valid<F: TaskFlow, R: CpuRef>(flow: F, cpu_ref: R) -> bool;
 predicate task_flow_cpu_ref_write_at_entry_or_scheduler_commit<F: TaskFlow>(flow: F) -> bool;
@@ -118,6 +213,7 @@ predicate task_flow_enter_does_not_select_machine_coordinate<F: TaskFlow>(flow: 
 predicate task_flow_published_with_task<F: TaskFlow, T: Task>(flow: F, task: T) -> bool;
 predicate task_flow_terminal_runtime_quiesced<F: TaskFlow>(flow: F) -> bool;
 predicate task_flow_no_pending_yield<F: TaskFlow>(flow: F) -> bool;
+predicate task_flow_user_continuation_coordinate_resumed<F: TaskFlow>(flow: F) -> bool;
 
 predicate current_task_bind_scheduler_commit_boundary_valid<F: TaskFlow, R: TaskRef, D: TaskFlow>(flow: F, task_ref: R, dispatch_flow: D) -> bool;
 predicate scheduler_preflight_dispatch_flow_is<R: TaskRef, F: TaskFlow>(task_ref: R, flow: F) -> bool;
@@ -138,16 +234,75 @@ predicate boot_task_stack_current_binding_refreshed_for_active_controller<C, T: 
 type ApplicationInstance: ResourceObject { }
 
 type UserAppRuntime: ResourceObject {
+    initial_state: State::Base;
+    parent: TaskFlow;
     associations { mutable application: ApplicationInstance; }
+
+    state State::Base {
+        transitions {
+            on Transition::Preset -> State::Prepared {
+                emits { Transition::Setup; }
+            }
+        }
+    }
+    state State::Prepared {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                emits { Transition::Enable; }
+            }
+        }
+    }
+    state State::Ready {
+        transitions {
+            on Transition::Enable -> State::Online {
+                ensures {
+                    user_app_runtime_owned_by_flow(self, self.parent);
+                    user_app_runtime_unique_for_flow(self, self.parent);
+                    user_app_runtime_not_shared(self);
+                    user_app_runtime_application_continuation_online(self, self.application);
+                    user_app_runtime_passive_lifecycle(self);
+                    application_instance_owned_by_runtime(self.application, self);
+                }
+            }
+        }
+    }
+    state State::Online {
+        invariant {
+            user_app_runtime_owned_by_flow(self, self.parent);
+            user_app_runtime_unique_for_flow(self, self.parent);
+            user_app_runtime_not_shared(self);
+            user_app_runtime_application_continuation_online(self, self.application);
+            user_app_runtime_passive_lifecycle(self);
+        }
+        transitions {
+            on Transition::Disable -> State::Offline {
+                depends_on { user_app_runtime_terminal_quiesced(self); }
+            }
+        }
+    }
+    state State::Offline {
+        transitions {
+            on Transition::Cleanup -> State::Destroyed {
+                depends_on { user_app_runtime_terminal_quiesced(self); }
+            }
+        }
+    }
+    state State::Destroyed { }
+
     processes {
-        Action::Bind(flow: TaskFlow) {
+        Action::Bind(flow: TaskFlow, application: ApplicationInstance) {
             state_effect: StateEffect::None;
-            depends_on { self.state == State::Base; }
+            structural_binding: true;
+            depends_on { application_instance_fresh(application); }
             ensures {
                 user_app_runtime_owned_by_flow(self, flow);
                 user_app_runtime_unique_for_flow(self, flow);
                 user_app_runtime_not_shared(self);
+                user_app_runtime_application_continuation_online(self, application);
+                user_app_runtime_passive_lifecycle(self);
+                application_instance_owned_by_runtime(application, self);
             }
+            updates { self.application = application; }
         }
 
         Action::ReplaceApplication(next: ApplicationInstance) {
@@ -175,113 +330,14 @@ predicate user_app_runtime_exec_committed<R: UserAppRuntime, A: ApplicationInsta
 predicate user_app_runtime_owned_by_flow<R: UserAppRuntime, F: TaskFlow>(runtime: R, flow: F) -> bool;
 predicate user_app_runtime_unique_for_flow<R: UserAppRuntime, F: TaskFlow>(runtime: R, flow: F) -> bool;
 predicate user_app_runtime_not_shared<R: UserAppRuntime>(runtime: R) -> bool;
-
-type UserTaskFlow: TaskFlow {
-    lifecycle_override: true;
-    initial_context: Action::EnterPreparedUserContext;
-    owned { runtime: UserAppRuntime; }
-    processes {
-        Action::EnterPreparedUserContext {
-            state_effect: StateEffect::None;
-            depends_on {
-                self.state == State::Online;
-                self.parent.state == State::OnCpu;
-            }
-            ensures { user_task_flow_prepared_user_context_entered(self); }
-        }
-
-        Action::Bind(owner_task: Task, runtime: UserAppRuntime) {
-            state_effect: StateEffect::None;
-            depends_on {
-                self.state == State::Base;
-                owner_task.state == State::Base;
-            }
-            ensures {
-                task_fixed_flow_is(owner_task, self);
-                task_flow_owner_is(self, owner_task);
-                task_flow_parent_is(self, owner_task);
-                task_flow_owner_exclusive(self);
-                user_app_runtime_owned_by_flow(runtime, self);
-                user_app_runtime_unique_for_flow(runtime, self);
-            }
-        }
-    }
-
-    lifecycle {
-        Transition::Preset {
-            state_effect: StateEffect::Always;
-            depends_on {
-                self.state == State::Base;
-                self.parent.state == State::Ready;
-                task_fixed_flow_is(self.parent, self);
-            }
-        }
-
-        Transition::Setup {
-            state_effect: StateEffect::Always;
-            depends_on {
-                self.state == State::Prepared;
-                self.parent.state == State::Ready;
-            }
-        }
-
-        Transition::Enable {
-            state_effect: StateEffect::Always;
-            depends_on {
-                self.state == State::Ready;
-                self.parent.state == State::Ready;
-                self.runtime.state == State::Online;
-                task_initial_context_complete(self.parent, self);
-            }
-            ensures { task_flow_published_with_task(self, self.parent); }
-        }
-
-        Transition::Disable {
-            state_effect: StateEffect::Always;
-            depends_on {
-                self.state == State::Online;
-                task_flow_terminal_runtime_quiesced(self);
-                task_flow_no_pending_yield(self);
-            }
-        }
-
-        Transition::Cleanup {
-            state_effect: StateEffect::Always;
-            depends_on {
-                self.state == State::Offline;
-                task_flow_terminal_runtime_quiesced(self);
-                task_flow_no_pending_yield(self);
-            }
-        }
-    }
-}
+predicate user_app_runtime_application_continuation_online<R: UserAppRuntime, A: ApplicationInstance>(runtime: R, app: A) -> bool;
+predicate user_app_runtime_passive_lifecycle<R: UserAppRuntime>(runtime: R) -> bool;
+predicate user_app_runtime_terminal_quiesced<R: UserAppRuntime>(runtime: R) -> bool;
+predicate application_instance_owned_by_runtime<A: ApplicationInstance, R: UserAppRuntime>(app: A, runtime: R) -> bool;
 
 object KernelInitUserAppRuntime: UserAppRuntime {
     parent: KernelInitFlow;
-    initial_state: State::Base;
-    state State::Base {
-        transitions {
-            on Transition::Preset -> State::Prepared {
-                ensures {
-                    user_app_runtime_owned_by_flow(self, KernelInitFlow);
-                    user_app_runtime_unique_for_flow(self, KernelInitFlow);
-                    user_app_runtime_not_shared(self);
-                }
-                emits { Transition::Setup; }
-            }
-        }
-    }
-    state State::Prepared {
-        transitions {
-            on Transition::Setup -> State::Ready {
-                emits { Transition::Enable; }
-            }
-        }
-    }
-    state State::Ready {
-        transitions { on Transition::Enable -> State::Online { } }
-    }
-    state State::Online { }
+    associations { application = KernelInitApplicationInstance; }
 }
 
 object KernelInitApplicationInstance: ApplicationInstance {
@@ -300,7 +356,6 @@ predicate kthreadd_schedule_loop_ready<T: Task, S: Scheduler>(task: T, scheduler
 predicate kthreadd_schedule_loop_active<T: Task, S: Scheduler>(task: T, scheduler: S) -> bool;
 predicate ap_idle_flow_key_matches_task<F: TaskFlow, T: Task>(flow: F, task: T) -> bool;
 predicate ap_idle_flow_pointwise_phases_complete<F: TaskFlow>(flow: F) -> bool;
-predicate user_task_flow_prepared_user_context_entered<F: TaskFlow>(flow: F) -> bool;
 
 object KernelInitFlow: TaskFlow {
     lifecycle_override: true;

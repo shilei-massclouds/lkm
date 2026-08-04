@@ -14,16 +14,21 @@ Task carrier、TaskRef、TaskThreadContext 和 Task lifecycle 见 [`Task`](task.
 - `KernelInitFlow` 终身属于 `KernelInitTask`。Task 发布时 Flow 已 Online；首次及后续 dispatch 都以
   contextual Enter 进入；首次 Enter 消费 Setup 绑定的 `RunKernelInit` 正文坐标。successful exec 不替换它。
 - `KthreaddFlow` 终身属于 `KthreaddTask`，发布和派发规则相同。
-- 每次 fork/clone 创建 fresh child Task 与 fresh `UserTaskFlow`；child exec 不创建后继 Flow。
+- 每次 fork/clone 创建 fresh child Task 与 fresh 普通 `TaskFlow`；child exec 不创建后继 Flow。
 - `ApIdleFlow[logical_id]` 与 `ApIdleTask[logical_id]` pointwise 固定，在 HSM 交付前完成不可调度的
   Online 预初始化。
 - 每个普通动态内核 Task 创建 fresh `KernelTaskFlow`，其初始正文坐标绑定调用者提供的内核入口；
   blocked、wake、yield 和恢复不替换该 Flow。
 
-每个用户型 TaskFlow 最多创建一个终身稳定、不可共享的 `UserAppRuntime` owned child。PID 1 的 Runtime
-属于 `KernelInitFlow`，child Runtime 属于各自 `UserTaskFlow`。exec 只以事务方式替换 Runtime 内部
+每个用户型 TaskFlow 最多创建一个终身稳定、不可共享的被动 `UserAppRuntime` owned child。PID 1 的 Runtime
+属于 `KernelInitFlow`，child Runtime 属于各自的普通 `TaskFlow`。exec 只以事务方式替换 Runtime 内部
 `ApplicationInstance`；fork 创建新的 Task、Flow、Runtime。应用映像名称不得提升为 Flow 类型或
 Flow identity。
+
+Runtime Online 表示应用 continuation 已经建立且尚未 terminal；它覆盖应用正在运行、runnable/待调度、
+阻塞挂起以及被 CPU-owned trap overlay 临时覆盖。Runtime 不进入 effective-flow 栈，也不以
+Running/Paused/Trapped 子状态复制 Task、ContextCoordinate 或 overlay 状态。Runtime Setup/Enable 只用于
+从头建立应用 continuation 的路径；fork snapshot 直接物化 Online Runtime，不调用这些迁移。
 
 ## owner、FlowRef 与 CpuRef
 
@@ -61,7 +66,7 @@ Online、`StateEffect::None` 正文 Action；保存后的 coordinate 指向 Yiel
 坐标。Scheduler 与 Enter 都不得按 first/resume、具体 Flow 类型、函数或固定入口分支。
 
 `KernelInitFlow.RunKernelInit` 驱动 kernel-init 阶段链；`KthreaddFlow.RunScheduleLoop` 进入调度循环；
-`UserTaskFlow.EnterPreparedUserContext` 进入已准备的用户上下文；`ApIdleFlow.RunIdle` 承载 AP idle 正文。
+普通 TaskFlow 的 user continuation 坐标恢复已准备的用户现场；`ApIdleFlow.RunIdle` 承载 AP idle 正文。
 这些都是普通正文 Action，不携带一次性属性。BootInitFlow 继续由 `_start` 驱动 Preset/Setup/Enable，
 不制造首次 Enter；BootTask 与 AP idle 的首次架构直入不伪造 Dispatch/Enter，只有首次真实切出后的恢复
 才走通用 Dispatch/Enter。
@@ -123,7 +128,14 @@ TaskThreadContext 已具备完整寄存器、固定 FlowRef/generation、epoch �
 `Task.Save -> Task.Suspend` 表达；不定义 `TaskFlow.Exit`。Disable 只允许 terminal 路径，要求无活动
 Trap child、无 pending YieldToken、Runtime 已完成退出；Cleanup 从 Offline 回收到 Destroyed。
 
-Task terminal Disable 前固定 Flow 必须不再 Online；Task Cleanup 前 Flow 必须 Destroyed。storage 或
+上述生命周期适用于从头创建的 Flow。fork child 由原子 snapshot 直接 materialize 为 Online，完整候选
+一次性建立 owner/parent、FlowRef/generation、初始 ContextCoordinate 与 Online invariant，不产生
+Preset/Setup/Enable transition。fork 后 parent 为 `OnCpu/Online/Online`，child 为
+`Online/Online/Online`；首次选择 child 和任意后续选择完全一样，统一执行
+`Restore -> Dispatch -> TaskFlow.Enter -> ContextCoordinate`，不增加 Runtime Enter。
+
+Task terminal Disable 前固定 Flow 必须不再 Online；用户型 terminal 还要求先显式 quiesce、Disable 和
+Cleanup Runtime，再 Disable/Cleanup Flow，最后 Disable/Cleanup Task。Task Cleanup 前 Flow 必须 Destroyed。storage 或
 alias 离开词法范围不表示销毁。下一动态实例使用新 generation。
 
 ## 当前能力边界

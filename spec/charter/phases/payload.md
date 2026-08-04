@@ -32,7 +32,7 @@ KernelInitTask.OnCpu、effective-flow guard 和 exec transaction epoch。唯一�
 precheck 失败都不得伪造它；requested/default init 失败保持既有 terminal 规则。Kernel.Online 后 action
 失败不回滚 Kernel，也不通过声明新 Flow 重试。
 
-fork/clone 创建 fresh Task、fresh UserTaskFlow 和 fresh UserAppRuntime；child 后续 exec 只替换自身
+fork/clone 创建 fresh Task、fresh 普通 TaskFlow 和 fresh UserAppRuntime；child 后续 exec 只替换自身
 Runtime 内部 ApplicationInstance。不同 Task/Flow 不共享 Runtime。
 
 ## 引用

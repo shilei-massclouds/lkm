@@ -4,9 +4,25 @@ KernelInitTask retains KernelInitFlow for its entire lifetime. KernelInitFlow ow
 UserAppRuntime. PID 1 exec replaces only `runtime.application`; successful replacement preserves the
 identities and generations of Task, TaskRef, Flow, FlowRef and Runtime.
 
-Fork allocates a fresh Task, TaskRef, UserTaskFlow, FlowRef, UserAppRuntime and ApplicationInstance. The
-creation order is structural bind, Task context setup, Runtime publication, Flow publication, runqueue
-publication, then Task publication. No child shares Runtime or Flow storage with its parent or siblings.
+Fork stages a fresh Task, TaskRef, ordinary TaskFlow, FlowRef, UserAppRuntime and ApplicationInstance in one
+private aggregate candidate. A checked `materialize_fork_child_snapshot` constructor fills the embedded Flow,
+owner/parent links, independent generations, stack, post-fork TaskThreadContext, Runtime/application binding,
+PID and resource references, then performs exactly one publication after scheduler-eligibility and runqueue-
+metadata preflight. It commits the
+child directly as `Online/Online/Online`; it must not call Task, Flow, or Runtime Preset/Setup/Enable. No child
+shares any of these identities or storage with its parent or siblings.
+
+The constructor accepts only a current `OnCpu/Live` parent whose Flow and Runtime are Online. The parent remains
+`OnCpu/Online/Online`; the child is published `Online/Online/Online`, with return register 0 while the parent gets
+the child PID. The child's context contains a fresh FlowRef/generation and rebuilt post-fork continuation, but no
+parent TrapFlowRef, YieldToken, CurrentTask binding, CPU execution authority, or trap stack. Validation failure at
+any stage releases staged Task slot, PID, page tables and frame references and leaves parent PTEs, counters,
+runqueue and all public registries unchanged.
+
+Task-slot storage distinguishes a private `reserved` slot from an `occupied` published slot; TaskRef and FlowRef
+resolution never sees the former. Runtime storage address plus a nonzero application generation realizes an
+ApplicationInstance identity. Fork starts a fresh Runtime at application generation 1; exec preserves Task,
+TaskFlow and Runtime storage/refs and advances only that generation.
 
 Before runqueue or Task publication, ordinary fork also creates a fresh `UserAddressSpace`, root page table,
 SATP and `UserStack`. Resident private pages are shared through checked `UserFrameRef`s while holes remain holes.
@@ -14,7 +30,7 @@ For a VMA that was originally private-writable, both parent and child leaf PTEs 
 originally read-only pages are shared read-only without COW promotion. Allocation, reference acquisition or PTE
 installation failure releases the unpublished child mm and Task slot in reverse order without changing the parent.
 
-Fork is a prepare/commit transaction. Prepare allocates every child page-table page, acquires every child frame
+Fork snapshot materialization is a prepare/commit transaction. Prepare allocates every child page-table page, acquires every child frame
 reference, builds all child leaves, and revalidates each parent leaf/physical-frame/VMA tuple. Commit lowers the
 validated parent writable leaves to RO+COW, performs targeted `sfence.vma`, and only then publishes the child.
 Nested fork accepts an already RO+COW parent leaf when its original private VMA is writable. No fallible operation
@@ -37,7 +53,7 @@ Syscall and user-mode traps are effective-flow children above the lifetime TaskF
 on return, the scheduler restores the saved trap leaf from TaskThreadContext before resuming the
 TaskFlow-level continuation.
 
-Exit quiesces the ApplicationInstance and Runtime, disables and cleans the fixed Flow, then disables and
+Exit quiesces the ApplicationInstance, disables and cleans the Runtime, disables and cleans the fixed Flow, then disables and
 cleans the Task. A pending yield must be resolved or terminated before Flow cleanup.
 
 `UserAddressSpace` owns the common user-fault classifier. `UserFaultRequest` carries the current Task identity,

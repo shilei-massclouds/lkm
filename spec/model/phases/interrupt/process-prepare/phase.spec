@@ -380,15 +380,18 @@ object TaskCreationCore: KernelObject {
             /*
              * CopyUserProcess is the Task/TaskRef-parameterized user fork/clone
              * creation boundary. Each invocation receives a fresh destination
-             * Task with an independent PID and lifecycle and binds the fresh
-             * lifetime UserTaskFlow supplied by the caller.
+             * Task with an independent PID and lifecycle and completes the
+             * caller's atomic fork snapshot for a fresh ordinary TaskFlow.
              */
             Action::CopyUserProcess(
                 src_process: Task,
                 src_ref: TaskRef,
                 dst_process: Task,
                 dst_ref: TaskRef,
-                flow: UserTaskFlow,
+                flow: TaskFlow,
+                flow_ref: TaskFlowRef,
+                runtime: UserAppRuntime,
+                application: ApplicationInstance,
                 pid_ns: RootPidNamespace,
                 scheduler: Scheduler,
                 fs: FsStruct,
@@ -399,8 +402,12 @@ object TaskCreationCore: KernelObject {
             ) {
                 state_effect: StateEffect::None;
                 depends_on {
-                    src_process.state == State::Online;
-                    dst_process.state == State::Prepared;
+                    src_process.state == State::OnCpu;
+                    task_execution_authority_is(
+                        src_process,
+                        TaskExecutionAuthority::Live
+                    );
+                    dst_process.state == State::Online;
                     task_ref_targets(src_ref, src_process);
                     task_ref_targets(dst_ref, dst_process);
                     pid_ns.state == State::Ready;
@@ -410,18 +417,20 @@ object TaskCreationCore: KernelObject {
                     address_space.state == State::Online;
                     trap_frame.state == State::Ready;
                     boundaries.state == State::Ready;
-                    task_clone_args_ready(dst_process);
-                    flow.state == State::Ready;
+                    flow.state == State::Online;
+                    runtime.state == State::Online;
                     task_fixed_flow_is(dst_process, flow);
                     task_flow_owner_is(flow, dst_process);
+                    task_flow_parent_is(flow, dst_process);
                     task_flow_owner_exclusive(flow);
+                    task_flow_ref_targets(flow_ref, flow);
+                    user_app_runtime_owned_by_flow(runtime, flow);
+                    user_app_runtime_unique_for_flow(runtime, flow);
+                    application_instance_owned_by_runtime(application, runtime);
                     user_clone_plain_fork_first_slice_bound(boundaries);
                     user_clone_fresh_task_per_child_bound(boundaries);
                     user_clone_multiple_independent_tasks_bound(boundaries);
                     user_task_set_allows_multiple_independent_tasks(UserTaskSet);
-                    user_task_set_contains(UserTaskSet, dst_process);
-                    user_task_instance_fresh(dst_process);
-                    user_task_pid_and_lifecycle_independent(dst_process);
                 }
 
                 drives {
@@ -438,10 +447,25 @@ object TaskCreationCore: KernelObject {
                     task_duplicated_from(dst_process, src_process);
                     task_pid_allocated(dst_process, pid_ns);
                     task_thread_context_ready(dst_process);
+                    task_context_coordinate_ready(dst_process.thread_context);
+                    task_context_flow_ref_is_fixed(dst_process, flow);
+                    task_initial_context_coordinate_bound(dst_process, flow);
+                    task_initial_context_complete(dst_process, flow);
                     task_sched_entity_initialized(dst_process, scheduler);
-                    task_state_new(dst_process);
                     task_state_running(dst_process);
                     task_scheduler_publication_committed(dst_process);
+                    task_fixed_flow_binding_complete(dst_process);
+                    task_fixed_flow_binding_consistent(dst_process);
+                    task_online_has_recoverable_context(dst_process);
+                    task_online_eligibility_is_scheduler_owned(dst_process);
+                    task_online_does_not_imply_dispatched(dst_process);
+                    task_execution_authority_is(dst_process, TaskExecutionAuthority::None);
+                    task_breakpoint_state_is(dst_process, TaskBreakpointState::Valid);
+                    task_breakpoint_bound_to_flow_ref(dst_process, flow);
+                    task_breakpoint_flow_ref_generation_valid(dst_process);
+                    task_flow_ref_generation_valid(flow);
+                    fork_snapshot_post_fork_continuation_ready(dst_process);
+                    fork_snapshot_child_has_no_parent_overlay_authority(dst_process);
                     user_child_process_parent_pid1_or_current_child(dst_process, src_process);
                     user_child_process_pid_allocated(dst_process, pid_ns);
                     user_child_process_tgid_equals_pid(dst_process);
@@ -461,10 +485,16 @@ object TaskCreationCore: KernelObject {
                     task_enqueued_on_scheduler(dst_ref, Cpu0Scheduler);
                     task_fixed_flow_is(dst_process, flow);
                     task_flow_owner_is(flow, dst_process);
+                    task_flow_parent_is(flow, dst_process);
                     task_flow_owner_exclusive(flow);
-                    user_task_set_contains(UserTaskSet, dst_process);
                     user_task_instance_fresh(dst_process);
                     user_task_pid_and_lifecycle_independent(dst_process);
+                    user_app_runtime_owned_by_flow(runtime, flow);
+                    user_app_runtime_unique_for_flow(runtime, flow);
+                    user_app_runtime_not_shared(runtime);
+                    user_app_runtime_application_continuation_online(runtime, application);
+                    user_app_runtime_passive_lifecycle(runtime);
+                    application_instance_owned_by_runtime(application, runtime);
                     task_creation_copy_process_sighand_siglock_deferred(TaskCreationCore);
                     task_creation_copy_process_tasklist_lock_deferred(TaskCreationCore);
                     task_creation_copy_process_pidmap_lock_deferred(TaskCreationCore);

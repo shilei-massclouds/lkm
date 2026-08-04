@@ -18,7 +18,7 @@ CPU 归属只保存在固定 `TaskFlow.cpu_ref`；Task 不保存同义 CPU assig
   successful exec 都保持 Task、Flow 和 Flow-owned `UserAppRuntime` identity，只替换 Runtime 内部
   `ApplicationInstance`。
 - `KthreaddTask` 固定绑定 `KthreaddFlow`。
-- 每次 fork/clone 都创建 fresh Task、fresh `UserTaskFlow` 和该 Flow 创建的 fresh
+- 每次 fork/clone 都创建 fresh Task、fresh 普通 `TaskFlow` 和该 Flow 创建的 fresh
   `UserAppRuntime`；三者都不得与 parent 或其它 child 共享。child 后续 exec 仍不替换 Flow。
 - `ApIdleTask[logical_id]` 与 `ApIdleFlow[logical_id]` pointwise、终身绑定。
 - `TaskCreationCore` 创建的普通动态内核 Task 使用同一 Task/TaskFlow aggregate；每个实例拥有 fresh
@@ -109,12 +109,21 @@ Action 在向低地址增长的内核栈底安装固定保护值并建立 `task_
 
 ## 创建与发布
 
-普通 Task.Preset 建立 fresh identity、TaskRef、不可变 Flow association、Flow owner/parent 和 clone
+从头创建的普通 Task 由 Task.Preset 建立 fresh identity、TaskRef、不可变 Flow association、Flow owner/parent 和 clone
 specification。Setup 消费 `TaskCreationCore` 的 copy-process 事实，建立 PID、stack、首个寄存器字节、
 固定 FlowRef/generation、epoch、抽象初始 coordinate、Prepared context、scheduler entity 和
 New/not-enqueued 状态。Flow.Enable 验证该初始 context 完整并发布 Flow Online；Task.Enable 在
 wake/runqueue publication 后把 Prepared context 原子发布为 `Online/None/Valid`。两者都不在创建者栈
 执行 Flow 主体。
+
+fork/clone child 不重放上述 Base→Prepared→Ready→Online 创建迁移。它使用一个 `snapshot` 原子候选，
+直接 materialize fresh `Task=Online`、普通 `TaskFlow=Online`、`UserAppRuntime=Online` 与无状态
+`ApplicationInstance`，并在唯一 publish point 前完成 fresh TaskRef/FlowRef/generation、PID、stack、
+ContextCoordinate、post-fork 寄存器现场、owner/parent 和所有资源引用。任一步失败都不得发布任何
+child identity、引用、PID、PTE 或 frame ref。提交时 parent 保持 `Task=OnCpu`、`TaskFlow=Online`、
+`UserAppRuntime=Online`，child 固定为 `Online/Online/Online`；child 返回值为 0，parent 返回 child PID。
+child 不继承 parent 的活动 TrapFlowRef、YieldToken、CurrentTask/CPU authority 或 trap stack，初始 Valid
+context 只重建 post-fork continuation。
 
 `BootInitRestInitPhase` 完整驱动 PID 1 与 kthreadd 的创建和发布。它们首次真正被选择时与以后恢复时
 完全相同：Scheduler 恢复 context、提交 CurrentTask/CurrentStack，再 drives Task.Dispatch，随后向固定
@@ -179,8 +188,10 @@ OnCpu/Live 且尚无 terminal reason 的 Task 可以提交一次。该原因沿�
 释放 faulting Task 的 mm 一次，reap 不得重复释放。
 
 用户地址空间、files、credentials、signal 和 exec transaction 属于稳定 Task/Runtime 资源。每个用户型
-TaskFlow 最多创建一个终身稳定、不可共享的 `UserAppRuntime` owned child；exec 只替换 Runtime 内的
-ApplicationInstance，fork 才创建新的 Task/Flow/Runtime。
+TaskFlow 最多创建一个终身稳定、不可共享的被动 `UserAppRuntime` owned child；Runtime 的 `Online`
+覆盖应用 continuation 正在执行、runnable/待调度、阻塞挂起和被 trap overlay 覆盖，不另设
+Running/Paused/Trapped lifecycle。exec 只替换 Runtime 内的 ApplicationInstance，fork 才创建新的
+Task/Flow/Runtime。terminal 路径依次 quiesce 并 Disable/Cleanup Runtime、固定 TaskFlow 和 Task。
 
 ## 当前能力边界
 

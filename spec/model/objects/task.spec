@@ -431,7 +431,7 @@ object UserTaskSet: TaskSet {
         Action::Insert(task: Task, task_ref: TaskRef) {
             state_effect: StateEffect::None;
             depends_on {
-                task.state == State::Prepared;
+                task.state == State::Online;
                 task_ref_targets(task_ref, task);
                 user_task_instance_fresh(task);
                 user_task_pid_and_lifecycle_independent(task);

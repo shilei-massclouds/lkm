@@ -23,6 +23,13 @@ FlowRef/generation, epoch and the embedded Flow's `initial_context` body coordin
 validates and publishes Online and Task Enable publishes a Valid breakpoint. The boot Task starts `OnCpu` with an
 Invalid breakpoint and initializes the architectural save area only on its first real switch out.
 
+Fork is the sole exception to the from-scratch lifecycle constructor. A private aggregate slot is initialized
+through `materialize_fork_child_snapshot`, which validates the complete Task/Flow/Runtime/Application candidate
+and publishes it directly as `Online/Online/Online`. The constructor writes the immutable Task↔Flow association,
+fresh TaskRef/FlowRef generations, `None/Valid` execution/breakpoint state and post-fork ContextCoordinate before
+publication. It never calls the public Preset/Setup/Enable transition methods and never imports the parent's
+active TrapFlowRef, YieldToken, CurrentTask/CurrentStack binding or Live authority.
+
 A UserTask binds the actual shared kernel carrier-stack range during `Setup`; a dummy or zero range cannot
 satisfy contextual `Enter`'s CurrentStack check. On the real user exception path this is the prepared user
 kernel trap-stack range on which the simulated user-to-user handoff and contextual Enter execute, not the

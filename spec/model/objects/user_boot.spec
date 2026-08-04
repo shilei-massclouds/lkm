@@ -414,6 +414,11 @@ predicate syscall_clone_vfork_parent_frame_saved<T, C>(table: T, child: C) -> bo
 predicate syscall_clone_vfork_child_handoff<T, C>(table: T, child: C) -> bool;
 predicate syscall_clone_vfork_next_child_accepted<T, C>(table: T, child: C) -> bool;
 predicate syscall_clone_wake_up_new_task_shape<T, S>(table: T, scheduler: S) -> bool;
+predicate fork_snapshot_parent_state_matrix<P: Task, F: TaskFlow, R: UserAppRuntime>(parent: P, flow: F, runtime: R) -> bool;
+predicate fork_snapshot_child_state_matrix<C: Task, F: TaskFlow, R: UserAppRuntime>(child: C, flow: F, runtime: R) -> bool;
+predicate fork_snapshot_identities_all_fresh<P: Task, PF: TaskFlow, PR: UserAppRuntime, C: Task, TR: TaskRef, CF: TaskFlow, FR: TaskFlowRef, CR: UserAppRuntime, A: ApplicationInstance>(parent: P, parent_flow: PF, parent_runtime: PR, child: C, child_ref: TR, child_flow: CF, child_flow_ref: FR, child_runtime: CR, child_application: A) -> bool;
+predicate fork_snapshot_child_has_no_parent_overlay_authority<C: Task>(child: C) -> bool;
+predicate fork_snapshot_post_fork_continuation_ready<C: Task>(child: C) -> bool;
 predicate syscall_execve_linux_6_12_do_execveat_common_bound<T>(table: T) -> bool;
 predicate syscall_execve_observed_shell_ls_args_bound<T>(table: T) -> bool;
 predicate syscall_execve_observed_busybox_init_getty_args_bound<T>(table: T) -> bool;
@@ -2877,8 +2882,9 @@ object SyscallTable: ResourceObject {
 
             on Action::Clone -> TaskRef {
                 /*
-                 * Linux clone/fork declares a fresh Task identity, TaskRef and
-                 * lifetime UserTaskFlow and private UserAppRuntime on every execution.
+                 * Linux clone/fork atomically materializes a fresh Task identity,
+                 * TaskRef, ordinary lifetime TaskFlow, FlowRef, private
+                 * UserAppRuntime and ApplicationInstance on every execution.
                  *
                  * BusyBox command sequencing and other application behavior
                  * are historical test evidence only. Clone ABI validation,
@@ -2888,7 +2894,9 @@ object SyscallTable: ResourceObject {
                 depends_on {
                     CurrentCPU.trap.exception.syscall.state == State::Online;
                     TaskCreationCore.state == State::Ready;
-                    KernelInitTask.state == State::Online;
+                    KernelInitTask.state == State::OnCpu;
+                    KernelInitFlow.state == State::Online;
+                    KernelInitUserAppRuntime.state == State::Online;
                     UserTaskSet.state == State::Ready;
                     user_task_set_allows_multiple_independent_tasks(UserTaskSet);
                     UserCloneDeferredBoundaries.state == State::Ready;
@@ -2901,47 +2909,42 @@ object SyscallTable: ResourceObject {
                 }
 
                 drives {
-                    declare child of Task;
-                    declare child_ref of TaskRef;
-                    declare child_flow of UserTaskFlow;
-                    declare child_runtime of UserAppRuntime;
-                    child_ref.Action::Bind(task: child);
-                    child_flow.Action::Bind(owner_task: child, runtime: child_runtime);
-                    child_runtime.Action::Bind(flow: child_flow);
-                    child.Transition::Preset(
-                        parent_task: KernelInitTask,
-                        task_ref: child_ref,
-                        flow: child_flow
-                    );
-                    UserTaskSet.Action::Insert(task: child, task_ref: child_ref);
-                    TaskCreationCore.Action::CopyUserProcess(
-                        src_process: KernelInitTask,
-                        src_ref: KernelInitTaskRef,
-                        dst_process: child,
-                        dst_ref: child_ref,
-                        flow: child_flow,
-                        pid_ns: RootPidNamespace,
-                        scheduler: Cpu0Scheduler,
-                        fs: FsStruct,
-                        files: FilesStruct,
-                        address_space: UserAddressSpace,
-                        trap_frame: UserTrapFrame,
-                        boundaries: UserCloneDeferredBoundaries
-                    );
-                    FilesStruct.Action::SaveParentFdSnapshot(child: child);
-                    child.Transition::Setup(
-                        parent_task: KernelInitTask,
-                        pid_ns: RootPidNamespace,
-                        scheduler: Cpu0Scheduler,
-                        flow: child_flow
-                    );
-                    child_flow.Transition::Preset;
-                    child_flow.Transition::Setup;
-                    child_runtime.Transition::Preset;
-                    child_runtime.Transition::Setup;
-                    child_runtime.Transition::Enable;
-                    child_flow.Transition::Enable;
-                    child.Transition::Enable;
+                    snapshot fork_child {
+                        materialize child of Task at State::Online;
+                        materialize child_ref of TaskRef;
+                        materialize child_flow of TaskFlow at State::Online;
+                        materialize child_flow_ref of TaskFlowRef;
+                        materialize child_runtime of UserAppRuntime at State::Online;
+                        materialize child_application of ApplicationInstance;
+                        child_ref.Action::Bind(task: child);
+                        child_flow.Action::BindOwner(
+                            owner_task: child,
+                            flow_ref: child_flow_ref
+                        );
+                        child_runtime.Action::Bind(
+                            flow: child_flow,
+                            application: child_application
+                        );
+                        TaskCreationCore.Action::CopyUserProcess(
+                            src_process: KernelInitTask,
+                            src_ref: KernelInitTaskRef,
+                            dst_process: child,
+                            dst_ref: child_ref,
+                            flow: child_flow,
+                            flow_ref: child_flow_ref,
+                            runtime: child_runtime,
+                            application: child_application,
+                            pid_ns: RootPidNamespace,
+                            scheduler: Cpu0Scheduler,
+                            fs: FsStruct,
+                            files: FilesStruct,
+                            address_space: UserAddressSpace,
+                            trap_frame: UserTrapFrame,
+                            boundaries: UserCloneDeferredBoundaries
+                        );
+                        UserTaskSet.Action::Insert(task: child, task_ref: child_ref);
+                        FilesStruct.Action::SaveParentFdSnapshot(child: child);
+                    }
                 }
 
                 ensures {
@@ -2979,8 +2982,27 @@ object SyscallTable: ResourceObject {
                     user_app_runtime_owned_by_flow(child_runtime, child_flow);
                     user_app_runtime_unique_for_flow(child_runtime, child_flow);
                     user_app_runtime_not_shared(child_runtime);
+                    application_instance_owned_by_runtime(child_application, child_runtime);
+                    fork_snapshot_parent_state_matrix(
+                        KernelInitTask,
+                        KernelInitFlow,
+                        KernelInitUserAppRuntime
+                    );
+                    fork_snapshot_child_state_matrix(child, child_flow, child_runtime);
+                    fork_snapshot_identities_all_fresh(
+                        KernelInitTask,
+                        KernelInitFlow,
+                        KernelInitUserAppRuntime,
+                        child,
+                        child_ref,
+                        child_flow,
+                        child_flow_ref,
+                        child_runtime,
+                        child_application
+                    );
+                    fork_snapshot_child_has_no_parent_overlay_authority(child);
+                    fork_snapshot_post_fork_continuation_ready(child);
                     task_fixed_flow_binding_complete(child);
-                    task_fixed_flow_binding_consistent(child);
                     task_fixed_flow_binding_consistent(child);
                     child.state == State::Online;
                     child_flow.state == State::Online;
@@ -2996,7 +3018,7 @@ object SyscallTable: ResourceObject {
 
             on Action::Execve(
                 task: Task,
-                flow: UserTaskFlow,
+                flow: TaskFlow,
                 runtime: UserAppRuntime
             ) {
                 depends_on {
@@ -3106,24 +3128,33 @@ object SyscallTable: ResourceObject {
                 }
             }
 
-            on Action::Exit(current_flow: TaskFlow) {
+            on Action::Exit(
+                current_flow: TaskFlow,
+                runtime: UserAppRuntime
+            ) {
                 depends_on {
                     CurrentCPU.trap.exception.syscall.state == State::Online;
                     KernelInitTask.state == State::OnCpu;
                     KernelInitFlow.state == State::Online;
                     current_flow.state == State::Online;
+                    runtime.state == State::Online;
                     task_fixed_flow_is(KernelInitTask, current_flow);
+                    user_app_runtime_owned_by_flow(runtime, current_flow);
+                    user_app_runtime_terminal_quiesced(runtime);
                 }
 
                 drives {
+                    runtime.Transition::Disable;
+                    runtime.Transition::Cleanup;
                     current_flow.Transition::Disable;
-                    KernelInitTask.Transition::Disable;
                     current_flow.Transition::Cleanup;
+                    KernelInitTask.Transition::Disable;
                     KernelInitTask.Transition::Cleanup;
                 }
 
                 ensures {
                     syscall_exit_records_status(self);
+                    runtime.state == State::Destroyed;
                     current_flow.state == State::Destroyed;
                     KernelInitTask.state == State::Destroyed;
                     task_fixed_flow_destroyed(KernelInitTask);
@@ -3153,19 +3184,28 @@ object SyscallTable: ResourceObject {
                 }
             }
 
-            on Action::ExitGroup(child: Task, current_flow: TaskFlow) {
+            on Action::ExitGroup(
+                child: Task,
+                current_flow: TaskFlow,
+                runtime: UserAppRuntime
+            ) {
                 depends_on {
                     CurrentCPU.trap.exception.syscall.state == State::Online;
                     child.state == State::OnCpu;
                     current_flow.state == State::Online;
+                    runtime.state == State::Online;
                     user_task_set_contains(UserTaskSet, child);
                     task_fixed_flow_is(child, current_flow);
+                    user_app_runtime_owned_by_flow(runtime, current_flow);
+                    user_app_runtime_terminal_quiesced(runtime);
                 }
 
                 drives {
+                    runtime.Transition::Disable;
+                    runtime.Transition::Cleanup;
                     current_flow.Transition::Disable;
-                    child.Transition::Disable;
                     current_flow.Transition::Cleanup;
+                    child.Transition::Disable;
                     child.Transition::Cleanup;
                 }
 
@@ -3181,6 +3221,7 @@ object SyscallTable: ResourceObject {
                     user_child_process_parent_fd_snapshot_restored(child, FilesStruct);
                     files_struct_parent_fd_snapshot_restored(FilesStruct, child);
                     user_child_process_completed_record_archived(child);
+                    runtime.state == State::Destroyed;
                     current_flow.state == State::Destroyed;
                     child.state == State::Destroyed;
                     task_fixed_flow_destroyed(child);

@@ -17,11 +17,20 @@ TaskFlow boundary from Charter, Model, and Coding.
   HSM changes execution authority without replacing the Task or Flow.
 - A user TaskFlow creates at most one stable, private UserAppRuntime. Repeated
   exec replaces only the Runtime's ApplicationInstance. Fork creates a new
-  Task, a new lifetime UserTaskFlow, and a new Runtime.
+  Task, a new ordinary lifetime TaskFlow, and a new Runtime.
 - Runtime identity tests cover repeated exec (same Task/Flow/Runtime, new
   application generation), fork (all three identities distinct), stale
   TaskRef/FlowRef generation rejection, and bounded slot recycling only after
   terminal cleanup.
+- Fork snapshot tests assert parent `OnCpu/Online/Online`, child
+  `Online/Online/Online`, fresh Task/TaskRef/TaskFlow/FlowRef/Runtime/Application
+  identities, and no child Preset/Setup/Enable transition signal. Failure injection
+  at PID, page-table, PTE, frame-ref, binding, and publication stages must leave no
+  child identity or partial parent mutation.
+- The child context returns zero and contains a fresh FlowRef/generation and
+  post-fork coordinate. It contains no copied root TrapFlowRef, YieldToken,
+  CurrentTask/CPU authority, or parent trap-stack binding; the parent return register
+  contains the committed child PID.
 
 ## Dispatch and context
 
@@ -45,8 +54,8 @@ TaskFlow boundary from Charter, Model, and Coding.
   YieldToken or machine coordinate. Blocked and wakeup tests use the same Task
   states; runqueue membership, not a second lifecycle state, distinguishes
   them.
-- Terminal paths order Flow `Online -> Offline -> Destroyed` and Task
-  `OnCpu/Online -> Offline -> Destroyed`. No terminal path republishes a
+- Terminal paths order Runtime, Flow, then Task through `Online -> Offline -> Destroyed`.
+  No terminal path republishes a
   resumable context.
 
 ## Stack guard action
@@ -73,6 +82,10 @@ TaskFlow boundary from Charter, Model, and Coding.
 - Trap entry does not change Task OnCpu or TaskFlow Online. The CPU effective
   Flow stack pushes Trap/Interrupt/Exception leaves and restores the nested
   leaf before a task-switched trap continuation resumes.
+- User syscall, retryable page fault, terminal SIGSEGV, and kernel extable fault
+  use the same root/child/leaf/token protocol. SPP=U and SPP=S differ only in the
+  saved architectural return frame; neither creates a distinct lifecycle or a
+  Runtime Enter.
 - Child-to-parent terminal handoff accepts the shared user trap stack only
   through the simulated-user-handoff stack identity preflighted in
   `NextDispatch`; a physical switch or a stale/different carrier must fail
@@ -113,7 +126,7 @@ TaskFlow boundary from Charter, Model, and Coding.
   smoke aggregates and reject old Flow wrapper or Task-parallel Flow storage.
 - PID 1 multiple-exec smoke preserves KernelInitTask, KernelInitFlow, and
   UserAppRuntime identity. Child smoke proves independent
-  Task/UserTaskFlow/UserAppRuntime identity and terminal reclamation.
+  Task/TaskFlow/UserAppRuntime identity and terminal reclamation.
 - User-entry checkpoints name the runtime/application boundary rather than a
   replaceable Flow. Checkpoint inventory and Linux mapping artifacts must be
   regenerated after any rename.

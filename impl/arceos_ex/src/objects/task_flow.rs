@@ -256,6 +256,46 @@ impl TaskFlow {
         Ok(())
     }
 
+    /// Construct a fresh fork-child Flow directly in its committed Online
+    /// state.  This is snapshot construction, not lifecycle replay.
+    pub(crate) fn materialize_fork_child_online(
+        &mut self,
+        owner_ref: TaskRef,
+        cpu_ref: CpuRef,
+    ) -> EventResult {
+        if self.declared
+            || self.lifecycle.state() != State::Base
+            || self.flow_ref.is_valid()
+            || self.owner.is_valid()
+            || !owner_ref.is_valid()
+            || !cpu_ref.is_valid()
+        {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Online,
+            );
+        }
+        self.generation = next_generation(self.generation);
+        self.flow_ref = TaskFlowRef::new(self.storage_slot, self.generation);
+        self.lifecycle = Lifecycle::new(State::Online);
+        self.declared = true;
+        self.owner = owner_ref;
+        self.disabled = false;
+        self.cleaned = false;
+        self.cpu_ref = cpu_ref;
+        self.last_entered_context_epoch = 0;
+        self.last_entered_dispatch_ordinal = 0;
+        Ok(())
+    }
+
+    pub(crate) const fn fork_snapshot_has_no_lifecycle_replay(&self) -> bool {
+        !self.lifecycle.event_seen(LifecycleEvent::Preset)
+            && !self.lifecycle.event_seen(LifecycleEvent::Setup)
+            && !self.lifecycle.event_seen(LifecycleEvent::Enable)
+    }
+
     pub(crate) fn bind_owner(&mut self, owner_ref: TaskRef) -> EventResult {
         if !self.declared
             || !self.flow_ref.is_valid()

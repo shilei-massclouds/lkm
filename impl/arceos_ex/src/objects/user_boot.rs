@@ -37,7 +37,7 @@ use super::{
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     static_page_tables,
     swapper_vm::SwapperVm,
-    task::{Task, TaskEntry, TaskKind, TaskRef, USER_TASK_SLOT_COUNT},
+    task::{Task, TaskEntry, TaskRef, USER_TASK_SLOT_COUNT},
     task_flow::{TaskFlow, TaskFlowRef},
     trap_type::TrapFrame,
     vfs::{FsStruct, FsStructSnapshot},
@@ -308,6 +308,7 @@ impl UserCompletedChildRecord {
 struct UserTaskStorageSlot {
     generation: u32,
     flow_generation: u32,
+    reserved: bool,
     occupied: bool,
     pid: usize,
     task: Task,
@@ -322,6 +323,7 @@ impl UserTaskStorageSlot {
         Self {
             generation: 0,
             flow_generation: 0,
+            reserved: false,
             occupied: false,
             pid: 0,
             task: Task::new(),
@@ -341,10 +343,12 @@ impl UserTaskStorageSlot {
     }
 }
 
-fn task_event_or_terminate(result: EventResult) {
-    if result.is_err() {
-        panic!("declared Task/TaskFlow invariant failed");
-    }
+/// A complete but unreachable fork-child aggregate.  Moving this value into
+/// its reserved slot is the only publication operation.
+struct ForkChildSnapshotCandidate {
+    task: Task,
+    runtime: UserAppRuntime,
+    flow_generation: u32,
 }
 
 pub struct UserCloneDeferredBoundaries {
@@ -3939,6 +3943,23 @@ impl UserTrapFrame {
 
 /// Stable application runtime owned by KernelInitFlow. Exec replaces only the
 /// internal application instance; it never replaces the owning TaskFlow.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct UserApplicationInstanceRef {
+    runtime_identity: usize,
+    generation: u32,
+}
+
+#[cfg_attr(not(app_smoke), allow(dead_code))]
+impl UserApplicationInstanceRef {
+    pub const fn is_valid(self) -> bool {
+        self.runtime_identity != 0 && self.generation != 0
+    }
+
+    pub const fn same_identity(self, other: Self) -> bool {
+        self.runtime_identity == other.runtime_identity && self.generation == other.generation
+    }
+}
+
 #[cfg_attr(not(app_smoke), allow(dead_code))]
 pub struct UserAppRuntime {
     lifecycle: Lifecycle,
@@ -4004,6 +4025,17 @@ impl UserAppRuntime {
 
     pub const fn released(&self) -> bool {
         self.released
+    }
+
+    pub fn identity_ptr(&self) -> usize {
+        self as *const Self as usize
+    }
+
+    pub fn application_instance_ref(&self) -> UserApplicationInstanceRef {
+        UserApplicationInstanceRef {
+            runtime_identity: self.identity_ptr(),
+            generation: self.application_generation,
+        }
     }
 
     /// Materialize the one lifetime-stable runtime in Base.
@@ -4211,36 +4243,74 @@ impl UserAppRuntime {
             .adopt_transition(LifecycleEvent::Cleanup, State::Offline, State::Destroyed)
     }
 
-    fn bind_dynamic(&mut self, owner: &Task, flow: &TaskFlow, pid: usize) -> EventResult {
-        self.declare()?;
-        if pid == 0
-            || owner.state() != State::Online
+    /// Construct the passive runtime and its fresh application instance as
+    /// part of an unpublished fork snapshot.  Online denotes an available
+    /// application continuation, not current CPU occupancy.
+    fn materialize_fork_child_snapshot(
+        &mut self,
+        owner: &Task,
+        flow: &TaskFlow,
+        pid: usize,
+    ) -> EventResult {
+        if self.declared
+            || self.lifecycle.state() != State::Base
+            || self.declaration_occurrence != 0
+            || self.owner_bound
+            || self.active_binding_committed
+            || self.application_entered
+            || self.released
+            || pid == 0
+            || !owner.fork_snapshot_candidate_valid()
             || flow.state() != State::Online
-            || owner.flow() != flow.flow_ref()
-            || flow.owner() != owner.task_ref()
+            || !owner.flow().same_identity(flow.flow_ref())
+            || !flow.owner().same_identity(owner.task_ref())
         {
             return failed_condition(
                 LifecycleEvent::Preset,
                 self.state(),
                 State::Base,
-                State::Prepared,
+                State::Online,
             );
         }
+
+        self.lifecycle = Lifecycle::new(State::Online);
+        self.declared = true;
+        self.declaration_occurrence = 1;
         self.owner_pid = pid;
         self.owner_task_ref = owner.task_ref();
         self.owner_flow_ref = flow.flow_ref();
         self.owner_bound = true;
+        self.entry_source_pid1_exec = false;
         self.instance_fresh = true;
         self.execution_context_ready = true;
         self.active_binding_committed = true;
         self.application_entered = true;
         self.application_generation = next_generation(self.application_generation);
-        self.lifecycle
-            .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)?;
-        self.lifecycle
-            .adopt_transition(LifecycleEvent::Setup, State::Prepared, State::Ready)?;
-        self.lifecycle
-            .adopt_transition(LifecycleEvent::Enable, State::Ready, State::Online)
+        self.released = false;
+        Ok(())
+    }
+
+    const fn fork_snapshot_has_no_lifecycle_replay(&self) -> bool {
+        !self.lifecycle.event_seen(LifecycleEvent::Preset)
+            && !self.lifecycle.event_seen(LifecycleEvent::Setup)
+            && !self.lifecycle.event_seen(LifecycleEvent::Enable)
+    }
+
+    fn fork_snapshot_candidate_valid(&self, owner: &Task) -> bool {
+        self.lifecycle.state() == State::Online
+            && self.declared
+            && self.declaration_occurrence == 1
+            && self.owner_pid == owner.pid()
+            && self.owner_task_ref.same_identity(owner.task_ref())
+            && self.owner_flow_ref.same_identity(owner.flow_ref())
+            && self.owner_bound
+            && self.instance_fresh
+            && self.execution_context_ready
+            && self.active_binding_committed
+            && self.application_entered
+            && self.application_generation != 0
+            && !self.released
+            && self.fork_snapshot_has_no_lifecycle_replay()
     }
 
     fn replace_dynamic_application(&mut self, owner: &Task, flow: &TaskFlow) -> bool {
@@ -4659,6 +4729,8 @@ pub struct UserTaskSet {
     #[cfg(app_smoke)]
     fail_next_cow_child_mm_after_prepare: bool,
     #[cfg(app_smoke)]
+    fail_next_fork_snapshot_after_materialize: bool,
+    #[cfg(app_smoke)]
     last_unpublished_rollback_stage: usize,
     next_child_pid: usize,
     completed_child_records: [UserCompletedChildRecord; USER_COMPLETED_CHILD_RECORD_CAPACITY],
@@ -4802,6 +4874,8 @@ impl UserTaskSet {
             #[cfg(app_smoke)]
             fail_next_cow_child_mm_after_prepare: false,
             #[cfg(app_smoke)]
+            fail_next_fork_snapshot_after_materialize: false,
+            #[cfg(app_smoke)]
             last_unpublished_rollback_stage: 0,
             next_child_pid: USER_CHILD_PID,
             completed_child_records: [UserCompletedChildRecord::empty();
@@ -4882,6 +4956,50 @@ impl UserTaskSet {
         }
     }
 
+    #[cfg(app_smoke)]
+    pub fn active_fork_snapshot_contract(&self) -> bool {
+        let Some(slot) = self.slot_for_ref(self.active_task_ref) else {
+            return false;
+        };
+        !slot.reserved
+            && slot.occupied
+            && slot.task.fork_snapshot_candidate_valid()
+            && slot.runtime.fork_snapshot_candidate_valid(&slot.task)
+            && slot.task.execution_authority() == super::task::TaskExecutionAuthority::None
+            && !slot.task.root_trap_flow_ref().is_valid()
+            && !self.pending_task_ref.is_valid()
+    }
+
+    #[cfg(app_smoke)]
+    pub fn active_task_identity_ptr(&self) -> usize {
+        self.slot_for_ref(self.active_task_ref)
+            .map_or(0, |slot| &slot.task as *const Task as usize)
+    }
+
+    #[cfg(app_smoke)]
+    pub fn active_flow_identity_ptr(&self) -> usize {
+        self.slot_for_ref(self.active_task_ref).map_or(0, |slot| {
+            slot.task.embedded_flow() as *const TaskFlow as usize
+        })
+    }
+
+    #[cfg(app_smoke)]
+    pub fn active_runtime_identity_ptr(&self) -> usize {
+        self.slot_for_ref(self.active_task_ref)
+            .map_or(0, |slot| slot.runtime.identity_ptr())
+    }
+
+    #[cfg(app_smoke)]
+    pub fn active_application_instance_ref(&self) -> UserApplicationInstanceRef {
+        self.slot_for_ref(self.active_task_ref).map_or(
+            UserApplicationInstanceRef {
+                runtime_identity: 0,
+                generation: 0,
+            },
+            |slot| slot.runtime.application_instance_ref(),
+        )
+    }
+
     pub(crate) fn carrier_stack_matches(&self, base: usize, top: usize) -> bool {
         self.set_lifecycle.state() == State::Ready
             && base != 0
@@ -4923,7 +5041,7 @@ impl UserTaskSet {
         let mut count = 0usize;
         let mut index = 0usize;
         while index < USER_TASK_SLOT_COUNT {
-            if !self.task_slots[index].occupied {
+            if !self.task_slots[index].reserved && !self.task_slots[index].occupied {
                 count += 1;
             }
             index += 1;
@@ -4941,6 +5059,20 @@ impl UserTaskSet {
         } else {
             None
         }
+    }
+
+    fn active_dynamic_fork_parent_ready(&self) -> bool {
+        self.slot_for_ref(self.active_task_ref).is_some_and(|slot| {
+            slot.task.state() == State::OnCpu
+                && slot.task.execution_authority() == super::task::TaskExecutionAuthority::Live
+                && slot.task.embedded_flow().state() == State::Online
+                && slot.runtime.state() == State::Online
+                && slot
+                    .runtime
+                    .task_ref_owner()
+                    .same_identity(slot.task.task_ref())
+                && slot.runtime.flow_ref().same_identity(slot.task.flow_ref())
+        })
     }
 
     pub(crate) fn task_switch_in_ready(&self, task_ref: TaskRef) -> bool {
@@ -5060,7 +5192,8 @@ impl UserTaskSet {
             return false;
         };
         let slot = &mut self.task_slots[index];
-        if !slot.occupied
+        if !slot.reserved
+            || slot.occupied
             || !slot.task_ref().same_identity(child_ref)
             || slot.mm_present
             || slot.inactive_address_space.state() != State::Base
@@ -5102,7 +5235,8 @@ impl UserTaskSet {
             self.last_unpublished_rollback_stage = 0;
         }
         if let Some(index) = child_ref.user_slot()
-            && self.task_slots[index].occupied
+            && self.task_slots[index].reserved
+            && !self.task_slots[index].occupied
             && self.task_slots[index].task_ref().same_identity(child_ref)
         {
             let slot = &mut self.task_slots[index];
@@ -5136,7 +5270,7 @@ impl UserTaskSet {
                     {
                         self.last_unpublished_rollback_stage = 3;
                     }
-                    slot.occupied = false;
+                    slot.reserved = false;
                     slot.pid = 0;
                     #[cfg(app_smoke)]
                     {
@@ -5283,7 +5417,9 @@ impl UserTaskSet {
             return None;
         }
         let mut index = 0usize;
-        while index < USER_TASK_SLOT_COUNT && self.task_slots[index].occupied {
+        while index < USER_TASK_SLOT_COUNT
+            && (self.task_slots[index].reserved || self.task_slots[index].occupied)
+        {
             index += 1;
         }
         if index == USER_TASK_SLOT_COUNT {
@@ -5302,77 +5438,129 @@ impl UserTaskSet {
         slot.task = Task::new_user(task_ref, slot.flow_generation);
         slot.pid = pid;
         slot.runtime = UserAppRuntime::new();
-        slot.occupied = true;
+        slot.reserved = true;
+        slot.occupied = false;
 
         Some(task_ref)
     }
 
-    fn publish_reserved_user_task(&mut self, task_ref: TaskRef, parent_ref: TaskRef) -> bool {
-        let Some(index) = task_ref.user_slot() else {
-            return false;
-        };
-        let slot = &mut self.task_slots[index];
-        if !slot.occupied
+    fn prepare_reserved_user_task_snapshot(
+        &self,
+        task_ref: TaskRef,
+    ) -> Option<ForkChildSnapshotCandidate> {
+        let index = task_ref.user_slot()?;
+        let slot = &self.task_slots[index];
+        if !slot.reserved
+            || slot.occupied
             || !slot.task_ref().same_identity(task_ref)
             || slot.task.state() != State::Base
             || slot.runtime.state() != State::Base
+            || self.carrier_stack_base == 0
+            || self.carrier_stack_top <= self.carrier_stack_base
         {
-            return false;
+            return None;
         }
         let pid = slot.pid;
-
-        task_event_or_terminate(slot.task.set_identity_metadata(
+        let mut task = Task::new_user(task_ref, slot.flow_generation);
+        task.materialize_fork_child_snapshot(
             pid,
-            TaskEntry::UserChild,
-            TaskKind::UserModeThread,
-        ));
-        task_event_or_terminate(slot.task.adopt_preset());
-        task_event_or_terminate(slot.task.declare_and_bind_embedded_flow());
-        slot.task.init_dummy_switch_context();
-        if !slot
-            .task
-            .set_kernel_stack_bounds(self.carrier_stack_base, self.carrier_stack_top)
+            super::cpu::CpuRef::new(0),
+            self.carrier_stack_base,
+            self.carrier_stack_top,
+        )
+        .ok()?;
+        let mut runtime = UserAppRuntime::new();
+        runtime
+            .materialize_fork_child_snapshot(&task, task.embedded_flow(), pid)
+            .ok()?;
+        let candidate = ForkChildSnapshotCandidate {
+            flow_generation: task.flow_ref().generation(),
+            task,
+            runtime,
+        };
+        if !candidate.task.task_ref().same_identity(task_ref)
+            || !candidate.task.fork_snapshot_candidate_valid()
+            || !candidate
+                .runtime
+                .fork_snapshot_candidate_valid(&candidate.task)
         {
-            panic!("UserTask shared kernel stack boundary invariant failed");
+            return None;
         }
-        task_event_or_terminate(slot.task.adopt_setup());
-        slot.flow_generation = slot.task.flow_ref().generation();
-
-        self.parent_task_ref = parent_ref;
-        self.active_task_ref = task_ref;
-        self.pending_task_ref = TaskRef::NONE;
-        self.last_exited_task_ref = TaskRef::NONE;
-
-        let slot = &mut self.task_slots[index];
-        let UserTaskStorageSlot { task, runtime, .. } = slot;
-        if !task.bind_flow_cpu_ref(super::cpu::CpuRef::new(0)) {
-            panic!("declared UserTaskFlow CPU binding invariant failed");
-        }
-        task_event_or_terminate(task.publish_embedded_flow());
-        task_event_or_terminate(task.adopt_enable());
-        task_event_or_terminate(runtime.bind_dynamic(task, task.embedded_flow(), pid));
-        true
+        Some(candidate)
     }
 
-    fn reserved_user_task_publish_ready(&self, task_ref: TaskRef) -> bool {
+    /// Atomically publish a previously checked aggregate.  This function has
+    /// no fallible work and is safe to call after the parent COW PTE commit.
+    fn commit_reserved_user_task_snapshot(
+        &mut self,
+        task_ref: TaskRef,
+        parent_ref: TaskRef,
+        candidate: ForkChildSnapshotCandidate,
+    ) {
+        let index = task_ref.user_slot().expect("fork snapshot user slot");
+        let slot = &mut self.task_slots[index];
+        assert!(slot.reserved);
+        assert!(!slot.occupied);
+        assert!(slot.task_ref().same_identity(task_ref));
+        assert_eq!(slot.pid, candidate.task.pid());
+        assert!(candidate.task.task_ref().same_identity(task_ref));
+        assert!(candidate.task.fork_snapshot_candidate_valid());
+        assert!(
+            candidate
+                .runtime
+                .fork_snapshot_candidate_valid(&candidate.task)
+        );
+
+        slot.task = candidate.task;
+        slot.runtime = candidate.runtime;
+        slot.flow_generation = candidate.flow_generation;
+        slot.reserved = false;
+        // `occupied` is the resolver-visible publication marker.  Every
+        // identity, binding and committed state is already complete here.
+        slot.occupied = true;
+        self.parent_task_ref = parent_ref;
+        self.pending_task_ref = TaskRef::NONE;
+        self.last_exited_task_ref = TaskRef::NONE;
+        self.active_task_ref = task_ref;
+    }
+
+    fn reserved_user_task_publish_ready(
+        &self,
+        task_ref: TaskRef,
+        candidate: &ForkChildSnapshotCandidate,
+    ) -> bool {
         let Some(index) = task_ref.user_slot() else {
             return false;
         };
         let slot = &self.task_slots[index];
-        slot.occupied
+        slot.reserved
+            && !slot.occupied
             && slot.task_ref().same_identity(task_ref)
             && slot.task.state() == State::Base
             && slot.runtime.state() == State::Base
             && slot.mm_present
             && self.carrier_stack_base != 0
             && self.carrier_stack_top > self.carrier_stack_base
+            && candidate.task.task_ref().same_identity(task_ref)
+            && candidate.task.fork_snapshot_candidate_valid()
+            && candidate
+                .runtime
+                .fork_snapshot_candidate_valid(&candidate.task)
     }
 
     fn allocate_user_task(&mut self, pid: usize, parent_ref: TaskRef) -> Option<TaskRef> {
         let task_ref = self.reserve_user_task(pid)?;
-        if !self.publish_reserved_user_task(task_ref, parent_ref) {
-            return None;
-        }
+        let candidate = match self.prepare_reserved_user_task_snapshot(task_ref) {
+            Some(candidate) => candidate,
+            None => {
+                let index = task_ref.user_slot()?;
+                let slot = &mut self.task_slots[index];
+                slot.reserved = false;
+                slot.pid = 0;
+                return None;
+            }
+        };
+        self.commit_reserved_user_task_snapshot(task_ref, parent_ref, candidate);
         Some(task_ref)
     }
 
@@ -5948,6 +6136,11 @@ impl UserTaskSet {
     }
 
     #[cfg(app_smoke)]
+    pub fn smoke_fail_next_fork_snapshot_after_materialize(&mut self) {
+        self.fail_next_fork_snapshot_after_materialize = true;
+    }
+
+    #[cfg(app_smoke)]
     pub const fn smoke_last_unpublished_rollback_stage(&self) -> usize {
         self.last_unpublished_rollback_stage
     }
@@ -6368,6 +6561,8 @@ impl UserTaskSet {
     pub fn copy_plain_fork_from_parent(
         &mut self,
         parent: &KernelInitTaskUserState,
+        parent_task: &KernelInitTask,
+        parent_runtime: &UserAppRuntime,
         boundaries: &UserCloneDeferredBoundaries,
         address_space: &mut UserAddressSpace,
         stack: &UserStack,
@@ -6391,6 +6586,16 @@ impl UserTaskSet {
             || self.task_entry != TaskEntry::UserChild
             || !parent.active_user_flow_online()
             || !parent.pid1_preserved()
+            || parent_task.state() != State::OnCpu
+            || parent_task.task().execution_authority() != super::task::TaskExecutionAuthority::Live
+            || parent_task.flow().state() != State::Online
+            || parent_runtime.state() != State::Online
+            || !parent_runtime
+                .task_ref_owner()
+                .same_identity(parent_task.task_ref())
+            || !parent_runtime
+                .flow_ref()
+                .same_identity(parent_task.flow().flow_ref())
             || boundaries.state() != State::Ready
             || !boundaries.accepts_plain_fork_first_slice(clone_flags, newsp)
             || address_space.state() != State::Online
@@ -6427,14 +6632,28 @@ impl UserTaskSet {
                 return None;
             }
         };
-        if !self.reserved_user_task_publish_ready(child_ref)
+        let child_candidate = match self.prepare_reserved_user_task_snapshot(child_ref) {
+            Some(candidate) => candidate,
+            None => {
+                files_struct.discard_parent_fd_snapshot(&parent_fd_snapshot);
+                self.rollback_unpublished_user_task(child_ref, page_allocator, page_metadata_map);
+                return None;
+            }
+        };
+        #[cfg(app_smoke)]
+        if core::mem::take(&mut self.fail_next_fork_snapshot_after_materialize) {
+            files_struct.discard_parent_fd_snapshot(&parent_fd_snapshot);
+            self.rollback_unpublished_user_task(child_ref, page_allocator, page_metadata_map);
+            return None;
+        }
+        if !self.reserved_user_task_publish_ready(child_ref, &child_candidate)
             || !address_space.commit_prepared_cow_fork(stack, page_metadata_map)
         {
             files_struct.discard_parent_fd_snapshot(&parent_fd_snapshot);
             self.rollback_unpublished_user_task(child_ref, page_allocator, page_metadata_map);
             return None;
         }
-        assert!(self.publish_reserved_user_task(child_ref, TaskRef::KERNEL_INIT));
+        self.commit_reserved_user_task_snapshot(child_ref, TaskRef::KERNEL_INIT, child_candidate);
         self.pid = child_pid;
         self.parent_pid = super::rest_init::KERNEL_INIT_PID;
         self.tgid = child_pid;
@@ -6875,6 +7094,7 @@ impl UserTaskSet {
     ) -> Option<usize> {
         let builtin_grandchild_source = self.pid1_plain_fork_child_continuation();
         if self.active_task_state() != State::OnCpu
+            || !self.active_dynamic_fork_parent_ready()
             || !self.current_child_continuation()
             || (!self.vfork_clone() && !builtin_grandchild_source)
             || self.observed_plain_fork_child_active
@@ -6928,14 +7148,28 @@ impl UserTaskSet {
                 return None;
             }
         };
-        if !self.reserved_user_task_publish_ready(child_ref)
+        let child_candidate = match self.prepare_reserved_user_task_snapshot(child_ref) {
+            Some(candidate) => candidate,
+            None => {
+                files_struct.discard_parent_fd_snapshot(&fork_fd_snapshot);
+                self.rollback_unpublished_user_task(child_ref, page_allocator, page_metadata_map);
+                return None;
+            }
+        };
+        #[cfg(app_smoke)]
+        if core::mem::take(&mut self.fail_next_fork_snapshot_after_materialize) {
+            files_struct.discard_parent_fd_snapshot(&fork_fd_snapshot);
+            self.rollback_unpublished_user_task(child_ref, page_allocator, page_metadata_map);
+            return None;
+        }
+        if !self.reserved_user_task_publish_ready(child_ref, &child_candidate)
             || !address_space.commit_prepared_cow_fork(stack, page_metadata_map)
         {
             files_struct.discard_parent_fd_snapshot(&fork_fd_snapshot);
             self.rollback_unpublished_user_task(child_ref, page_allocator, page_metadata_map);
             return None;
         }
-        assert!(self.publish_reserved_user_task(child_ref, parent_task_ref));
+        self.commit_reserved_user_task_snapshot(child_ref, parent_task_ref, child_candidate);
         if builtin_grandchild_source {
             self.builtin_grandchild.reset_empty();
             self.builtin_grandchild.bound = true;

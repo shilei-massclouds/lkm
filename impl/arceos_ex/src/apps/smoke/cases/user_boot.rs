@@ -2392,6 +2392,8 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
         ctx.user_task_set
             .copy_plain_fork_from_parent(
                 &ctx.kernel_init_user_state,
+                &ctx.kernel_init_task,
+                &ctx.kernel_init_user_runtime,
                 &ctx.user_clone_deferred_boundaries,
                 &mut ctx.user_address_space,
                 &ctx.user_stack,
@@ -2468,10 +2470,65 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
                     .is_some_and(|leaf| leaf.writable() && !leaf.cow() && leaf.refcount() == 1),
         );
     }
+    let (free_before_snapshot_failure, slots_before_snapshot_failure, pid_before_snapshot_failure) = {
+        let ctx = context();
+        (
+            ctx.page_allocator.buddy_total_free_pages(),
+            ctx.user_task_set.free_task_slot_count(),
+            ctx.user_task_set.next_child_pid(),
+        )
+    };
+    context()
+        .user_task_set
+        .smoke_fail_next_fork_snapshot_after_materialize();
+    let snapshot_materialize_failure = {
+        let ctx = context();
+        ctx.user_task_set
+            .copy_plain_fork_from_parent(
+                &ctx.kernel_init_user_state,
+                &ctx.kernel_init_task,
+                &ctx.kernel_init_user_runtime,
+                &ctx.user_clone_deferred_boundaries,
+                &mut ctx.user_address_space,
+                &ctx.user_stack,
+                &ctx.user_trap_frame,
+                &ctx.fs_struct,
+                &ctx.files_struct,
+                &mut ctx.page_allocator,
+                &ctx.page_metadata_map,
+                &clone_frame,
+                USER_PLAIN_FORK_FLAGS,
+                0,
+                true,
+                true,
+                true,
+                true,
+            )
+            .is_none()
+    };
+    {
+        let ctx = context();
+        assertions.assert(
+            "fork snapshot candidate failure publishes nothing",
+            snapshot_materialize_failure
+                && ctx.user_task_set.smoke_last_unpublished_rollback_stage() == 5
+                && ctx.user_task_set.free_task_slot_count() == slots_before_snapshot_failure
+                && ctx.user_task_set.next_child_pid() == pid_before_snapshot_failure
+                && ctx.page_allocator.buddy_total_free_pages() == free_before_snapshot_failure
+                && ctx.user_address_space.satp_token() == satp_before
+                && ctx.user_address_space.cow_leaf_diagnostic(
+                    &ctx.user_stack,
+                    cow_probe_addr,
+                    &ctx.page_metadata_map,
+                ) == parent_leaf_before_failure,
+        );
+    }
     let outer_child_pid = {
         let ctx = context();
         let Some(child_pid) = ctx.user_task_set.copy_plain_fork_from_parent(
             &ctx.kernel_init_user_state,
+            &ctx.kernel_init_task,
+            &ctx.kernel_init_user_runtime,
             &ctx.user_clone_deferred_boundaries,
             &mut ctx.user_address_space,
             &ctx.user_stack,
@@ -2518,6 +2575,29 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
     {
         let ctx = context();
         let child_ref = ctx.user_task_set.active_task_ref();
+        let child_application = ctx.user_task_set.active_application_instance_ref();
+        let parent_application = ctx.kernel_init_user_runtime.application_instance_ref();
+        assertions.assert(
+            "fork atomically materializes distinct Online task flow runtime application",
+            ctx.kernel_init_task.state() == State::OnCpu
+                && ctx.kernel_init_task.flow_state() == State::Online
+                && ctx.kernel_init_user_runtime.state() == State::Online
+                && ctx.user_task_set.active_fork_snapshot_contract()
+                && !child_ref.same_identity(ctx.kernel_init_task.task_ref())
+                && !ctx
+                    .user_task_set
+                    .flow_ref()
+                    .same_identity(ctx.kernel_init_task.task().flow_ref())
+                && ctx.user_task_set.active_task_identity_ptr()
+                    != ctx.kernel_init_task.task() as *const _ as usize
+                && ctx.user_task_set.active_flow_identity_ptr()
+                    != ctx.kernel_init_task.task().embedded_flow() as *const _ as usize
+                && ctx.user_task_set.active_runtime_identity_ptr()
+                    != ctx.kernel_init_user_runtime.identity_ptr()
+                && child_application.is_valid()
+                && parent_application.is_valid()
+                && !child_application.same_identity(parent_application),
+        );
         let parent_leaf = ctx.user_address_space.cow_leaf_diagnostic(
             &ctx.user_stack,
             cow_probe_addr,
@@ -2924,12 +3004,17 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
         (interpreter_len != 0).then_some(&interpreter_buffer[..interpreter_len]);
     let exec_task_ref = context().user_task_set.active_task_ref();
     let fork_flow_ref = context().user_task_set.flow_ref();
+    let fork_task_identity = context().user_task_set.active_task_identity_ptr();
+    let fork_flow_identity = context().user_task_set.active_flow_identity_ptr();
+    let fork_runtime_identity = context().user_task_set.active_runtime_identity_ptr();
+    let fork_application_ref = context().user_task_set.active_application_instance_ref();
     let first_exec = crate::objects::exec_transaction::smoke_commit_builtin_grandchild_exec_image(
         context(),
         &main_buffer[..main_len],
         interpreter_image,
     );
     let first_exec_flow_ref = context().user_task_set.flow_ref();
+    let first_exec_application_ref = context().user_task_set.active_application_instance_ref();
     let first_exec_closed_child_fd = matches!(
         context().files_struct.fcntl_getfd_fd(cloexec_fd),
         Err(FileError::BadFd)
@@ -2964,6 +3049,17 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
             && context()
                 .user_task_set
                 .flow_ref_valid(exec_task_ref, first_exec_flow_ref),
+    );
+    assertions.assert(
+        "exec preserves task flow runtime and replaces only application identity",
+        context().user_task_set.active_task_ref() == exec_task_ref
+            && context().user_task_set.active_task_identity_ptr() == fork_task_identity
+            && context().user_task_set.active_flow_identity_ptr() == fork_flow_identity
+            && context().user_task_set.active_runtime_identity_ptr() == fork_runtime_identity
+            && fork_flow_ref.same_identity(first_exec_flow_ref)
+            && fork_application_ref.is_valid()
+            && first_exec_application_ref.is_valid()
+            && !fork_application_ref.same_identity(first_exec_application_ref),
     );
     let first_exec_satp = context().user_address_space.satp_token();
     let second_exec = crate::objects::exec_transaction::smoke_commit_builtin_grandchild_exec_image(

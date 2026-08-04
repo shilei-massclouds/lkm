@@ -769,7 +769,7 @@ object FilesStruct: ResourceObject {
                 depends_on {
                     FilesStruct.state == State::Ready;
                     FileDescriptorTable.state == State::Ready;
-                    child.state == State::Prepared;
+                    child.state == State::Online;
                     user_task_set_contains(UserTaskSet, child);
                 }
 

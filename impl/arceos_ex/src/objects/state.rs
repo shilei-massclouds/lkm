@@ -275,6 +275,13 @@ impl Lifecycle {
         self.state
     }
 
+    /// Reports whether an ordinary lifecycle transition has been committed.
+    /// Snapshot materialization starts in its specified committed state with
+    /// no transition events recorded.
+    pub const fn event_seen(&self, event: LifecycleEvent) -> bool {
+        self.seen_events & event.bit() != 0
+    }
+
     pub fn transition(
         &mut self,
         event: LifecycleEvent,

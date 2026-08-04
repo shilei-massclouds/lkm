@@ -745,9 +745,17 @@ fork/clone 的动态 child 都是独立实例。每个 Task 在声明时原子�
 Flow 历史集合、当前/初始双重 binding 或 successor chain。
 
 静态 pair 是 BootTask→BootInitFlow、KernelInitTask→KernelInitFlow、KthreaddTask→KthreaddFlow；
-每个 fork/clone 创建 fresh Task→fresh UserTaskFlow，并由该 Flow 最多创建一个 fresh
+每个 fork/clone 创建 fresh Task→fresh 普通 TaskFlow，并由该 Flow 最多创建一个 fresh
 UserAppRuntime。PID 1 的 Runtime 属于 KernelInitFlow。exec 保持 Task、Flow、FlowRef 和 Runtime
 identity，只替换 Runtime 内部 ApplicationInstance；不同 Task/Flow 不共享 Runtime。
+
+fork/clone 使用 `snapshot` 在一个候选中直接 materialize fresh child Task/TaskFlow/UserAppRuntime 为
+`Online/Online/Online`，并 materialize 无状态 ApplicationInstance、TaskRef 和 FlowRef。块内完成
+owner/parent、generation、PID、stack、ContextCoordinate、COW/frame refs、返回寄存器与 scheduler
+publication；不发送 Preset/Setup/Enable，不形成 lifecycle transition signal。完整候选 invariant 一次性
+成立后才发布，任一失败回滚全部 identity、引用、PID、PTE 和 frame ref。提交时 parent 固定为
+`OnCpu/Online/Online`，child 固定为 `Online/Online/Online`。child 不复制活动 TrapFlowRef、YieldToken、
+CurrentTask/CPU authority 或 trap stack，只重建 child-return-zero 的 post-fork continuation。
 
 Task 物理拥有 TaskThreadContext，其寄存器区是 `ra/sp/s0..s11`，并保存抽象 ContextCoordinate、
 breakpoint validity、固定 TaskFlowRef/generation、context epoch、dispatch record、可选 root TrapFlowRef
@@ -766,10 +774,16 @@ Task.Online 只表示已发布且当前不在 CPU；runnable/on-rq/blocked 与 l
 generation、context epoch 和 dispatch ordinal，精确一次消费本轮 proof 与当前 coordinate。Signal 不携带
 机器入口或 first/resume kind。
 
+UserAppRuntime 是普通 TaskFlow 的被动 owned child，不是 Flow，也不进入 effective-flow 栈。Runtime
+Online 表示 application continuation 已建立且未 terminal，覆盖执行、runnable/待调度、阻塞挂起和被
+trap overlay 覆盖，不另建 Running/Paused/Trapped 状态。Runtime Setup/Enable 只服务从头建立路径；fork
+snapshot 不调用它们。调度始终使用 `Restore -> Dispatch -> TaskFlow.Enter -> ContextCoordinate`，没有
+Runtime Enter。terminal 显式依次 Disable/Cleanup Runtime、TaskFlow 和 Task。
+
 BootTask 初态为 OnCpu/Live/Invalid，不经 Scheduler 获得首次执行权；首次切出时才保存 context。
 BootInitFlow 经 Preset/Setup/Enable 到 Online 后，继续以 Online Action 承载 idle setup、
-`yields Scheduler.Schedule` 后的返回 coordinate 与 idle loop。KernelInitFlow、KthreaddFlow 和
-UserTaskFlow 随所属 Task 发布为 Online，运行主体由 contextual Enter 进入。
+`yields Scheduler.Schedule` 后的返回 coordinate 与 idle loop。KernelInitFlow、KthreaddFlow 和动态
+普通 TaskFlow 随所属 Task 发布为 Online，运行主体由 contextual Enter 进入。
 
 TaskFlow lifecycle/action 必须校验 parent OnCpu/Live、固定 pair、FlowRef/generation、CpuRef、
 CurrentTask/CurrentStack 和 effective-flow guard。陷入不改变 Task.OnCpu 或 TaskFlow.Online，只把

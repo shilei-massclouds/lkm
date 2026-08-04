@@ -6189,6 +6189,8 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
 
             let Some(child_pid) = ctx.user_task_set.copy_plain_fork_from_parent(
                 &ctx.kernel_init_user_state,
+                &ctx.kernel_init_task,
+                &ctx.kernel_init_user_runtime,
                 &ctx.user_clone_deferred_boundaries,
                 &mut ctx.user_address_space,
                 &ctx.user_stack,

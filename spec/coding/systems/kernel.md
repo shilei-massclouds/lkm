@@ -101,6 +101,6 @@ Hello/Smoke 与用户 payload 都保持 KernelInitFlow。准备期断言必须�
 
 - KernelInitFlow 每个 transition/action 都即时检查 parent KernelInitTask 为 OnCpu。
 - guard 任一条件失败必须在状态和 checkpoint 修改前 fail-stop。
-- KthreaddFlow 只承载服务循环；BootInitFlow 直接拥有 BootIdleEntryPhase；UserTaskFlow
-  拥有稳定 UserAppRuntime。
+- KthreaddFlow 只承载服务循环；BootInitFlow 直接拥有 BootIdleEntryPhase；用户型普通 TaskFlow
+  拥有稳定、被动的 UserAppRuntime。
 - AP Entry/Callin/OnlineIdle 不得伪装成 KernelInitFlow 子阶段。
