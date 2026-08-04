@@ -6,7 +6,10 @@ use crate::{
     context::context,
     objects::{
         state::State,
-        task::{Task, TaskBreakpointState, TaskEntry, TaskExecutionAuthority, TaskKind, TaskRef},
+        task::{
+            TASK_SIGNAL_SEGMENTATION_FAULT, Task, TaskBreakpointState, TaskEntry,
+            TaskExecutionAuthority, TaskKind, TaskRef, TaskSegvCode, TaskTerminalReason,
+        },
         task_flow::TaskFlowRef,
     },
 };
@@ -268,6 +271,10 @@ impl SmokeScenario for CooperativeSwitchScenario {
             task_breakpoint_contract_smoke(),
         );
         assertions.assert(
+            "SIGSEGV terminal records exact code address and rejects duplicates",
+            task_sigsegv_terminal_smoke(),
+        );
+        assertions.assert(
             "stale cross-cpu inactive and wrong-binding Schedule senders leave scheduler unchanged",
             schedule_sender_rejection_smoke(),
         );
@@ -466,6 +473,41 @@ fn task_breakpoint_contract_smoke() -> bool {
         return false;
     }
     task.state() == State::Destroyed
+}
+
+fn task_sigsegv_terminal_smoke() -> bool {
+    let mut task = Task::new_user(TaskRef::user(0, 78), 0);
+    if task
+        .set_identity_metadata(78, TaskEntry::UserChild, TaskKind::TestOnly)
+        .is_err()
+        || task.adopt_preset().is_err()
+        || task.declare_and_bind_embedded_flow().is_err()
+    {
+        return false;
+    }
+    task.init_dummy_switch_context();
+    if task.adopt_setup().is_err()
+        || !task.bind_flow_cpu_ref(crate::objects::cpu::CpuRef::new(0))
+        || task.publish_embedded_flow().is_err()
+        || task.set_runtime_running().is_err()
+        || task.publish_runqueue_binding().is_err()
+        || task.adopt_enable().is_err()
+        || task.dispatch_and_enter_for_test().is_err()
+        || !task.record_segmentation_fault_terminal(TaskSegvCode::Maperr, 0x1234_5000)
+    {
+        return false;
+    }
+    let Some(info) = task.segv_info() else {
+        return false;
+    };
+    task.terminal_reason() == TaskTerminalReason::SegmentationFault
+        && info.signal() == TASK_SIGNAL_SEGMENTATION_FAULT
+        && info.code() == TaskSegvCode::Maperr
+        && info.address() == 0x1234_5000
+        && task.terminal_wait_status(0xff) == TASK_SIGNAL_SEGMENTATION_FAULT
+        && !task.record_segmentation_fault_terminal(TaskSegvCode::Accerr, 0x5678_9000)
+        && !task.record_out_of_memory_terminal()
+        && task.segv_info() == Some(info)
 }
 
 extern "C" fn smoke_scheduler_task_entry() -> ! {

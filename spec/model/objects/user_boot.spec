@@ -211,7 +211,12 @@ predicate user_address_space_owner_task_bound<T, K>(space: T, task: K) -> bool;
 predicate user_address_space_active_carrier_validated<T>(space: T) -> bool;
 predicate user_address_space_exec_replacement_atomic<T>(space: T) -> bool;
 predicate user_address_space_fault_kernel_extable_isolated<T>(space: T) -> bool;
-predicate user_address_space_fault_sigsegv_delivery_deferred<T>(space: T) -> bool;
+predicate user_address_space_fault_unmapped_segv_maperr_bound<T>(space: T) -> bool;
+predicate user_address_space_fault_protection_segv_accerr_bound<T>(space: T) -> bool;
+predicate user_address_space_fault_sigsegv_addr_exact<T>(space: T) -> bool;
+predicate user_address_space_fault_sigsegv_no_sepc_advance<T>(space: T) -> bool;
+predicate user_address_space_fault_sigsegv_task_terminal_bound<T>(space: T) -> bool;
+predicate user_address_space_fault_sigsegv_usercopy_still_efault<T>(space: T) -> bool;
 predicate swapper_vm_remains_kernel_shared_instance<T>(swapper: T) -> bool;
 
 predicate user_trap_frame_allocated<T>(frame: T) -> bool;
@@ -1126,7 +1131,12 @@ object UserAddressSpace: ResourceObject {
                     user_address_space_active_carrier_validated(self);
                     user_address_space_exec_replacement_atomic(self);
                     user_address_space_fault_kernel_extable_isolated(self);
-                    user_address_space_fault_sigsegv_delivery_deferred(self);
+                    user_address_space_fault_unmapped_segv_maperr_bound(self);
+                    user_address_space_fault_protection_segv_accerr_bound(self);
+                    user_address_space_fault_sigsegv_addr_exact(self);
+                    user_address_space_fault_sigsegv_no_sepc_advance(self);
+                    user_address_space_fault_sigsegv_task_terminal_bound(self);
+                    user_address_space_fault_sigsegv_usercopy_still_efault(self);
                 }
             }
         }

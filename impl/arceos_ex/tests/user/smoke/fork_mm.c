@@ -9,6 +9,7 @@
 
 static volatile unsigned long initialized_data = 0x1122334455667788UL;
 static volatile unsigned long zero_bss;
+static const unsigned char readonly_probe = 0x5a;
 
 static int say(const char *message, size_t len)
 {
@@ -16,6 +17,55 @@ static int say(const char *message, size_t len)
 }
 
 #define SAY_LITERAL(message) say(message, sizeof(message) - 1)
+
+typedef void (*fault_fn_t)(void);
+
+__attribute__((noinline, noreturn)) static void fault_unmapped_load(void)
+{
+	const void *address = (const void *)(uintptr_t)0x1000;
+
+	__asm__ volatile("lb zero, 0(%0)" : : "r"(address) : "memory");
+	syscall(SYS_exit, 90);
+	__builtin_unreachable();
+}
+
+__attribute__((noinline, noreturn)) static void fault_readonly_store(void)
+{
+	__asm__ volatile("sb zero, 0(%0)" : : "r"(&readonly_probe) : "memory");
+	syscall(SYS_exit, 91);
+	__builtin_unreachable();
+}
+
+__attribute__((noinline, noreturn)) static void fault_nx_execute(void)
+{
+	long mapping = syscall(SYS_mmap, NULL, 4096, PROT_READ | PROT_WRITE,
+			       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+
+	if (mapping < 0) {
+		syscall(SYS_exit, 92);
+	}
+	*(volatile uint16_t *)(uintptr_t)mapping = 0x8082;
+	__asm__ volatile("jalr ra, 0(%0)" : : "r"((uintptr_t)mapping) : "ra", "memory");
+	syscall(SYS_exit, 93);
+	__builtin_unreachable();
+}
+
+static int expect_sigsegv(fault_fn_t fault)
+{
+	long child = syscall(SYS_clone, SIGCHLD, 0, 0, 0, 0);
+	long waited;
+	int status = 0;
+
+	if (child < 0) {
+		return -1;
+	}
+	if (child == 0) {
+		fault();
+		__builtin_unreachable();
+	}
+	waited = syscall(SYS_wait4, -1, &status, 0, NULL);
+	return waited == child && status == SIGSEGV ? 0 : -1;
+}
 
 int smoke_fork_mm(void)
 {
@@ -135,6 +185,46 @@ int smoke_fork_mm(void)
 	}
 	if (SAY_LITERAL("user fork COW reuse stress ok\n") < 0) {
 		return 117;
+	}
+	if (expect_sigsegv(fault_unmapped_load) < 0) {
+		return 120;
+	}
+	if (SAY_LITERAL("user SIGSEGV MAPERR wait ok\n") < 0) {
+		return 121;
+	}
+	initialized_data ^= 0x1001UL;
+	zero_bss ^= 0x2002UL;
+	stack_value ^= 0x3003UL;
+	*anonymous ^= 0x4004UL;
+	*heap_probe ^= 0x5U;
+	if (expect_sigsegv(fault_readonly_store) < 0 || readonly_probe != 0x5a) {
+		return 122;
+	}
+	if (SAY_LITERAL("user SIGSEGV ACCERR readonly wait ok\n") < 0) {
+		return 123;
+	}
+	initialized_data ^= 0x6006UL;
+	zero_bss ^= 0x7007UL;
+	stack_value ^= 0x8008UL;
+	*anonymous ^= 0x9009UL;
+	*heap_probe ^= 0xaU;
+	if (expect_sigsegv(fault_nx_execute) < 0) {
+		return 124;
+	}
+	if (SAY_LITERAL("user SIGSEGV ACCERR NX wait ok\n") < 0) {
+		return 125;
+	}
+	initialized_data ^= 0xb00bUL;
+	zero_bss ^= 0xc00cUL;
+	stack_value ^= 0xd00dUL;
+	*anonymous ^= 0xe00eUL;
+	*heap_probe ^= 0xfU;
+	if (readonly_probe != 0x5a || initialized_data == 0 || zero_bss == 0 ||
+	    stack_value == 0 || *anonymous == 0 || *heap_probe == 0) {
+		return 126;
+	}
+	if (SAY_LITERAL("user SIGSEGV parent mm survives ok\n") < 0) {
+		return 127;
 	}
 	if (syscall(SYS_munmap, (void *)(uintptr_t)mapping, 4096) != 0) {
 		return 118;

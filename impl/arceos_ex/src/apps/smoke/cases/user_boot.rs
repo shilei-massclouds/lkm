@@ -2210,11 +2210,18 @@ fn exercise_user_fault_core(assertions: &mut SmokeAssertions, ctx: &mut crate::c
             &ctx.page_metadata_map,
         )
     });
+    let protection_diagnostic = ctx.user_address_space.last_user_fault();
     assertions.assert(
         "common fault core protection classification",
-        protection.is_some_and(|resolution| {
-            resolution.class() == UserFaultClass::Protection
-                && resolution.result() == UserFaultResult::SegvAccerr
+        read_only_addr.is_some_and(|address| {
+            protection.is_some_and(|resolution| {
+                resolution.class() == UserFaultClass::Protection
+                    && resolution.result() == UserFaultResult::SegvAccerr
+                    && resolution.sepc() == sepc + 8
+            }) && protection_diagnostic.address() == address
+                && protection_diagnostic.sepc() == sepc + 8
+                && protection_diagnostic.class() == UserFaultClass::Protection
+                && protection_diagnostic.result() == UserFaultResult::SegvAccerr
         }),
     );
 
@@ -2230,10 +2237,16 @@ fn exercise_user_fault_core(assertions: &mut SmokeAssertions, ctx: &mut crate::c
         &mut ctx.page_allocator,
         &ctx.page_metadata_map,
     );
+    let unmapped_diagnostic = ctx.user_address_space.last_user_fault();
     assertions.assert(
         "common fault core unmapped classification",
         unmapped.class() == UserFaultClass::Unmapped
-            && unmapped.result() == UserFaultResult::SegvMaperr,
+            && unmapped.result() == UserFaultResult::SegvMaperr
+            && unmapped.sepc() == sepc + 12
+            && unmapped_diagnostic.address() == USER_HEAP_BASE - USER_PAGE_SIZE
+            && unmapped_diagnostic.sepc() == sepc + 12
+            && unmapped_diagnostic.class() == UserFaultClass::Unmapped
+            && unmapped_diagnostic.result() == UserFaultResult::SegvMaperr,
     );
 
     let wrong_mm = ctx.user_address_space.resolve_user_fault(

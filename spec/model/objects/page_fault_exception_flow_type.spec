@@ -22,6 +22,10 @@ type PageFaultExceptionFlowType: FlowObject {
                     page_fault_flow_user_cow_refcount_checked(self, PageMetadataMap);
                     page_fault_flow_user_cow_commit_atomic(self);
                     page_fault_flow_user_cow_oom_terminal_disjoint(self);
+                    page_fault_flow_user_unmapped_segv_maperr(self);
+                    page_fault_flow_user_protection_segv_accerr(self);
+                    page_fault_flow_user_segv_addr_exact(self);
+                    page_fault_flow_user_segv_terminal_does_not_retry(self);
                     page_fault_flow_user_retry_same_instruction(self);
                     page_fault_flow_user_kernel_state_disjoint(self);
                 }
@@ -54,6 +58,10 @@ predicate page_fault_flow_user_cow_write_protect_bound<F: PageFaultExceptionFlow
 predicate page_fault_flow_user_cow_refcount_checked<F: PageFaultExceptionFlowType, M>(flow: F, metadata_map: M) -> bool;
 predicate page_fault_flow_user_cow_commit_atomic<F: PageFaultExceptionFlowType>(flow: F) -> bool;
 predicate page_fault_flow_user_cow_oom_terminal_disjoint<F: PageFaultExceptionFlowType>(flow: F) -> bool;
+predicate page_fault_flow_user_unmapped_segv_maperr<F: PageFaultExceptionFlowType>(flow: F) -> bool;
+predicate page_fault_flow_user_protection_segv_accerr<F: PageFaultExceptionFlowType>(flow: F) -> bool;
+predicate page_fault_flow_user_segv_addr_exact<F: PageFaultExceptionFlowType>(flow: F) -> bool;
+predicate page_fault_flow_user_segv_terminal_does_not_retry<F: PageFaultExceptionFlowType>(flow: F) -> bool;
 predicate page_fault_flow_user_retry_same_instruction<F: PageFaultExceptionFlowType>(flow: F) -> bool;
 predicate page_fault_flow_user_kernel_state_disjoint<F: PageFaultExceptionFlowType>(flow: F) -> bool;
 predicate page_fault_flow_root_leaf_revalidated_after_schedule<F: PageFaultExceptionFlowType>(flow: F) -> bool;

@@ -8,7 +8,9 @@ entries and illegal context are terminal.
 
 User-origin instruction/load/store causes build one `UserFaultRequest` from the trap frame and current Task/mm,
 then call the `UserAddressSpace` classifier. A successful result returns the original `sepc`; invalid or failed
-results remain explicit and cannot fall through to kernel exception-table lookup. The kernel branch likewise
+results remain explicit and cannot fall through to kernel exception-table lookup. `SegvMaperr`/`SegvAccerr` are
+lowered only here, for a real user trap, to the current Task's synchronous fatal SIGSEGV record and terminal
+handoff; usercopy callers continue to translate the same range failure to `EFAULT`. The kernel branch likewise
 must not read user VMA, sparse-backing, or COW diagnostic state.
 
 `Preset` installs only the terminal page-fault fallback consumed by `TrapType.Setup`; handler and fixup bindings

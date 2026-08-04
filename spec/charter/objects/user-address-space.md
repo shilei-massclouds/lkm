@@ -27,8 +27,15 @@
   当前 leaf 后释放旧引用；refcount 等于一时不复制，只清除 COW 并恢复原写权限。两条成功路径都只在
   定点 `sfence.vma` 后返回保持原 `sepc` 的 `RetrySameInstruction`。分配、复制或 commit 失败必须
   保持原 PTE、frame 引用和父子可见字节不变。
-- `Protection` 与 `Unmapped` 必须形成稳定非法 fault 结果，不得被伪装为可恢复缺页；正式
-  `SIGSEGV/SEGV_ACCERR/SEGV_MAPERR` task terminal delivery 在后续阶段闭合。
+- 来自真实用户 instruction/load/store trap 的 `Unmapped` 必须形成同步致命
+  `SIGSEGV/SEGV_MAPERR`，`Protection` 必须形成同步致命 `SIGSEGV/SEGV_ACCERR`。signal info 固定
+  `signo=11`，`si_code` 与分类一致，`si_addr` 精确等于本次请求的 fault address；不得推进 `sepc`、
+  伪装普通 exit 或进入 kernel exception-table fixup。错误 Task/mm、stale SATP 和其它
+  `InvalidContext` 是内核上下文不变量失败，不得伪装成用户 SIGSEGV。
+- 同步致命 SIGSEGV 首片只记录当前 Task terminal，并沿既有 child exit/wait/SIGCHLD 生命周期形成
+  低 signal bits 为 11 的 wait word、唤醒 parent wait 和生成 SIGCHLD。它不构造用户 signal frame、
+  不进入已登记 handler、不实现 `rt_sigreturn` 或 core dump。faulting Task 的 mm/PTE/`UserFrame`
+  引用在 terminal handoff 释放一次，reap 只释放 Task record；parent 和 sibling mm 不受影响。
 - 诊断在固定处理边界记录 Task/mm 身份、地址、`sepc`、access、分类、结果、fault 前后 frame
   refcount、复制次数和唯一引用快路径次数。这些诊断不得插入、删除或重排既有外部 checkpoint。
 - COW 分配或 commit 资源失败产生 `TaskTerminalReason::OutOfMemory`：只终止当前 faulting Task，

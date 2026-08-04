@@ -11,6 +11,9 @@ resolver result. `RetrySameInstruction` is accepted only when the returned `sepc
 The COW branch additionally snapshots the leaf PFN/COW bit and checked `UserFrameRef` count. A shared-copy or
 unique-reference commit must revalidate that tuple before changing the leaf, flush the one VA and retry the same
 instruction. Resource failure preserves the tuple and selects the Task `OutOfMemory` terminal result.
+`Unmapped/SegvMaperr` and `Protection/SegvAccerr` snapshot the exact request VA as `si_addr`, record the current
+Task's signal-11 terminal and enter the existing exit/wait/SIGCHLD handoff without changing the captured `sepc`.
+They never enter the COW retry or kernel fixup branches, and `InvalidContext` is not lowered to a user signal.
 User and kernel result variants are disjoint, so neither path can accidentally consume the other's recovery
 state.
 

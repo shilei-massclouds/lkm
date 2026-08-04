@@ -725,6 +725,29 @@ impl Context {
         }
     }
 
+    pub(crate) fn record_task_segmentation_fault(
+        &mut self,
+        task_ref: TaskRef,
+        code: crate::objects::task::TaskSegvCode,
+        address: usize,
+    ) -> bool {
+        self.task_mut_for_ref(task_ref)
+            .is_some_and(|task| task.record_segmentation_fault_terminal(code, address))
+    }
+
+    pub(crate) fn task_segmentation_fault_info(
+        &self,
+        task_ref: TaskRef,
+    ) -> Option<crate::objects::task::TaskSegvInfo> {
+        let candidate = self.current_task_candidate(task_ref)?;
+        if candidate.task.terminal_reason()
+            != crate::objects::task::TaskTerminalReason::SegmentationFault
+        {
+            return None;
+        }
+        candidate.task.segv_info()
+    }
+
     fn current_task_candidate(&self, task_ref: TaskRef) -> Option<CurrentTaskCandidate<'_>> {
         let candidate = if task_ref.same_identity(TaskRef::BOOT) {
             self.boot_current_task_candidate()

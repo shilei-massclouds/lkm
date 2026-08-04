@@ -76,3 +76,18 @@ signal-9 wait word and SIGCHLD, with no SIGSEGV, user signal frame, OOM killer s
 The stable fault diagnostic records Task/mm, VA, `sepc`, access, class, result, checked refcount, copy count and
 unique fast-path count. It is internal diagnostic state and does not create, reorder or rename external checkpoints. Kernel
 exception-table recovery never calls this classifier and never consumes its state.
+
+For a real user instruction/load/store trap, `SegvMaperr` lowers to
+`TaskTerminalReason::SegmentationFault` plus `TaskSegvInfo { code: Maperr, address: stval }`;
+`SegvAccerr` lowers identically with `code: Accerr`. The signal number is the constant 11, and
+`TaskSegvInfo.address` is copied from the same `UserFaultRequest.address` that produced the result. The trap handler
+does not advance `sepc`: after recording the terminal it invokes the existing child-exit handoff with logical exit
+status zero, while `task_wait_status` selects the low-bit signal-11 encoding from the terminal reason. The handoff
+releases the faulting mm once, resumes/copies status to the parent wait and queues SIGCHLD; reap releases only the
+destroyed Task slot. A stable terminal diagnostic exposes task identity, signal number, code and address without
+adding or reordering checkpoints.
+
+`InvalidContext` remains a kernel invariant failure and must not be relabeled as SIGSEGV. Syscall usercopy may use
+the same classifier for range preparation, but `SegvMaperr`/`SegvAccerr` there remain a false/EFAULT result because
+no user instruction trap occurred. OOM remains the disjoint signal-9 Task terminal. This slice does not inspect the
+registered action table, create a signal frame, enter a handler, implement `rt_sigreturn`, or write a core image.

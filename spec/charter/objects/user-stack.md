@@ -40,5 +40,6 @@ usercopy 对合法栈范围使用同一 range resolver 逐页 fault-in；失败�
 诊断在既有稳定时点记录 top max、选定 top、offset、execfn pointer 和 auxv 完整性，不新增、插入或
 重排 checkpoint。普通 fork 在 child 发布前为每个已驻留 stack page acquire 独立引用，并把双方 leaf
 降低为 RO+COW；任一方写缺页按 `UserAddressSpace` 统一策略解共享。parent/child 栈字节不得通过
-wait/exit snapshot 回滚实现隔离。完整 SIGSEGV、动态 `RLIMIT_STACK`、多线程栈、
-`MAP_STACK/MAP_GROWSDOWN`、完整 CRNG 和内核 compiler stack protector 不在本轮。
+wait/exit snapshot 回滚实现隔离。栈范围的无映射或权限 fault 由 `UserAddressSpace` 按同步致命
+SIGSEGV 统一收口；动态 `RLIMIT_STACK`、多线程栈、`MAP_STACK/MAP_GROWSDOWN`、用户 handler
+delivery、完整 CRNG 和内核 compiler stack protector 不在本轮。

@@ -183,6 +183,39 @@ pub enum TaskBreakpointState {
 pub enum TaskTerminalReason {
     None,
     OutOfMemory,
+    SegmentationFault,
+}
+
+pub const TASK_SIGNAL_SEGMENTATION_FAULT: usize = 11;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TaskSegvCode {
+    Maperr,
+    Accerr,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TaskSegvInfo {
+    code: TaskSegvCode,
+    address: usize,
+}
+
+impl TaskSegvInfo {
+    pub const fn new(code: TaskSegvCode, address: usize) -> Self {
+        Self { code, address }
+    }
+
+    pub const fn signal(self) -> usize {
+        TASK_SIGNAL_SEGMENTATION_FAULT
+    }
+
+    pub const fn code(self) -> TaskSegvCode {
+        self.code
+    }
+
+    pub const fn address(self) -> usize {
+        self.address
+    }
 }
 
 /// The physical core-register context and its recoverable continuation
@@ -372,6 +405,7 @@ pub struct Task {
     no_setaffinity: bool,
     stack_guard_installed: bool,
     terminal_reason: TaskTerminalReason,
+    segv_info: Option<TaskSegvInfo>,
     thread_context: TaskThreadContext,
     flow: TaskFlow,
 }
@@ -420,6 +454,7 @@ impl Task {
             no_setaffinity: false,
             stack_guard_installed: false,
             terminal_reason: TaskTerminalReason::None,
+            segv_info: None,
             thread_context: TaskThreadContext::new(),
             flow: Self::initial_flow(task_ref),
         }
@@ -468,6 +503,7 @@ impl Task {
             no_setaffinity: false,
             stack_guard_installed: false,
             terminal_reason: TaskTerminalReason::None,
+            segv_info: None,
             thread_context: TaskThreadContext::new(),
             flow: TaskFlow::new_static_bound(TaskFlowRef::BOOT_INIT, TaskRef::BOOT),
         }
@@ -497,6 +533,7 @@ impl Task {
             no_setaffinity: false,
             stack_guard_installed: false,
             terminal_reason: TaskTerminalReason::None,
+            segv_info: None,
             thread_context: TaskThreadContext::new(),
             flow: TaskFlow::new_static_bound(flow_ref, task_ref),
         }
@@ -601,6 +638,18 @@ impl Task {
         self.terminal_reason
     }
 
+    pub const fn segv_info(&self) -> Option<TaskSegvInfo> {
+        self.segv_info
+    }
+
+    pub const fn terminal_wait_status(&self, exit_status: usize) -> usize {
+        match self.terminal_reason {
+            TaskTerminalReason::OutOfMemory => 9,
+            TaskTerminalReason::SegmentationFault => TASK_SIGNAL_SEGMENTATION_FAULT,
+            TaskTerminalReason::None => (exit_status & 0xff) << 8,
+        }
+    }
+
     pub fn record_out_of_memory_terminal(&mut self) -> bool {
         if self.lifecycle.state() != State::OnCpu
             || self.execution_authority != TaskExecutionAuthority::Live
@@ -609,6 +658,23 @@ impl Task {
             return false;
         }
         self.terminal_reason = TaskTerminalReason::OutOfMemory;
+        true
+    }
+
+    pub fn record_segmentation_fault_terminal(
+        &mut self,
+        code: TaskSegvCode,
+        address: usize,
+    ) -> bool {
+        if self.lifecycle.state() != State::OnCpu
+            || self.execution_authority != TaskExecutionAuthority::Live
+            || self.terminal_reason != TaskTerminalReason::None
+            || self.segv_info.is_some()
+        {
+            return false;
+        }
+        self.terminal_reason = TaskTerminalReason::SegmentationFault;
+        self.segv_info = Some(TaskSegvInfo::new(code, address));
         true
     }
 

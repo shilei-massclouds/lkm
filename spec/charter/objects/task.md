@@ -172,6 +172,12 @@ Cleanup 要求 Flow 已 Destroyed；终止路径不先制造可恢复 Online con
 child exit/wait/SIGCHLD 生命周期传递，wait word 按 signal 9 编码，但不表示已运行 OOM killer 或已向
 用户 handler 交付 signal frame。mm、PTE 和 `UserFrame` 引用必须在 Task Cleanup 前只释放一次。
 
+用户非法 instruction/load/store fault 使用 `TaskTerminalReason::SegmentationFault`。Task 同时保存不可
+分离的 SIGSEGV info：`signo=11`、`SEGV_MAPERR` 或 `SEGV_ACCERR` 以及精确 fault address；只有当前
+OnCpu/Live 且尚无 terminal reason 的 Task 可以提交一次。该原因沿同一 child exit/wait/SIGCHLD 生命周期
+传递，wait word 低 signal bits 为 11。首片不构造用户 signal frame或调用 handler；terminal handoff
+释放 faulting Task 的 mm 一次，reap 不得重复释放。
+
 用户地址空间、files、credentials、signal 和 exec transaction 属于稳定 Task/Runtime 资源。每个用户型
 TaskFlow 最多创建一个终身稳定、不可共享的 `UserAppRuntime` owned child；exec 只替换 Runtime 内的
 ApplicationInstance，fork 才创建新的 Task/Flow/Runtime。

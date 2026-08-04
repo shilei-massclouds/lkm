@@ -2473,19 +2473,24 @@ impl UserAddressSpace {
                 page_allocator,
                 page_metadata_map,
             );
-            let outcome = match result {
-                Ok(_) => UserFaultResult::RetrySameInstruction,
+            let (class, outcome) = match result {
+                Ok(_) => (
+                    UserFaultClass::NotPresent,
+                    UserFaultResult::RetrySameInstruction,
+                ),
                 Err(
                     UserStackGrowReject::BackingAllocation
                     | UserStackGrowReject::PageTableAllocation
                     | UserStackGrowReject::PteInstall,
-                ) => UserFaultResult::TaskOom,
-                Err(UserStackGrowReject::Rlimit | UserStackGrowReject::MappingCollision) => {
-                    UserFaultResult::SegvMaperr
-                }
-                Err(_) => UserFaultResult::SegvAccerr,
+                ) => (UserFaultClass::NotPresent, UserFaultResult::TaskOom),
+                Err(
+                    UserStackGrowReject::Rlimit
+                    | UserStackGrowReject::GuardGap
+                    | UserStackGrowReject::MappingCollision,
+                ) => (UserFaultClass::Unmapped, UserFaultResult::SegvMaperr),
+                Err(_) => (UserFaultClass::Protection, UserFaultResult::SegvAccerr),
             };
-            return self.record_user_fault(request, UserFaultClass::NotPresent, outcome);
+            return self.record_user_fault(request, class, outcome);
         }
 
         let Some(mapping_index) = mapping_index else {
@@ -5011,10 +5016,9 @@ impl UserTaskSet {
 
     pub(crate) fn task_wait_status(&self, task_ref: TaskRef, exit_status: usize) -> usize {
         self.slot_for_ref(task_ref)
-            .filter(|slot| {
-                slot.task.terminal_reason() == super::task::TaskTerminalReason::OutOfMemory
+            .map_or((exit_status & 0xff) << 8, |slot| {
+                slot.task.terminal_wait_status(exit_status)
             })
-            .map_or((exit_status & 0xff) << 8, |_| 9)
     }
 
     pub fn inactive_cow_leaf_diagnostic(

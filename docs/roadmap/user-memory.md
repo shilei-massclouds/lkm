@@ -79,32 +79,44 @@ Compose 或 Impl 语义：
 - 测试结束后无残留 QEMU 进程，未产生额外 tracked 修改。锁定的
   `spec/charter/systems/computer.md` 仅审查、未解锁或修改。
 
-## 第四阶段：同步致命 SIGSEGV 与最终收口（最高优先级）
+## 已完成基线：第四阶段同步致命 SIGSEGV 与最终收口
 
-第三阶段已经通过全部门禁并归档。下一执行窗口必须 charter-first 从本阶段开始；它是主 Roadmap
-当前唯一最高优先级执行项，不得由其他用户内存扩展、snapshot 回退或 handler delivery 抢占。
+第四阶段把统一 fault core 的非法用户访问结果接入既有 task exit/wait/SIGCHLD 生命周期：
 
-实现责任：
+- 只有真实 U-mode instruction/load/store page fault 会降低为同步致命 SIGSEGV；无 VMA 为
+  `SEGV_MAPERR`，权限、NX、只读写入和非 COW 写保护为 `SEGV_ACCERR`。`TaskSegvInfo` 不可变地保存
+  signal 11、code 与精确 fault address，成功 COW 仍只重试原 `sepc`。
+- signal terminal 只允许 OnCpu/Live 且尚无 terminal reason 的 Task 记录一次；重复或与 OOM 冲突的
+  terminal 确定拒绝。wait word 的低 signal bits 为 11，terminal handoff 唤醒 parent 并产生 SIGCHLD；
+  exit 释放当前 mm 一次，reap 只释放 Task record。
+- 错误 Task/mm/SATP 仍是内核 invariant failure，syscall usercopy 的非法范围仍返回 `EFAULT`；两者都
+  不伪装为用户 SIGSEGV。kernel extable、nested/atomic kernel fault 分支保持独立。
+- 第一片不构造用户 signal frame，不进入已登记 handler，也不实现 `rt_sigreturn`、core dump 或 OOM
+  killer；COW 资源失败继续使用独立 signal-9 OOM terminal。
 
-- 无 VMA 的用户 fault 生成携带 fault address 的 `SIGSEGV/SEGV_MAPERR`；VMA 权限、NX、只读写入和
-  非 COW 写保护生成 `SIGSEGV/SEGV_ACCERR`。COW 成功仍只重试同一指令，不进入 signal 分支。
-- 第一片只实现同步致命 delivery：形成 signal 11 退出状态、唤醒 wait 并生成 SIGCHLD；不构造用户
-  signal frame，不进入登记 handler，不实现 `rt_sigreturn`、core dump 或 OOM killer。
-- signal terminal 必须释放 faulting Task 的 mm/PTE/frame 引用并只释放一次，随后由 wait/reap 保持
-  与普通 signal death 一致的状态。
+### 第四阶段完整回归证据（2026-08-04）
 
-最终验收责任：
-
-- 真实 guest 覆盖只读写、NX execute 和 unmapped access，分别观察 ACCERR/MAPERR、`si_addr` 与
-  wait status signal 11；覆盖 parent/child fault 后另一方数据与 mm 继续有效。
-- native 与 Linux-object provider 运行相同程序，比较输出、父子隔离、退出和 wait 状态；只比较双方
-  共有的外部 checkpoint，不伪造 Linux 内部 COW checkpoint。
-- 运行 tools2 全套与完整模型推导、`make verify`、`make coding-spec-check`、格式/Clippy、相关
-  user/rootfs/LTP smoke、默认四组压力各 10 次、额外多轮 fork/COW/exit 引用回收压力、
-  `make difftest`、`git diff --check`，并以仓库根直接 `make test` 作为每次代码变更的最终门禁。
+- 对象 smoke 验证 MAPERR/ACCERR、精确 address、重复 terminal 拒绝和 wait word 11。native 与
+  Linux-object 的同一真实 user fixture 均以普通 RISC-V 指令触发 unmapped load、read-only store 和
+  NX execute；三次 parent wait 都观察 signal 11，诊断中的 MAPERR `si_addr` 精确为 `0x1000`，随后
+  parent 继续完成 mm/COW 数据读写与回收。
+- 仓库根直接执行 `make test`，结果 188/188；格式、Clippy、规格、双 provider KUnit/kernel smoke、
+  user/rootfs 与 LTP acceptance 全部通过。
+- `make -C tools2 test-all` 通过：106 个 Python 测试、16 个 frontend 测试、bundle check 与 9 个
+  Playwright E2E 均成功；canonical snapshots 已同步到 model fingerprint `39c7df6e...`，boundary
+  inventory 保持 192 项。
+- 默认 `make stress-test` 四组各执行 10 轮，合计 40/40、failure=0。报告位于
+  `impl/arceos_ex/tests/stress/out/20260804T012718.114832Z-df-0001-user-boot/`、
+  `impl/arceos_ex/tests/stress/out/20260804T012728.600063Z-df-0002-smoke-initcall/`、
+  `impl/arceos_ex/tests/stress/out/20260804T012753.600475Z-df-0003-distro-sh-ls/` 与
+  `impl/arceos_ex/tests/stress/out/20260804T012807.379501Z-rc-local-native-timeout-focused/`。
+- `make difftest` 确认 474 个 checkpoint mapping 当前有效、103 个 exact Linux marker 为
+  `0 missing / 0 stale / 0 mismatch`；`rc-local-difftest` 为 1/1、failure=0，报告位于
+  `impl/arceos_ex/tests/stress/out/20260804T012902.853785Z-rc-local-difftest/`。
+- 锁定的 `spec/charter/systems/computer.md` 仅审查、未解锁或修改；Compose 经审查无适用装配变更。
 
 ## 明确不扩展的边界
 
-本专题不实现 thread group、`CLONE_VM`、完整 vfork mm sharing、用户 handler delivery、
+本专题未实现 thread group、`CLONE_VM`、完整 vfork mm sharing、用户 handler delivery、
 `rt_sigreturn`、page cache、文件后备缺页、`MAP_SHARED`、swap、页面迁移、OOM killer、ASLR 扩展或
-SMP 页表并发。上述责任不能被第三或第四阶段的实现便利隐式吸收。
+SMP 页表并发。上述责任不能被四阶段闭环的实现便利隐式吸收。

@@ -106,3 +106,10 @@ sequence. The child archive stores a fatal-signal wait word with low signal bits
 `exit_code << 8` encoding, wakes an eligible parent wait and queues SIGCHLD. The current Task's mm is released
 exactly once during terminal handoff; reap releases only the Task record. This reason does not construct a user
 signal frame, select an OOM victim or invoke a system-wide panic path.
+
+A fatal illegal user page fault instead records `TaskTerminalReason::SegmentationFault` and one immutable
+`TaskSegvInfo`. Its representation contains `TaskSegvCode::{Maperr, Accerr}` and the exact fault address; the signal
+number is the constant 11 rather than a mutable field. Recording is accepted only for an OnCpu/Live Task whose
+terminal reason is `None`, so duplicate or conflicting terminals fail deterministically. `task_wait_status` encodes
+this reason as 11 in the low signal bits. The existing terminal handoff and reap ordering is shared with OOM, but
+the two reasons and wait words remain disjoint.

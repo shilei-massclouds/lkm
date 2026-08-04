@@ -3,7 +3,8 @@
 enum TaskRuntimeState { New, Running }
 enum TaskExecutionAuthority { None, Reserved, Live }
 enum TaskBreakpointState { Invalid, Prepared, Valid }
-enum TaskTerminalReason { OutOfMemory }
+enum TaskTerminalReason { OutOfMemory, SegmentationFault }
+enum UserSegvCode { Maperr, Accerr }
 
 type TaskRef {
     processes {
@@ -102,6 +103,12 @@ predicate task_oom_terminal_generates_sigchld<T: Task>(task: T) -> bool;
 predicate task_oom_terminal_has_no_user_signal_frame<T: Task>(task: T) -> bool;
 predicate task_oom_terminal_has_no_oom_killer_selection<T: Task>(task: T) -> bool;
 predicate task_oom_terminal_releases_mm_once<T: Task>(task: T) -> bool;
+predicate task_segv_terminal_info_valid<T: Task>(task: T) -> bool;
+predicate task_segv_terminal_fault_address_exact<T: Task>(task: T) -> bool;
+predicate task_segv_terminal_wait_signal_eleven<T: Task>(task: T) -> bool;
+predicate task_segv_terminal_generates_sigchld<T: Task>(task: T) -> bool;
+predicate task_segv_terminal_has_no_user_signal_frame<T: Task>(task: T) -> bool;
+predicate task_segv_terminal_releases_mm_once<T: Task>(task: T) -> bool;
 predicate task_fixed_flow_offline<T: Task>(task: T) -> bool;
 predicate task_fixed_flow_destroyed<T: Task>(task: T) -> bool;
 predicate task_destroyed_only_after_flow_cleanup<T: Task>(task: T) -> bool;
@@ -304,6 +311,23 @@ type Task: ResourceObject {
     state State::Destroyed { invariant { task_destroyed_only_after_flow_cleanup(self); } }
 
     processes {
+        Action::TerminateForSegmentationFault {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::OnCpu;
+                task_execution_authority_is(self, TaskExecutionAuthority::Live);
+            }
+            ensures {
+                task_terminal_reason_is(self, TaskTerminalReason::SegmentationFault);
+                task_segv_terminal_info_valid(self);
+                task_segv_terminal_fault_address_exact(self);
+                task_segv_terminal_wait_signal_eleven(self);
+                task_segv_terminal_generates_sigchld(self);
+                task_segv_terminal_has_no_user_signal_frame(self);
+                task_segv_terminal_releases_mm_once(self);
+            }
+        }
+
         Action::TerminateForOutOfMemory {
             state_effect: StateEffect::None;
             depends_on {

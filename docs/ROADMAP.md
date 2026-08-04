@@ -19,8 +19,9 @@
 
 ## 当前焦点
 
-1. 用户 fault core、普通 fork 独立 mm 与真实 COW 已完成；下一执行窗口以同步致命 SIGSEGV 为唯一
-   最高优先级执行项，不得回退到 eager writable-page copy 或 writable-page/stack/address-space snapshot。
+1. 用户 fault core、普通 fork 独立 mm、真实 COW 与同步致命 SIGSEGV 四阶段已经全部闭环并归档；普通
+   fork 不得回退到 eager writable-page copy 或 writable-page/stack/address-space snapshot。动态栈
+   rlimit、thread group、`CLONE_VM` 和用户 signal handler delivery 仍是各自独立的后续任务。
 2. 缺陷处理继续遵循证据驱动：先复现并定位 checkpoint/diagnostic 边界，再更新规格与实现。
 3. BusyBox init getty/login shell 的 bounded pending-child `setpgid` / `TIOCSPGRP` 验收已闭环并归档；
    focused case 保持 opt-in，后续扩大任务图或 job-control 语义必须由新的可复现证据触发。
@@ -55,7 +56,6 @@
 
 | 优先级 | 状态 | 领域 | 任务 | 剩余责任 | 细节 |
 | --- | --- | --- | --- | --- | --- |
-| `P0` | 当前计划（最高优先级） | charter/model/coding/arceos_ex/mm/task/signal | 同步致命 SIGSEGV 与最终收口 | 在已完成真实 COW 的基线上，将 unmapped、权限、NX 与非 COW 写保护分别收口为 `SEGV_MAPERR/SEGV_ACCERR`，携带 `si_addr`，形成 signal 11 的 task exit/wait/SIGCHLD 状态；不扩展 handler frame、`rt_sigreturn` 或 core dump。完成双 provider、压力、引用回收与 difftest 总验收。 | [后续执行边界](roadmap/user-memory.md#第四阶段同步致命-sigsegv与最终收口最高优先级)；[测试规格](../spec/testing/user-memory.md) |
 | `P0` | 长期回归 | validation/trace | ordinary-path nightly/压力缺陷复现 | 默认 suite 持续运行 DF-0001/DF-0002/DF-0003 ordinary cases 与 DF-0004 canonical `rc-local-native`；`stress-mem` 和 DF-0004 100 轮深采样按需显式运行。出现失败类后按稳定序列、source-scoped facts 或 timeout QMP artifact 定位，不以 probe 路径或重试替代 ordinary path。 | [缺陷记录](DEFECTS.md)；[测试规格](../spec/testing/rootfs.md) |
 | `P0` | 当前 | validation/trace/arceos_ex | 纵向差分定位 DEFECTS 问题 | 用 stress 报告、成功/失败序列、failure diagnostic 和 `stress-mem` 产物定位新失败；没有失败类集合时只记录回归，不增一次性 checkpoint。 | [缺陷记录](DEFECTS.md) |
 | `P0` | 进行中 | trace/arceos_ex | 当前 trace 诊断能力评估与缺口补强 | 只补仍影响定位的最小长期观察点；Linux-like trace 由现有证据不足触发。 | [pyveri DEVELOPMENT](../tools/pyveri/DEVELOPMENT.md#step-c1-收口-trace-输出和注释数据流) |

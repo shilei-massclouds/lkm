@@ -24,5 +24,5 @@ interaction = "none"
 [expect]
 process_exit = 0
 guest_exit_status = 0
-markers = ["user-smoke: begin", "user fork child private mm ok", "user fork parent COW unique fast path ok", "user fork COW reuse stress ok", "user-smoke: end status=0"]
+markers = ["user-smoke: begin", "user fork child private mm ok", "user fork parent COW unique fast path ok", "user fork COW reuse stress ok", "code=SEGV_MAPERR si_code=1 si_addr=0x0000000000001000", "code=SEGV_ACCERR si_code=2", "user SIGSEGV MAPERR wait ok", "user SIGSEGV ACCERR readonly wait ok", "user SIGSEGV ACCERR NX wait ok", "user SIGSEGV parent mm survives ok", "user-smoke: end status=0"]
 forbidden_markers = ["Function not implemented", "arceos_ex panic"]

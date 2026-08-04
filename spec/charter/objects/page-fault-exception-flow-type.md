@@ -4,8 +4,9 @@
 `PageFaultExceptionType`。它分别保存 user/kernel 来源、fault address、原始 `sepc`、访问分类、
 nested/hardirq/入口前中断状态和 fixup 或恢复结果。user occurrence 将 Task/mm-bound 请求交给
 `UserAddressSpace`，记录 `NotPresent`、`CowWriteProtect`、`Protection` 或 `Unmapped` 的互斥分类；
-`RetrySameInstruction` 必须保持原 `sepc`。COW 资源失败记录 OutOfMemory terminal，不能转入 kernel
-fixup 或用户 SIGSEGV 分支。user recovery
+`RetrySameInstruction` 必须保持原 `sepc`。`Unmapped`/`Protection` 分别携带精确 fault address 形成
+`SIGSEGV/SEGV_MAPERR` 或 `SIGSEGV/SEGV_ACCERR` Task terminal；不得推进 `sepc` 或进入用户 handler。
+COW 资源失败记录 OutOfMemory terminal，不能转入 kernel fixup 或用户 SIGSEGV 分支。user recovery
 默认可睡眠；具有有效 exception-table fixup 的 kernel fault仅在
 非嵌套、非 hardirq、入口前可中断的当前 Task context 中可调度。atomic 路径立即设置 fixup `sepc`；
 可调度 kernel 路径可以在观察到已发布 mailbox/`need_resched` 时先经 owner Scheduler 切换，恢复后重新

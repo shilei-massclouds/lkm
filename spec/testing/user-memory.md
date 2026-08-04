@@ -59,12 +59,19 @@ Rule IDs (MUST after the corresponding implementation phase):
 - `arceos_ex_must_user_unmapped_fault_exit_with_segv_maperr`
 - `arceos_ex_must_user_protection_fault_exit_with_segv_accerr`
 - `arceos_ex_must_user_segv_produce_wait_status_and_sigchld`
+- `arceos_ex_must_user_segv_preserve_fault_address_and_release_mm_once`
 
 无 VMA fault 必须形成带 fault VA 的 `SIGSEGV/SEGV_MAPERR`；权限、NX 和非 COW 写保护必须形成
 `SIGSEGV/SEGV_ACCERR`。首片只验收同步致命 delivery：task 以 signal 11 状态退出、wait 被唤醒并得到
 对应 status、parent 产生 SIGCHLD；不得以推进 `sepc`、panic 或伪装普通 exit 代替。用户 handler
 frame、`rt_sigreturn`、core dump 和 OOM killer 不在本闭环；COW 分配失败以独立 task OOM terminal
 验收，不能伪装成 SIGSEGV。
+
+对象 smoke 必须分别保存并检查 `TaskSegvInfo` 的 signal 11、MAPERR/ACCERR 和精确 fault address，拒绝
+重复 terminal record，并证明 wait word 为 11。真实双 provider fixture 必须用普通 RISC-V 指令分别
+触发无映射 load、只读页 store 与 NX 页 execute，parent 对每个 child 验证 signal-11 wait status，且
+后续 parent mm/COW 数据仍可读写；测试不得调用专用 fault 注入 API。内核稳定诊断必须给出与实际
+`stval` 一致的 code/address。退出后 mm/PTE/frame 计数通过对象 smoke 与多轮 fork/wait 回归守恒。
 
 ## Gates
 

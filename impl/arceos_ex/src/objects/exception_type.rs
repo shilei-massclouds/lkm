@@ -19,7 +19,7 @@ use super::{
     process_prepare::TaskCopyUserProcessInputs,
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     syscall_exception_type::SyscallExceptionType,
-    task::TaskEntry,
+    task::{TaskEntry, TaskSegvCode, TaskSegvInfo},
     trap_type::TrapFrame,
     unexpected_exception_type::UnexpectedExceptionType,
     user_boot::{
@@ -3634,6 +3634,14 @@ fn page_fault_exception_handler(frame: &mut TrapFrame) {
             debug_assert_eq!(result.sepc(), frame.sepc);
             return;
         }
+        if frame.stval >= crate::context::context_ref().user_stack.rlimit_base()
+            && frame.stval < crate::context::context_ref().user_stack.top()
+        {
+            crate::checkpoint::dispatch(
+                crate::checkpoint::Checkpoint::UserStackGrowRejected,
+                crate::context::context_ref(),
+            );
+        }
         if result.result() == UserFaultResult::TaskOom {
             let _ = {
                 let ctx = crate::context::context();
@@ -3643,16 +3651,48 @@ fn page_fault_exception_handler(frame: &mut TrapFrame) {
                 return;
             }
         }
-        if frame.stval >= crate::context::context_ref().user_stack.rlimit_base()
-            && frame.stval < crate::context::context_ref().user_stack.top()
-        {
-            crate::checkpoint::dispatch(
-                crate::checkpoint::Checkpoint::UserStackGrowRejected,
-                crate::context::context_ref(),
+        let segv_code = match result.result() {
+            UserFaultResult::SegvMaperr => Some(TaskSegvCode::Maperr),
+            UserFaultResult::SegvAccerr => Some(TaskSegvCode::Accerr),
+            _ => None,
+        };
+        if let Some(segv_code) = segv_code {
+            let diagnostic = crate::context::context_ref()
+                .user_address_space
+                .last_user_fault();
+            debug_assert_eq!(diagnostic.address(), frame.stval);
+            debug_assert_eq!(diagnostic.sepc(), frame.sepc);
+            let recorded = crate::context::context().record_task_segmentation_fault(
+                task_ref,
+                segv_code,
+                frame.stval,
             );
+            if recorded && complete_recorded_task_sigsegv(frame, task_ref) {
+                return;
+            }
         }
     }
     panic_dispatch_frame("page fault exception", frame)
+}
+
+fn complete_recorded_task_sigsegv(frame: &mut TrapFrame, task_ref: super::task::TaskRef) -> bool {
+    let Some(info) = crate::context::context_ref().task_segmentation_fault_info(task_ref) else {
+        return false;
+    };
+    print_task_sigsegv_diagnostic(task_ref, info);
+    if let Some(table) = syscall_table_ref()
+        && complete_observed_child_exit_to_parent_wait(table, frame, 0)
+    {
+        return true;
+    }
+    if complete_child_exit_to_parent_wait(frame, 0) {
+        return true;
+    }
+    crate::arch::riscv64::sbi::putstr("user task SIGSEGV terminal without wait parent\n");
+    if !cleanup_current_task_for_shutdown() {
+        crate::arch::riscv64::sbi::putstr("current Task/TaskFlow SIGSEGV cleanup failed\n");
+    }
+    crate::arch::riscv64::sbi::system_shutdown()
 }
 
 fn complete_recorded_task_oom(frame: &mut TrapFrame, task_ref: super::task::TaskRef) -> bool {
@@ -8545,6 +8585,31 @@ fn print_user_fault_result(result: UserFaultResult) {
         UserFaultResult::TaskOom => crate::arch::riscv64::sbi::putstr("task-oom"),
         UserFaultResult::InvalidContext => crate::arch::riscv64::sbi::putstr("invalid-context"),
     }
+}
+
+fn print_task_sigsegv_diagnostic(task_ref: super::task::TaskRef, info: TaskSegvInfo) {
+    crate::arch::riscv64::sbi::putstr("user SIGSEGV terminal task_slot=");
+    print_decimal(task_ref.slot());
+    crate::arch::riscv64::sbi::putstr(" task_generation=");
+    print_decimal(task_ref.generation() as usize);
+    crate::arch::riscv64::sbi::putstr(" signal=");
+    print_decimal(info.signal());
+    crate::arch::riscv64::sbi::putstr(" code=");
+    let code = match info.code() {
+        TaskSegvCode::Maperr => {
+            crate::arch::riscv64::sbi::putstr("SEGV_MAPERR");
+            1
+        }
+        TaskSegvCode::Accerr => {
+            crate::arch::riscv64::sbi::putstr("SEGV_ACCERR");
+            2
+        }
+    };
+    crate::arch::riscv64::sbi::putstr(" si_code=");
+    print_decimal(code);
+    crate::arch::riscv64::sbi::putstr(" si_addr=0x");
+    print_hex(info.address());
+    crate::arch::riscv64::sbi::putchar(b'\n');
 }
 
 fn print_fault_access(access: UserFaultAccess) {
