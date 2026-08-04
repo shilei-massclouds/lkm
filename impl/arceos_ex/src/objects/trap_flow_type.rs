@@ -381,7 +381,7 @@ impl TrapFlowType {
     }
 
     pub fn cleanup(&mut self, return_cpu: CpuRef) -> EventResult {
-        if !self.child_destroyed || !return_cpu.is_valid() {
+        if !self.child_destroyed || !return_cpu.is_valid() || return_cpu != self.core.parent_cpu() {
             return failed_condition(
                 LifecycleEvent::Cleanup,
                 self.core.state(),
@@ -694,7 +694,12 @@ pub fn smoke_occurrence_contract() -> bool {
     let Ok(token) = interrupt_record.root.enable() else {
         return false;
     };
-    if interrupt_record.root.disable().is_err() || interrupt_record.root.cleanup(cpu_ref).is_err() {
+    if interrupt_record.root.enable().is_ok()
+        || interrupt_record.root.disable().is_err()
+        || interrupt_record.root.cleanup(CpuRef::new(1)).is_ok()
+        || interrupt_record.root.state() != State::Offline
+        || interrupt_record.root.cleanup(cpu_ref).is_err()
+    {
         return false;
     }
     let root_ref = interrupt_record.root.flow_ref();
@@ -732,10 +737,156 @@ pub fn smoke_occurrence_contract() -> bool {
         return false;
     }
 
-    smoke_page_fault_occurrence(cpu_ref)
+    smoke_active_leaf_resume_contract(cpu_ref)
+        && smoke_page_fault_occurrence(cpu_ref)
         && smoke_syscall_occurrence(cpu_ref)
         && smoke_breakpoint_occurrence(cpu_ref)
         && smoke_unexpected_occurrence(cpu_ref)
+}
+
+#[cfg(app_smoke)]
+fn smoke_active_leaf_resume_contract(cpu_ref: CpuRef) -> bool {
+    let generation = 15;
+    let context_epoch = 9;
+    let task_ref = TaskRef::BOOT;
+    let flow_ref = TaskFlowRef::BOOT_INIT;
+    let mut record = TrapExecutionRecord::new();
+    let root_address = core::ptr::addr_of!(record.root) as usize;
+    let exception_address = core::ptr::addr_of!(record.exception) as usize;
+    let leaf_address = core::ptr::addr_of!(record.page_fault) as usize;
+    if record
+        .root
+        .declare_and_bind(generation, root_address, cpu_ref, true)
+        .is_err()
+        || record
+            .root
+            .preset(TrapEntrySnapshot {
+                cause_class: TrapCauseClass::Exception,
+                scause: 13,
+                sepc: 0x5000,
+                sstatus: 0,
+                stval: 0x6000,
+                entry_task: task_ref,
+                effective_task_flow: flow_ref,
+                context_epoch,
+            })
+            .is_err()
+        || record
+            .exception
+            .declare_and_bind(generation, exception_address, cpu_ref, State::Ready)
+            .is_err()
+        || record.exception.preset(13).is_err()
+    {
+        return false;
+    }
+    let exception_ref = record.exception.flow_ref();
+    if record.root.select_child(exception_ref).is_err()
+        || record
+            .page_fault
+            .declare_and_bind(generation, leaf_address, cpu_ref, State::Online)
+            .is_err()
+        || record.page_fault.preset(13, 0x6000, true).is_err()
+    {
+        return false;
+    }
+    let leaf_ref = record.page_fault.flow_ref();
+    if record.exception.select_child(leaf_ref).is_err()
+        || record
+            .page_fault
+            .setup_context(false, false, true, None)
+            .is_err()
+    {
+        return false;
+    }
+
+    let root_ref = record.root.flow_ref();
+    let stale_root = TrapFlowRef::new(root_address, generation + 1);
+    let stale_flow = flow_ref.with_generation_for_test(flow_ref.generation() + 1);
+    if TrapFlowType::record_suspended_context(
+        root_ref,
+        TaskRef::KERNEL_INIT,
+        flow_ref,
+        cpu_ref,
+        context_epoch,
+    ) || TrapFlowType::record_suspended_context(
+        root_ref,
+        task_ref,
+        stale_flow,
+        cpu_ref,
+        context_epoch,
+    ) || TrapFlowType::record_suspended_context(
+        root_ref,
+        task_ref,
+        flow_ref,
+        CpuRef::new(1),
+        context_epoch,
+    ) || TrapFlowType::record_suspended_context(root_ref, task_ref, flow_ref, cpu_ref, 0)
+        || !TrapFlowType::record_suspended_context(
+            root_ref,
+            task_ref,
+            flow_ref,
+            cpu_ref,
+            context_epoch,
+        )
+        || !TrapFlowType::active_leaf_preflight(
+            root_ref,
+            task_ref,
+            flow_ref,
+            cpu_ref,
+            context_epoch,
+        )
+        || TrapFlowType::active_leaf_preflight(
+            stale_root,
+            task_ref,
+            flow_ref,
+            cpu_ref,
+            context_epoch,
+        )
+        || TrapFlowType::active_leaf_preflight(
+            root_ref,
+            TaskRef::KERNEL_INIT,
+            flow_ref,
+            cpu_ref,
+            context_epoch,
+        )
+        || TrapFlowType::active_leaf_preflight(
+            root_ref,
+            task_ref,
+            stale_flow,
+            cpu_ref,
+            context_epoch,
+        )
+        || TrapFlowType::active_leaf_preflight(
+            root_ref,
+            task_ref,
+            flow_ref,
+            CpuRef::new(1),
+            context_epoch,
+        )
+        || TrapFlowType::active_leaf_preflight(
+            root_ref,
+            task_ref,
+            flow_ref,
+            cpu_ref,
+            context_epoch + 1,
+        )
+        || !TrapFlowType::resume_active_leaf(root_ref, task_ref, flow_ref, cpu_ref, context_epoch)
+        || TrapFlowType::resume_active_leaf(root_ref, task_ref, flow_ref, cpu_ref, context_epoch)
+        || !TrapFlowType::active_leaf_resumed(root_ref, task_ref, flow_ref, cpu_ref, context_epoch)
+    {
+        return false;
+    }
+
+    record.page_fault.enable_after_handler().is_ok()
+        && record.page_fault.disable().is_ok()
+        && record.page_fault.cleanup().is_ok()
+        && !TrapFlowType::active_leaf_preflight(
+            root_ref,
+            task_ref,
+            flow_ref,
+            cpu_ref,
+            context_epoch,
+        )
 }
 
 #[cfg(app_smoke)]
