@@ -6,7 +6,7 @@
 
 | 领域 | 已完成任务 | 专题证据 |
 | --- | --- | --- |
-| charter/model/coding/arceos_ex/mm/task/signal | 同步致命 SIGSEGV、MAPERR/ACCERR、wait/SIGCHLD 与最终用户内存收口 | [用户缺页、独立 mm、COW 与 SIGSEGV 执行边界](user-memory.md#已完成基线第四阶段同步致命-sigsegv-与最终收口) |
+| charter/model/coding/arceos_ex/mm/task/signal | 同步致命 SIGSEGV、MAPERR/ACCERR、wait/SIGCHLD 与最终用户内存收口（完成基线 `7b55a842`） | [用户缺页、独立 mm、COW 与 SIGSEGV 执行边界](user-memory.md#已完成基线第四阶段同步致命-sigsegv-与最终收口) |
 | charter/model/coding/arceos_ex/mm/task | 真实 COW、共享 user-frame 引用与 OOM terminal 闭环 | [用户缺页、独立 mm、COW 与 SIGSEGV 执行边界](user-memory.md#已完成基线第三阶段真实-cow) |
 | charter/model/coding/arceos_ex/mm/task | 统一用户 fault core 与普通 fork 独立 mm/eager dup_mm | [用户缺页、独立 mm、COW 与 SIGSEGV 执行边界](user-memory.md#已完成基线第一与第二阶段) |
 | charter/model/coding/arceos_ex/trap/scheduler | TaskFlow 正式 trap overlay 与 page-fault leaf 内 A->B->A 返回首轮 | [确定性 SMP TaskFlow lanes 专题](deterministic-smp-lanes.md#已闭合taskflow-trap-overlay-与-leaf-内切换返回) |

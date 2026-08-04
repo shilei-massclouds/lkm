@@ -5,6 +5,9 @@
 
 ## 已完成基线：第一与第二阶段
 
+第一阶段由提交 `6d89d71b` 闭合，第二阶段独立 mm 实现由提交 `58f6eb03` 闭合，并由提交
+`75f6782c` 记录其独立完整验收。
+
 第一阶段已把普通用户缺页统一到 Task/mm-aware VMA fault core：请求显式携带 TaskRef、SATP、fault
 address、`sepc` 和 access；成功分配/映射后执行目标 TLB flush 并返回同指令重试，kernel extable
 分支保持隔离。
@@ -44,7 +47,8 @@ Compose 或 Impl 语义：
 
 ## 已完成基线：第三阶段真实 COW
 
-第三阶段在独立 per-Task mm 基线上完成真实 COW，并关闭 Model deferred `user_clone.004`：
+第三阶段由提交 `1ed0445b` 闭合，在独立 per-Task mm 基线上完成真实 COW，并关闭 Model deferred
+`user_clone.004`：
 
 - `UserFrameRef` 与 `PageMetadataMap` 提供受检查的 user-frame 获取、共享引用和释放；普通 page-table
   page 仍保持唯一 `PageRef`。RISC-V RSW bit 8 表示 COW，bit 9 保留。
@@ -81,7 +85,8 @@ Compose 或 Impl 语义：
 
 ## 已完成基线：第四阶段同步致命 SIGSEGV 与最终收口
 
-第四阶段把统一 fault core 的非法用户访问结果接入既有 task exit/wait/SIGCHLD 生命周期：
+第四阶段由提交 `7b55a842` 闭合，把统一 fault core 的非法用户访问结果接入既有 task
+exit/wait/SIGCHLD 生命周期；该提交也是四阶段计划的最终完成基线：
 
 - 只有真实 U-mode instruction/load/store page fault 会降低为同步致命 SIGSEGV；无 VMA 为
   `SEGV_MAPERR`，权限、NX、只读写入和非 COW 写保护为 `SEGV_ACCERR`。`TaskSegvInfo` 不可变地保存

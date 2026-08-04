@@ -19,9 +19,11 @@
 
 ## 当前焦点
 
-1. 用户 fault core、普通 fork 独立 mm、真实 COW 与同步致命 SIGSEGV 四阶段已经全部闭环并归档；普通
-   fork 不得回退到 eager writable-page copy 或 writable-page/stack/address-space snapshot。动态栈
-   rlimit、thread group、`CLONE_VM` 和用户 signal handler delivery 仍是各自独立的后续任务。
+1. 用户 fault core、普通 fork 独立 mm、真实 COW 与同步致命 SIGSEGV 四阶段已经全部闭环并归档，最终
+   完成基线为提交 `7b55a842`；普通 fork 不得回退到 eager writable-page copy 或
+   writable-page/stack/address-space snapshot。动态栈 rlimit、thread group、`CLONE_VM` 和用户 signal
+   handler delivery 仍是各自独立的后续任务。各阶段提交链与完整验收证据见
+   [用户内存专题](roadmap/user-memory.md)。
 2. 缺陷处理继续遵循证据驱动：先复现并定位 checkpoint/diagnostic 边界，再更新规格与实现。
 3. BusyBox init getty/login shell 的 bounded pending-child `setpgid` / `TIOCSPGRP` 验收已闭环并归档；
    focused case 保持 opt-in，后续扩大任务图或 job-control 语义必须由新的可复现证据触发。
