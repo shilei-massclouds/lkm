@@ -83,6 +83,10 @@ fn emit_diag(ctx: &Context, sink: &mut dyn Sink) {
     sink.diag_usize("virtio_rng_requests", device.request_count());
     sink.diag_usize("virtio_rng_notifies", device.notify_count());
     sink.diag_usize("virtio_rng_irq_count", device.irq_count());
+    sink.diag_usize(
+        "virtio_rng_poll_completion_count",
+        device.poll_completion_count(),
+    );
     sink.diag_usize("virtio_rng_completions", device.completion_count());
     sink.diag_usize(
         "virtio_status_reset",

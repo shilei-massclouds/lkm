@@ -25,7 +25,7 @@ use crate::checkpoint::Checkpoint;
 pub const KERNEL_INIT_PID: usize = 1;
 pub const KTHREADD_PID: usize = 2;
 
-pub const KERNEL_TASK_STACK_ORDER: usize = 2;
+pub const KERNEL_TASK_STACK_ORDER: usize = 3;
 pub const KERNEL_TASK_STACK_SIZE: usize = 4096 << KERNEL_TASK_STACK_ORDER;
 pub const KERNEL_TASK_STACK_ALIGN: usize = KERNEL_TASK_STACK_SIZE * 2;
 pub const KERNEL_TASK_STACK_GUARD_SIZE: usize = 4096;

@@ -34,7 +34,7 @@ use super::{
 };
 use crate::checkpoint::Checkpoint;
 
-const AP_STACK_SIZE: usize = 16 * 1024;
+const AP_STACK_SIZE: usize = 32 * 1024;
 const SSTATUS_FPU_VECTOR_MASK: usize = (0b11 << 9) | (0b11 << 13);
 const AP_BOOT_DATA_TASK_PTR_OFFSET: usize = 0;
 const AP_BOOT_DATA_STACK_PTR_OFFSET: usize = 8;
@@ -405,8 +405,26 @@ arceos_ex_secondary_start_sbi:
     task_ptr_offset = const AP_BOOT_DATA_TASK_PTR_OFFSET,
 );
 
+global_asm!(
+    r#"
+    .section .text.task_switch, "ax"
+    .align 2
+    .globl arceos_ex_enter_ap_idle_on_clean_stack
+arceos_ex_enter_ap_idle_on_clean_stack:
+    /* a0 = AP stack top, a1 = logical id, a2 = RunIdle entry. */
+    andi    sp, a0, -16
+    mv      a0, a1
+    jr      a2
+"#
+);
+
 unsafe extern "C" {
     fn arceos_ex_secondary_start_sbi();
+    fn arceos_ex_enter_ap_idle_on_clean_stack(
+        stack_top: usize,
+        logical_id: usize,
+        entry: extern "C" fn(usize) -> !,
+    ) -> !;
 }
 
 #[unsafe(no_mangle)]
@@ -624,6 +642,23 @@ fn ap_stack_top_virt(logical_id: usize) -> Option<usize> {
     }
     let stack = unsafe { core::ptr::addr_of!(AP_STACKS[logical_id]) as usize };
     stack.checked_add(AP_STACK_SIZE)
+}
+
+pub(crate) fn enter_ap_idle_on_clean_stack(
+    logical_id: usize,
+    entry: extern "C" fn(usize) -> !,
+) -> ! {
+    let Some(stack_top) = ap_stack_top_virt(logical_id) else {
+        crate::phases::smp_runtime::smp_bringup::ap_phase_fail_stop(
+            "ApIdleFlow",
+            logical_id,
+            State::Online,
+            "clean-stack-target",
+        );
+    };
+    // SAFETY: all one-way AP bring-up phases are Online, interrupts have not
+    // yet been opened, and `entry` never returns to the discarded frames.
+    unsafe { arceos_ex_enter_ap_idle_on_clean_stack(stack_top, logical_id, entry) }
 }
 
 pub struct SecondaryIdleTaskSet {

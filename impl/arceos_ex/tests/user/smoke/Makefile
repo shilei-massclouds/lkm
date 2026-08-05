@@ -5,6 +5,7 @@ SMOKE_SRC := smoke.c \
 	stdin.c \
 	fpu_mmap.c \
 	fork_mm.c \
+	preempt.c \
 	credentials.c \
 	process_identity.c \
 	tty_termios.c \

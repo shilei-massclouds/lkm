@@ -21,6 +21,16 @@ no longer pending. A later read must not merely spin on an inherited
 pending flag; it must first converge that inherited request or fail
 with a structured block I/O error.
 
+The single static request buffer, queue mutation and completion consumer are
+protected by one real IRQ-safe acquire/release lock. Task-context synchronous
+readers take that lock with the blocking acquire path, so contention with a
+different live reader delays submission instead of being translated to
+`DeviceNotReady`. The IRQ completion path uses only `try_lock`: when the task
+reader owns the lock, the IRQ path leaves used-ring consumption to that
+reader's bounded polling loop. A boolean compare/exchange owner whose failed
+acquisition is returned through the block/VFS error path does not satisfy this
+rule.
+
 ## Initcall superblock probe convergence
 
 Rule ID: `arceos_ex_must_virtio_blk_initcall_superblock_probe_converge_before_ready` (MUST).

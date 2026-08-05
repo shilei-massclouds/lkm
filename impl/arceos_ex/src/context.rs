@@ -8,7 +8,8 @@ use crate::objects::scheduler::{SchedulerTestStacks, SchedulerTestTasks};
 use crate::objects::scheduler_shared::SchedulerShared;
 use crate::objects::scheduler_task_access::SchedulerTaskAccess;
 use crate::objects::state::{
-    EventError, EventErrorCode, EventResult, LifecycleEvent, State, failed_condition,
+    EventError, EventErrorCode, EventResult, FailureDiagnostic, LifecycleEvent, State,
+    failed_condition,
 };
 use crate::objects::{
     binary_format_registry::BinaryFormatRegistry,
@@ -1053,19 +1054,26 @@ impl Context {
             user_task_set,
             scheduler_test_tasks,
         );
-        scheduler.schedule(
-            sender_flow_ref,
-            current_task_ref,
-            current_cpu_ref,
-            &mut task_access,
-            local_interrupt,
-        )?;
-        let current_task = self.current_task().map_err(current_task_event_error)?;
+        scheduler
+            .schedule(
+                sender_flow_ref,
+                current_task_ref,
+                current_cpu_ref,
+                &mut task_access,
+                local_interrupt,
+            )
+            .map_err(|error| context_schedule_stage(error, "Scheduler.Schedule"))?;
+        let current_task = self
+            .current_task()
+            .map_err(current_task_event_error)
+            .map_err(|error| context_schedule_stage(error, "ResolveCurrentAfterSchedule"))?;
         if self.scheduler().switch_to_entry_prev_ref() != current_task.task_ref()
             && self.scheduler().switch_to_entry_next_ref() == current_task.task_ref()
             && self.scheduler().schedule_exit_current_ref() != current_task.task_ref()
         {
-            self.scheduler_mut().record_schedule_exit(current_task)?;
+            self.scheduler_mut()
+                .record_schedule_exit(current_task)
+                .map_err(|error| context_schedule_stage(error, "RecordScheduleExit"))?;
         }
         Ok(())
     }
@@ -1135,7 +1143,147 @@ impl Context {
         }
         self.scheduler_mut()
             .replace_user_task_on_runqueue(previous, next, next_pid)?;
-        {
+        self.commit_simulated_task_switch(previous, next, current_task)
+    }
+
+    /// Keep the simulated scheduler binding, architectural task identity and
+    /// trap-entry owner indivisible with respect to local interrupts.  Real
+    /// switches obtain the same property from the architecture switch path;
+    /// smoke/user continuation handoffs must close that window explicitly.
+    fn commit_simulated_task_switch(
+        &mut self,
+        previous: crate::objects::task::TaskRef,
+        next: crate::objects::task::TaskRef,
+        current_task: CurrentTask,
+    ) -> EventResult {
+        let saved_sstatus = crate::arch::riscv64::csr::save_and_disable_supervisor_interrupts();
+        let mut completed_stage = 0u8;
+        let result = (|| {
+            {
+                let Self {
+                    cpu_group,
+                    scheduler_test_tasks,
+                    kernel_init_task,
+                    kthreadd_task,
+                    user_task_set,
+                    ..
+                } = self;
+                let scheduler = cpu_group.boot_scheduler_mut().ok_or_else(|| {
+                    EventError::failed(
+                        EventErrorCode::ConditionFailed,
+                        LifecycleEvent::Setup,
+                        State::Base,
+                        State::Online,
+                        State::Online,
+                    )
+                })?;
+                let task_access = SchedulerTaskAccess::new(
+                    kernel_init_task,
+                    kthreadd_task,
+                    user_task_set,
+                    scheduler_test_tasks,
+                );
+                scheduler.prepare_simulated_task_switch(
+                    previous,
+                    next,
+                    current_task,
+                    &task_access,
+                )?;
+            }
+            completed_stage = 1;
+            self.establish_simulated_task_identity(next)?;
+            completed_stage = 2;
+            self.finish_task_switch(next)?;
+            completed_stage = 3;
+            Ok(())
+        })();
+        if let Err(error) = result {
+            self.print_simulated_task_switch_failure(previous, next, completed_stage, error);
+        }
+        #[cfg(app_smoke)]
+        if result.is_ok() && previous.is_user() && next.is_user() {
+            let entry_context = self.boot_cpu_trap().entry_context();
+            crate::arch::riscv64::sbi::putstr("simulated user switch committed prev=");
+            print_context_task_ref(previous);
+            crate::arch::riscv64::sbi::putstr(" next=");
+            print_context_task_ref(next);
+            crate::arch::riscv64::sbi::putstr(" tp=");
+            print_context_hex(crate::arch::riscv64::csr::read_tp());
+            crate::arch::riscv64::sbi::putstr("rq_curr=");
+            print_context_task_ref(self.scheduler().curr_ref());
+            crate::arch::riscv64::sbi::putstr(" entry_cpu=");
+            print_context_hex(entry_context.cpu_logical_id());
+            crate::arch::riscv64::sbi::putstr("entry_task=");
+            print_context_hex(entry_context.task_identity());
+            crate::arch::riscv64::sbi::putstr("sstatus=");
+            print_context_hex(crate::arch::riscv64::csr::read_sstatus());
+            crate::arch::riscv64::sbi::putstr("sscratch=");
+            print_context_hex(crate::arch::riscv64::csr::read_sscratch());
+            crate::arch::riscv64::sbi::putstr("sp=");
+            print_context_hex(crate::arch::riscv64::csr::read_sp());
+            crate::arch::riscv64::sbi::putstr("entry_stack=[");
+            print_context_hex(entry_context.kernel_stack_base());
+            crate::arch::riscv64::sbi::putstr(",");
+            print_context_hex(entry_context.kernel_stack_top());
+            crate::arch::riscv64::sbi::putstr(")");
+            let stvec = crate::arch::riscv64::csr::read_stvec();
+            let mapping = self
+                .user_address_space
+                .sv39_mapping_diagnostic(stvec, &self.page_metadata_map);
+            crate::arch::riscv64::sbi::putstr("satp=");
+            print_context_hex(crate::arch::riscv64::csr::read_satp());
+            crate::arch::riscv64::sbi::putstr("mm_satp=");
+            print_context_hex(mapping.satp_token());
+            crate::arch::riscv64::sbi::putstr("root_phys=");
+            print_context_hex(mapping.root_phys());
+            crate::arch::riscv64::sbi::putstr("root_linear=");
+            print_context_hex(mapping.root_linear());
+            crate::arch::riscv64::sbi::putstr("stvec=");
+            print_context_hex(stvec);
+            crate::arch::riscv64::sbi::putstr("pte=");
+            print_context_hex(mapping.root_pte());
+            crate::arch::riscv64::sbi::putstr("/");
+            print_context_hex(mapping.l1_pte());
+            crate::arch::riscv64::sbi::putstr("/");
+            print_context_hex(mapping.l0_pte());
+            crate::arch::riscv64::sbi::putstr("exec=");
+            print_context_hex(mapping.executable() as usize);
+            crate::objects::trap_type::arm_next_formal_entry_diagnostic();
+        }
+        crate::arch::riscv64::csr::restore_supervisor_interrupts(saved_sstatus);
+        result
+    }
+
+    fn print_simulated_task_switch_failure(
+        &self,
+        previous: TaskRef,
+        next: TaskRef,
+        completed_stage: u8,
+        error: EventError,
+    ) {
+        let identity_ref = self
+            .task_ref_from_identity(crate::arch::riscv64::csr::read_tp())
+            .unwrap_or(TaskRef::NONE);
+        crate::arch::riscv64::sbi::putstr("simulated task switch failure stage=");
+        crate::arch::riscv64::sbi::putchar(b'0' + completed_stage);
+        crate::arch::riscv64::sbi::putstr(" prev=");
+        print_context_task_ref(previous);
+        crate::arch::riscv64::sbi::putstr(" next=");
+        print_context_task_ref(next);
+        crate::arch::riscv64::sbi::putstr(" tp_ref=");
+        print_context_task_ref(identity_ref);
+        crate::arch::riscv64::sbi::putstr(" rq_curr=");
+        print_context_task_ref(self.scheduler().curr_ref());
+        if let Some(diagnostic) = error.diagnostic() {
+            crate::arch::riscv64::sbi::putstr(" first_failed=");
+            crate::arch::riscv64::sbi::putstr(diagnostic.first_failed);
+        }
+        crate::arch::riscv64::sbi::putchar(b'\n');
+    }
+
+    pub fn finish_task_switch(&mut self, next: crate::objects::task::TaskRef) -> EventResult {
+        let mut physical_switch_guard = false;
+        let switch_result = (|| {
             let Self {
                 cpu_group,
                 scheduler_test_tasks,
@@ -1144,56 +1292,37 @@ impl Context {
                 user_task_set,
                 ..
             } = self;
-            let scheduler = cpu_group.boot_scheduler_mut().ok_or_else(|| {
-                EventError::failed(
-                    EventErrorCode::ConditionFailed,
-                    LifecycleEvent::Setup,
+            let Some(scheduler) = cpu_group.boot_scheduler_mut() else {
+                return failed_condition(
+                    LifecycleEvent::Dispatch,
                     State::Base,
                     State::Online,
                     State::Online,
-                )
-            })?;
-            let task_access = SchedulerTaskAccess::new(
+                );
+            };
+            physical_switch_guard = scheduler.schedule_guard_pending();
+            let mut task_access = SchedulerTaskAccess::new(
                 kernel_init_task,
                 kthreadd_task,
                 user_task_set,
                 scheduler_test_tasks,
             );
-            scheduler.prepare_simulated_task_switch(previous, next, current_task, &task_access)?;
-        }
-        self.establish_simulated_task_identity(next)?;
-        self.finish_task_switch(next)
-    }
-
-    pub fn finish_task_switch(&mut self, next: crate::objects::task::TaskRef) -> EventResult {
-        let Self {
-            cpu_group,
-            scheduler_test_tasks,
-            kernel_init_task,
-            kthreadd_task,
-            user_task_set,
-            ..
-        } = self;
-        let Some(scheduler) = cpu_group.boot_scheduler_mut() else {
-            return failed_condition(
-                LifecycleEvent::Dispatch,
-                State::Base,
-                State::Online,
-                State::Online,
-            );
+            scheduler.dispatch_task_after_switch(next, &mut task_access)?;
+            self.refresh_current_cpu_trap_entry_task(next)?;
+            let current_task = self
+                .resolve_current_task_identity(crate::arch::riscv64::csr::read_tp(), next)
+                .map_err(current_task_event_error)?;
+            self.scheduler_mut().record_schedule_exit(current_task)
+        })();
+        let finish_result = if physical_switch_guard {
+            self.cpu_group
+                .boot_scheduler_and_local_interrupt_mut()
+                .ok_or_else(missing_scheduler_error)
+                .and_then(|(scheduler, interrupt)| scheduler.complete_schedule_guard(interrupt))
+        } else {
+            Ok(())
         };
-        let mut task_access = SchedulerTaskAccess::new(
-            kernel_init_task,
-            kthreadd_task,
-            user_task_set,
-            scheduler_test_tasks,
-        );
-        scheduler.dispatch_task_after_switch(next, &mut task_access)?;
-        self.refresh_current_cpu_trap_entry_task(next)?;
-        let current_task = self
-            .resolve_current_task_identity(crate::arch::riscv64::csr::read_tp(), next)
-            .map_err(current_task_event_error)?;
-        self.scheduler_mut().record_schedule_exit(current_task)
+        switch_result.and(finish_result)
     }
 
     fn refresh_current_cpu_trap_entry_task(&mut self, task_ref: TaskRef) -> EventResult {
@@ -1339,33 +1468,7 @@ impl Context {
         if previous.same_identity(next) {
             return Ok(());
         }
-        {
-            let Self {
-                cpu_group,
-                scheduler_test_tasks,
-                kernel_init_task,
-                kthreadd_task,
-                user_task_set,
-                ..
-            } = self;
-            let Some(scheduler) = cpu_group.boot_scheduler_mut() else {
-                return failed_condition(
-                    LifecycleEvent::Setup,
-                    State::Base,
-                    State::Online,
-                    State::Online,
-                );
-            };
-            let task_access = SchedulerTaskAccess::new(
-                kernel_init_task,
-                kthreadd_task,
-                user_task_set,
-                scheduler_test_tasks,
-            );
-            scheduler.prepare_simulated_task_switch(previous, next, current_task, &task_access)?;
-        }
-        self.establish_simulated_task_identity(next)?;
-        self.finish_task_switch(next)
+        self.commit_simulated_task_switch(previous, next, current_task)
     }
 
     #[cfg_attr(not(app_user_boot), allow(dead_code))]
@@ -1385,33 +1488,7 @@ impl Context {
         if previous.same_identity(next) {
             return Ok(());
         }
-        {
-            let Self {
-                cpu_group,
-                scheduler_test_tasks,
-                kernel_init_task,
-                kthreadd_task,
-                user_task_set,
-                ..
-            } = self;
-            let Some(scheduler) = cpu_group.boot_scheduler_mut() else {
-                return failed_condition(
-                    LifecycleEvent::Setup,
-                    State::Base,
-                    State::Online,
-                    State::Online,
-                );
-            };
-            let task_access = SchedulerTaskAccess::new(
-                kernel_init_task,
-                kthreadd_task,
-                user_task_set,
-                scheduler_test_tasks,
-            );
-            scheduler.prepare_simulated_task_switch(previous, next, current_task, &task_access)?;
-        }
-        self.establish_simulated_task_identity(next)?;
-        self.finish_task_switch(next)
+        self.commit_simulated_task_switch(previous, next, current_task)
     }
 
     #[cfg_attr(not(app_smoke), allow(dead_code))]
@@ -1526,6 +1603,16 @@ fn missing_scheduler_error() -> EventError {
     )
 }
 
+fn context_schedule_stage(error: EventError, first_failed: &'static str) -> EventError {
+    error.with_diagnostic_if_absent(FailureDiagnostic::new(
+        "Context",
+        "ScheduleFromRefs",
+        "CurrentTask",
+        "Scheduler return and CPU-local current binding revalidation",
+        first_failed,
+    ))
+}
+
 static mut CONTEXT: Context = Context::new();
 
 static SECONDARY_RUNTIME_OPEN: [AtomicBool; crate::objects::cpu::MAX_CPUS] =
@@ -1582,6 +1669,14 @@ fn secondary_trap_runtime(logical_id: usize) -> Option<*const crate::objects::tr
     (address != 0).then_some(address as *const crate::objects::trap_type::TrapType)
 }
 
+#[cfg_attr(not(app_user_boot), allow(dead_code))]
+pub(crate) fn secondary_trap_entry_context(logical_id: usize) -> Option<usize> {
+    let trap = secondary_trap_runtime(logical_id)?;
+    // SAFETY: the secondary runtime open flag release-publishes this stable
+    // CPU-owned TrapType and its embedded entry context.
+    Some(unsafe { (&*trap).entry_context_address() })
+}
+
 fn secondary_scheduler_curr_ref(logical_id: usize) -> Option<TaskRef> {
     if !secondary_runtime_open(logical_id) {
         return None;
@@ -1606,7 +1701,9 @@ pub(crate) struct TrapTaskAccess {
 
 impl TrapTaskAccess {
     fn candidate(self) -> Option<CurrentTaskCandidate<'static>> {
-        if self.task_ref.is_kernel() {
+        if self.task_ref.is_user() {
+            crate::objects::user_boot::smp_task_candidate_by_ref(self.task_ref, self.logical_id)
+        } else if self.task_ref.is_kernel() {
             crate::objects::kernel_task::task_candidate_by_ref(self.task_ref)
         } else if self.task_ref.is_ap_idle() {
             crate::objects::smp_bringup::ap_current_task_candidate_by_ref(self.task_ref)
@@ -1618,7 +1715,9 @@ impl TrapTaskAccess {
     }
 
     fn task_mut(self) -> Option<&'static mut Task> {
-        if self.task_ref.is_kernel() {
+        if self.task_ref.is_user() {
+            crate::objects::user_boot::smp_task_mut_by_ref_on_cpu(self.task_ref, self.logical_id)
+        } else if self.task_ref.is_kernel() {
             crate::objects::kernel_task::task_mut_by_ref_on_cpu(self.task_ref, self.logical_id)
         } else if self.task_ref.is_ap_idle() {
             crate::objects::smp_bringup::ap_task_mut_by_ref(self.task_ref)
@@ -1736,9 +1835,18 @@ impl TrapRuntimeLease {
                 .ok_or("trap_task_identity_unknown")?;
             context_ref().current_task_candidate(task_ref)
         } else {
-            crate::objects::kernel_task::task_candidate_by_identity(task_identity).or_else(|| {
-                crate::objects::smp_bringup::ap_current_task_candidate_by_identity(task_identity)
-            })
+            crate::objects::kernel_task::task_candidate_by_identity(task_identity)
+                .or_else(|| {
+                    crate::objects::smp_bringup::ap_current_task_candidate_by_identity(
+                        task_identity,
+                    )
+                })
+                .or_else(|| {
+                    crate::objects::user_boot::smp_task_candidate_by_identity(
+                        task_identity,
+                        logical_id,
+                    )
+                })
         }
         .ok_or("trap_task_candidate_missing")?;
         let task_ref = candidate.task.task_ref();
@@ -1850,28 +1958,146 @@ impl TrapRuntimeLease {
     }
 }
 
-pub(crate) fn process_secondary_inbound(logical_id: usize) -> EventResult {
+pub(crate) fn process_smp_inbound(logical_id: usize) -> EventResult {
     let Some(message) = crate::objects::kernel_task::take_inbound(logical_id) else {
         return Ok(());
     };
     if message.target_cpu.logical_id() != logical_id || message.ordinal == 0 {
         return Err(missing_scheduler_error());
     }
-    let task_id = crate::objects::kernel_task::task_by_ref(message.task_ref)
-        .map(Task::pid)
+    let task_id =
+        if message.task_ref.is_user() || message.task_ref.same_identity(TaskRef::KERNEL_INIT) {
+            crate::objects::user_process_registry::global_registry().pid(message.task_ref)
+        } else {
+            crate::objects::kernel_task::task_by_ref(message.task_ref).map(Task::pid)
+        }
         .ok_or_else(missing_scheduler_error)?;
-    let (scheduler, local_interrupt) =
-        secondary_runtime_parts(logical_id).ok_or_else(missing_scheduler_error)?;
-    scheduler.commit_inbound_kernel_task(message.task_ref, message.kind, task_id, local_interrupt)
+    if logical_id == 0 {
+        let Context {
+            cpu_group,
+            scheduler_test_tasks,
+            kernel_init_task,
+            kthreadd_task,
+            user_task_set,
+            ..
+        } = context();
+        let (scheduler, local_interrupt) = cpu_group
+            .boot_scheduler_and_local_interrupt_mut()
+            .ok_or_else(missing_scheduler_error)?;
+        let mut task_access = SchedulerTaskAccess::new(
+            kernel_init_task,
+            kthreadd_task,
+            user_task_set,
+            scheduler_test_tasks,
+        );
+        let result = scheduler.commit_inbound_task(
+            message.task_ref,
+            message.kind,
+            task_id,
+            &mut task_access,
+            local_interrupt,
+        );
+        #[cfg(checkpoint_handler_user_scheduler_trace)]
+        trace_smp_inbound_commit(
+            logical_id,
+            message,
+            task_id,
+            result.is_ok(),
+            scheduler,
+            &task_access,
+        );
+        result
+    } else {
+        let (scheduler, local_interrupt) =
+            secondary_runtime_parts(logical_id).ok_or_else(missing_scheduler_error)?;
+        let mut task_access = SchedulerTaskAccess::new_secondary(logical_id);
+        let result = scheduler.commit_inbound_task(
+            message.task_ref,
+            message.kind,
+            task_id,
+            &mut task_access,
+            local_interrupt,
+        );
+        #[cfg(checkpoint_handler_user_scheduler_trace)]
+        trace_smp_inbound_commit(
+            logical_id,
+            message,
+            task_id,
+            result.is_ok(),
+            scheduler,
+            &task_access,
+        );
+        result
+    }
+}
+
+#[cfg(checkpoint_handler_user_scheduler_trace)]
+fn trace_smp_inbound_commit(
+    logical_id: usize,
+    message: crate::objects::kernel_task::InboundMessage,
+    task_id: usize,
+    committed: bool,
+    scheduler: &crate::objects::scheduler::Scheduler,
+    task_access: &SchedulerTaskAccess<'_>,
+) {
+    let candidate = task_access.current_task_candidate(message.task_ref);
+    let (task_state, task_cpu, task_running, task_published, task_sleep) =
+        candidate.map_or((b'-', usize::MAX, false, false, false), |candidate| {
+            (
+                candidate.task.state().code(),
+                candidate
+                    .task
+                    .flow_cpu_ref()
+                    .map_or(usize::MAX, |cpu_ref| cpu_ref.logical_id()),
+                candidate.task.running(),
+                candidate.task.runqueue_published(),
+                candidate.task.scheduler_sleep_declared(),
+            )
+        });
+    let kind = match message.kind {
+        crate::objects::kernel_task::InboundKind::Activate => "activate",
+        crate::objects::kernel_task::InboundKind::Wake => "wake",
+    };
+    crate::arch::riscv64::sbi::write_record(format_args!(
+        "SMP inbound commit result={} cpu={} kind={} ordinal={} task_slot={} task_generation={} pid={} task_state={} task_cpu={} running={} published={} sleep={} rq_current_slot={} rq_current_generation={} rq_contains_id={} rq_contains_ref={} rq_tasks={}\n",
+        if committed { "ok" } else { "failed" },
+        logical_id,
+        kind,
+        message.ordinal,
+        message.task_ref.slot(),
+        message.task_ref.generation(),
+        task_id,
+        task_state as char,
+        task_cpu,
+        task_running as usize,
+        task_published as usize,
+        task_sleep as usize,
+        scheduler.curr_ref().slot(),
+        scheduler.curr_ref().generation(),
+        scheduler.contains_task(task_id) as usize,
+        scheduler.contains_task_ref(message.task_ref) as usize,
+        scheduler.task_count(),
+    ));
+}
+
+pub(crate) fn process_secondary_inbound(logical_id: usize) -> EventResult {
+    if logical_id == 0 {
+        return Err(missing_scheduler_error());
+    }
+    process_smp_inbound(logical_id)
 }
 
 pub(crate) fn schedule_secondary_current(
     logical_id: usize,
     current_task_ref: TaskRef,
 ) -> EventResult {
-    let candidate = crate::objects::smp_bringup::ap_current_task_candidate_by_ref(current_task_ref)
-        .or_else(|| crate::objects::kernel_task::task_candidate_by_ref(current_task_ref))
-        .ok_or_else(missing_scheduler_error)?;
+    let candidate =
+        crate::objects::user_boot::smp_task_candidate_by_ref(current_task_ref, logical_id)
+            .or_else(|| {
+                crate::objects::smp_bringup::ap_current_task_candidate_by_ref(current_task_ref)
+            })
+            .or_else(|| crate::objects::kernel_task::task_candidate_by_ref(current_task_ref))
+            .ok_or_else(missing_scheduler_error)?;
     let flow_ref = candidate.flow.flow_ref();
     let cpu_ref = candidate
         .flow
@@ -1902,18 +2128,92 @@ pub(crate) fn schedule_secondary_current(
     }
 }
 
+/// Schedule through the owner CPU's runtime. CPU0 owns the repository-wide
+/// boot Context while APs own only their published CPU-local runtime pair.
+pub(crate) fn schedule_smp_current(logical_id: usize, current_task_ref: TaskRef) -> EventResult {
+    if logical_id == 0 {
+        if current_task_ref.same_identity(TaskRef::KERNEL_INIT) {
+            return context().schedule_current();
+        }
+        let candidate = crate::objects::user_boot::smp_task_candidate_by_ref(current_task_ref, 0)
+            .ok_or_else(missing_scheduler_error)?;
+        let flow_ref = candidate.flow.flow_ref();
+        let cpu_ref = candidate
+            .flow
+            .cpu_ref()
+            .ok_or_else(missing_scheduler_error)?;
+        context().schedule_from_refs(flow_ref, current_task_ref, cpu_ref)
+    } else {
+        schedule_secondary_current(logical_id, current_task_ref)
+    }
+}
+
+pub(crate) fn smp_has_runnable_competitor(
+    logical_id: usize,
+    current_task_ref: TaskRef,
+) -> Result<bool, EventError> {
+    let scheduler = if logical_id == 0 {
+        context_ref().scheduler()
+    } else {
+        let (scheduler, _) =
+            secondary_runtime_parts(logical_id).ok_or_else(missing_scheduler_error)?;
+        scheduler
+    };
+    if scheduler.cpu_ref().logical_id() != logical_id
+        || !scheduler.curr_ref().same_identity(current_task_ref)
+    {
+        return Err(missing_scheduler_error());
+    }
+    Ok(scheduler.has_runnable_competitor(current_task_ref))
+}
+
 #[cfg_attr(not(app_smoke), allow(dead_code))]
 pub(crate) fn finish_secondary_task_switch(logical_id: usize, task_ref: TaskRef) -> EventResult {
-    let (scheduler, _) = secondary_runtime_parts(logical_id).ok_or_else(missing_scheduler_error)?;
+    let (scheduler, interrupt) =
+        secondary_runtime_parts(logical_id).ok_or_else(missing_scheduler_error)?;
+    let physical_switch_guard = scheduler.schedule_guard_pending();
     let mut task_access = SchedulerTaskAccess::new_secondary(logical_id);
-    scheduler.dispatch_task_after_switch(task_ref, &mut task_access)
+    let dispatch_result = scheduler.dispatch_task_after_switch(task_ref, &mut task_access);
+    let finish_result = if physical_switch_guard {
+        scheduler.complete_schedule_guard(interrupt)
+    } else {
+        Ok(())
+    };
+    dispatch_result.and(finish_result)
+}
+
+#[cfg_attr(not(app_user_boot), allow(dead_code))]
+pub(crate) fn finish_smp_task_switch(logical_id: usize, task_ref: TaskRef) -> EventResult {
+    if logical_id == 0 {
+        context().finish_task_switch(task_ref)
+    } else {
+        finish_secondary_task_switch(logical_id, task_ref)
+    }
 }
 
 #[cfg_attr(not(app_smoke), allow(dead_code))]
 pub(crate) fn declare_secondary_task_sleep(logical_id: usize, task_ref: TaskRef) -> EventResult {
-    crate::objects::kernel_task::task_mut_by_ref_on_cpu(task_ref, logical_id)
-        .ok_or_else(missing_scheduler_error)?
+    let task = if task_ref.is_user() {
+        crate::objects::user_boot::smp_task_mut_by_ref_on_cpu(task_ref, logical_id)
+    } else {
+        crate::objects::kernel_task::task_mut_by_ref_on_cpu(task_ref, logical_id)
+    };
+    task.ok_or_else(missing_scheduler_error)?
         .declare_scheduler_sleep()
+}
+
+pub(crate) fn declare_smp_task_sleep(logical_id: usize, task_ref: TaskRef) -> EventResult {
+    if logical_id == 0 {
+        if task_ref.same_identity(TaskRef::KERNEL_INIT) {
+            context().declare_current_scheduler_sleep()
+        } else {
+            crate::objects::user_boot::smp_task_mut_by_ref_on_cpu(task_ref, logical_id)
+                .ok_or_else(missing_scheduler_error)?
+                .declare_scheduler_sleep()
+        }
+    } else {
+        declare_secondary_task_sleep(logical_id, task_ref)
+    }
 }
 
 #[cfg_attr(not(app_smoke), allow(dead_code))]
@@ -1921,9 +2221,33 @@ pub(crate) fn disable_secondary_task_flow_for_exit(
     logical_id: usize,
     task_ref: TaskRef,
 ) -> EventResult {
-    crate::objects::kernel_task::task_mut_by_ref_on_cpu(task_ref, logical_id)
-        .ok_or_else(missing_scheduler_error)?
+    let task = if task_ref.is_user() {
+        crate::objects::user_boot::smp_task_mut_by_ref_on_cpu(task_ref, logical_id)
+    } else {
+        crate::objects::kernel_task::task_mut_by_ref_on_cpu(task_ref, logical_id)
+    };
+    task.ok_or_else(missing_scheduler_error)?
         .disable_embedded_flow_for_exit()
+}
+
+pub(crate) fn disable_smp_task_flow_for_exit(logical_id: usize, task_ref: TaskRef) -> EventResult {
+    if logical_id == 0 {
+        crate::objects::user_boot::smp_task_mut_by_ref_on_cpu(task_ref, logical_id)
+            .ok_or_else(missing_scheduler_error)?
+            .disable_embedded_flow_for_exit()
+    } else {
+        disable_secondary_task_flow_for_exit(logical_id, task_ref)
+    }
+}
+
+#[cfg_attr(not(app_user_boot), allow(dead_code))]
+pub(crate) fn smp_trap_entry_context(logical_id: usize) -> Option<usize> {
+    if logical_id == 0 {
+        let address = crate::objects::trap_type::TrapType::installed_entry_context_address(0);
+        (address != 0).then_some(address)
+    } else {
+        secondary_trap_entry_context(logical_id)
+    }
 }
 
 pub fn context() -> &'static mut Context {
@@ -1937,4 +2261,69 @@ pub fn context_ref() -> &'static Context {
     // SAFETY: read-only access is used for boundary checks before the mutable
     // phase path starts mutating the context.
     unsafe { &*core::ptr::addr_of!(CONTEXT) }
+}
+
+pub(crate) fn user_memory_resource_ptrs() -> (
+    *mut crate::objects::mm_core::PageAllocator,
+    *const crate::objects::mm_core::PageMetadataMap,
+) {
+    let context = core::ptr::addr_of_mut!(CONTEXT);
+    // Raw, field-specific capabilities are dereferenced only while the
+    // user-memory resource lock is held.
+    unsafe {
+        (
+            core::ptr::addr_of_mut!((*context).page_allocator),
+            core::ptr::addr_of!((*context).page_metadata_map),
+        )
+    }
+}
+
+pub(crate) fn pid1_user_mm_resource_ptrs() -> (
+    *mut crate::objects::user_boot::UserAddressSpace,
+    *mut crate::objects::user_boot::UserStack,
+) {
+    let context = core::ptr::addr_of_mut!(CONTEXT);
+    // The PID1 aggregate remains at stable Context field addresses. Callers
+    // dereference these capabilities only on CPU0 while holding the shared
+    // user-memory lock.
+    unsafe {
+        (
+            core::ptr::addr_of_mut!((*context).user_address_space),
+            core::ptr::addr_of_mut!((*context).user_stack),
+        )
+    }
+}
+
+pub(crate) fn pid1_user_process_resource_ptrs() -> (
+    *mut crate::objects::files::FilesStruct,
+    *mut crate::objects::vfs::FsStruct,
+) {
+    let context = core::ptr::addr_of_mut!(CONTEXT);
+    // Dereferencing is serialized by the per-process files lock and remains
+    // confined to PID1's immutable owner CPU.
+    unsafe {
+        (
+            core::ptr::addr_of_mut!((*context).files_struct),
+            core::ptr::addr_of_mut!((*context).fs_struct),
+        )
+    }
+}
+
+fn print_context_task_ref(task_ref: TaskRef) {
+    print_context_hex(task_ref.slot());
+    crate::arch::riscv64::sbi::putchar(b':');
+    print_context_hex(task_ref.generation() as usize);
+}
+
+fn print_context_hex(value: usize) {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    crate::arch::riscv64::sbi::putstr("0x");
+    let mut shift = usize::BITS - 4;
+    loop {
+        crate::arch::riscv64::sbi::putchar(HEX[(value >> shift) & 0xf]);
+        if shift == 0 {
+            break;
+        }
+        shift -= 4;
+    }
 }

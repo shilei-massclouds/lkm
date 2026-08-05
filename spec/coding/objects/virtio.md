@@ -43,6 +43,11 @@ smoke 不绕过 core。首片覆盖 nonblocking consumption 和低水位重新�
 `data_avail` 小于该次请求长度，剩余尾部不足以服务下一次同尺寸读取，device 将其丢弃、重置
 `data_idx/data_avail` 并立即重新提交完整 input buffer；完全耗尽是该规则的特例。重新提交失败使该次
 read 失败。请求开始时已经不足而形成的短读仍把实际长度返回给 caller，caller 不得把它伪装为完整
-entropy；exec 因而继续映射 `EntropyUnavailable/EAGAIN`。blocking wait、
+entropy；exec 因而继续映射 `EntropyUnavailable/EAGAIN`。当软件 `data_avail == 0` 且请求仍 pending
+时，read 在返回 empty 前必须 acquire-load 一次 device-visible used index；若设备已经发布 completion，
+read 立即经正常 `get_buf` 路径收割该 buffer 后继续消费。这只是补收调用时已经完成的数据，不等待未来
+completion，仍属于 nonblocking read。read-side 收割、IRQ completion、运行期 HWRNG 读取及 live runtime
+指针访问由同一 IRQ-safe lock 串行化；任何一条路径都不得重复释放 descriptor 或重复记 completion。
+blocking wait、
 random pool、完整 `/dev/hwrng` file operations、quality/sysfs、freeze/restore 和完整资源回收
 保持 deferred。devfs 的 `hwrng` 节点只提供命名空间可发现性，不增加旁路读取入口。

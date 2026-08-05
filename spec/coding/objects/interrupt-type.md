@@ -18,11 +18,15 @@ own device-source gates.
 - `SaveAndDisable` records the prior `SIE` value by nesting depth; `Restore` consumes exactly the matching saved value.
 - `InterruptFlowType` dispatch is hardirq context: ordinary IRQ reentry and scheduling are rejected unless a named
   return/softirq interval explicitly reopens interrupts.
-- Online secondary CPUs enable `sie.SSIE`. The SBI IPI sender runs only after release mailbox publication. SSIP
+- Online secondary CPUs enable `sie.SSIE`. The SBI IPI sender runs only after release inbox publication. SSIP
   dispatch clears the local pending bit and release-sets the per-CPU `need_resched` flag; it does not borrow a
-  Scheduler, consume a mailbox or switch context. Duplicate SSIP occurrences are idempotent at that flag.
+  Scheduler, consume an inbox or switch context. Duplicate SSIP occurrences are idempotent at that flag.
 - Software interrupt cause has an explicit reschedule handler policy. It runs inside the same fresh
   TrapFlow→InterruptFlow lifecycle as other interrupts and cannot bypass Cleanup/token consumption.
+- Each online CPU enables its timer source only after its `SchedulerClockevent` is ready. Timer dispatch asks the
+  CPU-local deadline mux to acknowledge and rearm the earliest of the CPU0 compatibility one-shot and 10 ms
+  scheduler deadline, then coalesces `need_resched`. It never consumes an inbox, takes a runqueue lock or switches
+  context in hardirq.
 
 Mapping: charter [`interrupt-type.md`](../../charter/objects/interrupt-type.md), model
 [`interrupt_type.spec`](../../model/objects/interrupt_type.spec), implementation

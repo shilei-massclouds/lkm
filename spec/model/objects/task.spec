@@ -5,6 +5,7 @@ enum TaskExecutionAuthority { None, Reserved, Live }
 enum TaskBreakpointState { Invalid, Prepared, Valid }
 enum TaskTerminalReason { OutOfMemory, SegmentationFault }
 enum UserSegvCode { Maperr, Accerr }
+enum UserProcessSlotState { Empty, Reserved, Published, Zombie, Reaping }
 
 type TaskRef {
     processes {
@@ -17,6 +18,9 @@ type TaskRef {
 
 type TaskRefSet { }
 type TaskSet: ResourceObject { }
+type UserProcessGeneration { }
+type UserProcessLease { }
+type UserProcessAggregate: ResourceObject { }
 type RegisterValue { }
 type ContextEpoch { }
 type DispatchRecord { }
@@ -135,11 +139,31 @@ predicate current_stack_binding_matches_task<C, T: Task, S: Stack>(cpu: C, task:
 predicate current_task_ref_derived_from_selector<R: TaskRef, T: Task>(task_ref: R, task: T) -> bool;
 predicate boot_task_preemption_is_static_initial_property<T: Task>(task: T) -> bool;
 
-predicate user_task_set_allows_multiple_independent_tasks<S: TaskSet>(set: S) -> bool;
-predicate user_task_set_contains<S: TaskSet, T: Task>(set: S, task: T) -> bool;
-predicate user_task_set_stores_ref<S: TaskSet, R: TaskRef>(set: S, task_ref: R) -> bool;
-predicate user_task_set_ref_targets_member<S: TaskSet, R: TaskRef, T: Task>(set: S, task_ref: R, task: T) -> bool;
-predicate user_task_set_members_fresh_and_independent<S: TaskSet>(set: S) -> bool;
+predicate user_process_registry_capacity_is_32<S: TaskSet>(registry: S) -> bool;
+predicate user_process_registry_pid1_stable<S: TaskSet>(registry: S) -> bool;
+predicate user_process_registry_allows_independent_aggregates<S: TaskSet>(registry: S) -> bool;
+predicate user_process_registry_contains<S: TaskSet, T: Task>(registry: S, task: T) -> bool;
+predicate user_process_registry_stores_ref<S: TaskSet, R: TaskRef>(registry: S, task_ref: R) -> bool;
+predicate user_process_registry_ref_targets_member<S: TaskSet, R: TaskRef, T: Task>(registry: S, task_ref: R, task: T) -> bool;
+predicate user_process_registry_members_fresh_and_independent<S: TaskSet>(registry: S) -> bool;
+predicate user_process_registry_slot_state_is<S: TaskSet>(registry: S, state: UserProcessSlotState) -> bool;
+predicate user_process_registry_slot_generation_is<S: TaskSet, G: UserProcessGeneration>(registry: S, generation: G) -> bool;
+predicate user_process_registry_reservation_unpublished<S: TaskSet, T: Task>(registry: S, task: T) -> bool;
+predicate user_process_registry_fork_resources_complete<S: TaskSet, T: Task>(registry: S, task: T) -> bool;
+predicate user_process_registry_inbox_reservation_complete<S: TaskSet, T: Task>(registry: S, task: T) -> bool;
+predicate user_process_registry_fork_failure_has_no_residue<S: TaskSet>(registry: S) -> bool;
+predicate user_process_registry_generation_reuse_checked<S: TaskSet>(registry: S) -> bool;
+predicate user_process_registry_aggregate_owns_process_resources<S: TaskSet, A: UserProcessAggregate>(registry: S, aggregate: A) -> bool;
+predicate user_process_registry_lease_generation_valid<S: TaskSet, L: UserProcessLease>(registry: S, lease: L) -> bool;
+predicate user_process_registry_lease_cpu_owner_valid<S: TaskSet, L: UserProcessLease, C: CpuRef>(registry: S, lease: L, cpu_ref: C) -> bool;
+predicate user_process_registry_lease_acquire_checks_generation_and_cpu<S: TaskSet, R: TaskRef, C: CpuRef>(registry: S, task_ref: R, cpu_ref: C) -> bool;
+predicate user_process_registry_reap_excludes_scheduler_and_lease_refs<S: TaskSet, T: Task>(registry: S, task: T) -> bool;
+predicate user_process_registry_exit_status_published_release<S: TaskSet, T: Task>(registry: S, task: T) -> bool;
+predicate user_process_registry_parent_wake_target_cpu_fixed<S: TaskSet, T: Task>(registry: S, task: T) -> bool;
+predicate user_process_registry_parent_child_identity_bound<S: TaskSet, P: Task, C: Task>(registry: S, parent: P, child: C) -> bool;
+predicate user_process_registry_wait_uses_current_parent_identity<S: TaskSet, P: Task, C: Task>(registry: S, parent: P, child: C) -> bool;
+predicate user_process_registry_reap_preserves_unselected_parent_state<S: TaskSet, P: Task, C: Task>(registry: S, parent: P, child: C) -> bool;
+predicate user_process_registry_exec_preserves_identity<S: TaskSet, T: Task>(registry: S, task: T) -> bool;
 predicate user_task_instance_fresh<T: Task>(task: T) -> bool;
 predicate user_task_pid_and_lifecycle_independent<T: Task>(task: T) -> bool;
 
@@ -414,32 +438,103 @@ type Task: ResourceObject {
     }
 }
 
-object UserTaskSet: TaskSet {
+object UserProcessRegistry: TaskSet {
     initial_state: State::Base;
     state State::Base {
         transitions {
             on Transition::Setup -> State::Ready {
                 ensures {
-                    user_task_set_allows_multiple_independent_tasks(self);
-                    user_task_set_members_fresh_and_independent(self);
+                    user_process_registry_capacity_is_32(self);
+                    user_process_registry_pid1_stable(self);
+                    user_process_registry_allows_independent_aggregates(self);
+                    user_process_registry_members_fresh_and_independent(self);
+                    user_process_registry_generation_reuse_checked(self);
                 }
             }
         }
     }
-    state State::Ready { }
+    state State::Ready {
+        invariant {
+            user_process_registry_capacity_is_32(self);
+            user_process_registry_pid1_stable(self);
+            user_process_registry_generation_reuse_checked(self);
+        }
+    }
     actions {
-        Action::Insert(task: Task, task_ref: TaskRef) {
+        Action::ReserveFork(
+            task: Task,
+            aggregate: UserProcessAggregate,
+            generation: UserProcessGeneration
+        ) {
             state_effect: StateEffect::None;
             depends_on {
                 task.state == State::Online;
-                task_ref_targets(task_ref, task);
                 user_task_instance_fresh(task);
                 user_task_pid_and_lifecycle_independent(task);
             }
             ensures {
-                user_task_set_contains(self, task);
-                user_task_set_stores_ref(self, task_ref);
-                user_task_set_ref_targets_member(self, task_ref, task);
+                user_process_registry_slot_state_is(self, UserProcessSlotState::Reserved);
+                user_process_registry_slot_generation_is(self, generation);
+                user_process_registry_reservation_unpublished(self, task);
+                user_process_registry_aggregate_owns_process_resources(self, aggregate);
+            }
+        }
+
+        Action::PublishFork(task: Task, task_ref: TaskRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                task.state == State::Online;
+                task_ref_targets(task_ref, task);
+                user_process_registry_reservation_unpublished(self, task);
+                user_process_registry_fork_resources_complete(self, task);
+                user_process_registry_inbox_reservation_complete(self, task);
+            }
+            ensures {
+                user_process_registry_slot_state_is(self, UserProcessSlotState::Published);
+                user_process_registry_contains(self, task);
+                user_process_registry_stores_ref(self, task_ref);
+                user_process_registry_ref_targets_member(self, task_ref, task);
+            }
+        }
+
+        Action::AcquireLease(
+            task_ref: TaskRef,
+            cpu_ref: CpuRef,
+            generation: UserProcessGeneration
+        ) -> UserProcessLease {
+            state_effect: StateEffect::None;
+            depends_on {
+                task_ref_ready(task_ref);
+                user_process_registry_slot_generation_is(self, generation);
+            }
+            ensures {
+                user_process_registry_lease_acquire_checks_generation_and_cpu(self, task_ref, cpu_ref);
+            }
+            result {
+                Acquired: Success(lease_acquired);
+                StaleGeneration: Failed(stale_generation);
+                WrongCpu: Failed(wrong_cpu);
+            }
+        }
+
+        Action::PublishZombie(task: Task) {
+            state_effect: StateEffect::None;
+            depends_on { user_process_registry_contains(self, task); }
+            ensures {
+                user_process_registry_slot_state_is(self, UserProcessSlotState::Zombie);
+                user_process_registry_exit_status_published_release(self, task);
+                user_process_registry_parent_wake_target_cpu_fixed(self, task);
+            }
+        }
+
+        Action::Reap(task: Task) {
+            state_effect: StateEffect::None;
+            depends_on {
+                user_process_registry_slot_state_is(self, UserProcessSlotState::Zombie);
+                user_process_registry_reap_excludes_scheduler_and_lease_refs(self, task);
+            }
+            ensures {
+                user_process_registry_slot_state_is(self, UserProcessSlotState::Empty);
             }
         }
     }

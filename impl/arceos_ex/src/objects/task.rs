@@ -1,12 +1,15 @@
 use crate::{arch::riscv64::task_switch::TaskSwitchContext, checkpoint::Checkpoint};
 
 use super::{
+    cpu::MAX_CPUS,
     state::{EventResult, FailureDiagnostic, Lifecycle, LifecycleEvent, State, failed_condition},
     task_flow::{TaskFlow, TaskFlowRef},
     trap_flow_type::{TrapFlowRef, TrapFlowType},
 };
 
-pub const USER_TASK_SLOT_COUNT: usize = 8;
+/// Dynamic user-process Tasks. PID1 is the separately stored KernelInitTask,
+/// so these 31 slots complete the 32-process registry capacity.
+pub const USER_TASK_SLOT_COUNT: usize = 31;
 pub const KERNEL_TASK_SLOT_COUNT: usize = 8;
 pub const TASK_STACK_GUARD_VALUE: usize = 0x57AC6E9D;
 
@@ -18,8 +21,11 @@ const TASK_SLOT_SMOKE_MUTEX: u16 = 5;
 const TASK_SLOT_SMOKE_RWSEM: u16 = 6;
 const TASK_SLOT_SMOKE_RWLOCK: u16 = 7;
 const TASK_SLOT_AP_IDLE_BASE: u16 = 16;
+const TASK_SLOT_AP_IDLE_END: u16 = TASK_SLOT_AP_IDLE_BASE + MAX_CPUS as u16 - 1;
 const TASK_SLOT_USER_BASE: u16 = 32;
-const TASK_SLOT_KERNEL_BASE: u16 = 48;
+const TASK_SLOT_USER_END: u16 = TASK_SLOT_USER_BASE + USER_TASK_SLOT_COUNT as u16 - 1;
+const TASK_SLOT_KERNEL_BASE: u16 = 80;
+const TASK_SLOT_KERNEL_END: u16 = TASK_SLOT_KERNEL_BASE + KERNEL_TASK_SLOT_COUNT as u16 - 1;
 
 /// Stable identity for a Task storage occurrence.
 ///
@@ -90,7 +96,7 @@ impl TaskRef {
     }
 
     pub const fn is_ap_idle(self) -> bool {
-        self.slot >= TASK_SLOT_AP_IDLE_BASE && self.slot < TASK_SLOT_AP_IDLE_BASE + 8
+        self.slot >= TASK_SLOT_AP_IDLE_BASE && self.slot <= TASK_SLOT_AP_IDLE_END
     }
 
     pub const fn is_scheduler_ref(self) -> bool {
@@ -135,9 +141,9 @@ impl TaskRef {
             TASK_SLOT_SMOKE_MUTEX => "SmokeMutexTask",
             TASK_SLOT_SMOKE_RWSEM => "SmokeRwsemTask",
             TASK_SLOT_SMOKE_RWLOCK => "SmokeRwLockTask",
-            TASK_SLOT_AP_IDLE_BASE..=23 => "ApIdleTask",
-            TASK_SLOT_USER_BASE..=39 => "UserTask",
-            TASK_SLOT_KERNEL_BASE..=55 => "KernelTask",
+            TASK_SLOT_AP_IDLE_BASE..=TASK_SLOT_AP_IDLE_END => "ApIdleTask",
+            TASK_SLOT_USER_BASE..=TASK_SLOT_USER_END => "UserTask",
+            TASK_SLOT_KERNEL_BASE..=TASK_SLOT_KERNEL_END => "KernelTask",
             _ => "UnknownTask",
         }
     }
@@ -422,10 +428,10 @@ impl Task {
             TASK_SLOT_SMOKE_MUTEX => TaskFlow::new_static_bound(TaskFlowRef::smoke(1), task_ref),
             TASK_SLOT_SMOKE_RWSEM => TaskFlow::new_static_bound(TaskFlowRef::smoke(2), task_ref),
             TASK_SLOT_SMOKE_RWLOCK => TaskFlow::new_static_bound(TaskFlowRef::smoke(3), task_ref),
-            TASK_SLOT_USER_BASE..=39 => {
+            TASK_SLOT_USER_BASE..=TASK_SLOT_USER_END => {
                 TaskFlow::new_user((task_ref.slot - TASK_SLOT_USER_BASE) as usize)
             }
-            TASK_SLOT_KERNEL_BASE..=55 => {
+            TASK_SLOT_KERNEL_BASE..=TASK_SLOT_KERNEL_END => {
                 TaskFlow::new_kernel((task_ref.slot - TASK_SLOT_KERNEL_BASE) as usize)
             }
             _ => TaskFlow::new_static(TaskFlowRef::NONE),
@@ -1480,6 +1486,30 @@ impl Task {
             .adopt_transition(LifecycleEvent::Cleanup, State::Offline, State::Destroyed)
     }
 
+    /// Final cleanup for an exited Task after its owning CPU has saved the
+    /// switch context and removed every current/runqueue reference.
+    pub(crate) fn cleanup_suspended_terminal(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Online
+            || self.on_cpu
+            || self.execution_authority != TaskExecutionAuthority::None
+            || self.core_save_pending_suspend
+            || self.running
+            || self.runqueue_published
+            || self.flow.state() != State::Destroyed
+        {
+            return failed_condition(
+                LifecycleEvent::Cleanup,
+                self.lifecycle.state(),
+                State::Online,
+                State::Destroyed,
+            );
+        }
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Disable, State::Online, State::Offline)?;
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Cleanup, State::Offline, State::Destroyed)
+    }
+
     pub fn set_runtime_running(&mut self) -> EventResult {
         if self.lifecycle.state() != State::Ready {
             return failed_condition(
@@ -1566,6 +1596,41 @@ impl Task {
             .arch_mut()
             .set_kernel_stack_bounds(base, top);
         installed && self.kernel_stack_base() == base && self.kernel_stack_top() == top
+    }
+
+    /// Commit PID1's no-return transition from its startup stack to the
+    /// prepared user trap stack. No scheduler operation is allowed between
+    /// this boundary and the architectural user-mode handoff.
+    #[cfg_attr(not(app_user_boot), allow(dead_code))]
+    pub fn adopt_user_kernel_stack(&mut self, base: usize, top: usize) -> bool {
+        let live_sp = crate::arch::riscv64::csr::read_sp();
+        if self.task_ref != TaskRef::KERNEL_INIT
+            || self.state() != State::OnCpu
+            || self.execution_authority != TaskExecutionAuthority::Live
+            || !self.current_stack_matches()
+            || self.root_trap_flow_ref().is_valid()
+            || base == 0
+            || top <= base
+            || !base.is_multiple_of(core::mem::align_of::<usize>())
+            || !top.is_multiple_of(16)
+            || (live_sp >= base && live_sp <= top)
+        {
+            return false;
+        }
+        if !self
+            .thread_context
+            .arch_mut()
+            .set_kernel_stack_bounds(base, top)
+        {
+            return false;
+        }
+        // SAFETY: the handoff owns the new, mapped Task stack exclusively;
+        // the lowest word is reserved by the Task stack-guard contract.
+        unsafe { core::ptr::write_volatile(base as *mut usize, TASK_STACK_GUARD_VALUE) };
+        self.stack_guard_installed = true;
+        self.kernel_stack_base() == base
+            && self.kernel_stack_top() == top
+            && self.stack_guard_intact()
     }
 
     pub const fn kernel_stack_base(&self) -> usize {

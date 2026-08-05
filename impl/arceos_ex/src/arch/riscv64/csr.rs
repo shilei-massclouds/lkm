@@ -135,6 +135,61 @@ arceos_ex_enter_user_mode:
     sfence.vma
     mv      sp, a2
     sret
+
+    .align 2
+    .globl arceos_ex_enter_user_mode_from_trap_frame
+arceos_ex_enter_user_mode_from_trap_frame:
+    /*
+     * a0 = user satp
+     * a1 = complete TrapFrame copied by fork
+     * a2 = current CPU TrapEntryContext
+     *
+     * A fork continuation is not an ELF entry point: every user register is
+     * observable state.  Keep the Task identity in sscratch, then restore the
+     * complete saved frame exactly as the formal trap-return path does.
+     */
+    sd      tp, {trap_context_task_offset}(a2)
+    csrw    sscratch, tp
+    mv      sp, a1
+    ld      t0, {trap_frame_sepc_offset}(sp)
+    csrw    sepc, t0
+    ld      t0, {trap_frame_sstatus_offset}(sp)
+    csrw    sstatus, t0
+    csrw    satp, a0
+    sfence.vma
+
+    ld      ra, 8(sp)
+    ld      gp, 24(sp)
+    ld      tp, 32(sp)
+    ld      t0, 40(sp)
+    ld      t1, 48(sp)
+    ld      t2, 56(sp)
+    ld      s0, 64(sp)
+    ld      s1, 72(sp)
+    ld      a0, 80(sp)
+    ld      a1, 88(sp)
+    ld      a2, 96(sp)
+    ld      a3, 104(sp)
+    ld      a4, 112(sp)
+    ld      a5, 120(sp)
+    ld      a6, 128(sp)
+    ld      a7, 136(sp)
+    ld      s2, 144(sp)
+    ld      s3, 152(sp)
+    ld      s4, 160(sp)
+    ld      s5, 168(sp)
+    ld      s6, 176(sp)
+    ld      s7, 184(sp)
+    ld      s8, 192(sp)
+    ld      s9, 200(sp)
+    ld      s10, 208(sp)
+    ld      s11, 216(sp)
+    ld      t3, 224(sp)
+    ld      t4, 232(sp)
+    ld      t5, 240(sp)
+    ld      t6, 248(sp)
+    ld      sp, 16(sp)
+    sret
 "#,
     state_controller_offset = const crate::objects::cpu::TRANSLATION_STATE_CONTROLLER_OFFSET,
     state_count_offset = const crate::objects::cpu::TRANSLATION_STATE_COMMITTED_COUNT_OFFSET,
@@ -155,6 +210,8 @@ arceos_ex_enter_user_mode:
     trampoline_controller = const crate::objects::cpu::TranslationController::TrampolineVm as u8,
     handoff_kind = const crate::objects::cpu::TranslationActivationKind::Handoff as u8,
     trap_context_task_offset = const crate::objects::trap_type::TRAP_ENTRY_CONTEXT_TASK_OFFSET,
+    trap_frame_sstatus_offset = const crate::objects::trap_type::TRAP_FRAME_SSTATUS_OFFSET,
+    trap_frame_sepc_offset = const crate::objects::trap_type::TRAP_FRAME_SEPC_OFFSET,
 );
 
 unsafe extern "C" {
@@ -173,6 +230,12 @@ unsafe extern "C" {
         user_entry: usize,
         user_sp: usize,
         user_sstatus: usize,
+        user_trap_entry_context: usize,
+    ) -> !;
+    #[cfg(app_user_boot)]
+    fn arceos_ex_enter_user_mode_from_trap_frame(
+        user_satp: usize,
+        frame: *const crate::objects::trap_type::TrapFrame,
         user_trap_entry_context: usize,
     ) -> !;
 }
@@ -328,6 +391,17 @@ pub fn write_stvec(value: usize) {
     }
 }
 
+#[cfg(app_smoke)]
+pub fn read_stvec() -> usize {
+    let value: usize;
+
+    unsafe {
+        core::arch::asm!("csrr {value}, stvec", value = out(reg) value, options(nostack, nomem));
+    }
+
+    value
+}
+
 pub fn write_satp(value: usize) {
     unsafe {
         core::arch::asm!("csrw satp, {value}", value = in(reg) value, options(nostack, nomem));
@@ -400,6 +474,21 @@ pub unsafe fn enter_user_mode(
             user_entry,
             user_sp,
             user_sstatus,
+            user_trap_entry_context,
+        )
+    }
+}
+
+#[cfg(app_user_boot)]
+pub unsafe fn enter_user_mode_from_trap_frame(
+    user_satp: usize,
+    frame: &crate::objects::trap_type::TrapFrame,
+    user_trap_entry_context: usize,
+) -> ! {
+    unsafe {
+        arceos_ex_enter_user_mode_from_trap_frame(
+            user_satp,
+            core::ptr::from_ref(frame),
             user_trap_entry_context,
         )
     }

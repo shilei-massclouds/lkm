@@ -48,6 +48,7 @@ const IRQ_ACTION_CAPACITY: usize = 16;
 static TIMER_INTERRUPT_COUNT: AtomicUsize = AtomicUsize::new(0);
 static ONESHOT_DEADLINE: AtomicU64 = AtomicU64::new(0);
 static ONESHOT_CALLBACK: AtomicUsize = AtomicUsize::new(0);
+static REGISTERED_TIMEBASE_HZ: AtomicU64 = AtomicU64::new(0);
 
 pub type ClockEventCallback = fn(u64);
 pub type IrqChipInitFn = for<'dt> fn(
@@ -2162,6 +2163,7 @@ impl RiscvTimerProvider {
         };
 
         self.timebase_hz = timebase_hz;
+        REGISTERED_TIMEBASE_HZ.store(timebase_hz, Ordering::Release);
         timekeeper.clocksource_core.register_riscv_clocksource();
         self.clocksource_registered = true;
         self.clockevent_registered = true;
@@ -2205,8 +2207,7 @@ impl RiscvTimerProvider {
         let deadline = now.wrapping_add(delta_ticks);
         ONESHOT_DEADLINE.store(deadline, Ordering::Relaxed);
         ONESHOT_CALLBACK.store(callback as usize, Ordering::Release);
-        riscv64::csr::enable_supervisor_timer_interrupt();
-        riscv64::sbi::set_timer(deadline);
+        program_clockevent_mux(0);
         Some(deadline)
     }
 }
@@ -7522,15 +7523,72 @@ pub fn handle_external_interrupt() {
     );
 }
 
-pub fn handle_timer_interrupt() {
+#[cfg_attr(not(app_user_boot), allow(dead_code))]
+pub fn start_scheduler_tick(logical_id: usize, timebase_hz: u64) -> Option<u64> {
+    if !super::scheduler_clockevent::setup_cpu(logical_id, timebase_hz) {
+        return None;
+    }
+    let deadline = super::scheduler_clockevent::begin_slice(logical_id, riscv64::sbi::read_time())?;
+    program_clockevent_mux(logical_id);
+    Some(deadline)
+}
+
+#[cfg_attr(not(app_user_boot), allow(dead_code))]
+pub fn begin_scheduler_slice(logical_id: usize) -> Option<u64> {
+    let timebase_hz = registered_timebase_hz();
+    (timebase_hz != 0)
+        .then_some(())
+        .and_then(|()| start_scheduler_tick(logical_id, timebase_hz))
+}
+
+#[cfg_attr(not(app_user_boot), allow(dead_code))]
+pub fn registered_timebase_hz() -> u64 {
+    REGISTERED_TIMEBASE_HZ.load(Ordering::Acquire)
+}
+
+fn program_clockevent_mux(logical_id: usize) {
+    let scheduler_deadline = super::scheduler_clockevent::next_deadline(logical_id);
+    let oneshot_deadline = if logical_id == 0 && ONESHOT_CALLBACK.load(Ordering::Acquire) != 0 {
+        let deadline = ONESHOT_DEADLINE.load(Ordering::Acquire);
+        (deadline != 0).then_some(deadline)
+    } else {
+        None
+    };
+    let next = match (scheduler_deadline, oneshot_deadline) {
+        (Some(scheduler), Some(oneshot)) => Some(core::cmp::min(scheduler, oneshot)),
+        (Some(deadline), None) | (None, Some(deadline)) => Some(deadline),
+        (None, None) => None,
+    };
+    if let Some(deadline) = next {
+        riscv64::sbi::set_timer(deadline);
+        riscv64::csr::enable_supervisor_timer_interrupt();
+    } else {
+        riscv64::csr::disable_supervisor_timer_interrupt();
+    }
+}
+
+pub fn handle_timer_interrupt(logical_id: usize) {
     riscv64::csr::disable_supervisor_timer_interrupt();
     TIMER_INTERRUPT_COUNT.fetch_add(1, Ordering::Relaxed);
-    let callback = ONESHOT_CALLBACK.swap(0, Ordering::AcqRel);
-    let deadline = ONESHOT_DEADLINE.swap(0, Ordering::AcqRel);
+    let now = riscv64::sbi::read_time();
+    let scheduler_due = super::scheduler_clockevent::handle_timer(logical_id, now);
+    let oneshot_due = logical_id == 0
+        && ONESHOT_CALLBACK.load(Ordering::Acquire) != 0
+        && ONESHOT_DEADLINE.load(Ordering::Acquire) <= now;
+    let (callback, deadline) = if oneshot_due {
+        (
+            ONESHOT_CALLBACK.swap(0, Ordering::AcqRel),
+            ONESHOT_DEADLINE.swap(0, Ordering::AcqRel),
+        )
+    } else {
+        (0, 0)
+    };
+    program_clockevent_mux(logical_id);
     if callback != 0 {
         let callback: ClockEventCallback = unsafe { core::mem::transmute(callback) };
         callback(deadline);
     }
+    let _ = scheduler_due;
 }
 
 fn read_timebase_frequency(device_tree: &DeviceTree) -> Option<u64> {

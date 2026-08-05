@@ -412,7 +412,7 @@ fn bind_interrupt_policy(cause: usize, policy: InterruptPolicy) {
 fn dispatch_handler_policy(handler: u8, scause: usize, logical_id: usize) -> bool {
     match handler {
         HANDLER_TIMER => {
-            timer_interrupt_handler();
+            timer_interrupt_handler(logical_id);
             false
         }
         HANDLER_EXTERNAL => {
@@ -432,8 +432,8 @@ fn reschedule_interrupt_handler(logical_id: usize) {
     crate::objects::kernel_task::handle_reschedule_ipi(logical_id);
 }
 
-fn timer_interrupt_handler() {
-    crate::objects::irq_time::handle_timer_interrupt();
+fn timer_interrupt_handler(logical_id: usize) {
+    crate::objects::irq_time::handle_timer_interrupt(logical_id);
 }
 
 fn external_interrupt_handler() {

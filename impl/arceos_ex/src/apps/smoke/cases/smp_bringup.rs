@@ -18,7 +18,8 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
-    if ctx.secondary_idle_tasks.state() != State::Prepared
+    if !ap_idle_task_ref_range_covers_max_cpus()
+        || ctx.secondary_idle_tasks.state() != State::Prepared
         || ctx.secondary_idle_tasks.prepared_count() != ctx.cpu_group.secondary_count()
         || !ctx.secondary_idle_tasks.inactive()
         || !ctx.secondary_idle_tasks.per_secondary_idle_task()
@@ -172,6 +173,18 @@ pub fn run() -> SmokeResult {
         ctx.cpu_group.possible_cpu_count()
     ));
     SmokeResult::Passed
+}
+
+fn ap_idle_task_ref_range_covers_max_cpus() -> bool {
+    let mut logical_id = 0usize;
+    while logical_id < crate::objects::cpu::MAX_CPUS {
+        let task_ref = TaskRef::ap_idle(logical_id);
+        if !task_ref.is_ap_idle() || task_ref.is_user() || task_ref.is_kernel() {
+            return false;
+        }
+        logical_id += 1;
+    }
+    true
 }
 
 fn reserved_ap_fixed_flow_is_online() -> bool {

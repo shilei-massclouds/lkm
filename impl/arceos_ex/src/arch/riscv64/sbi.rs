@@ -1,3 +1,10 @@
+#[cfg(any(
+    checkpoint_handler_announce,
+    checkpoint_handler_user_scheduler_trace,
+    checkpoint_handler_user_syscall_trace
+))]
+use core::fmt::{self, Write};
+
 const EID_LEGACY_CONSOLE_PUTCHAR: usize = 1;
 #[cfg_attr(not(app_smoke), allow(dead_code))]
 const EID_LEGACY_SET_TIMER: usize = 0;
@@ -46,7 +53,13 @@ pub fn putchar(byte: u8) {
     #[cfg(checkpoint_handler_stress_mem)]
     crate::stress_mem::capture_byte(byte);
     #[cfg(not(checkpoint_handler_stress_mem))]
-    putchar_raw(byte);
+    {
+        if crate::objects::ns16550a::uart8250_interrupt_driven_configured() {
+            let _ = crate::objects::ns16550a::write_console_bytes(&[byte]);
+        } else {
+            putchar_raw(byte);
+        }
+    }
 }
 
 pub fn putchar_raw(byte: u8) {
@@ -57,7 +70,99 @@ pub fn putstr(message: &str) {
     #[cfg(checkpoint_handler_stress_mem)]
     crate::stress_mem::capture_bytes(message.as_bytes());
     #[cfg(not(checkpoint_handler_stress_mem))]
-    putstr_raw(message);
+    {
+        if crate::objects::ns16550a::uart8250_interrupt_driven_configured() {
+            for chunk in message.as_bytes().chunks(256) {
+                let _ = crate::objects::ns16550a::write_console_bytes(chunk);
+            }
+        } else {
+            putstr_raw(message);
+        }
+    }
+}
+
+#[cfg(any(
+    checkpoint_handler_announce,
+    checkpoint_handler_user_scheduler_trace,
+    checkpoint_handler_user_syscall_trace
+))]
+const RUNTIME_DIAGNOSTIC_RECORD_SIZE: usize = 480;
+
+#[cfg(any(
+    checkpoint_handler_announce,
+    checkpoint_handler_user_scheduler_trace,
+    checkpoint_handler_user_syscall_trace
+))]
+struct RuntimeDiagnosticRecord {
+    bytes: [u8; RUNTIME_DIAGNOSTIC_RECORD_SIZE],
+    len: usize,
+}
+
+#[cfg(any(
+    checkpoint_handler_announce,
+    checkpoint_handler_user_scheduler_trace,
+    checkpoint_handler_user_syscall_trace
+))]
+impl RuntimeDiagnosticRecord {
+    const fn new() -> Self {
+        Self {
+            bytes: [0; RUNTIME_DIAGNOSTIC_RECORD_SIZE],
+            len: 0,
+        }
+    }
+
+    fn as_bytes(&self) -> &[u8] {
+        &self.bytes[..self.len]
+    }
+}
+
+#[cfg(any(
+    checkpoint_handler_announce,
+    checkpoint_handler_user_scheduler_trace,
+    checkpoint_handler_user_syscall_trace
+))]
+impl Write for RuntimeDiagnosticRecord {
+    fn write_str(&mut self, message: &str) -> fmt::Result {
+        let end = self.len.checked_add(message.len()).ok_or(fmt::Error)?;
+        let destination = self.bytes.get_mut(self.len..end).ok_or(fmt::Error)?;
+        destination.copy_from_slice(message.as_bytes());
+        self.len = end;
+        Ok(())
+    }
+}
+
+#[cfg(any(
+    checkpoint_handler_announce,
+    checkpoint_handler_user_scheduler_trace,
+    checkpoint_handler_user_syscall_trace
+))]
+pub fn write_record(args: fmt::Arguments<'_>) {
+    let mut record = RuntimeDiagnosticRecord::new();
+    if record.write_fmt(args).is_err() {
+        write_record_bytes(b"runtime diagnostic record overflow\n");
+        return;
+    }
+    write_record_bytes(record.as_bytes());
+}
+
+#[cfg(any(
+    checkpoint_handler_announce,
+    checkpoint_handler_user_scheduler_trace,
+    checkpoint_handler_user_syscall_trace
+))]
+fn write_record_bytes(bytes: &[u8]) {
+    #[cfg(checkpoint_handler_stress_mem)]
+    crate::objects::printk::write_bytes(bytes);
+    #[cfg(not(checkpoint_handler_stress_mem))]
+    {
+        if crate::objects::ns16550a::uart8250_interrupt_driven_configured() {
+            crate::objects::printk::write_bytes(bytes);
+        } else {
+            for byte in bytes {
+                putchar_raw(*byte);
+            }
+        }
+    }
 }
 
 pub fn putstr_raw(message: &str) {
@@ -69,6 +174,8 @@ pub fn putstr_raw(message: &str) {
 pub fn system_shutdown() -> ! {
     #[cfg(checkpoint_handler_stress_mem)]
     crate::stress_mem::finish();
+    #[cfg(not(checkpoint_handler_stress_mem))]
+    let _ = crate::objects::ns16550a::flush_runtime_console();
 
     let _ = sbi_call_2(
         EID_SRST,

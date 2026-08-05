@@ -320,6 +320,24 @@ route, handoff cursor transfer and keep_bootcon policy; drivers only
 request registration and must not carry those global facts as
 private state.
 
+After SMP user execution is enabled, `PrintkBuffer`, `ConsoleRegistry` and the complete ns16550a runtime/probe
+state must be accessed only through guard-owned `IrqSpinLock` storage. Local IRQ save around the UART TX ring is
+still required for the port operation, but it is not an SMP exclusion mechanism and cannot stand in for that
+lock. The UART hardirq and every producer use the same state guard; no raw `static mut` read or write may race a
+different CPU.
+
+Once the real serial console is interrupt-driven, runtime SBI diagnostics must submit to the same serial8250 TX
+queue as printk-backed user TTY writes. SBI raw output remains only the early-console/stress-memory fallback before
+that backend can accept a record. Each submitted user write byte slice is enqueued contiguously under the UART
+state guard, so a diagnostic cannot overtake or split it by bypassing the queue. Queue capacity pressure may poll
+and transmit already-queued head bytes while holding that guard, but must preserve FIFO order, must not partially
+publish and retry a record, and must not report queue overflow for an accepted write.
+
+Before an SBI system reset is issued, the shutdown path must synchronously poll and drain every byte already
+accepted by the interrupt-driven serial8250 TX queue under the same UART state guard. It must then disable THRI
+and close the port's pending-TX facts before invoking the reset, so the last runtime diagnostic or guest-exit
+record cannot be lost merely because no later UART interrupt will run.
+
 #### devfs first slice
 
 DevFs must be an InitcallPhase object, not part of the initial

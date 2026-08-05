@@ -307,6 +307,11 @@ predicate serial8250_console_write_does_not_use_sbi<T>(console: T) -> bool;
 predicate serial8250_console_interrupt_output_deferred_until_irqchip<T>(console: T) -> bool;
 predicate serial8250_console_interrupt_driven_ready<T>(console: T) -> bool;
 predicate serial8250_console_tx_queue_guarded_by_local_irq_save<T>(console: T) -> bool;
+predicate serial8250_console_shared_state_guarded_by_irq_safe_lock<T>(console: T) -> bool;
+predicate serial8250_console_runtime_diagnostics_share_tx_queue<T>(console: T) -> bool;
+predicate serial8250_console_write_batch_contiguous_against_diagnostics<T>(console: T) -> bool;
+predicate serial8250_console_capacity_pressure_preserves_fifo_order<T>(console: T) -> bool;
+predicate serial8250_console_shutdown_flushes_tx_queue_before_reset<T>(console: T) -> bool;
 predicate serial8250_console_tx_irq_kicks_thri<T>(console: T) -> bool;
 predicate serial8250_console_tx_irq_handler_drains_queue<T>(console: T) -> bool;
 predicate serial8250_console_tx_queue_empty_after_irq<T>(console: T) -> bool;
@@ -1740,6 +1745,11 @@ object Serial8250Console: ConsoleObject {
 
                 ensures {
                     serial8250_console_interrupt_driven_ready(Serial8250Console);
+                    serial8250_console_shared_state_guarded_by_irq_safe_lock(Serial8250Console);
+                    serial8250_console_runtime_diagnostics_share_tx_queue(Serial8250Console);
+                    serial8250_console_write_batch_contiguous_against_diagnostics(Serial8250Console);
+                    serial8250_console_capacity_pressure_preserves_fifo_order(Serial8250Console);
+                    serial8250_console_shutdown_flushes_tx_queue_before_reset(Serial8250Console);
                 }
             }
         }
@@ -1755,6 +1765,11 @@ object Serial8250Console: ConsoleObject {
             serial8250_console_write_uses_uart_membase(Serial8250Console, Uart8250Port);
             serial8250_console_write_does_not_use_sbi(Serial8250Console);
             serial8250_console_interrupt_driven_ready(Serial8250Console);
+            serial8250_console_shared_state_guarded_by_irq_safe_lock(Serial8250Console);
+            serial8250_console_runtime_diagnostics_share_tx_queue(Serial8250Console);
+            serial8250_console_write_batch_contiguous_against_diagnostics(Serial8250Console);
+            serial8250_console_capacity_pressure_preserves_fifo_order(Serial8250Console);
+            serial8250_console_shutdown_flushes_tx_queue_before_reset(Serial8250Console);
             serial8250_console_online_trace_emitted(Serial8250Console);
             serial8250_console_delivered_records_not_replayed_by_earlycon(Serial8250Console);
         }

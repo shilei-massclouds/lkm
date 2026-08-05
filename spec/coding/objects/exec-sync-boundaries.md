@@ -13,9 +13,11 @@ freed. Boot commit installs the prepared current image but leaves the final SATP
 selected payload no-return entry. Bounded CLOEXEC is prechecked before point-of-no-return and mutated only after
 the image swap begins.
 
-"CPU no longer references retired backing" includes the bounded saved-parent snapshot: a runtime child exec
-must transfer the old mm/stack to the `UserTaskSet`-owned continuation record while that parent continuation is live. The corresponding
-child-exit handoff releases the child image and restores the parent ownership before resuming it.
+"CPU no longer references retired backing" is checked against the executing aggregate's stable address-space
+object and SATP. Runtime exec replaces that object's contents transactionally; it never transfers a whole mm/stack
+through a saved-parent continuation. A vfork parent remains blocked on the same CPU and retains its own aggregate.
 
-No code may claim the deferred Linux locks/hooks are held or complete. Concurrency, credentials, signals,
-LSM, namespace/accounting and fatal-signal recovery remain outside this slice.
+No code may claim deferred Linux hooks are complete. The current SMP slice nevertheless requires resource-level
+IRQ-safe locking for registry, aggregate exec/mm, files/fs, allocator metadata and VFS/console state; it must not
+substitute one global syscall mutex. Full Linux credential guards, LSM and namespace/accounting hooks remain
+outside this slice.

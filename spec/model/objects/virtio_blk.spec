@@ -46,6 +46,9 @@ predicate virtio_blk_completion_observed_by_irq<T>(device: T) -> bool;
 predicate virtio_blk_completion_observed_by_sync_poll<T>(device: T) -> bool;
 predicate virtio_blk_completion_single_consumer<T>(device: T) -> bool;
 predicate virtio_blk_sync_read_submit_wait_complete<T>(device: T) -> bool;
+predicate virtio_blk_sync_owner_serializes_task_callers<T>(device: T) -> bool;
+predicate virtio_blk_sync_owner_contention_not_device_failure<T>(device: T) -> bool;
+predicate virtio_blk_irq_owner_try_defers_to_task_poll<T>(device: T) -> bool;
 predicate virtio_blk_live_read_submitted_checkpoint<T>(device: T) -> bool;
 predicate virtio_blk_live_read_completed_checkpoint<T>(device: T) -> bool;
 predicate virtio_blk_live_read_failed_checkpoint_defined<T>(device: T) -> bool;
@@ -178,6 +181,9 @@ object VirtioBlkDevice: DeviceObject {
                     block_io_completion_source_contract_ready(self);
                     virtio_blk_completion_single_consumer(self);
                     virtio_blk_no_inherited_pending_before_submit(self);
+                    virtio_blk_sync_owner_serializes_task_callers(self);
+                    virtio_blk_sync_owner_contention_not_device_failure(self);
+                    virtio_blk_irq_owner_try_defers_to_task_poll(self);
                 }
             }
         }
@@ -202,6 +208,9 @@ object VirtioBlkDevice: DeviceObject {
             block_io_completion_source_contract_ready(self);
             virtio_blk_completion_single_consumer(self);
             virtio_blk_no_inherited_pending_before_submit(self);
+            virtio_blk_sync_owner_serializes_task_callers(self);
+            virtio_blk_sync_owner_contention_not_device_failure(self);
+            virtio_blk_irq_owner_try_defers_to_task_poll(self);
         }
 
         processes {
@@ -314,6 +323,9 @@ object VirtioBlkDevice: DeviceObject {
                 ensures {
                     virtio_blk_serves_block_read(self, BlockDevice);
                     virtio_blk_sync_read_submit_wait_complete(self);
+                    virtio_blk_sync_owner_serializes_task_callers(self);
+                    virtio_blk_sync_owner_contention_not_device_failure(self);
+                    virtio_blk_irq_owner_try_defers_to_task_poll(self);
                     virtio_blk_read_request_done(self);
                     virtio_blk_complete_status_ok(self);
                     virtio_blk_live_read_completed_checkpoint(self);

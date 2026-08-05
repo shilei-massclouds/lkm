@@ -41,6 +41,8 @@ Object-level charter notes live here when they need a dedicated topic file.
 | `UserStack` | [`user-stack.md`](user-stack.md) |
 | `UserAddressSpace` | [`user-address-space.md`](user-address-space.md) |
 | `UserFrame` | [`user-frame.md`](user-frame.md) |
+| `UserProcessRegistry` | [`user-process-registry.md`](user-process-registry.md) |
+| `SchedulerClockevent` | [`scheduler-clockevent.md`](scheduler-clockevent.md) |
 | `BinaryFormatRegistry` | [`binary-format-registry.md`](binary-format-registry.md) |
 | `ExecSyncBoundaries` | [`exec-sync-boundaries.md`](exec-sync-boundaries.md) |
 | `ElfObject` | [`elf-object.md`](elf-object.md) |

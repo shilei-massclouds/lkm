@@ -202,6 +202,12 @@ arceos_ex_task_switch:
     ret
 
 .Ltask_switch_entry_context_rejected:
+    li      a7, 1
+    li      a6, 0
+    li      a0, 84              /* T: task-switch context missing */
+    ecall
+    li      a0, 10
+    ecall
     li      a7, 0x53525354
     li      a6, 0
     li      a0, 0

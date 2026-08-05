@@ -140,6 +140,6 @@ alias 离开词法范围不表示销毁。下一动态实例使用新 generation
 
 ## 当前能力边界
 
-本轮在既有 UP 基础上闭合显式目标 CPU 的普通内核 Task activation/wake mailbox、reschedule IPI 与
-AP idle/scheduler continuation。GlobalArbiter、自动负载选择、运行中迁移、用户任务 AP 执行、时钟抢占
-和 deterministic replay 保持延期。
+本轮在既有 SMP runtime 上闭合用户 Task 的固定跨 CPU placement、per-CPU inbox/runqueue 与 10 ms
+用户态抢占。普通 fork 的 Flow CpuRef 按 PID 公式一次写入，vfork/CLONE_VM 继承 parent CpuRef；两者
+均不迁移。GlobalArbiter、自动负载选择、运行中迁移、内核态立即抢占和 deterministic replay 保持延期。

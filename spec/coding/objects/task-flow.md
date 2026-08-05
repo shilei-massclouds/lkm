@@ -19,8 +19,8 @@ The static mappings are:
 
 BootInitFlow directly owns idle setup, scheduling return, idle entry and idle-loop actions.
 
-`ApIdleFlow.RunIdle` remains the one AP execution continuation after bringup and lowers to the common mailbox,
-need-resched and safe-`wfi` loop. A dynamic KernelTaskFlow binds its caller-supplied kernel entry as the initial
+`ApIdleFlow.RunIdle` remains the one AP execution continuation after bringup and lowers to the common inbox,
+need-resched and safe-`wfi` loop. It may dispatch fixed-owner user Tasks as well as kernel Tasks. A dynamic KernelTaskFlow binds its caller-supplied kernel entry as the initial
 coordinate and keeps the same identity across identity yield, block/wake and continuation resume.
 
 ## Lifecycle and execution
@@ -62,3 +62,8 @@ The Runtime is passive: `Online` covers executing, runnable, blocked, and tempor
 continuations. It is not pushed onto the effective-flow stack and has no Running, Paused, or Trapped storage.
 Scheduling restores the Task context and calls only Dispatch and TaskFlow Enter; it never calls a Runtime Enter.
 Terminal code explicitly quiesces and cleans Runtime before Flow, and Flow before Task.
+
+At SMP publication, PID 1's Flow is fixed to CPU0. An ordinary fork Flow is fixed to
+`online_cpus[child_pid % cpu_count]`; a vfork/CLONE_VM Flow is fixed to the parent CpuRef. No later action mutates a
+published user Flow's CpuRef. Timer expiry does not enter a Flow from hardirq: it only records CPU-local
+`need_resched`, and a return-to-user safe continuation performs any Dispatch/Enter sequence.

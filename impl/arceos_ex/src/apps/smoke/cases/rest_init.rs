@@ -3,7 +3,7 @@ use crate::{
     context::context,
     objects::{
         printk,
-        rest_init::SystemStateValue,
+        rest_init::{KERNEL_TASK_STACK_ALIGN, KERNEL_TASK_STACK_SIZE, SystemStateValue},
         state::State,
         task::{TaskEntry, TaskKind, TaskRef},
         task_flow::TaskFlowRef,
@@ -129,7 +129,7 @@ pub fn run() -> SmokeResult {
         || !ctx.kthreadd_task.provider_ready()
         || !ctx.kthreadd_task.pid_lookup_under_rcu_read()
         || !ctx.kthreadd_task.pid_lookup_rcu_guard_balanced()
-        || ctx.kthreadd_task.schedule_loop_active()
+        || !ctx.kthreadd_task.schedule_loop_active()
         || ctx.kthreadd_task_pi_lock.state() != State::Ready
         || ctx.kthreadd_task_pi_lock.locked()
         || ctx.kthreadd_task_pi_lock.irqsave_entered_count() == 0
@@ -143,7 +143,38 @@ pub fn run() -> SmokeResult {
         || ctx.kthreadd_task.flow_ref() != TaskFlowRef::KTHREADD
         || ctx.kthreadd_task.task().flow() != TaskFlowRef::KTHREADD
     {
-        printk::write_str("kthreadd task facts invalid\n");
+        printk::write_fmt(format_args!(
+            "kthreadd task facts invalid state_online={} pid={} created={} entry={} kind={} clone_fs={} clone_files={} clone_vm={} clone_untraced={} kthread={}\n",
+            ctx.kthreadd_task.state() == State::Online,
+            ctx.kthreadd_task.pid(),
+            ctx.task_creation_core.kthreadd_created(),
+            ctx.kthreadd_task.entry() == TaskEntry::Kthreadd,
+            ctx.kthreadd_task.kind() == TaskKind::KernelThread,
+            ctx.kthreadd_task.clone_fs(),
+            ctx.kthreadd_task.clone_files(),
+            ctx.kthreadd_task.clone_vm(),
+            ctx.kthreadd_task.clone_untraced(),
+            ctx.kthreadd_task.kernel_thread_flag(),
+        ));
+        printk::write_fmt(format_args!(
+            "kthreadd runtime facts running={} enqueued={} cpu={} selected_pid={} on_rq={} global_ref={} provider={} pid_rcu={} pid_rcu_balanced={} loop_active={} pi_ready={} pi_locked={} pi_save={} pi_restore={} pi_ordered={}\n",
+            ctx.kthreadd_task.running(),
+            ctx.kthreadd_task.enqueued(),
+            ctx.kthreadd_task.flow().cpu_id(),
+            ctx.scheduler().selected_runqueue_task_id(),
+            boot_scheduler_view.runqueue_contains_task_id(ctx.kthreadd_task.pid()),
+            ctx.kthreadd_task.global_ref_bound(),
+            ctx.kthreadd_task.provider_ready(),
+            ctx.kthreadd_task.pid_lookup_under_rcu_read(),
+            ctx.kthreadd_task.pid_lookup_rcu_guard_balanced(),
+            ctx.kthreadd_task.schedule_loop_active(),
+            ctx.kthreadd_task_pi_lock.state() == State::Ready,
+            ctx.kthreadd_task_pi_lock.locked(),
+            ctx.kthreadd_task_pi_lock.irqsave_entered_count(),
+            ctx.kthreadd_task_pi_lock.irqrestore_exited_count(),
+            ctx.kthreadd_task_pi_lock
+                .irqrestore_restored_before_preemption_enabled(),
+        ));
         return SmokeResult::Failed;
     }
 
@@ -291,6 +322,14 @@ pub fn run() -> SmokeResult {
         || ctx.scheduler().kernel_init_stack_switch_returned_count() != 0
         || ctx.kernel_init_task.entry_started_count() != 1
         || !ctx.kernel_init_task.entry_stack_verified()
+        || ctx.kernel_init_task.task().kernel_stack_top()
+            - ctx.kernel_init_task.task().kernel_stack_base()
+            != KERNEL_TASK_STACK_SIZE
+        || !ctx
+            .kernel_init_task
+            .task()
+            .kernel_stack_base()
+            .is_multiple_of(KERNEL_TASK_STACK_ALIGN)
         || !ctx
             .kernel_init_task
             .stack_pointer_in_range(ctx.kernel_init_task.entry_stack_pointer())

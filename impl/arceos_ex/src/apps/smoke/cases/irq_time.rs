@@ -2,7 +2,7 @@ use crate::{
     apps::smoke::SmokeResult,
     arch::riscv64::{csr, sbi},
     context::context,
-    objects::{irq_time, printk, state::State},
+    objects::{irq_time, printk, scheduler_clockevent, state::State},
     phases,
 };
 use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -148,6 +148,23 @@ pub fn run() -> SmokeResult {
         || !plic_irqchip_callback_recorded(ctx)
     {
         printk::write_str("plic irqchip section traversal facts invalid\n");
+        return SmokeResult::Failed;
+    }
+
+    const CLOCKEVENT_TEST_CPU: usize = 15;
+    if !scheduler_clockevent::setup_cpu(CLOCKEVENT_TEST_CPU, 1_000_000)
+        || scheduler_clockevent::begin_slice(CLOCKEVENT_TEST_CPU, 100) != Some(10_100)
+        || scheduler_clockevent::handle_timer(CLOCKEVENT_TEST_CPU, 10_099)
+        || !scheduler_clockevent::handle_timer(CLOCKEVENT_TEST_CPU, 10_100)
+        || !scheduler_clockevent::need_resched_pending(CLOCKEVENT_TEST_CPU)
+        || scheduler_clockevent::handle_timer(CLOCKEVENT_TEST_CPU, 10_100)
+        || !scheduler_clockevent::handle_timer(CLOCKEVENT_TEST_CPU, 40_100)
+        || scheduler_clockevent::next_deadline(CLOCKEVENT_TEST_CPU) != Some(50_100)
+        || !scheduler_clockevent::renew_identity_slice(CLOCKEVENT_TEST_CPU)
+        || scheduler_clockevent::need_resched_pending(CLOCKEVENT_TEST_CPU)
+        || scheduler_clockevent::counters(CLOCKEVENT_TEST_CPU) != Some((2, 2, 1, 1))
+    {
+        printk::write_str("per-CPU scheduler clockevent deadline facts invalid\n");
         return SmokeResult::Failed;
     }
 

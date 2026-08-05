@@ -1,0 +1,31 @@
+schema_version = 2
+name = "scripted-shell-trace"
+purpose = "diagnostic"
+timeout_seconds = 120
+
+[kernel]
+app = "user-boot"
+provider = "native"
+probe = ["announce", "user-syscall-error"]
+profile = "release"
+
+[disk]
+mode = "template-readonly"
+profile = "canonical"
+
+[qemu]
+memory_mb = 128
+smp = 2
+kernel_cmdline = "earlycon=sbi init=/bin/sh"
+rng = true
+exit_policy = "guest-shutdown"
+interaction = "scripted"
+stdin_steps = [
+  { ready_marker = "~ #", payload = "echo \"OK\"\nls\nls /lib\nexit\n" },
+]
+
+[expect]
+process_exit = 0
+guest_exit_status = 0
+markers = ["OK", "ld-musl-riscv64.so.1", "lost+found"]
+forbidden_markers = ["Function not implemented", "arceos_ex panic"]

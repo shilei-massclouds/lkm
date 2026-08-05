@@ -49,22 +49,30 @@ VMA fault 状态。
 ## 普通 fork 的独立 mm
 
 - 每个普通 fork parent/child Task 各自拥有一个 `UserAddressSpace` 身份、低半根页表和 SATP；高半
-  仍只引用共享 `SwapperVm`。实现可以在调度切换期间把当前 Task 的 mm 暂存于唯一 active carrier，
-  但 carrier 只是经 TaskRef 和 SATP 校验的借用位置，不能成为跨 Task 的全局地址空间所有者。
+  仍只引用共享 `SwapperVm`。地址空间物理保存在对应 `UserProcessAggregate`，不得移入全局 active
+  carrier 或通过交换整个对象来选择当前进程。trap、syscall 与 usercopy 只可经 generation/CPU-checked
+  `UserProcessLease` 访问当前 mm。
 - child 发布前先建立独立稀疏 VMA 元数据、页表和用户栈引用。所有可失败的 child 页表分配、leaf
   inventory 校验和共享引用 acquire 必须在 parent PTE commit 前完成；随后把双方原本可写的私有 leaf
   降低为 RO+COW，把原本只读 leaf 建立为共享只读非 COW，并刷新 parent 的受影响 TLB。parent/child
   初始 PFN 相同但根页表、SATP 和 mm identity 不同；未驻留 VMA 仍未驻留。任一步失败必须释放全部
   未发布 child 资源，parent 的 PTE、frame 引用、SATP 和可见字节保持不变。
-- wait/schedule handoff 只切换 Task 所拥有的 mm 和 SATP，不得通过保存/恢复 parent writable page、
-  stack 或整个 address-space 的字节快照实现隔离。trap 和 usercopy 必须按当前 TaskRef 解析并校验 active
-  mm；错误 Task、错误 owner 或 stale SATP 不能访问 carrier。
+- schedule commit 选择 next Task 所拥有的 mm，写 SATP 并执行本地 `sfence.vma`，不得通过保存/恢复
+  parent writable page、stack 或整个 address-space 的字节快照实现隔离。trap 和 usercopy 必须按当前
+  TaskRef/CPU lease 解析并校验 mm；错误 Task、错误 owner 或 stale SATP 不能访问。
 - exec 在 point-of-no-return 原子替换当前 Task 的 mm；失败继续保留旧 mm，成功后旧 mm 只释放一次。
   exit 释放 exiting Task 的 leaf、页表和 backing，reap 只释放 Task record，不得再次释放同一 mm。
   fork 失败的 Task/mm 在可见发布前共同回滚，禁止留下可调度 child 或双重释放。
 
 普通 fork 的共享 frame 不改变上述 per-Task mm ownership、切换、exec 或 teardown 边界。
-`CLONE_VM`、完整 vfork mm sharing 与 thread group 继续独立 deferred。
+vfork/首轮接受的 `CLONE_VM` 保持 parent-blocking 串行 handoff并固定父核；共享 mm 不会并发运行。
+vfork child 在自己的 aggregate 中保留一个空闲且身份稳定的 `UserAddressSpace`/`UserStack` 对象，并以
+generation-checked 直接链接解析仍存活的最终 mm owner；page fault、usercopy、brk、mmap、mprotect、
+munmap 以及从该 child 发起的普通 fork 都必须先验证 current child、owner、同一 CpuRef 和 live SATP，
+再对 owner mm 操作。成功 exec 把 staging image 安装到 child 的空闲对象，令 child 成为自己的 mm owner，
+且不得 retire、释放或改写原 shared parent mm；exec 前 exit 也不得释放该 parent mm。链接中的 stale
+generation、错误 CPU 或 parent 已非 live 必须在暴露 mm 地址之前失败。
+完整 thread group 和共享 mm 跨 CPU 继续独立 deferred。
 
 ## Mapping
 

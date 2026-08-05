@@ -35,6 +35,9 @@ type InterruptFlowType: FlowObject {
                 ensures {
                     interrupt_flow_handler_completed(self);
                     interrupt_flow_handler_policy_does_not_schedule(self);
+                    interrupt_flow_user_origin_allows_safe_continuation(self);
+                    interrupt_flow_kernel_origin_defers_until_user_return(self);
+                    interrupt_flow_safe_continuation_preserves_overlay_aba(self);
                 }
             }
         }
@@ -46,7 +49,13 @@ type InterruptFlowType: FlowObject {
     }
     state State::Online {
         transitions {
-            on Transition::Disable -> State::Offline { ensures { interrupt_flow_disabled(self); } }
+            on Transition::Disable -> State::Offline {
+                ensures {
+                    interrupt_flow_disabled(self);
+                    interrupt_flow_need_resched_evaluated_after_disable_before_cleanup(self);
+                    interrupt_flow_safe_continuation_retains_live_leaf(self);
+                }
+            }
         }
     }
     state State::Offline {
@@ -69,3 +78,8 @@ predicate interrupt_flow_handler_policy_does_not_schedule<F: InterruptFlowType>(
 predicate interrupt_flow_completion_committed<F: InterruptFlowType>(flow: F) -> bool;
 predicate interrupt_flow_disabled<F: InterruptFlowType>(flow: F) -> bool;
 predicate interrupt_flow_occurrence_released<F: InterruptFlowType>(flow: F) -> bool;
+predicate interrupt_flow_need_resched_evaluated_after_disable_before_cleanup<F: InterruptFlowType>(flow: F) -> bool;
+predicate interrupt_flow_safe_continuation_retains_live_leaf<F: InterruptFlowType>(flow: F) -> bool;
+predicate interrupt_flow_user_origin_allows_safe_continuation<F: InterruptFlowType>(flow: F) -> bool;
+predicate interrupt_flow_kernel_origin_defers_until_user_return<F: InterruptFlowType>(flow: F) -> bool;
+predicate interrupt_flow_safe_continuation_preserves_overlay_aba<F: InterruptFlowType>(flow: F) -> bool;

@@ -4,6 +4,7 @@ use super::{
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
 };
 use crate::checkpoint::Checkpoint;
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 pub struct PreemptionControl {
     lifecycle: Lifecycle,
@@ -127,11 +128,11 @@ impl PreemptionControl {
 
 pub struct RawSpinLock {
     lifecycle: Lifecycle,
-    locked: bool,
-    acquired_count: usize,
-    released_count: usize,
-    irqsave_entered_count: usize,
-    irqrestore_exited_count: usize,
+    locked: AtomicBool,
+    acquired_count: AtomicUsize,
+    released_count: AtomicUsize,
+    irqsave_entered_count: AtomicUsize,
+    irqrestore_exited_count: AtomicUsize,
     irqrestore_restored_before_preemption_enabled: bool,
 }
 
@@ -139,11 +140,11 @@ impl RawSpinLock {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
-            locked: false,
-            acquired_count: 0,
-            released_count: 0,
-            irqsave_entered_count: 0,
-            irqrestore_exited_count: 0,
+            locked: AtomicBool::new(false),
+            acquired_count: AtomicUsize::new(0),
+            released_count: AtomicUsize::new(0),
+            irqsave_entered_count: AtomicUsize::new(0),
+            irqrestore_exited_count: AtomicUsize::new(0),
             irqrestore_restored_before_preemption_enabled: false,
         }
     }
@@ -152,24 +153,24 @@ impl RawSpinLock {
         self.lifecycle.state()
     }
 
-    pub const fn locked(&self) -> bool {
-        self.locked
+    pub fn locked(&self) -> bool {
+        self.locked.load(Ordering::Acquire)
     }
 
-    pub const fn acquired_count(&self) -> usize {
-        self.acquired_count
+    pub fn acquired_count(&self) -> usize {
+        self.acquired_count.load(Ordering::Relaxed)
     }
 
-    pub const fn released_count(&self) -> usize {
-        self.released_count
+    pub fn released_count(&self) -> usize {
+        self.released_count.load(Ordering::Relaxed)
     }
 
-    pub const fn irqsave_entered_count(&self) -> usize {
-        self.irqsave_entered_count
+    pub fn irqsave_entered_count(&self) -> usize {
+        self.irqsave_entered_count.load(Ordering::Relaxed)
     }
 
-    pub const fn irqrestore_exited_count(&self) -> usize {
-        self.irqrestore_exited_count
+    pub fn irqrestore_exited_count(&self) -> usize {
+        self.irqrestore_exited_count.load(Ordering::Relaxed)
     }
 
     pub const fn irqrestore_restored_before_preemption_enabled(&self) -> bool {
@@ -190,13 +191,18 @@ impl RawSpinLock {
             );
         }
 
-        self.locked = false;
+        self.locked.store(false, Ordering::Relaxed);
         self.lifecycle
             .transition(LifecycleEvent::Setup, State::Base, State::Ready, checkpoint)
     }
 
     pub fn acquire(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Ready || self.locked {
+        if self.lifecycle.state() != State::Ready
+            || self
+                .locked
+                .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+                .is_err()
+        {
             return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
@@ -205,13 +211,17 @@ impl RawSpinLock {
             );
         }
 
-        self.locked = true;
-        self.acquired_count = self.acquired_count.wrapping_add(1);
+        self.acquired_count.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
 
     pub fn release(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Ready || !self.locked {
+        if self.lifecycle.state() != State::Ready
+            || self
+                .locked
+                .compare_exchange(true, false, Ordering::Release, Ordering::Relaxed)
+                .is_err()
+        {
             return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
@@ -220,8 +230,7 @@ impl RawSpinLock {
             );
         }
 
-        self.locked = false;
-        self.released_count = self.released_count.wrapping_add(1);
+        self.released_count.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
 
@@ -230,7 +239,7 @@ impl RawSpinLock {
         local_interrupt: &mut InterruptType,
         preemption: &mut PreemptionControl,
     ) -> EventResult {
-        if self.lifecycle.state() != State::Ready || self.locked {
+        if self.lifecycle.state() != State::Ready || self.locked() {
             return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
@@ -242,7 +251,7 @@ impl RawSpinLock {
         local_interrupt.save_and_disable()?;
         preemption.disable()?;
         self.acquire()?;
-        self.irqsave_entered_count = self.irqsave_entered_count.wrapping_add(1);
+        self.irqsave_entered_count.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
 
@@ -251,7 +260,7 @@ impl RawSpinLock {
         local_interrupt: &mut InterruptType,
         preemption: &mut PreemptionControl,
     ) -> EventResult {
-        if self.lifecycle.state() != State::Ready || !self.locked {
+        if self.lifecycle.state() != State::Ready || !self.locked() {
             return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
@@ -267,7 +276,7 @@ impl RawSpinLock {
             == restored_before.wrapping_add(1)
             && preemption.disabled();
         preemption.enable()?;
-        self.irqrestore_exited_count = self.irqrestore_exited_count.wrapping_add(1);
+        self.irqrestore_exited_count.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
 }

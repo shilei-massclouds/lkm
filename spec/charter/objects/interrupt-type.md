@@ -18,7 +18,14 @@ release 发布目标 mailbox，再经 SBI 向目标 hart 请求 IPI。SSIP handl
 把 CPU-local `need_resched` 合并置位，并正常返回；handler 内禁止消费 runqueue、调用 Scheduler 或执行
 context switch。中断返回后的 idle/Task 安全点负责 acquire 观察 mailbox 与 `need_resched` 并调度。
 SSIP 是正式 trap，必须像其它中断一样创建 fresh TrapFlow/InterruptFlow、完成全部 lifecycle、Cleanup
-并消费一次 TrapReturnToken；handler policy 不得以“快速返回”绕过 effective-flow 栈。
+并消费一次 TrapReturnToken；SPP=U 的 post-Disable/pre-Cleanup 安全 continuation 可以暂挂该 lifecycle，
+handler policy 不得以“快速返回”绕过 effective-flow 栈。
+
+每个 online CPU 同样开放 supervisor timer interrupt。timer handler 只确认本 CPU clockevent、重装
+deadline 并合并 `need_resched`，不得在 hardirq 内消费 inbox 或调度。若入口 SPP=U，InterruptFlow 的
+handler 与 Disable 完成后、leaf/root Cleanup 前的用户返回安全点可以消费 pending 并调度；SPP=S 保留
+pending，最迟在后续返回用户态前消费。该返回边界见
+[`SchedulerClockevent`](scheduler-clockevent.md)。
 
 ## Mapping
 

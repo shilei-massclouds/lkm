@@ -629,6 +629,27 @@ pub fn sv39_indices(virt: usize) -> (usize, usize, usize) {
     )
 }
 
+#[cfg(app_smoke)]
+pub const fn sv39_pte_valid(pte: usize) -> bool {
+    pte & PTE_V != 0
+}
+
+#[cfg(app_smoke)]
+pub const fn sv39_pte_leaf(pte: usize) -> bool {
+    pte & (PTE_R | PTE_W | PTE_X) != 0
+}
+
+#[cfg(app_smoke)]
+pub const fn sv39_pte_executable(pte: usize) -> bool {
+    pte & PTE_X != 0
+}
+
+#[cfg(app_smoke)]
+pub const fn sv39_pte_phys(pte: usize) -> usize {
+    const SV39_PPN_MASK: usize = (1usize << 44) - 1;
+    ((pte >> 10) & SV39_PPN_MASK) << 12
+}
+
 pub fn table_pte_from_phys(table_phys: usize) -> usize {
     table_pte(table_phys)
 }

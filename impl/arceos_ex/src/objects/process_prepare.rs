@@ -692,9 +692,7 @@ impl TaskCreationCore {
         dst_state: State,
         dst_entry: TaskEntry,
     ) -> Result<TaskCopyProcessResult, EventError> {
-        let dst_prepared_record = dst_state == State::Prepared
-            && inputs.dst_process.active_task_state() == State::Prepared
-            && inputs.dst_process.prepared();
+        let dst_prepared_record = inputs.dst_process.plain_fork_reservation_ready();
         let dst_nested_vfork_record = inputs.allow_nested_vfork
             && dst_state == State::OnCpu
             && inputs.dst_process.nested_vfork_copy_ready();

@@ -1,6 +1,7 @@
 use super::{
     completion::Completion,
     hwrng::{HwRngCore, HwRngDevice, HwRngDeviceRef, HwRngError, HwRngProvider},
+    irq_spinlock::IrqSpinLock,
     irq_time::{IrqHandlerRegistry, Plic, PlicIrqDomain},
     kernel_image::KernelImage,
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
@@ -26,6 +27,7 @@ static VIRTIO_RNG_LAST_IRQ_STATUS: AtomicU32 = AtomicU32::new(0);
 static VIRTIO_RNG_IRQ_COMPLETION_CALLS: AtomicUsize = AtomicUsize::new(0);
 static VIRTIO_RNG_ENTROPY_READY_CHECKPOINTS: AtomicUsize = AtomicUsize::new(0);
 static VIRTIO_RNG_LIVE_PTR: AtomicUsize = AtomicUsize::new(0);
+static VIRTIO_RNG_RUNTIME_LOCK: IrqSpinLock<()> = IrqSpinLock::new(());
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum VirtioRngError {
@@ -223,6 +225,7 @@ pub struct VirtioRngDevice {
     request_count: usize,
     notify_count: usize,
     irq_count: usize,
+    poll_completion_count: usize,
     completion_count: usize,
 }
 
@@ -271,6 +274,7 @@ impl VirtioRngDevice {
             request_count: 0,
             notify_count: 0,
             irq_count: 0,
+            poll_completion_count: 0,
             completion_count: 0,
         }
     }
@@ -431,6 +435,11 @@ impl VirtioRngDevice {
     #[allow(dead_code)]
     pub const fn irq_count(&self) -> usize {
         self.irq_count
+    }
+
+    #[allow(dead_code)]
+    pub const fn poll_completion_count(&self) -> usize {
+        self.poll_completion_count
     }
 
     pub const fn completion_count(&self) -> usize {
@@ -621,7 +630,7 @@ impl VirtioRngDevice {
         Ok(used.len())
     }
 
-    pub fn complete_entropy_from_irq(&mut self) -> Result<u32, VirtioRngError> {
+    fn complete_entropy_from_device(&mut self, from_irq: bool) -> Result<u32, VirtioRngError> {
         if self.lifecycle.state() == State::Destroyed {
             self.removed_rejects_io = true;
             return Err(VirtioRngError::Removed);
@@ -645,13 +654,32 @@ impl VirtioRngDevice {
         self.data_idx = 0;
         self.data_avail_updated = true;
         self.data_idx_reset = true;
-        self.irq_count = self.irq_count.saturating_add(1);
+        if from_irq {
+            self.irq_count = self.irq_count.saturating_add(1);
+        } else {
+            self.poll_completion_count = self.poll_completion_count.saturating_add(1);
+        }
         self.completion_count = self.completion_count.saturating_add(1);
         self.have_data
             .complete()
             .map_err(|_| VirtioRngError::DeviceNotReady)?;
         self.have_data_completed = true;
         Ok(used.len())
+    }
+
+    pub fn complete_entropy_from_irq(&mut self) -> Result<u32, VirtioRngError> {
+        self.complete_entropy_from_device(true)
+    }
+
+    fn collect_published_entropy(&mut self) -> Result<bool, VirtioRngError> {
+        if !self.request_pending || !self.real_notify_irq_ready {
+            return Ok(false);
+        }
+        match self.complete_entropy_from_device(false) {
+            Ok(_) => Ok(true),
+            Err(VirtioRngError::Queue(VirtqueueError::NoUsedBuffer)) => Ok(false),
+            Err(error) => Err(error),
+        }
     }
 
     pub fn register_hwrng(
@@ -683,6 +711,9 @@ impl VirtioRngDevice {
         }
         if wait {
             self.blocking_wait_deferred = true;
+        }
+        if self.data_avail == 0 {
+            self.collect_published_entropy()?;
         }
         if buffer.is_empty() || self.data_avail == 0 {
             return Err(VirtioRngError::NoDataAvailable);
@@ -833,10 +864,16 @@ impl VirtioRngRuntime {
         buffer: &mut [u8],
         wait: bool,
     ) -> Result<usize, HwRngError> {
+        let _guard = VIRTIO_RNG_RUNTIME_LOCK.lock();
         let Some(device) = self.device.as_mut() else {
             return Err(HwRngError::ProviderUnavailable);
         };
-        hwrng_core.read_current(device, buffer, wait)
+        let completion_count = device.completion_count();
+        let result = hwrng_core.read_current(device, buffer, wait);
+        if device.completion_count() != completion_count {
+            self.real_completion_len = device.queue().last_used_len();
+        }
+        result
     }
 }
 
@@ -849,6 +886,7 @@ pub fn setup_live_driver(
     plic_irq_domain: &mut PlicIrqDomain,
     irq_handler_registry: &IrqHandlerRegistry,
 ) -> EventResult {
+    let _guard = VIRTIO_RNG_RUNTIME_LOCK.lock();
     VIRTIO_RNG_LIVE_PTR.store(
         context_runtime as *mut VirtioRngRuntime as usize,
         Ordering::Release,
@@ -885,24 +923,18 @@ pub fn setup_live_driver(
     Ok(())
 }
 
-pub fn live_runtime() -> Option<&'static VirtioRngRuntime> {
+fn live_runtime_ptr() -> Option<*mut VirtioRngRuntime> {
     let ptr = VIRTIO_RNG_LIVE_PTR.load(Ordering::Acquire);
     if ptr == 0 {
         return None;
     }
-    unsafe { (ptr as *const VirtioRngRuntime).as_ref() }
-}
-
-fn live_runtime_mut() -> Option<&'static mut VirtioRngRuntime> {
-    let ptr = VIRTIO_RNG_LIVE_PTR.load(Ordering::Acquire);
-    if ptr == 0 {
-        return None;
-    }
-    unsafe { (ptr as *mut VirtioRngRuntime).as_mut() }
+    Some(ptr as *mut VirtioRngRuntime)
 }
 
 pub fn live_mmio_transport() -> Option<VirtioMmioTransportDevice> {
-    live_runtime()?.device()?.virtio_device().mmio_transport()
+    let _guard = VIRTIO_RNG_RUNTIME_LOCK.lock();
+    let runtime = unsafe { live_runtime_ptr()?.as_ref()? };
+    runtime.device()?.virtio_device().mmio_transport()
 }
 
 pub fn note_mmio_irq(status: u32) {
@@ -911,16 +943,19 @@ pub fn note_mmio_irq(status: u32) {
 
 pub fn handle_irq_completion() {
     VIRTIO_RNG_IRQ_COMPLETION_CALLS.fetch_add(1, Ordering::AcqRel);
-    let Some(runtime) = live_runtime_mut() else {
-        return;
-    };
-    let Some(device) = runtime.device.as_mut() else {
-        return;
-    };
-    let Ok(len) = device.complete_entropy_from_irq() else {
-        return;
-    };
-    runtime.real_completion_len = len;
+    {
+        let _guard = VIRTIO_RNG_RUNTIME_LOCK.lock();
+        let Some(runtime) = (unsafe { live_runtime_ptr().and_then(|ptr| ptr.as_mut()) }) else {
+            return;
+        };
+        let Some(device) = runtime.device.as_mut() else {
+            return;
+        };
+        let Ok(len) = device.complete_entropy_from_irq() else {
+            return;
+        };
+        runtime.real_completion_len = len;
+    }
     VIRTIO_RNG_ENTROPY_READY_CHECKPOINTS.fetch_add(1, Ordering::AcqRel);
     crate::checkpoint::dispatch(
         crate::checkpoint::Checkpoint::VirtioRngEntropyReady,
@@ -945,6 +980,7 @@ pub fn entropy_ready_checkpoints() -> usize {
 
 #[allow(dead_code)]
 pub fn entropy_buffer_nonzero() -> bool {
+    let _guard = VIRTIO_RNG_RUNTIME_LOCK.lock();
     let bytes = unsafe {
         &(&raw const VIRTIO_RNG_ENTROPY_BUFFER)
             .as_ref()

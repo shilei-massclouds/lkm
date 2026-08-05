@@ -8,6 +8,7 @@ use super::{
     fdt_reader::{read_be_u32, read_cells},
     initcall::{ContextRef, InitcallReturn},
     ioremap::IoMemoryMapping,
+    irq_spinlock::IrqSpinLock,
     irq_time::{IrqHandlerKind, LogicalIrq},
     printk,
 };
@@ -44,6 +45,7 @@ const UART_MCR_OUT2: usize = 1 << 3;
 const UART_MCR_LOOP: usize = 1 << 4;
 const UART_LSR_DR: usize = 1;
 const UART_LSR_THRE: usize = 1 << 5;
+const UART_LSR_TEMT: usize = 1 << 6;
 const UART_POLL_SPINS: usize = 100_000;
 const UART_RX_DRAIN_LIMIT: usize = 16;
 const UART_TX_LOAD_SIZE: usize = 8;
@@ -853,6 +855,7 @@ pub struct Serial8250WriteBackend {
     tx_irq_drains: usize,
     tx_irq_budget_hits: usize,
     tx_irq_empty_stop: usize,
+    tx_capacity_assist_drains: usize,
     tx_irq_guarded_by_local_irq_save: bool,
     write_calls: usize,
     bytes_accepted: usize,
@@ -897,6 +900,7 @@ impl Serial8250WriteBackend {
             tx_irq_drains: 0,
             tx_irq_budget_hits: 0,
             tx_irq_empty_stop: 0,
+            tx_capacity_assist_drains: 0,
             tx_irq_guarded_by_local_irq_save: false,
             write_calls: 0,
             bytes_accepted: 0,
@@ -962,6 +966,7 @@ impl Serial8250WriteBackend {
             tx_irq_drains: 0,
             tx_irq_budget_hits: 0,
             tx_irq_empty_stop: 0,
+            tx_capacity_assist_drains: 0,
             tx_irq_guarded_by_local_irq_save: false,
             write_calls: 0,
             bytes_accepted: 0,
@@ -1022,14 +1027,27 @@ impl Serial8250WriteBackend {
         self.tx_irq_drains = 0;
         self.tx_irq_budget_hits = 0;
         self.tx_irq_empty_stop = 0;
+        self.tx_capacity_assist_drains = 0;
         self.tx_irq_guarded_by_local_irq_save = false;
-        checkpoint::checkpoint(Checkpoint::Serial8250ConsoleIrqDrivenReady);
         true
     }
 
     fn enqueue_console_bytes_and_kick(&mut self, bytes: &[u8]) -> bool {
         let saved = csr::save_and_disable_supervisor_interrupts();
         self.tx_irq_guarded_by_local_irq_save = true;
+        let required = bytes
+            .len()
+            .saturating_add(bytes.iter().filter(|byte| **byte == b'\n').count());
+        if required > UART_TX_QUEUE_SIZE {
+            csr::restore_supervisor_interrupts(saved);
+            return false;
+        }
+        while UART_TX_QUEUE_SIZE - self.tx_queued < required {
+            if !self.drain_one_tx_byte_for_capacity() {
+                csr::restore_supervisor_interrupts(saved);
+                return false;
+            }
+        }
         let mut ok = true;
         for byte in bytes {
             if *byte == b'\n' {
@@ -1046,7 +1064,7 @@ impl Serial8250WriteBackend {
     }
 
     fn enqueue_tx_byte(&mut self, byte: u8) -> bool {
-        if self.tx_queued == UART_TX_QUEUE_SIZE {
+        if self.tx_queued == UART_TX_QUEUE_SIZE && !self.drain_one_tx_byte_for_capacity() {
             self.tx_queue_overflow = true;
             return false;
         }
@@ -1054,6 +1072,50 @@ impl Serial8250WriteBackend {
         self.tx_queue[self.tx_tail] = byte;
         self.tx_tail = (self.tx_tail + 1) % UART_TX_QUEUE_SIZE;
         self.tx_queued += 1;
+        true
+    }
+
+    fn drain_one_tx_byte_for_capacity(&mut self) -> bool {
+        if !self.interrupt_driven || self.tx_queued == 0 || !self.wait_for_tx_ready() {
+            return false;
+        }
+        let Some(byte) = self.pop_tx_byte() else {
+            return false;
+        };
+        if !self.write_uart_tx(byte) {
+            return false;
+        }
+        self.tx_bytes_submitted = self.tx_bytes_submitted.saturating_add(1);
+        self.last_tx_byte = byte;
+        self.mmio_writes_performed = true;
+        self.tx_capacity_assist_drains = self.tx_capacity_assist_drains.saturating_add(1);
+        true
+    }
+
+    fn flush_interrupt_driven_tx(&mut self) -> bool {
+        if !self.ready || !self.interrupt_driven {
+            return false;
+        }
+        while self.tx_queued != 0 {
+            if !self.drain_one_tx_byte_for_capacity() {
+                return false;
+            }
+        }
+        let ier = self.read_uart_ier() & !UART_IER_THRI;
+        if !self.write_uart_ier(ier) {
+            return false;
+        }
+        let mut spins = 0usize;
+        while self.read_uart_lsr() & (UART_LSR_THRE | UART_LSR_TEMT)
+            != UART_LSR_THRE | UART_LSR_TEMT
+        {
+            if spins == UART_POLL_SPINS {
+                self.timed_out = true;
+                return false;
+            }
+            core::hint::spin_loop();
+            spins += 1;
+        }
         true
     }
 
@@ -1268,21 +1330,16 @@ impl Serial8250WriteBackend {
     }
 }
 
-static mut NS16550A_PROBE_STATE: Ns16550aProbeState = Ns16550aProbeState::new();
+static NS16550A_PROBE_STATE: IrqSpinLock<Ns16550aProbeState> =
+    IrqSpinLock::new(Ns16550aProbeState::new());
 
 pub fn uart8250_port_registered() -> bool {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .port
-            .registered
-    }
+    NS16550A_PROBE_STATE.lock().port.registered
 }
 
 #[allow(dead_code)]
 pub fn uart8250_port_device_ref() -> Option<DeviceRef> {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     if state.port.registered {
         Some(state.port.device_ref)
     } else {
@@ -1291,7 +1348,7 @@ pub fn uart8250_port_device_ref() -> Option<DeviceRef> {
 }
 
 pub fn uart8250_port_resources_ready() -> bool {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state.port.registered
         && state.port.mapbase != 0
         && state.port.mapsize != 0
@@ -1311,7 +1368,7 @@ pub fn uart8250_port_resources_ready() -> bool {
 }
 
 pub fn uart8250_port_ioremapped() -> bool {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state.port.registered
         && state.port.ioremapped
         && state.port.vm_ioremap
@@ -1321,7 +1378,7 @@ pub fn uart8250_port_ioremapped() -> bool {
 }
 
 pub fn uart8250_port_irq_resource_ready() -> bool {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state.port.registered
         && state.port.irq_resource_ready
         && state.port.irq_parent_plic
@@ -1329,38 +1386,26 @@ pub fn uart8250_port_irq_resource_ready() -> bool {
 }
 
 pub fn uart8250_port_logical_irq_ready() -> bool {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state.port.registered && state.port.irq_mapping_ready && state.port.logical_irq.is_valid()
 }
 
 pub fn uart8250_port_irq_source() -> u32 {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .port
-            .irq_source
-    }
+    NS16550A_PROBE_STATE.lock().port.irq_source
 }
 
 pub fn uart8250_port_logical_irq() -> LogicalIrq {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .port
-            .logical_irq
-    }
+    NS16550A_PROBE_STATE.lock().port.logical_irq
 }
 
 pub fn uart8250_interrupt_output_still_deferred() -> bool {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state.port.registered && state.port.interrupt_output_deferred
 }
 
 #[cfg(checkpoint_handler_uart_irq_chain)]
 pub fn uart8250_interrupt_driven_ready() -> bool {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state.port.registered
         && state.port.interrupt_driven_ready
         && !state.port.interrupt_output_deferred
@@ -1375,7 +1420,7 @@ pub fn uart8250_interrupt_driven_ready() -> bool {
 }
 
 pub fn uart8250_interrupt_driven_configured() -> bool {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state.port.registered
         && state.port.interrupt_driven_ready
         && !state.port.interrupt_output_deferred
@@ -1392,17 +1437,17 @@ pub fn uart8250_interrupt_driven_configured() -> bool {
 }
 
 pub fn uart8250_interrupt_trigger_ready() -> bool {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state.port.registered && state.port.interrupt_trigger_ready
 }
 
 pub fn uart8250_thre_interrupt_handled() -> bool {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state.port.registered && state.port.thre_interrupt_handled
 }
 
 pub fn uart8250_irq_handler_registered() -> bool {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state.port.registered
         && state.port.irq_handler_registered
         && state.port.irq_handler_hardirq_context_required
@@ -1411,13 +1456,13 @@ pub fn uart8250_irq_handler_registered() -> bool {
 
 #[cfg_attr(not(app_smoke), allow(dead_code))]
 pub fn uart8250_irq_handler_hardirq_context_required() -> bool {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state.port.registered && state.port.irq_handler_hardirq_context_required
 }
 
 #[cfg_attr(not(app_smoke), allow(dead_code))]
 pub fn uart8250_irq_handler_dispatch_ready() -> bool {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state.port.registered && state.port.irq_handler_dispatch_ready
 }
 
@@ -1446,107 +1491,52 @@ pub fn uart8250_rx_interrupt_handled_count() -> usize {
 }
 
 pub fn serial8250_tx_queue_len() -> usize {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .write_backend
-            .tx_queued
-    }
+    NS16550A_PROBE_STATE.lock().write_backend.tx_queued
 }
 
 pub fn serial8250_tx_irq_kick_count() -> usize {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .write_backend
-            .tx_irq_kicks
-    }
+    NS16550A_PROBE_STATE.lock().write_backend.tx_irq_kicks
 }
 
 pub fn serial8250_tx_irq_drain_count() -> usize {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .write_backend
-            .tx_irq_drains
-    }
+    NS16550A_PROBE_STATE.lock().write_backend.tx_irq_drains
 }
 
 #[cfg(checkpoint_handler_uart_irq_chain)]
 pub fn serial8250_tx_irq_budget_hit_count() -> usize {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .write_backend
-            .tx_irq_budget_hits
-    }
+    NS16550A_PROBE_STATE.lock().write_backend.tx_irq_budget_hits
 }
 
 #[cfg(checkpoint_handler_uart_irq_chain)]
 pub fn serial8250_tx_irq_empty_stop_count() -> usize {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .write_backend
-            .tx_irq_empty_stop
-    }
+    NS16550A_PROBE_STATE.lock().write_backend.tx_irq_empty_stop
 }
 
 #[cfg(checkpoint_handler_uart_irq_chain)]
 pub fn serial8250_tx_byte_count_available_for_irq_probe() -> usize {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .write_backend
-            .tx_bytes_submitted
-    }
+    NS16550A_PROBE_STATE.lock().write_backend.tx_bytes_submitted
 }
 
 #[cfg(checkpoint_handler_uart_irq_chain)]
 pub fn serial8250_tx_crlf_insertion_count() -> usize {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .write_backend
-            .crlf_insertions
-    }
+    NS16550A_PROBE_STATE.lock().write_backend.crlf_insertions
 }
 
 #[cfg(checkpoint_handler_uart_irq_chain)]
 pub fn serial8250_last_tx_byte() -> u8 {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .write_backend
-            .last_tx_byte
-    }
+    NS16550A_PROBE_STATE.lock().write_backend.last_tx_byte
 }
 
 #[cfg(checkpoint_handler_uart_irq_chain)]
 pub fn serial8250_tx_queue_overflowed() -> bool {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .write_backend
-            .tx_queue_overflow
-    }
+    NS16550A_PROBE_STATE.lock().write_backend.tx_queue_overflow
 }
 
 #[cfg(checkpoint_handler_uart_irq_chain)]
 pub fn serial8250_tx_queue_guarded_by_local_irq_save() -> bool {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
+    {
+        NS16550A_PROBE_STATE
+            .lock()
             .write_backend
             .tx_irq_guarded_by_local_irq_save
     }
@@ -1554,13 +1544,13 @@ pub fn serial8250_tx_queue_guarded_by_local_irq_save() -> bool {
 
 #[cfg_attr(not(app_smoke), allow(dead_code))]
 pub fn tty_port_ready() -> bool {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state.tty_port.facts_ready(state.port)
 }
 
 #[cfg_attr(not(app_smoke), allow(dead_code))]
 pub fn tty_port_not_backend_owner() -> bool {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state.tty_port.ready
         && state.tty_port.no_mmio_access
         && state.tty_port.no_irq_dispatch
@@ -1569,12 +1559,12 @@ pub fn tty_port_not_backend_owner() -> bool {
 
 #[cfg_attr(not(app_smoke), allow(dead_code))]
 pub fn tty_flip_buffer_ready() -> bool {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state.tty_flip_buffer.facts_ready(state.tty_port)
 }
 
 pub fn tty_flip_buffer_empty() -> bool {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state.tty_flip_buffer.ready
         && state.tty_flip_buffer.pending_len == 0
         && state.tty_flip_buffer.read_ready_len == 0
@@ -1590,7 +1580,7 @@ pub fn tty_flip_buffer_empty() -> bool {
 }
 
 pub fn tty_flip_buffer_pushed() -> bool {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state.tty_flip_buffer.ready
         && state.tty_flip_buffer.pending_len == 0
         && state.tty_flip_buffer.push_count != 0
@@ -1600,59 +1590,29 @@ pub fn tty_flip_buffer_pushed() -> bool {
 }
 
 pub fn tty_flip_buffer_push_count() -> usize {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .tty_flip_buffer
-            .push_count
-    }
+    NS16550A_PROBE_STATE.lock().tty_flip_buffer.push_count
 }
 
 pub fn tty_flip_buffer_total_inserted() -> usize {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .tty_flip_buffer
-            .total_inserted
-    }
+    NS16550A_PROBE_STATE.lock().tty_flip_buffer.total_inserted
 }
 
 pub fn tty_flip_buffer_last_pushed_len() -> usize {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .tty_flip_buffer
-            .last_pushed_len
-    }
+    NS16550A_PROBE_STATE.lock().tty_flip_buffer.last_pushed_len
 }
 
 pub fn tty_flip_buffer_last_byte() -> u8 {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .tty_flip_buffer
-            .last_byte
-    }
+    NS16550A_PROBE_STATE.lock().tty_flip_buffer.last_byte
 }
 
 pub fn tty_flip_buffer_overflowed() -> bool {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .tty_flip_buffer
-            .overflowed
-    }
+    NS16550A_PROBE_STATE.lock().tty_flip_buffer.overflowed
 }
 
 // Stable probe/provider observation interfaces are not used by every payload cfg.
 #[allow(dead_code)]
 pub fn tty_flip_buffer_ready_data_bound() -> bool {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state.tty_flip_buffer.ready
         && state.tty_flip_buffer.read_ready_len != 0
         && state.tty_flip_buffer.read_offset == 0
@@ -1661,7 +1621,7 @@ pub fn tty_flip_buffer_ready_data_bound() -> bool {
 
 #[allow(dead_code)]
 pub fn tty_flip_buffer_ready_data_consumed() -> bool {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state.tty_flip_buffer.ready
         && state.tty_flip_buffer.read_count != 0
         && state.tty_flip_buffer.last_read_len != 0
@@ -1671,23 +1631,23 @@ pub fn tty_flip_buffer_ready_data_consumed() -> bool {
 }
 
 pub fn seed_tty_ready_data_fixture(bytes: &[u8]) -> bool {
-    let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
+    let mut state = NS16550A_PROBE_STATE.lock();
     state.tty_flip_buffer.seed_ready_data_fixture(bytes)
 }
 
 pub fn clear_tty_ready_data() -> bool {
-    let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
+    let mut state = NS16550A_PROBE_STATE.lock();
     state.tty_flip_buffer.clear_ready_data()
 }
 
 #[allow(dead_code)]
 pub fn read_tty_ready_data(buffer: &mut [u8]) -> Option<usize> {
-    let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
+    let mut state = NS16550A_PROBE_STATE.lock();
     state.tty_flip_buffer.read_ready_data(buffer)
 }
 
 pub fn read_tty_ready_data_with_mode(buffer: &mut [u8], canonical: bool) -> Option<usize> {
-    let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
+    let mut state = NS16550A_PROBE_STATE.lock();
     state
         .tty_flip_buffer
         .read_ready_data_with_mode(buffer, canonical)
@@ -1695,24 +1655,24 @@ pub fn read_tty_ready_data_with_mode(buffer: &mut [u8], canonical: bool) -> Opti
 
 #[allow(dead_code)]
 pub fn tty_ready_data_available() -> Option<bool> {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state.tty_flip_buffer.read_ready_available()
 }
 
 pub fn tty_ready_data_available_with_mode(canonical: bool) -> Option<bool> {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state
         .tty_flip_buffer
         .read_ready_available_with_mode(canonical)
 }
 
 pub fn tty_xmit_fifo_ready() -> bool {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state.tty_xmit_fifo.facts_ready(state.tty_port)
 }
 
 pub fn tty_xmit_fifo_deferred_from_console_tx() -> bool {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state.tty_xmit_fifo.ready
         && state.tty_xmit_fifo.distinct_from_printk_console_tx
         && state.tty_xmit_fifo.runtime_tx_integration_deferred
@@ -1720,7 +1680,7 @@ pub fn tty_xmit_fifo_deferred_from_console_tx() -> bool {
 
 #[cfg(checkpoint_handler_uart_irq_chain)]
 pub fn tty_xmit_fifo_runtime_tx_integrated() -> bool {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state.tty_xmit_fifo.facts_ready(state.tty_port)
         && state.tty_xmit_fifo.distinct_from_printk_console_tx
         && !state.tty_xmit_fifo.runtime_tx_integration_deferred
@@ -1728,7 +1688,7 @@ pub fn tty_xmit_fifo_runtime_tx_integrated() -> bool {
 }
 
 pub fn probe_tty_xmit_fifo_round_trip(byte: u8) -> bool {
-    let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
+    let mut state = NS16550A_PROBE_STATE.lock();
     if !state.tty_xmit_fifo.facts_ready(state.tty_port) {
         return false;
     }
@@ -1739,7 +1699,7 @@ pub fn probe_tty_xmit_fifo_round_trip(byte: u8) -> bool {
 }
 
 pub fn tty_xmit_fifo_round_trip_ready() -> bool {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state.tty_xmit_fifo.facts_ready(state.tty_port)
         && state.tty_xmit_fifo.enqueue_count != 0
         && state.tty_xmit_fifo.dequeue_count != 0
@@ -1750,13 +1710,7 @@ pub fn tty_xmit_fifo_round_trip_ready() -> bool {
 }
 
 pub fn tty_xmit_fifo_queue_len() -> usize {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .tty_xmit_fifo
-            .queued
-    }
+    NS16550A_PROBE_STATE.lock().tty_xmit_fifo.queued
 }
 
 #[cfg(checkpoint_handler_uart_irq_chain)]
@@ -1765,93 +1719,44 @@ pub const fn tty_xmit_fifo_capacity() -> usize {
 }
 
 pub fn tty_xmit_fifo_enqueue_count() -> usize {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .tty_xmit_fifo
-            .enqueue_count
-    }
+    NS16550A_PROBE_STATE.lock().tty_xmit_fifo.enqueue_count
 }
 
 pub fn tty_xmit_fifo_dequeue_count() -> usize {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .tty_xmit_fifo
-            .dequeue_count
-    }
+    NS16550A_PROBE_STATE.lock().tty_xmit_fifo.dequeue_count
 }
 
 pub fn tty_xmit_fifo_last_enqueued() -> u8 {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .tty_xmit_fifo
-            .last_enqueued
-    }
+    NS16550A_PROBE_STATE.lock().tty_xmit_fifo.last_enqueued
 }
 
 pub fn tty_xmit_fifo_last_dequeued() -> u8 {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .tty_xmit_fifo
-            .last_dequeued
-    }
+    NS16550A_PROBE_STATE.lock().tty_xmit_fifo.last_dequeued
 }
 
 pub fn tty_xmit_fifo_overflowed() -> bool {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .tty_xmit_fifo
-            .overflowed
-    }
+    NS16550A_PROBE_STATE.lock().tty_xmit_fifo.overflowed
 }
 
 pub fn tty_xmit_fifo_underflowed() -> bool {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .tty_xmit_fifo
-            .underflowed
-    }
+    NS16550A_PROBE_STATE.lock().tty_xmit_fifo.underflowed
 }
 
 #[cfg(checkpoint_handler_uart_irq_chain)]
 pub fn tty_xmit_fifo_runtime_tx_kick_count() -> usize {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .tty_xmit_fifo
-            .runtime_tx_kicks
-    }
+    NS16550A_PROBE_STATE.lock().tty_xmit_fifo.runtime_tx_kicks
 }
 
 #[cfg(checkpoint_handler_uart_irq_chain)]
 pub fn tty_xmit_fifo_runtime_tx_drain_count() -> usize {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .tty_xmit_fifo
-            .runtime_tx_drains
-    }
+    NS16550A_PROBE_STATE.lock().tty_xmit_fifo.runtime_tx_drains
 }
 
 #[cfg(checkpoint_handler_uart_irq_chain)]
 pub fn tty_xmit_fifo_runtime_tx_empty_stop_count() -> usize {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
+    {
+        NS16550A_PROBE_STATE
+            .lock()
             .tty_xmit_fifo
             .runtime_tx_empty_stops
     }
@@ -1859,17 +1764,16 @@ pub fn tty_xmit_fifo_runtime_tx_empty_stop_count() -> usize {
 
 #[cfg(checkpoint_handler_uart_irq_chain)]
 pub fn tty_xmit_fifo_runtime_tx_guarded_by_local_irq_save() -> bool {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
+    {
+        NS16550A_PROBE_STATE
+            .lock()
             .tty_xmit_fifo
             .runtime_tx_guarded_by_local_irq_save
     }
 }
 
 pub fn serial8250_runtime_port_ready() -> bool {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state.runtime_port.facts_ready(
         state.port,
         state.tty_port,
@@ -1879,7 +1783,7 @@ pub fn serial8250_runtime_port_ready() -> bool {
 }
 
 pub fn serial8250_runtime_rx_deferred() -> bool {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state.runtime_port.ready
         && !state.runtime_port.online
         && !state.runtime_port.rdi_enabled
@@ -1888,12 +1792,12 @@ pub fn serial8250_runtime_rx_deferred() -> bool {
 }
 
 pub fn serial8250_runtime_console_tx_ready() -> bool {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state.runtime_port.ready && state.runtime_port.console_tx_interrupt_driven
 }
 
 pub fn serial8250_runtime_rx_enabled() -> bool {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state.runtime_port.ready
         && state.runtime_port.online
         && state.runtime_port.rdi_enabled
@@ -1906,34 +1810,16 @@ pub fn serial8250_runtime_rx_enabled() -> bool {
 }
 
 pub fn serial8250_runtime_rx_fifo_enabled() -> bool {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .runtime_port
-            .rx_fifo_enabled
-    }
+    NS16550A_PROBE_STATE.lock().runtime_port.rx_fifo_enabled
 }
 
 pub fn serial8250_runtime_rx_drain_limit() -> usize {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .runtime_port
-            .rx_drain_limit
-    }
+    NS16550A_PROBE_STATE.lock().runtime_port.rx_drain_limit
 }
 
 #[cfg(checkpoint_handler_uart_irq_chain)]
 pub fn serial8250_runtime_tx_load_size() -> usize {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .runtime_port
-            .tx_load_size
-    }
+    NS16550A_PROBE_STATE.lock().runtime_port.tx_load_size
 }
 
 pub fn serial8250_runtime_rx_last_byte() -> u8 {
@@ -1951,7 +1837,7 @@ pub fn uart8250_last_lsr() -> usize {
 }
 
 pub fn trigger_uart8250_thre_interrupt_once() -> bool {
-    let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
+    let mut state = NS16550A_PROBE_STATE.lock();
     if !state.port.registered
         || !state.port.irq_handler_registered
         || state.port.thre_interrupt_enabled
@@ -1993,30 +1879,33 @@ pub fn trigger_uart8250_thre_interrupt_once() -> bool {
 }
 
 pub fn enable_serial8250_interrupt_driven_console() -> bool {
-    let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
-    if !state.serial_console_registered
-        || !state.handoff_triggered
-        || !state.port.registered
-        || !state.port.irq_handler_registered
-        || !state.write_backend.facts_ready(state.port)
     {
-        return false;
-    }
-    if !state.runtime_port.ready || state.runtime_port.console_tx_interrupt_driven {
-        return false;
-    }
+        let mut state = NS16550A_PROBE_STATE.lock();
+        if !state.serial_console_registered
+            || !state.handoff_triggered
+            || !state.port.registered
+            || !state.port.irq_handler_registered
+            || !state.write_backend.facts_ready(state.port)
+        {
+            return false;
+        }
+        if !state.runtime_port.ready || state.runtime_port.console_tx_interrupt_driven {
+            return false;
+        }
 
-    if !state.write_backend.enable_interrupt_driven() {
-        return false;
+        if !state.write_backend.enable_interrupt_driven() {
+            return false;
+        }
+        state.runtime_port.console_tx_interrupt_driven = true;
+        state.port.interrupt_output_deferred = false;
+        state.port.interrupt_driven_ready = true;
     }
-    state.runtime_port.console_tx_interrupt_driven = true;
-    state.port.interrupt_output_deferred = false;
-    state.port.interrupt_driven_ready = true;
+    checkpoint::checkpoint(Checkpoint::Serial8250ConsoleIrqDrivenReady);
     true
 }
 
 pub fn enable_serial8250_runtime_rx() -> bool {
-    let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
+    let mut state = NS16550A_PROBE_STATE.lock();
     if !state.port.registered
         || !state.port.irq_handler_registered
         || !state.port.interrupt_driven_ready
@@ -2043,10 +1932,11 @@ pub fn enable_serial8250_runtime_rx() -> bool {
     }
 
     let fcr = UART_FCR_ENABLE_FIFO | UART_FCR_CLEAR_RCVR | UART_FCR_CLEAR_XMIT;
-    if !state.write_backend.write_uart_fcr(fcr)
-        || !state.tty_port.enable_for_uart_startup()
-        || !state.runtime_port.enable_rx_runtime(state.tty_port)
-    {
+    if !state.write_backend.write_uart_fcr(fcr) || !state.tty_port.enable_for_uart_startup() {
+        return false;
+    }
+    let tty_port = state.tty_port;
+    if !state.runtime_port.enable_rx_runtime(tty_port) {
         return false;
     }
     let ier = state.write_backend.read_uart_ier() | UART_IER_RDI | UART_IER_RLSI;
@@ -2054,7 +1944,7 @@ pub fn enable_serial8250_runtime_rx() -> bool {
 }
 
 pub fn trigger_serial8250_rx_loopback_once(byte: u8) -> bool {
-    let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     if !state.port.registered
         || !state.port.irq_handler_registered
         || !state.write_backend.interrupt_driven
@@ -2082,7 +1972,7 @@ pub fn trigger_serial8250_rx_loopback_once(byte: u8) -> bool {
 }
 
 pub fn trigger_serial8250_rx_loopback_batch(bytes: &[u8]) -> bool {
-    let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     if bytes.is_empty()
         || bytes.len() > state.runtime_port.rx_drain_limit
         || bytes.len() > TTY_FLIP_BUFFER_SIZE
@@ -2131,7 +2021,7 @@ pub fn start_tty_xmit_fifo_runtime_tx_batch(bytes: &[u8]) -> bool {
 
 #[cfg(checkpoint_handler_uart_irq_chain)]
 fn start_tty_xmit_fifo_runtime_tx_bytes(bytes: &[u8]) -> bool {
-    let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
+    let mut state = NS16550A_PROBE_STATE.lock();
     if bytes.is_empty()
         || bytes.len() > TTY_XMIT_FIFO_SIZE
         || !state.port.registered
@@ -2172,7 +2062,7 @@ fn start_tty_xmit_fifo_runtime_tx_bytes(bytes: &[u8]) -> bool {
 
 pub fn handle_uart_irq() {
     UART8250_IRQ_HANDLER_CALLS.fetch_add(1, Ordering::AcqRel);
-    let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
+    let mut state = NS16550A_PROBE_STATE.lock();
     if !state.port.registered {
         return;
     }
@@ -2188,7 +2078,7 @@ pub fn handle_uart_irq() {
     let interrupt_id = iir & UART_IIR_ID;
     if is_uart_rx_interrupt(interrupt_id)
         && state.runtime_port.online
-        && handle_rx_chars(state, lsr)
+        && handle_rx_chars(&mut state, lsr)
     {
         UART8250_RX_INTERRUPT_HANDLED.fetch_add(1, Ordering::AcqRel);
     }
@@ -2215,7 +2105,7 @@ pub fn handle_uart_irq() {
         && state.tty_xmit_fifo.runtime_tx_integrated
         && state.tty_xmit_fifo.queued != 0
     {
-        if !drain_tty_xmit_fifo_irq(state) {
+        if !drain_tty_xmit_fifo_irq(&mut state) {
             return;
         }
         state.port.thre_interrupt_enabled = state.tty_xmit_fifo.queued != 0;
@@ -2320,24 +2210,19 @@ fn handle_rx_chars(state: &mut Ns16550aProbeState, initial_lsr: usize) -> bool {
 }
 
 pub fn serial8250_console_registered() -> bool {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .serial_console_registered
-    }
+    NS16550A_PROBE_STATE.lock().serial_console_registered
 }
 
 #[cfg(checkpoint_handler_console_handoff)]
 #[allow(dead_code)]
 pub fn serial8250_write_backend_ready() -> bool {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state.serial_console_registered && state.write_backend.facts_ready(state.port)
 }
 
 #[cfg(checkpoint_handler_console_handoff)]
 pub fn serial8250_write_uses_membase() -> bool {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state.write_backend.ready
         && state.write_backend.uses_uart_membase
         && state.write_backend.membase == state.port.membase
@@ -2348,7 +2233,7 @@ pub fn serial8250_write_uses_membase() -> bool {
 #[cfg(checkpoint_handler_console_handoff)]
 #[allow(dead_code)]
 pub fn serial8250_write_uses_lsr_thr_polling() -> bool {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state.write_backend.ready
         && state.write_backend.uses_lsr_thr_polling
         && state.write_backend.tx_offset == 0
@@ -2358,14 +2243,14 @@ pub fn serial8250_write_uses_lsr_thr_polling() -> bool {
 
 #[cfg(checkpoint_handler_console_handoff)]
 pub fn serial8250_write_does_not_use_sbi() -> bool {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state.write_backend.ready && !state.write_backend.uses_sbi
 }
 
 #[cfg(checkpoint_handler_console_handoff)]
 #[allow(dead_code)]
 pub fn serial8250_interrupt_output_deferred() -> bool {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    let state = NS16550A_PROBE_STATE.lock();
     state.write_backend.ready
         && state.write_backend.interrupt_output_deferred
         && !state.write_backend.interrupt_driven
@@ -2378,33 +2263,20 @@ pub fn serial8250_write_call_count() -> usize {
 
 #[cfg(any(checkpoint_handler_console_handoff, checkpoint_handler_uart_irq_chain))]
 pub fn serial8250_write_call_count_available_for_irq_probe() -> usize {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .write_backend
-            .write_calls
-    }
+    NS16550A_PROBE_STATE.lock().write_backend.write_calls
 }
 
 #[cfg(checkpoint_handler_console_handoff)]
 pub fn serial8250_tx_byte_count() -> usize {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .write_backend
-            .tx_bytes_submitted
-    }
+    NS16550A_PROBE_STATE.lock().write_backend.tx_bytes_submitted
 }
 
 #[cfg(checkpoint_handler_console_handoff)]
 #[allow(dead_code)]
 pub fn serial8250_mmio_writes_performed() -> bool {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
+    {
+        NS16550A_PROBE_STATE
+            .lock()
             .write_backend
             .mmio_writes_performed
     }
@@ -2413,42 +2285,21 @@ pub fn serial8250_mmio_writes_performed() -> bool {
 #[cfg(checkpoint_handler_console_handoff)]
 #[allow(dead_code)]
 pub fn serial8250_write_timed_out() -> bool {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .write_backend
-            .timed_out
-    }
+    NS16550A_PROBE_STATE.lock().write_backend.timed_out
 }
 
 #[cfg(checkpoint_handler_console_handoff)]
 pub fn stdout_path_matched() -> bool {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .stdout_path_matched
-    }
+    NS16550A_PROBE_STATE.lock().stdout_path_matched
 }
 
 #[cfg(checkpoint_handler_console_handoff)]
 pub fn stdout_path_available() -> bool {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .stdout_path_available
-    }
+    NS16550A_PROBE_STATE.lock().stdout_path_available
 }
 
 pub fn handoff_triggered() -> bool {
-    unsafe {
-        (&raw const NS16550A_PROBE_STATE)
-            .as_ref()
-            .unwrap()
-            .handoff_triggered
-    }
+    NS16550A_PROBE_STATE.lock().handoff_triggered
 }
 
 fn ns16550a_probe(
@@ -2488,8 +2339,8 @@ fn ns16550a_probe(
             .unwrap_or(Serial8250RuntimePort::empty());
     let handoff_triggered = serial_console_registered && printk::console_handoff_complete();
 
-    unsafe {
-        let state = (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap();
+    {
+        let mut state = NS16550A_PROBE_STATE.lock();
         state.port = port;
         state.tty_port = tty_port;
         state.tty_flip_buffer = tty_flip_buffer;
@@ -2506,7 +2357,7 @@ fn ns16550a_probe(
 }
 
 pub fn write_console_bytes(bytes: &[u8]) -> bool {
-    let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
+    let mut state = NS16550A_PROBE_STATE.lock();
     if !state.serial_console_registered
         || !(state.write_backend.facts_ready(state.port)
             || state.write_backend.interrupt_driven
@@ -2527,6 +2378,22 @@ pub fn write_console_bytes(bytes: &[u8]) -> bool {
         state.port.thre_interrupt_enabled = false;
     }
     delivered
+}
+
+pub fn flush_runtime_console() -> bool {
+    let mut state = NS16550A_PROBE_STATE.lock();
+    if !state.port.interrupt_driven_ready
+        || !state.write_backend.ready
+        || !state.write_backend.interrupt_driven
+    {
+        return true;
+    }
+    if !state.write_backend.flush_interrupt_driven_tx() {
+        return false;
+    }
+    state.port.thre_interrupt_enabled = false;
+    state.port.thre_interrupt_handled = true;
+    true
 }
 
 fn build_uart8250_port(

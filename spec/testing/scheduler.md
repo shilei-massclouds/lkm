@@ -11,6 +11,8 @@
 - PreparePrev 覆盖 runnable、blocked 与 matching pending wake；blocked Task 从 runqueue/class
   membership 移除但保持 `Online/None/Valid`。选择顺序固定为 stop→DL→RT→fair→idle，且
   PreparePrev、Pick、PutPrev、SetNext 的次序可观察。
+- 单个 CPU 的 class queue 容量覆盖当前全部可投递 TaskRef；测试必须包含至少九个普通用户 Task
+  静态落到同一 CPU 的分布，且最后一次首次 activation 不得在 fork 发布后因队列容量失败。
 
 ## `yields Schedule` 与显式 switch
 
@@ -29,6 +31,9 @@
   当前 handler、YieldToken 或 machine coordinate。
 - A→B→A 与嵌套 Schedule occurrence 必须证明 B 的 switch 不会错误消费 A 的 token；恢复 A 时用
   dispatch record、CPU、TaskRef、FlowRef、generation 与 context epoch 精确一次恢复 source lane。
+- PID1 首次原地进入用户态开始 CPU0 slice；动态用户 Task 的首次与恢复 dispatch 都必须在提交其
+  SATP/本地 fence 后精确增加一次 owner CPU 的 slice-begin 计数。A→B→A 验收分别观察 A、B、A
+  三次 dispatch 的新 10 ms deadline，不得借用首次入口遗留的周期 deadline 代替恢复时重置。
 
 ## Linux differential 与 gates
 

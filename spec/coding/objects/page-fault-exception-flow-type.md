@@ -2,7 +2,7 @@
 
 This occurrence binds to `PageFaultExceptionType` and separately records fault address/access/source, nesting,
 hardirq and entry interrupt state. A validated kernel exception-table fixup is stored before any scheduling point.
-The atomic path writes fixup `sepc` directly. The schedulable kernel task-context path observes published mailbox or
+The atomic path writes fixup `sepc` directly. The schedulable kernel task-context path observes published inbox or
 `need_resched`, invokes the owner Scheduler normally, and after restoration revalidates the exact root/exception/leaf,
 generation, CPU and context epoch before writing `sepc`. Cleanup remains leaf→exception→root.
 

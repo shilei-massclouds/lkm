@@ -186,9 +186,16 @@ impl CurrentRunQueueFixture {
     }
 
     fn pick_next(&self) -> Result<TaskRef, crate::objects::state::EventError> {
+        self.pick_next_after(TaskRef::BOOT)
+    }
+
+    fn pick_next_after(
+        &self,
+        prev_ref: TaskRef,
+    ) -> Result<TaskRef, crate::objects::state::EventError> {
         self.runqueue.pick_next_task_for_local_subject(
             self.current_ref(),
-            TaskRef::BOOT,
+            prev_ref,
             crate::objects::scheduler::PrevDisposition::Runnable,
         )
     }
@@ -389,8 +396,16 @@ impl SmokeScenario for MixedQueueScenario {
             self.fixture.runqueue.contains_task(KTHREADD_PID),
         );
         assertions.assert(
-            "pick kernel init",
-            self.fixture.pick_next() == Ok(TaskRef::KERNEL_INIT),
+            "pick fair insertion head from idle",
+            self.fixture.pick_next() == Ok(TaskRef::KTHREADD),
+        );
+        assertions.assert(
+            "pick fair successor",
+            self.fixture.pick_next_after(TaskRef::KTHREADD) == Ok(TaskRef::KERNEL_INIT),
+        );
+        assertions.assert(
+            "pick fair wrap",
+            self.fixture.pick_next_after(TaskRef::KERNEL_INIT) == Ok(TaskRef::KTHREADD),
         );
     }
 

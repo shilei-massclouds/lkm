@@ -14,7 +14,7 @@ use super::{
         State, failed_condition,
     },
     static_branch::StaticBranch,
-    task::{Task, TaskEntry, TaskKind, TaskRef},
+    task::{KERNEL_TASK_SLOT_COUNT, Task, TaskEntry, TaskKind, TaskRef, USER_TASK_SLOT_COUNT},
     task_flow::TaskFlowRef,
     trap_type::TrapType,
     user_boot::USER_CHILD_PID,
@@ -63,7 +63,9 @@ struct SwitchPreflight {
     first_boot_handoff: bool,
 }
 
-const SCHED_CLASS_QUEUE_CAPACITY: usize = 8;
+// PID 1 and kthreadd can share the fair queue with every dynamic user and
+// kernel Task when fixed placement targets a single CPU.
+const SCHED_CLASS_QUEUE_CAPACITY: usize = USER_TASK_SLOT_COUNT + KERNEL_TASK_SLOT_COUNT + 2;
 
 #[derive(Clone, Copy)]
 struct SchedClassQueue {
@@ -258,7 +260,15 @@ pub struct Scheduler {
     scheduler_finish_preempt_count_restore_count: usize,
     task_switch_register_sentinel_passes: usize,
     task_switch_tp_identity_passes: usize,
+    switch_stack_mismatch_count: usize,
+    switch_stack_mismatch_prev_ref: TaskRef,
+    switch_stack_mismatch_live_sp: usize,
+    switch_stack_mismatch_task_base: usize,
+    switch_stack_mismatch_task_top: usize,
+    switch_stack_mismatch_entry_base: usize,
+    switch_stack_mismatch_entry_top: usize,
     physical_switch_pending: bool,
+    schedule_guard_pending: bool,
     switch_prev_committed_online: bool,
     next_dispatch: Option<NextDispatch>,
     scheduler_switch_mm_or_lazy_tlb_deferred: bool,
@@ -471,7 +481,15 @@ impl Scheduler {
             scheduler_finish_preempt_count_restore_count: 0,
             task_switch_register_sentinel_passes: 0,
             task_switch_tp_identity_passes: 0,
+            switch_stack_mismatch_count: 0,
+            switch_stack_mismatch_prev_ref: TaskRef::NONE,
+            switch_stack_mismatch_live_sp: 0,
+            switch_stack_mismatch_task_base: 0,
+            switch_stack_mismatch_task_top: 0,
+            switch_stack_mismatch_entry_base: 0,
+            switch_stack_mismatch_entry_top: 0,
             physical_switch_pending: false,
+            schedule_guard_pending: false,
             switch_prev_committed_online: false,
             next_dispatch: None,
             scheduler_switch_mm_or_lazy_tlb_deferred: true,
@@ -1063,30 +1081,45 @@ impl Scheduler {
         if !task_access.schedule_sender_matches(sender_flow_ref, current_task_ref, self.cpu_ref()) {
             return Err(self.failed_schedule_entry("active-flow-is-exact-sender"));
         }
+        if self.schedule_guard_pending {
+            return Err(self.failed_schedule_entry("no-pending-schedule-guard"));
+        }
 
         let prev_ref = current_task_ref;
         let mut next_ref = TaskRef::NONE;
         let mut switch_preflight = None;
+        let stack_mismatch_count_before = self.switch_stack_mismatch_count;
 
-        self.boot_idle_preemption.disable()?;
+        self.boot_idle_preemption
+            .disable()
+            .map_err(|error| schedule_stage(error, "PreemptDisable"))?;
         self.schedule_preemption_disable_count =
             self.schedule_preemption_disable_count.wrapping_add(1);
-        local_interrupt.save_and_disable()?;
+        local_interrupt
+            .save_and_disable()
+            .map_err(|error| schedule_stage(error, "LocalIrqSaveDisable"))?;
+        self.schedule_guard_pending = true;
         let guarded_result = (|| {
             self.scheduler_rcu_context_switch_count =
                 self.scheduler_rcu_context_switch_count.wrapping_add(1);
-            let current_scheduler_ref =
-                self.resolve_current_scheduler_ref(current_cpu_ref, task_access, prev_ref)?;
+            let current_scheduler_ref = self
+                .resolve_current_scheduler_ref(current_cpu_ref, task_access, prev_ref)
+                .map_err(|error| schedule_stage(error, "ResolveCurrentRunqueue"))?;
             self.lock
-                .lock_irqsave(local_interrupt, &mut self.boot_idle_preemption)?;
+                .lock_irqsave(local_interrupt, &mut self.boot_idle_preemption)
+                .map_err(|error| schedule_stage(error, "RunqueueLock"))?;
             let runqueue_result = (|| {
                 self.scheduler_rq_lock_mb_after_spinlock_count = self
                     .scheduler_rq_lock_mb_after_spinlock_count
                     .wrapping_add(1);
                 self.scheduler_rq_clock_update_count =
                     self.scheduler_rq_clock_update_count.wrapping_add(1);
-                let disposition = self.prepare_prev(prev_ref, task_access)?;
-                next_ref = self.pick_next_task(current_scheduler_ref, prev_ref, disposition)?;
+                let disposition = self
+                    .prepare_prev(prev_ref, task_access)
+                    .map_err(|error| schedule_stage(error, "PreparePrev"))?;
+                next_ref = self
+                    .pick_next_task(current_scheduler_ref, prev_ref, disposition)
+                    .map_err(|error| schedule_stage(error, "PickNext"))?;
                 self.scheduler_need_resched_clear_count =
                     self.scheduler_need_resched_clear_count.wrapping_add(1);
                 self.scheduler_rq_curr_publish_rcu_count =
@@ -1108,37 +1141,91 @@ impl Scheduler {
             })();
             let unlock_result = self
                 .lock
-                .unlock_irqrestore(local_interrupt, &mut self.boot_idle_preemption);
+                .unlock_irqrestore(local_interrupt, &mut self.boot_idle_preemption)
+                .map_err(|error| schedule_stage(error, "RunqueueUnlock"));
             if runqueue_result.is_ok() && unlock_result.is_ok() {
                 self.scheduler_finish_released_rq_lock_count =
                     self.scheduler_finish_released_rq_lock_count.wrapping_add(1);
             }
             runqueue_result.and(unlock_result)
         })();
+        if let Err(error) = guarded_result {
+            let finish_result = self
+                .complete_schedule_guard(local_interrupt)
+                .map_err(|finish| schedule_stage(finish, "RejectedGuardRestore"));
+            if self.switch_stack_mismatch_count != stack_mismatch_count_before {
+                self.trace_switch_stack_mismatch();
+            }
+            return Err::<(), EventError>(error).and(finish_result);
+        }
+        self.schedule_exit_prev_ref = prev_ref;
+        self.schedule_exit_next_ref = next_ref;
+        self.schedule_exit_saved_interrupt_count = local_interrupt.saved_and_disabled_count();
+        if let Some(preflight) = switch_preflight {
+            if let Err(error) = self.save_and_suspend_task(prev_ref, task_access) {
+                let error = schedule_stage(error, "SaveSuspendPrev");
+                let finish_result = self
+                    .complete_schedule_guard(local_interrupt)
+                    .map_err(|finish| schedule_stage(finish, "SaveSuspendGuardRestore"));
+                return Err::<(), EventError>(error).and(finish_result);
+            }
+            let resumed = match self.cooperative_context_switch(preflight) {
+                Ok(resumed) => resumed,
+                Err(error) => {
+                    let error = schedule_stage(error, "ArchitectureContextSwitch");
+                    let finish_result = self
+                        .complete_schedule_guard(local_interrupt)
+                        .map_err(|finish| schedule_stage(finish, "ContextSwitchGuardRestore"));
+                    return Err::<(), EventError>(error).and(finish_result);
+                }
+            };
+            if !resumed {
+                let error = self
+                    .failed_switch_to()
+                    .map_err(|error| schedule_stage(error, "ContextSwitchDidNotResume"));
+                let finish_result = self
+                    .complete_schedule_guard(local_interrupt)
+                    .map_err(|finish| schedule_stage(finish, "NoResumeGuardRestore"));
+                return error.and(finish_result);
+            }
+            let dispatch_result = self
+                .dispatch_task_after_switch(prev_ref, task_access)
+                .map_err(|error| schedule_stage(error, "DispatchRestoredPrev"));
+            let finish_result = self
+                .complete_schedule_guard(local_interrupt)
+                .map_err(|finish| schedule_stage(finish, "DispatchGuardRestore"));
+            dispatch_result.and(finish_result)?;
+        } else {
+            self.complete_schedule_guard(local_interrupt)
+                .map_err(|error| schedule_stage(error, "IdentityGuardRestore"))?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn complete_schedule_guard(
+        &mut self,
+        local_interrupt: &mut InterruptType,
+    ) -> EventResult {
+        if !self.schedule_guard_pending {
+            return Err(self.failed_schedule_entry("schedule-guard-pending"));
+        }
         let restore_result = local_interrupt.restore();
         let enable_result = self.boot_idle_preemption.enable_no_resched();
-        if guarded_result.is_ok() && restore_result.is_ok() && enable_result.is_ok() {
+        if restore_result.is_ok() && enable_result.is_ok() {
+            self.schedule_guard_pending = false;
             self.schedule_preemption_enable_no_resched_count = self
                 .schedule_preemption_enable_no_resched_count
                 .wrapping_add(1);
             self.scheduler_finish_preempt_count_restore_count = self
                 .scheduler_finish_preempt_count_restore_count
                 .wrapping_add(1);
+            self.schedule_exit_restored_interrupt_count = local_interrupt.restored_count();
         }
-        guarded_result.and(restore_result).and(enable_result)?;
-        self.schedule_exit_prev_ref = prev_ref;
-        self.schedule_exit_next_ref = next_ref;
-        self.schedule_exit_saved_interrupt_count = local_interrupt.saved_and_disabled_count();
-        self.schedule_exit_restored_interrupt_count = local_interrupt.restored_count();
-        if let Some(preflight) = switch_preflight {
-            self.save_and_suspend_task(prev_ref, task_access)?;
-            let resumed = self.cooperative_context_switch(preflight)?;
-            if !resumed {
-                return self.failed_switch_to();
-            }
-            self.dispatch_task_after_switch(prev_ref, task_access)?;
-        }
-        Ok(())
+        restore_result.and(enable_result)
+    }
+
+    pub(crate) const fn schedule_guard_pending(&self) -> bool {
+        self.schedule_guard_pending
     }
 
     pub fn schedule_idle(
@@ -1383,7 +1470,22 @@ impl Scheduler {
         if crate::arch::riscv64::csr::read_tp() != prev_task_identity {
             return Err(self.failed_switch_preflight("tp-binding-matches-prev"));
         }
-        if unsafe { !(*prev_context).physical_save_ready(crate::arch::riscv64::csr::read_sp()) } {
+        let live_sp = crate::arch::riscv64::csr::read_sp();
+        if unsafe { !(*prev_context).physical_save_ready(live_sp) } {
+            self.switch_stack_mismatch_count = self.switch_stack_mismatch_count.wrapping_add(1);
+            self.switch_stack_mismatch_prev_ref = prev_ref;
+            self.switch_stack_mismatch_live_sp = live_sp;
+            self.switch_stack_mismatch_task_base = unsafe { (*prev_context).kernel_stack_base() };
+            self.switch_stack_mismatch_task_top = unsafe { (*prev_context).kernel_stack_top() };
+            if trap_entry_context != 0 {
+                let entry_context =
+                    unsafe { &*(trap_entry_context as *const super::trap_type::TrapEntryContext) };
+                self.switch_stack_mismatch_entry_base = entry_context.kernel_stack_base();
+                self.switch_stack_mismatch_entry_top = entry_context.kernel_stack_top();
+            } else {
+                self.switch_stack_mismatch_entry_base = 0;
+                self.switch_stack_mismatch_entry_top = 0;
+            }
             return Err(self.failed_switch_preflight("prev-context-physical-save-ready"));
         }
         if unsafe { !(*next_context).physical_switch_ready() } {
@@ -1417,7 +1519,14 @@ impl Scheduler {
         self.switch_prev_committed_online = false;
         self.next_dispatch = Some(next_dispatch);
         crate::checkpoint::checkpoint(Checkpoint::SchedulerSwitchToEntry);
-        trace_switch_to(prev_ref, next_ref, current_task_ref);
+        trace_switch_to(
+            self.cpu_id(),
+            prev_ref,
+            prev_task_id,
+            next_ref,
+            next_task_id,
+            current_task_ref,
+        );
         self.switch_to_passes = self.switch_to_passes.wrapping_add(1);
         Ok(SwitchPreflight {
             prev_ref,
@@ -1525,6 +1634,14 @@ impl Scheduler {
         if !self.publish_current(task_ref) {
             return self.failed_switch_to();
         }
+        let user_address_space = task_access
+            .commit_dispatch_address_space(task_ref)
+            .map_err(|reason| self.failed_switch_commit(reason))?;
+        if user_address_space
+            && crate::objects::irq_time::begin_scheduler_slice(self.cpu_id()).is_none()
+        {
+            return Err(self.failed_switch_commit("user-scheduler-slice-begin"));
+        }
         self.task_switch_tp_identity_passes = self.task_switch_tp_identity_passes.wrapping_add(1);
         self.physical_switch_pending = false;
 
@@ -1536,6 +1653,18 @@ impl Scheduler {
             self.suspend_task_sequence = self.switch_protocol_sequence;
         }
         self.switch_prev_committed_online = false;
+
+        // This code executes on the selected next Task's stack, after the
+        // architecture switch replaced TP/current-stack authority. Only this
+        // boundary can grant wait/reap permission for a terminal user Task.
+        if prev_ref.is_user()
+            && crate::objects::user_process_registry::global_registry().slot_state(prev_ref)
+                == Some(crate::objects::user_process_registry::UserProcessSlotState::Zombie)
+            && !crate::objects::user_process_registry::global_registry()
+                .publish_scheduler_quiesced(prev_ref, self.cpu_ref())
+        {
+            return self.failed_switch_to();
+        }
 
         self.switch_protocol_sequence = self.switch_protocol_sequence.wrapping_add(1);
         self.restore_core_context_sequence = self.switch_protocol_sequence;
@@ -1790,6 +1919,26 @@ impl Scheduler {
             ))
     }
 
+    fn trace_switch_stack_mismatch(&self) {
+        crate::arch::riscv64::sbi::putstr("scheduler switch stack mismatch prev=");
+        print_scheduler_hex(self.switch_stack_mismatch_prev_ref.slot());
+        crate::arch::riscv64::sbi::putstr(":");
+        print_scheduler_hex(self.switch_stack_mismatch_prev_ref.generation() as usize);
+        crate::arch::riscv64::sbi::putstr(" live_sp=");
+        print_scheduler_hex(self.switch_stack_mismatch_live_sp);
+        crate::arch::riscv64::sbi::putstr(" task_stack=[");
+        print_scheduler_hex(self.switch_stack_mismatch_task_base);
+        crate::arch::riscv64::sbi::putstr(",");
+        print_scheduler_hex(self.switch_stack_mismatch_task_top);
+        crate::arch::riscv64::sbi::putstr(") entry_stack=[");
+        print_scheduler_hex(self.switch_stack_mismatch_entry_base);
+        crate::arch::riscv64::sbi::putstr(",");
+        print_scheduler_hex(self.switch_stack_mismatch_entry_top);
+        crate::arch::riscv64::sbi::putstr(") count=");
+        print_scheduler_hex(self.switch_stack_mismatch_count);
+        crate::arch::riscv64::sbi::putchar(b'\n');
+    }
+
     fn failed_switch_commit(&self, first_failed: &'static str) -> EventError {
         self.failed_schedule_condition()
             .with_diagnostic(FailureDiagnostic::new(
@@ -1974,22 +2123,67 @@ impl Scheduler {
     }
 }
 
-fn trace_switch_to(prev_ref: TaskRef, next_ref: TaskRef, current_after: TaskRef) {
+fn trace_switch_to(
+    logical_id: usize,
+    prev_ref: TaskRef,
+    prev_task_id: usize,
+    next_ref: TaskRef,
+    next_task_id: usize,
+    current_after: TaskRef,
+) {
     #[cfg(checkpoint_handler_announce)]
-    {
-        crate::arch::riscv64::sbi::putstr("checkpoint: Scheduler.SwitchTo prev=");
-        crate::arch::riscv64::sbi::putstr(prev_ref.name());
-        crate::arch::riscv64::sbi::putstr(" next=");
-        crate::arch::riscv64::sbi::putstr(next_ref.name());
-        crate::arch::riscv64::sbi::putstr(" current_after=");
-        crate::arch::riscv64::sbi::putstr(current_after.name());
-        crate::arch::riscv64::sbi::putchar(b'\n');
-    }
+    crate::arch::riscv64::sbi::write_record(format_args!(
+        "checkpoint: Scheduler.SwitchTo prev={} next={} current_after={}\n",
+        prev_ref.name(),
+        next_ref.name(),
+        current_after.name()
+    ));
 
     #[cfg(not(checkpoint_handler_announce))]
     {
-        let _ = (prev_ref, next_ref, current_after);
+        let _ = current_after;
     }
+
+    #[cfg(checkpoint_handler_user_scheduler_trace)]
+    crate::arch::riscv64::sbi::write_record(format_args!(
+        "user scheduler switch cpu={} prev_slot={} prev_generation={} prev_pid={} next_slot={} next_generation={} next_pid={}\n",
+        logical_id,
+        prev_ref.slot(),
+        prev_ref.generation(),
+        prev_task_id,
+        next_ref.slot(),
+        next_ref.generation(),
+        next_task_id,
+    ));
+
+    #[cfg(not(checkpoint_handler_user_scheduler_trace))]
+    {
+        let _ = (logical_id, prev_ref, prev_task_id, next_ref, next_task_id);
+    }
+}
+
+fn print_scheduler_hex(value: usize) {
+    crate::arch::riscv64::sbi::putstr("0x");
+    let mut shift = usize::BITS as usize;
+    while shift != 0 {
+        shift -= 4;
+        let digit = ((value >> shift) & 0xf) as u8;
+        crate::arch::riscv64::sbi::putchar(if digit < 10 {
+            b'0' + digit
+        } else {
+            b'a' + digit - 10
+        });
+    }
+}
+
+fn schedule_stage(error: EventError, first_failed: &'static str) -> EventError {
+    error.with_diagnostic_if_absent(FailureDiagnostic::new(
+        "Scheduler",
+        "Schedule.Runtime",
+        "CpuRunqueue",
+        "entry, runqueue protocol, context switch, and guard restoration",
+        first_failed,
+    ))
 }
 
 #[derive(Clone, Copy)]
@@ -2572,6 +2766,14 @@ impl Scheduler {
             + self.fair_queue.len()
     }
 
+    /// Return whether a scheduling decision can select a non-idle Task other
+    /// than `current`. The owner CPU calls this only at an IRQ-masked return
+    /// boundary after committing all acquire-visible inbox records.
+    pub const fn has_runnable_competitor(&self, current: TaskRef) -> bool {
+        let next = self.pick_highest_class_task(current);
+        next.is_valid() && !next.same_identity(current) && !next.same_identity(self.idle_ref())
+    }
+
     pub const fn contains_task_ref(&self, task_ref: TaskRef) -> bool {
         self.stop_queue.contains_ref(task_ref)
             || self.deadline_queue.contains_ref(task_ref)
@@ -2672,43 +2874,6 @@ impl Scheduler {
     }
 
     const fn pick_fair_task(&self, prev_ref: TaskRef) -> TaskRef {
-        if prev_ref.same_identity(TaskRef::KERNEL_INIT) || prev_ref.same_identity(TaskRef::BOOT) {
-            let candidates = [
-                TaskRef::SMOKE_RWLOCK,
-                TaskRef::SMOKE_RWSEM,
-                TaskRef::SMOKE_MUTEX,
-                TaskRef::SMOKE_SCHEDULER,
-            ];
-            let mut index = 0usize;
-            while index < candidates.len() {
-                if self.fair_queue.contains_ref(candidates[index]) {
-                    return candidates[index];
-                }
-                index += 1;
-            }
-            let mut queue_index = 0usize;
-            while queue_index < self.fair_queue.len {
-                let task_ref = self.fair_queue.task_refs[queue_index];
-                if task_ref.is_user() {
-                    return task_ref;
-                }
-                queue_index += 1;
-            }
-            if self.fair_queue.contains_ref(prev_ref) {
-                return prev_ref;
-            }
-            if self.fair_queue.contains_ref(TaskRef::KERNEL_INIT) {
-                return TaskRef::KERNEL_INIT;
-            }
-            if self.fair_queue.contains_ref(TaskRef::KTHREADD) {
-                return TaskRef::KTHREADD;
-            }
-            if self.fair_queue.contains_ref(TaskRef::KERNEL_INIT) {
-                return TaskRef::KERNEL_INIT;
-            }
-        } else if self.fair_queue.contains_ref(TaskRef::KERNEL_INIT) {
-            return TaskRef::KERNEL_INIT;
-        }
         self.fair_queue.pick_after(prev_ref)
     }
 
@@ -2884,27 +3049,36 @@ impl Scheduler {
         self.enqueue_task_with_class_and_id(task_ref, default_sched_class(task_ref), task_id)
     }
 
-    pub fn commit_inbound_kernel_task(
+    pub fn commit_inbound_task(
         &mut self,
         task_ref: TaskRef,
         kind: super::kernel_task::InboundKind,
         task_id: usize,
+        task_access: &mut SchedulerTaskAccess<'_>,
         local_interrupt: &mut InterruptType,
     ) -> EventResult {
         if self.lifecycle.state() != State::Online
-            || self.cpu_ref().is_boot_cpu()
-            || !task_ref.is_kernel()
-            || task_id_for_current_task_ref(task_ref) != Some(task_id)
+            || !task_ref.is_scheduler_ref()
+            || task_ref.same_identity(TaskRef::BOOT)
+            || (!task_ref.is_user() && task_id_for_current_task_ref(task_ref) != Some(task_id))
+            || (task_ref.is_user()
+                && super::user_process_registry::global_registry().pid(task_ref) != Some(task_id))
             || self.contains_task(task_id)
             || self.contains_task_ref(task_ref)
             || self.fair_queue.len() == SCHED_CLASS_QUEUE_CAPACITY
         {
             return self.failed_setup();
         }
-        let task_preflight = super::kernel_task::task_by_ref(task_ref).is_some_and(|task| {
+        let task = task_access
+            .current_task_candidate(task_ref)
+            .map(|candidate| candidate.task);
+        let task_preflight = task.is_some_and(|task| {
             task.flow_cpu_ref() == Some(self.cpu_ref())
                 && match kind {
-                    super::kernel_task::InboundKind::Activate => task.state() == State::Ready,
+                    super::kernel_task::InboundKind::Activate => {
+                        (task_ref.is_kernel() && task.state() == State::Ready)
+                            || (task_ref.is_user() && task.state() == State::Online)
+                    }
                     super::kernel_task::InboundKind::Wake => {
                         task.state() == State::Online
                             && task.scheduler_sleep_declared()
@@ -2923,10 +3097,14 @@ impl Scheduler {
         let commit = (|| {
             match kind {
                 super::kernel_task::InboundKind::Activate => {
-                    super::kernel_task::activate_for_enqueue(task_ref, self.cpu_id())?;
+                    if task_ref.is_kernel() {
+                        super::kernel_task::activate_for_enqueue(task_ref, self.cpu_id())?;
+                    }
                 }
                 super::kernel_task::InboundKind::Wake => {
-                    super::kernel_task::wake_for_enqueue(task_ref, self.cpu_id())?;
+                    task_access
+                        .wake_for_inbound(task_ref)
+                        .ok_or_else(|| self.failed_setup_error())??;
                 }
             }
             self.enqueue_task_with_class_and_id(task_ref, SchedClassRef::Fair, task_id)

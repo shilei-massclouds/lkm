@@ -1257,8 +1257,61 @@ fn read_fs_block<P: BlockDeviceProvider>(
     if !supported_block_size(block_size) || block_size > BUFFER_HEAD_MAX_SIZE {
         return Err(Ext2Error::UnsupportedBlockSize);
     }
-    bio::sb_bread_by_devt_block(registry, provider, devt, u64::from(block), block_size)
-        .map_err(Ext2Error::from)
+    bio::sb_bread_by_devt_block(registry, provider, devt, u64::from(block), block_size).map_err(
+        |error| {
+            #[cfg(app_user_boot)]
+            trace_ext2_block_read_failure(error, devt, block, block_size);
+            Ext2Error::from(error)
+        },
+    )
+}
+
+#[cfg(app_user_boot)]
+fn trace_ext2_block_read_failure(
+    error: bio::BlockIoError,
+    devt: DevT,
+    block: u32,
+    block_size: usize,
+) {
+    let error_name = match error {
+        bio::BlockIoError::Registry(error) => match error {
+            super::block_device::BlockDeviceError::CoreNotReady => "registry_core_not_ready",
+            super::block_device::BlockDeviceError::DeviceNotReady => "registry_device_not_ready",
+            super::block_device::BlockDeviceError::DuplicateDev => "registry_duplicate_dev",
+            super::block_device::BlockDeviceError::NoDevice => "registry_no_device",
+            super::block_device::BlockDeviceError::ProviderUnavailable => {
+                "registry_provider_unavailable"
+            }
+            super::block_device::BlockDeviceError::EmptyRead => "registry_empty_read",
+        },
+        bio::BlockIoError::DeviceMissing => "device_missing",
+        bio::BlockIoError::DeviceNotReady => "device_not_ready",
+        bio::BlockIoError::InvalidBlockSize => "invalid_block_size",
+        bio::BlockIoError::NoMemory => "no_memory",
+        bio::BlockIoError::ShortRead => "short_read",
+    };
+    crate::arch::riscv64::sbi::putstr("ext2 block read failure error=");
+    crate::arch::riscv64::sbi::putstr(error_name);
+    crate::arch::riscv64::sbi::putstr(" devt=");
+    trace_ext2_hex(devt.major() as usize);
+    crate::arch::riscv64::sbi::putchar(b':');
+    trace_ext2_hex(devt.minor() as usize);
+    crate::arch::riscv64::sbi::putstr(" block=");
+    trace_ext2_hex(block as usize);
+    crate::arch::riscv64::sbi::putstr(" block_size=");
+    trace_ext2_hex(block_size);
+    crate::arch::riscv64::sbi::putchar(b'\n');
+}
+
+#[cfg(app_user_boot)]
+fn trace_ext2_hex(value: usize) {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    crate::arch::riscv64::sbi::putstr("0x");
+    let mut shift = usize::BITS as usize;
+    while shift != 0 {
+        shift -= 4;
+        crate::arch::riscv64::sbi::putchar(DIGITS[(value >> shift) & 0xf]);
+    }
 }
 
 fn read_superblock_probe<P: BlockDeviceProvider>(

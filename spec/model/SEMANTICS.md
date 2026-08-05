@@ -752,10 +752,26 @@ identity，只替换 Runtime 内部 ApplicationInstance；不同 Task/Flow 不�
 fork/clone 使用 `snapshot` 在一个候选中直接 materialize fresh child Task/TaskFlow/UserAppRuntime 为
 `Online/Online/Online`，并 materialize 无状态 ApplicationInstance、TaskRef 和 FlowRef。块内完成
 owner/parent、generation、PID、stack、ContextCoordinate、COW/frame refs、返回寄存器与 scheduler
-publication；不发送 Preset/Setup/Enable，不形成 lifecycle transition signal。完整候选 invariant 一次性
-成立后才发布，任一失败回滚全部 identity、引用、PID、PTE 和 frame ref。提交时 parent 固定为
+inbox reservation；不发送 Preset/Setup/Enable，不形成 lifecycle transition signal。完整候选 invariant
+一次性成立后才向 `UserProcessRegistry` 与目标 CPU inbox 发布，任一失败以 `EAGAIN` 或 `ENOMEM`
+回滚全部 identity、引用、PID、PTE、frame ref、registry reservation 与 inbox reservation。提交时 parent 固定为
 `OnCpu/Online/Online`，child 固定为 `Online/Online/Online`。child 不复制活动 TrapFlowRef、YieldToken、
 CurrentTask/CPU authority 或 trap stack，只重建 child-return-zero 的 post-fork continuation。
+
+`UserProcessRegistry` 是容量 32（包括 PID 1）的共享进程身份目录。每个 published slot 绑定 generation、
+固定 CpuRef 与独立 `UserProcessAggregate`；aggregate 物理拥有 Task/TaskFlow/Runtime、mm、用户栈、trap
+frame、files/fs、credentials、signal 与 exec 状态。PID 1 使用不可替换的稳定条目并固定 CPU0；SMP online
+完成时按 logical CPU id 冻结 `online_cpus`，普通 fork 的 child 固定到
+`online_cpus[child_pid % cpu_count]`，vfork/CLONE_VM 则留在父 CPU 并以 parent-blocking handoff 串行执行。
+首轮不迁移、不自动均衡，也不允许同一 mm 跨 CPU 执行。
+
+访问 aggregate 必须通过同时校验 TaskRef、slot generation 与固定 CPU ownership 的
+`UserProcessLease`。地址空间对象不再搬入全局 active carrier，也不通过与 slot 交换整个 mm 来模拟
+切换。exec 保持 Task、TaskFlow、Runtime、CpuRef 与地址空间对象 identity，只事务替换 aggregate 内容；
+exit 以 release 发布 zombie/completion 与 SIGCHLD，再投递 parent 固定 CPU 的 wake。wait4 的
+PID `-1` 选择当前 parent 的任一 child，正 PID 仅选择该 parent 下 PID 精确匹配的 child；它在该
+匹配集合中独占 reap，只有 runqueue、inbox、current 与 lease 引用均已消失才把 slot 置空并
+推进 generation。
 
 Task 物理拥有 TaskThreadContext，其寄存器区是 `ra/sp/s0..s11`，并保存抽象 ContextCoordinate、
 breakpoint validity、固定 TaskFlowRef/generation、context epoch、dispatch record、可选 root TrapFlowRef
@@ -789,7 +805,7 @@ TaskFlow lifecycle/action 必须校验 parent OnCpu/Live、固定 pair、FlowRef
 CurrentTask/CurrentStack 和 effective-flow guard。陷入不改变 Task.OnCpu 或 TaskFlow.Online，只把
 effective-flow 栈叠加到 Trap/Interrupt/Exception leaf。所有正式入口事件（包括 reschedule SSIP）都
 创建 fresh、generation-checked occurrence，并按 child→root Cleanup 后消费一次 TrapReturnToken；SSIP
-handler 只清 pending 和合并 CPU-local need_resched，不消费 mailbox 或调度。若陷入内切出，保存的
+handler 只清 pending 和合并 CPU-local need_resched，不消费 inbox 或调度。若陷入内切出，保存的
 root TrapFlowRef 定位 active child/concrete leaf；恢复 preflight 与 contextual Enter 校验 root/leaf、
 入口 Task/Flow、owner CPU、generation、context epoch 和未 Cleanup 状态后精确一次记录 leaf resume。
 无切换 trap 返回不制造 Dispatch/Enter，Enter 也不按 leaf 类型选择机器坐标。
@@ -870,7 +886,9 @@ key 上前一 sibling Online 后才能推进后一 sibling，不同 key 之间�
 running/preempt prev 保留 Runnable；对 sleeping prev，有匹配 pending wake signal 时一次性恢复
 running，否则在 pick 前 DeactivateTask 并返回 Blocked。它不改变 Task lifecycle 或保存 context。
 
-PickNextTask 按 stop→DL→RT→fair→idle 优先级选择。类可提供组合 callback，或走
+PickNextTask 按 stop→DL→RT→fair→idle 优先级选择；每 CPU fair 队列中的用户 Task 使用 round-robin。
+每个 CPU 的 inbox 容量覆盖全部可投递 Task，每个 Task 同时至多一个 activation/wake notice；重复通知
+合并，release 发布后才发送 SSIP，consumer 以 acquire 校验 target CpuRef 与 generation。类可提供组合 callback，或走
 `pick_task -> prev_class.PutPrevTask(prev,next) -> next_class.SetNextTask(next)` fallback；put/set 属于 pick
 内部协议，Blocked/on-rq=false prev 绝不能重入队。Scheduler 的 `task_refs` 与五类 queue membership
 表示 runnable/on-rq 资格；`Online` Task 可以是 Blocked，直到 wake/enqueue 恢复资格。
@@ -887,9 +905,15 @@ dispatch kind。Task.Dispatch 为本轮生成单次 Enter proof；next Flow Ente
 coordinate 决定，并交叉校验 dispatch ordinal/record、CPU、TaskRef、FlowRef/generation 和 context epoch
 后精确一次消费。handler coordinate 进入正文 Action，yield/machine coordinate 恢复保存点。
 
+用户 Task dispatch 同时提交其 aggregate 的 SATP 并执行本地 `sfence.vma`，随后从上一 deadline 开始
+10 ms slice。每 CPU `SchedulerClockevent` mux 同时保留 CPU0 既有 one-shot callback 与 scheduler
+deadline；timer hardirq 只确认、重装 timer 和合并 `need_resched`。SPP=U 时，root/leaf cleanup 后的安全
+continuation 保存当前 trap overlay 并调度；SPP=S 时 pending 保留到最迟返回用户态前。没有竞争者时消费
+pending、按上一 deadline 跳过错过周期并续订 slice，不制造 identity context switch。
+
 non-identity Schedule 目标完成时 prev binding 已改变，所以 source token 保持 pending；未来 A→B→A
-切回时由 contextual Enter 恢复。MM、FPU/vector、`last` 返回值、完整 hooks、fairness、bandwidth、
-GlobalArbiter、跨 CPU mailbox、migration 和 replay 保持 Deferred/P2。
+切回时由 contextual Enter 恢复。FPU/vector、`last` 返回值、完整 hooks、bandwidth、GlobalArbiter、
+migration、动态负载选择、共享 mm 跨 CPU、ASID/远程 TLB shootdown、CPU hotplug 和 replay 保持 Deferred/P2。
 
 ## SEM-EXCLUSIVE-CONTEXT-001: Guard And Resource Exclusive Context Are Distinct
 
@@ -1147,7 +1171,7 @@ Synchronous continuations preserve the selected CPU context; asynchronous receiv
 
 `CpuGroup.cpus[logic_id]` is the sole canonical CPU instance collection. `CurrentCPU` is not an object, owner, instance, or lifecycle. It resolves as `dereference(effective_task_flow.cpu_ref)` and is valid only while that Flow has execution authority. `CpuRef` is a typed stable reference to a published indexed element; dereference of a missing element is an error.
 
-Only entry and scheduler-commit boundaries may write `TaskFlow.cpu_ref`; Task has no synonymous CPU assignment. A fixed Flow retains the assigned or last CPU while its Task is Online, and migration changes it only at commit. A synchronous `drives` subtree inherits the effective Flow and may use `CurrentCPU`; an asynchronous `emits` edge does not. Trace records the canonical `CpuGroup.cpus[i]` target and source Flow/CpuRef.
+Only entry and initial scheduler-publication boundaries may write `TaskFlow.cpu_ref`; Task has no synonymous CPU assignment. PID 1 is fixed to CPU0, ordinary fork uses the frozen-online-CPU PID formula, and vfork uses the parent CPU. A published user Flow retains that CPU for its entire lifetime; runtime migration is deferred. A synchronous `drives` subtree inherits the effective Flow and may use `CurrentCPU`; an asynchronous `emits` edge does not. Trace records the canonical `CpuGroup.cpus[i]` target and source Flow/CpuRef.
 
 `CpuGroup.Preset` atomically declares CPU0 and advances both child and parent to Prepared before Kernel Enable. Kernel acceptance binds CPU0s CpuRef to BootInitFlow; BootInitFlow.Preset resolves CurrentCPU, records the first entry argument for later use, and advances CPU0 to Ready without assigning its hartid in assembly. The later `smp_setup_processor_id()` boundary consumes the saved value for CPU0. CpuGroup.Setup atomically creates AP elements and publishes topology. possible/present/active/online sets derive from CPU states and may be cached only as rebuildable bitmaps.
 

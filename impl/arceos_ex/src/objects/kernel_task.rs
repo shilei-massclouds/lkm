@@ -1,24 +1,24 @@
-//! Bounded, explicitly placed kernel tasks and the CPU-local inbound lane.
+//! Bounded, explicitly placed tasks and the CPU-local inbound inbox.
 //!
 //! The creating CPU owns a slot only until `PUBLISHED` is released.  After
 //! that boundary the target CPU is the sole mutable owner of the Task; remote
-//! activation and wake paths communicate only through the mailbox below.
+//! activation and wake paths communicate only through the inbox below.
 
 #![cfg_attr(not(app_smoke), allow(dead_code))]
 
 use core::{
     cell::UnsafeCell,
-    sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+    sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering},
 };
 
 use super::{
     cpu::{CpuRef, MAX_CPUS},
     current_task::CurrentTaskCandidate,
     state::{EventResult, State},
-    task::{KERNEL_TASK_SLOT_COUNT, Task, TaskEntry, TaskKind, TaskRef},
+    task::{KERNEL_TASK_SLOT_COUNT, Task, TaskEntry, TaskKind, TaskRef, USER_TASK_SLOT_COUNT},
 };
 
-const KERNEL_TASK_STACK_WORDS: usize = 1024;
+const KERNEL_TASK_STACK_WORDS: usize = 4096;
 const KERNEL_TASK_PID_BASE: usize = 2000;
 
 #[repr(C, align(16))]
@@ -92,34 +92,52 @@ pub(crate) struct InboundMessage {
     pub ordinal: u64,
 }
 
-struct CpuMailbox {
-    writer: AtomicBool,
-    occupied: AtomicBool,
-    task_slot: AtomicUsize,
+// Dynamic user/kernel Tasks occupy their generation-indexed slots. PID 1 is
+// also a deliverable blocked-wake target even though its stable TaskRef does
+// not use either dynamic slot encoding.
+const PID1_INBOX_INDEX: usize = USER_TASK_SLOT_COUNT + KERNEL_TASK_SLOT_COUNT;
+const INBOX_SLOT_COUNT: usize = PID1_INBOX_INDEX + 1;
+const INBOX_EMPTY: u8 = 0;
+const INBOX_RESERVED: u8 = 1;
+const INBOX_PUBLISHED: u8 = 2;
+const INBOX_CONSUMING: u8 = 3;
+
+struct InboundSlot {
+    state: AtomicU8,
     task_generation: AtomicUsize,
     target_cpu: AtomicUsize,
     kind: AtomicUsize,
     ordinal: AtomicU64,
-    last_published: AtomicU64,
-    last_consumed: AtomicU64,
+}
+
+impl InboundSlot {
+    const fn new() -> Self {
+        Self {
+            state: AtomicU8::new(INBOX_EMPTY),
+            task_generation: AtomicUsize::new(0),
+            target_cpu: AtomicUsize::new(usize::MAX),
+            kind: AtomicUsize::new(0),
+            ordinal: AtomicU64::new(0),
+        }
+    }
+}
+
+struct CpuInbox {
+    slots: [InboundSlot; INBOX_SLOT_COUNT],
+    last_claimed_ordinal: AtomicU64,
+    max_consumed_ordinal: AtomicU64,
     need_resched: AtomicBool,
     ipi_sent: AtomicU64,
     ipi_received: AtomicU64,
     consumed: AtomicU64,
 }
 
-impl CpuMailbox {
+impl CpuInbox {
     const fn new() -> Self {
         Self {
-            writer: AtomicBool::new(false),
-            occupied: AtomicBool::new(false),
-            task_slot: AtomicUsize::new(0),
-            task_generation: AtomicUsize::new(0),
-            target_cpu: AtomicUsize::new(usize::MAX),
-            kind: AtomicUsize::new(0),
-            ordinal: AtomicU64::new(0),
-            last_published: AtomicU64::new(0),
-            last_consumed: AtomicU64::new(0),
+            slots: [const { InboundSlot::new() }; INBOX_SLOT_COUNT],
+            last_claimed_ordinal: AtomicU64::new(0),
+            max_consumed_ordinal: AtomicU64::new(0),
             need_resched: AtomicBool::new(false),
             ipi_sent: AtomicU64::new(0),
             ipi_received: AtomicU64::new(0),
@@ -128,7 +146,8 @@ impl CpuMailbox {
     }
 }
 
-static MAILBOXES: [CpuMailbox; MAX_CPUS] = [const { CpuMailbox::new() }; MAX_CPUS];
+static INBOXES: [CpuInbox; MAX_CPUS] = [const { CpuInbox::new() }; MAX_CPUS];
+static NEXT_AUTO_ORDINAL: AtomicU64 = AtomicU64::new(1);
 static NONIDENTITY_SWITCHES: [AtomicU64; MAX_CPUS] = [const { AtomicU64::new(0) }; MAX_CPUS];
 static IDENTITY_SCHEDULES: [AtomicU64; MAX_CPUS] = [const { AtomicU64::new(0) }; MAX_CPUS];
 static IDLE_RESTORES: [AtomicU64; MAX_CPUS] = [const { AtomicU64::new(0) }; MAX_CPUS];
@@ -183,6 +202,14 @@ pub(crate) fn create(
 }
 
 fn validate_published_target(task_ref: TaskRef, target_cpu: CpuRef) -> bool {
+    if task_ref.same_identity(TaskRef::KERNEL_INIT) {
+        return super::user_process_registry::global_registry()
+            .inbound_target_valid(task_ref, target_cpu);
+    }
+    if task_ref.is_user() {
+        return super::user_process_registry::global_registry()
+            .inbound_target_valid(task_ref, target_cpu);
+    }
     let Some(slot) = task_ref.kernel_slot() else {
         return false;
     };
@@ -195,57 +222,233 @@ fn validate_published_target(task_ref: TaskRef, target_cpu: CpuRef) -> bool {
     record.task.task_ref().same_identity(task_ref) && record.target_cpu == target_cpu
 }
 
-pub(crate) fn publish(
+fn validate_reservable_target(task_ref: TaskRef, target_cpu: CpuRef) -> bool {
+    if task_ref.same_identity(TaskRef::KERNEL_INIT) {
+        return super::user_process_registry::global_registry()
+            .inbound_target_valid(task_ref, target_cpu);
+    }
+    if task_ref.is_user() {
+        let registry = super::user_process_registry::global_registry();
+        return registry.inbound_target_valid(task_ref, target_cpu)
+            || registry.inbound_target_reservable(task_ref, target_cpu);
+    }
+    validate_published_target(task_ref, target_cpu)
+}
+
+fn inbox_index(task_ref: TaskRef) -> Option<usize> {
+    if task_ref.same_identity(TaskRef::KERNEL_INIT) {
+        Some(PID1_INBOX_INDEX)
+    } else if let Some(slot) = task_ref.user_slot() {
+        (slot < USER_TASK_SLOT_COUNT).then_some(slot)
+    } else {
+        let slot = task_ref.kernel_slot()?;
+        (slot < KERNEL_TASK_SLOT_COUNT).then_some(USER_TASK_SLOT_COUNT + slot)
+    }
+}
+
+fn task_ref_from_inbox_index(index: usize, generation: u32) -> Option<TaskRef> {
+    if index == PID1_INBOX_INDEX {
+        (generation == TaskRef::KERNEL_INIT.generation()).then_some(TaskRef::KERNEL_INIT)
+    } else if index < USER_TASK_SLOT_COUNT {
+        Some(TaskRef::user(index, generation))
+    } else {
+        let slot = index.checked_sub(USER_TASK_SLOT_COUNT)?;
+        (slot < KERNEL_TASK_SLOT_COUNT).then_some(TaskRef::kernel(slot, generation))
+    }
+}
+
+fn claim_ordinal(inbox: &CpuInbox, ordinal: u64) -> bool {
+    let mut current = inbox.last_claimed_ordinal.load(Ordering::Acquire);
+    loop {
+        if ordinal <= current {
+            return false;
+        }
+        match inbox.last_claimed_ordinal.compare_exchange_weak(
+            current,
+            ordinal,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => return true,
+            Err(observed) => current = observed,
+        }
+    }
+}
+
+pub(crate) struct InboxReservation {
+    logical_id: usize,
+    index: usize,
     task_ref: TaskRef,
     target_cpu: CpuRef,
     kind: InboundKind,
     ordinal: u64,
-) -> Result<(), &'static str> {
-    let cpu = target_cpu.logical_id();
-    if cpu == 0 || cpu >= MAX_CPUS || ordinal == 0 {
-        return Err("mailbox-target-or-ordinal");
+    coalesced: bool,
+}
+
+pub(crate) fn reserve_inbound(
+    task_ref: TaskRef,
+    target_cpu: CpuRef,
+    kind: InboundKind,
+    ordinal: u64,
+) -> Result<InboxReservation, &'static str> {
+    let logical_id = target_cpu.logical_id();
+    if logical_id >= MAX_CPUS || ordinal == 0 {
+        return Err("inbox-target-or-ordinal");
     }
-    if !validate_published_target(task_ref, target_cpu) {
-        return Err("mailbox-task-ref-or-generation");
+    if !validate_reservable_target(task_ref, target_cpu) {
+        return Err("inbox-task-ref-or-generation");
     }
-    let mailbox = &MAILBOXES[cpu];
-    if mailbox
-        .writer
-        .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+    let index = inbox_index(task_ref).ok_or("inbox-task-slot")?;
+    let inbox = &INBOXES[logical_id];
+    let slot = &inbox.slots[index];
+
+    let state = slot.state.load(Ordering::Acquire);
+    if state == INBOX_PUBLISHED
+        && slot.task_generation.load(Ordering::Relaxed) as u32 == task_ref.generation()
+        && slot.target_cpu.load(Ordering::Relaxed) == logical_id
+    {
+        if !claim_ordinal(inbox, ordinal) {
+            return Err("inbox-ordinal");
+        }
+        return Ok(InboxReservation {
+            logical_id,
+            index,
+            task_ref,
+            target_cpu,
+            kind,
+            ordinal,
+            coalesced: true,
+        });
+    }
+    if slot
+        .state
+        .compare_exchange(
+            INBOX_EMPTY,
+            INBOX_RESERVED,
+            Ordering::Acquire,
+            Ordering::Relaxed,
+        )
         .is_err()
     {
-        return Err("mailbox-producer-busy");
+        return Err("inbox-task-pending");
     }
-    if mailbox.occupied.load(Ordering::Acquire) {
-        mailbox.writer.store(false, Ordering::Release);
-        return Err("mailbox-full");
+    if !claim_ordinal(inbox, ordinal) {
+        slot.state.store(INBOX_EMPTY, Ordering::Release);
+        return Err("inbox-ordinal");
     }
-    if ordinal <= mailbox.last_published.load(Ordering::Acquire) {
-        mailbox.writer.store(false, Ordering::Release);
-        return Err("mailbox-ordinal");
-    }
-    // The lane carries the bounded registry index, not a concrete TaskRef
-    // encoding.  Reconstruction therefore remains owned by TaskRef.
-    mailbox.task_slot.store(
-        task_ref.kernel_slot().ok_or("mailbox-task-slot")?,
-        Ordering::Relaxed,
-    );
-    mailbox
-        .task_generation
+    slot.task_generation
         .store(task_ref.generation() as usize, Ordering::Relaxed);
-    mailbox.target_cpu.store(cpu, Ordering::Relaxed);
-    mailbox.kind.store(
+    slot.target_cpu.store(logical_id, Ordering::Relaxed);
+    slot.kind.store(
         match kind {
             InboundKind::Activate => 1,
             InboundKind::Wake => 2,
         },
         Ordering::Relaxed,
     );
-    mailbox.ordinal.store(ordinal, Ordering::Relaxed);
-    mailbox.last_published.store(ordinal, Ordering::Relaxed);
-    // This is the publication boundary paired with the target's acquire.
-    mailbox.occupied.store(true, Ordering::Release);
-    mailbox.writer.store(false, Ordering::Release);
+    slot.ordinal.store(ordinal, Ordering::Relaxed);
+    Ok(InboxReservation {
+        logical_id,
+        index,
+        task_ref,
+        target_cpu,
+        kind,
+        ordinal,
+        coalesced: false,
+    })
+}
+
+pub(crate) fn next_inbound_ordinal() -> u64 {
+    loop {
+        let ordinal = NEXT_AUTO_ORDINAL.fetch_add(1, Ordering::Relaxed);
+        if ordinal != 0 {
+            return ordinal;
+        }
+    }
+}
+
+pub(crate) fn publish_reserved_and_signal(
+    reservation: InboxReservation,
+    target_hartid: usize,
+) -> Result<(), &'static str> {
+    publish_reserved_and_signal_from(reservation, target_hartid, CpuRef::new(0))
+}
+
+pub(crate) fn publish_reserved_and_signal_from(
+    reservation: InboxReservation,
+    target_hartid: usize,
+    producer_cpu: CpuRef,
+) -> Result<(), &'static str> {
+    let logical_id = reservation.logical_id;
+    let newly_published = publish_reserved(reservation)?;
+    if newly_published && logical_id != producer_cpu.logical_id() {
+        crate::arch::riscv64::sbi::send_ipi(target_hartid).map_err(|_| "sbi-send-ipi")?;
+        mark_ipi_sent(logical_id);
+    }
+    Ok(())
+}
+
+pub(crate) fn publish_reserved(reservation: InboxReservation) -> Result<bool, &'static str> {
+    if reservation.coalesced {
+        return Ok(false);
+    }
+    let inbox = INBOXES
+        .get(reservation.logical_id)
+        .ok_or("inbox-reservation-cpu")?;
+    let slot = inbox
+        .slots
+        .get(reservation.index)
+        .ok_or("inbox-reservation-slot")?;
+    if slot.task_generation.load(Ordering::Relaxed) as u32 != reservation.task_ref.generation()
+        || slot.target_cpu.load(Ordering::Relaxed) != reservation.target_cpu.logical_id()
+        || slot.ordinal.load(Ordering::Relaxed) != reservation.ordinal
+        || slot.kind.load(Ordering::Relaxed)
+            != match reservation.kind {
+                InboundKind::Activate => 1,
+                InboundKind::Wake => 2,
+            }
+        || slot
+            .state
+            .compare_exchange(
+                INBOX_RESERVED,
+                INBOX_PUBLISHED,
+                Ordering::Release,
+                Ordering::Relaxed,
+            )
+            .is_err()
+    {
+        return Err("inbox-reservation-stale");
+    }
+    Ok(true)
+}
+
+pub(crate) fn rollback_reserved(reservation: InboxReservation) -> bool {
+    if reservation.coalesced {
+        return true;
+    }
+    INBOXES
+        .get(reservation.logical_id)
+        .and_then(|inbox| inbox.slots.get(reservation.index))
+        .is_some_and(|slot| {
+            slot.state
+                .compare_exchange(
+                    INBOX_RESERVED,
+                    INBOX_EMPTY,
+                    Ordering::Release,
+                    Ordering::Relaxed,
+                )
+                .is_ok()
+        })
+}
+
+pub(crate) fn publish(
+    task_ref: TaskRef,
+    target_cpu: CpuRef,
+    kind: InboundKind,
+    ordinal: u64,
+) -> Result<(), &'static str> {
+    let reservation = reserve_inbound(task_ref, target_cpu, kind, ordinal)?;
+    publish_reserved(reservation)?;
     Ok(())
 }
 
@@ -256,76 +459,108 @@ pub(crate) fn publish_and_ipi(
     kind: InboundKind,
     ordinal: u64,
 ) -> Result<(), &'static str> {
-    publish(task_ref, target_cpu, kind, ordinal)?;
-    crate::arch::riscv64::sbi::send_ipi(target_hartid).map_err(|_| "sbi-send-ipi")?;
-    mark_ipi_sent(target_cpu.logical_id());
+    let reservation = reserve_inbound(task_ref, target_cpu, kind, ordinal)?;
+    let newly_published = publish_reserved(reservation)?;
+    if newly_published {
+        crate::arch::riscv64::sbi::send_ipi(target_hartid).map_err(|_| "sbi-send-ipi")?;
+        mark_ipi_sent(target_cpu.logical_id());
+    }
     Ok(())
 }
 
 pub(crate) fn take_inbound(logical_id: usize) -> Option<InboundMessage> {
-    let mailbox = MAILBOXES.get(logical_id)?;
-    if !mailbox.occupied.load(Ordering::Acquire) {
+    let inbox = INBOXES.get(logical_id)?;
+    let mut selected = None;
+    let mut selected_ordinal = u64::MAX;
+    for (index, slot) in inbox.slots.iter().enumerate() {
+        if slot.state.load(Ordering::Acquire) == INBOX_PUBLISHED {
+            let ordinal = slot.ordinal.load(Ordering::Relaxed);
+            if ordinal < selected_ordinal {
+                selected = Some(index);
+                selected_ordinal = ordinal;
+            }
+        }
+    }
+    let index = selected?;
+    let slot = &inbox.slots[index];
+    if slot
+        .state
+        .compare_exchange(
+            INBOX_PUBLISHED,
+            INBOX_CONSUMING,
+            Ordering::Acquire,
+            Ordering::Relaxed,
+        )
+        .is_err()
+    {
         return None;
     }
-    let slot = mailbox.task_slot.load(Ordering::Relaxed);
-    let generation = mailbox.task_generation.load(Ordering::Relaxed) as u32;
-    let target = mailbox.target_cpu.load(Ordering::Relaxed);
-    let ordinal = mailbox.ordinal.load(Ordering::Relaxed);
-    let kind = match mailbox.kind.load(Ordering::Relaxed) {
+    let generation = slot.task_generation.load(Ordering::Relaxed) as u32;
+    let target = slot.target_cpu.load(Ordering::Relaxed);
+    let ordinal = slot.ordinal.load(Ordering::Relaxed);
+    let kind = match slot.kind.load(Ordering::Relaxed) {
         1 => Some(InboundKind::Activate),
         2 => Some(InboundKind::Wake),
         _ => None,
     };
-    // Consumption of the one physical slot is exact even when validation
-    // rejects its immutable payload; a malformed slot cannot poison the lane.
-    mailbox.occupied.store(false, Ordering::Release);
-    let task_ref = TaskRef::kernel(slot, generation);
+    // Exact consumption also clears malformed entries so they cannot poison
+    // a task's one-pending-notification slot.
+    slot.state.store(INBOX_EMPTY, Ordering::Release);
+    let task_ref = task_ref_from_inbox_index(index, generation)?;
     let message = InboundMessage {
         task_ref,
         target_cpu: CpuRef::new(target),
         kind: kind?,
         ordinal,
     };
-    let fresh = target == logical_id
-        && validate_published_target(task_ref, message.target_cpu)
-        && ordinal > mailbox.last_consumed.load(Ordering::Relaxed);
+    // Ordinals are uniquely and monotonically claimed when each per-Task
+    // slot is reserved, but independent reservations may be published in a
+    // different order. The claimed slot state is therefore the exact-once
+    // authority; a global consumed watermark cannot reject a lower, still
+    // published ordinal after a higher ordinal was consumed first.
+    let fresh = target == logical_id && validate_published_target(task_ref, message.target_cpu);
     if !fresh {
         return None;
     }
-    mailbox.last_consumed.store(ordinal, Ordering::Release);
-    mailbox.consumed.fetch_add(1, Ordering::Relaxed);
+    inbox
+        .max_consumed_ordinal
+        .fetch_max(ordinal, Ordering::Release);
+    inbox.consumed.fetch_add(1, Ordering::Relaxed);
     Some(message)
 }
 
 pub(crate) fn has_inbound(logical_id: usize) -> bool {
-    MAILBOXES
-        .get(logical_id)
-        .is_some_and(|mailbox| mailbox.occupied.load(Ordering::Acquire))
+    INBOXES.get(logical_id).is_some_and(|inbox| {
+        inbox
+            .slots
+            .iter()
+            .any(|slot| slot.state.load(Ordering::Acquire) == INBOX_PUBLISHED)
+    })
 }
 
 pub(crate) fn mark_ipi_sent(logical_id: usize) {
-    if let Some(mailbox) = MAILBOXES.get(logical_id) {
-        mailbox.ipi_sent.fetch_add(1, Ordering::Relaxed);
+    if let Some(inbox) = INBOXES.get(logical_id) {
+        inbox.ipi_sent.fetch_add(1, Ordering::Relaxed);
     }
 }
 
 pub(crate) fn handle_reschedule_ipi(logical_id: usize) {
-    if let Some(mailbox) = MAILBOXES.get(logical_id) {
-        mailbox.need_resched.store(true, Ordering::Release);
-        mailbox.ipi_received.fetch_add(1, Ordering::Relaxed);
+    if let Some(inbox) = INBOXES.get(logical_id) {
+        inbox.need_resched.store(true, Ordering::Release);
+        inbox.ipi_received.fetch_add(1, Ordering::Relaxed);
     }
 }
 
 pub(crate) fn take_need_resched(logical_id: usize) -> bool {
-    MAILBOXES
+    INBOXES
         .get(logical_id)
-        .is_some_and(|mailbox| mailbox.need_resched.swap(false, Ordering::AcqRel))
+        .is_some_and(|inbox| inbox.need_resched.swap(false, Ordering::AcqRel))
 }
 
 pub(crate) fn need_resched_pending(logical_id: usize) -> bool {
-    MAILBOXES
+    INBOXES
         .get(logical_id)
-        .is_some_and(|mailbox| mailbox.need_resched.load(Ordering::Acquire))
+        .is_some_and(|inbox| inbox.need_resched.load(Ordering::Acquire))
 }
 
 pub(crate) fn record_nonidentity_switch(logical_id: usize) {
@@ -464,11 +699,11 @@ fn fail_stop(reason: &'static str) -> ! {
 
 #[cfg(app_smoke)]
 pub(crate) fn counters(logical_id: usize) -> Option<(u64, u64, u64)> {
-    let mailbox = MAILBOXES.get(logical_id)?;
+    let inbox = INBOXES.get(logical_id)?;
     Some((
-        mailbox.ipi_sent.load(Ordering::Acquire),
-        mailbox.ipi_received.load(Ordering::Acquire),
-        mailbox.consumed.load(Ordering::Acquire),
+        inbox.ipi_sent.load(Ordering::Acquire),
+        inbox.ipi_received.load(Ordering::Acquire),
+        inbox.consumed.load(Ordering::Acquire),
     ))
 }
 

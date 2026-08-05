@@ -113,6 +113,12 @@ int main(int argc, char **argv)
 		return rc;
 	}
 
+	rc = RUN_CASE("preempt", smoke_preempt);
+	if (rc != 0) {
+		(void)SAY_STATUS("user-smoke: end status=", rc, "\n");
+		return rc;
+	}
+
 	rc = RUN_CASE("process_identity", smoke_process_identity);
 	if (rc != 0) {
 		(void)SAY_STATUS("user-smoke: end status=", rc, "\n");

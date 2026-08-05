@@ -26,12 +26,14 @@ use super::{
 
 const SCAUSE_INTERRUPT_BIT: usize = 1usize << (usize::BITS as usize - 1);
 pub const TRAP_FRAME_SIZE: usize = 36 * core::mem::size_of::<usize>();
+pub const TRAP_FRAME_SSTATUS_OFFSET: usize = 32 * core::mem::size_of::<usize>();
+pub const TRAP_FRAME_SEPC_OFFSET: usize = 33 * core::mem::size_of::<usize>();
 pub const TRAP_EXECUTION_RECORD_SIZE: usize = core::mem::size_of::<TrapExecutionRecord>();
 pub const TRAP_STACK_RECORD_SIZE: usize = (TRAP_FRAME_SIZE + TRAP_EXECUTION_RECORD_SIZE + 15) & !15;
 #[cfg_attr(not(app_user_boot), allow(dead_code))]
 pub const USER_TRAP_ENTRY_CONTEXT_SIZE: usize = core::mem::size_of::<TrapEntryContext>();
 #[cfg_attr(not(any(app_smoke, app_user_boot)), allow(dead_code))]
-pub const KERNEL_TRAP_THREAD_SHIFT: usize = 14;
+pub const KERNEL_TRAP_THREAD_SHIFT: usize = 15;
 pub const KERNEL_TRAP_OVERFLOW_STACK_SIZE: usize = 4096;
 const TRAP_ENTRY_CONTEXT_MAGIC: usize = 0x5452_4150_4354_5838;
 const TRAP_ENTRY_CONTEXT_MAGIC_OFFSET: usize = 0;
@@ -54,6 +56,14 @@ const TRAP_ENTRY_CONTEXT_SAVED_T6_OFFSET: usize = 112;
 static FORMAL_TRAP_ENTRY_CONTEXTS: [AtomicUsize; MAX_CPUS] =
     [const { AtomicUsize::new(0) }; MAX_CPUS];
 
+#[cfg(app_smoke)]
+static NEXT_FORMAL_ENTRY_DIAGNOSTIC: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(app_smoke)]
+pub(crate) fn arm_next_formal_entry_diagnostic() {
+    NEXT_FORMAL_ENTRY_DIAGNOSTIC.store(1, Ordering::Release);
+}
+
 struct TrapObservation {
     roots_completed: AtomicUsize,
     interrupts_completed: AtomicUsize,
@@ -61,6 +71,10 @@ struct TrapObservation {
     ssip_completed: AtomicUsize,
     return_tokens_consumed: AtomicUsize,
     leaf_switch_resumes: AtomicUsize,
+    user_safe_points: AtomicUsize,
+    user_tick_pending: AtomicUsize,
+    user_competitor_seen: AtomicUsize,
+    user_schedules: AtomicUsize,
     last_generation: AtomicU32,
 }
 
@@ -73,6 +87,10 @@ impl TrapObservation {
             ssip_completed: AtomicUsize::new(0),
             return_tokens_consumed: AtomicUsize::new(0),
             leaf_switch_resumes: AtomicUsize::new(0),
+            user_safe_points: AtomicUsize::new(0),
+            user_tick_pending: AtomicUsize::new(0),
+            user_competitor_seen: AtomicUsize::new(0),
+            user_schedules: AtomicUsize::new(0),
             last_generation: AtomicU32::new(0),
         }
     }
@@ -113,6 +131,17 @@ pub(crate) fn record_leaf_switch_resume(logical_id: usize) {
             .leaf_switch_resumes
             .fetch_add(1, Ordering::Relaxed);
     }
+}
+
+#[cfg(checkpoint_handler_user_syscall_trace)]
+pub(crate) fn user_safe_point_counters(logical_id: usize) -> Option<(usize, usize, usize, usize)> {
+    let observation = TRAP_OBSERVATIONS.get(logical_id)?;
+    Some((
+        observation.user_safe_points.load(Ordering::Acquire),
+        observation.user_tick_pending.load(Ordering::Acquire),
+        observation.user_competitor_seen.load(Ordering::Acquire),
+        observation.user_schedules.load(Ordering::Acquire),
+    ))
 }
 
 #[repr(C, align(16))]
@@ -508,6 +537,24 @@ formal_event_entry_cpu\index:
     j       .Lformal_event_entry_common
     .endm
 
+    .macro FORMAL_PRINT_HEX reg
+    mv      t2, \reg
+    li      t3, 60
+.Lformal_hex_loop_\@:
+    srl     t4, t2, t3
+    andi    a0, t4, 15
+    li      t5, 10
+    bltu    a0, t5, .Lformal_hex_digit_\@
+    addi    a0, a0, 87
+    j       .Lformal_hex_emit_\@
+.Lformal_hex_digit_\@:
+    addi    a0, a0, 48
+.Lformal_hex_emit_\@:
+    ecall
+    addi    t3, t3, -4
+    bgez    t3, .Lformal_hex_loop_\@
+    .endm
+
     FORMAL_CPU_ENTRY 1, 8
     FORMAL_CPU_ENTRY 2, 16
     FORMAL_CPU_ENTRY 3, 24
@@ -526,7 +573,7 @@ formal_event_entry_cpu\index:
 
 .Lformal_event_entry_common:
     /* sscratch now holds the interrupted tp; tp locates this CPU's context. */
-    beqz    tp, .Lformal_event_entry_direct_shutdown
+    beqz    tp, .Lformal_event_entry_context_null
     sd      sp, {context_saved_sp_offset}(tp)
     sd      t6, {context_saved_t6_offset}(tp)
     sd      t0, {context_saved_t0_offset}(tp)
@@ -539,7 +586,7 @@ formal_event_entry_cpu\index:
 
     ld      t0, {context_magic_offset}(t6)
     li      t1, {context_magic}
-    bne     t0, t1, .Lformal_event_entry_direct_shutdown
+    bne     t0, t1, .Lformal_event_entry_bad_magic
     csrr    t0, sstatus
     andi    t0, t0, {sstatus_spp}
     bnez    t0, .Lformal_event_entry_kernel
@@ -560,8 +607,72 @@ formal_event_entry_cpu\index:
     j       formal_event_entry_save_context
 
 .Lformal_event_entry_overflow:
+    /* Emit the failing CPU and bound class before touching the emergency
+     * stack.  This survives even when the emergency stack itself cannot run
+     * the Rust terminal diagnostic. Format: V<cpu-hex><L|H|R>. */
+    li      a7, 1
+    li      a6, 0
+    li      a0, 86
+    ecall
+    ld      a0, {context_cpu_offset}(t6)
+    li      t0, 10
+    bltu    a0, t0, 7f
+    addi    a0, a0, 87
+    j       8f
+7:  addi    a0, a0, 48
+8:  ecall
+    ld      t0, {context_saved_sp_offset}(t6)
+    ld      t1, {context_stack_base_offset}(t6)
+    bltu    t0, t1, 9f
+    ld      t1, {context_stack_top_offset}(t6)
+    bltu    t1, t0, 10f
+    li      a0, 82
+    j       11f
+9:  li      a0, 76
+    j       11f
+10: li      a0, 72
+11: ecall
+    li      a0, 32
+    ecall
+    ld      t0, {context_saved_sp_offset}(t6)
+    ld      t1, {context_stack_base_offset}(t6)
+    sub     t0, t0, t1
+    FORMAL_PRINT_HEX t0
+    li      a0, 47
+    ecall
+    li      t0, {trap_stack_record_size}
+    FORMAL_PRINT_HEX t0
+    li      a0, 43
+    ecall
+    ld      t0, {context_stack_top_offset}(t6)
+    ld      t1, {context_saved_sp_offset}(t6)
+    sub     t0, t0, t1
+    FORMAL_PRINT_HEX t0
+    li      a0, 10
+    ecall
+    /* Preserve the original trap boundary even if the emergency path itself
+     * faults before its Rust diagnostic can run. Format:
+     * S<scause>/E<sepc>/T<stval>. */
+    li      a0, 83
+    ecall
+    csrr    t0, scause
+    FORMAL_PRINT_HEX t0
+    li      a0, 47
+    ecall
+    li      a0, 69
+    ecall
+    csrr    t0, sepc
+    FORMAL_PRINT_HEX t0
+    li      a0, 47
+    ecall
+    li      a0, 84
+    ecall
+    csrr    t0, stval
+    FORMAL_PRINT_HEX t0
+    li      a0, 10
+    ecall
     ld      t0, {context_emergency_active_offset}(t6)
-    bnez    t0, .Lformal_event_entry_direct_shutdown
+    bnez    t0, .Lformal_event_entry_nested_overflow
     li      t0, 1
     sd      t0, {context_emergency_active_offset}(t6)
     ld      sp, {context_emergency_top_offset}(t6)
@@ -621,7 +732,20 @@ formal_event_entry_cpu\index:
     wfi
     j       .Lformal_event_entry_overflow_returned
 
+.Lformal_event_entry_context_null:
+    li      a0, 67              /* C: no CPU-local TrapEntryContext */
+    j       .Lformal_event_entry_direct_shutdown
+.Lformal_event_entry_bad_magic:
+    li      a0, 77              /* M: corrupt/unpublished context */
+    j       .Lformal_event_entry_direct_shutdown
+.Lformal_event_entry_nested_overflow:
+    li      a0, 79              /* O: emergency stack re-entered */
 .Lformal_event_entry_direct_shutdown:
+    li      a7, 1               /* legacy console_putchar */
+    li      a6, 0
+    ecall
+    li      a0, 10
+    ecall
     li      a7, 0x53525354
     li      a6, 0
     li      a0, 0
@@ -635,6 +759,7 @@ formal_event_entry_cpu\index:
     trap_stack_record_size = const TRAP_STACK_RECORD_SIZE,
     context_magic = const TRAP_ENTRY_CONTEXT_MAGIC,
     context_magic_offset = const TRAP_ENTRY_CONTEXT_MAGIC_OFFSET,
+    context_cpu_offset = const TRAP_ENTRY_CONTEXT_CPU_OFFSET,
     context_task_offset = const TRAP_ENTRY_CONTEXT_TASK_OFFSET,
     context_stack_base_offset = const TRAP_ENTRY_CONTEXT_STACK_BASE_OFFSET,
     context_stack_top_offset = const TRAP_ENTRY_CONTEXT_STACK_TOP_OFFSET,
@@ -821,6 +946,20 @@ extern "C" fn formal_event_entry_rust(
     frame: &mut TrapFrame,
     entry_context: &TrapEntryContext,
 ) -> usize {
+    #[cfg(app_smoke)]
+    if NEXT_FORMAL_ENTRY_DIAGNOSTIC.swap(0, Ordering::AcqRel) != 0 {
+        crate::arch::riscv64::sbi::putstr("armed formal trap reached Rust cpu=");
+        sbi_put_hex(entry_context.cpu_logical_id());
+        crate::arch::riscv64::sbi::putstr(" task=");
+        sbi_put_hex(entry_context.task_identity());
+        crate::arch::riscv64::sbi::putstr(" scause=");
+        sbi_put_hex(frame.scause);
+        crate::arch::riscv64::sbi::putstr(" sepc=");
+        sbi_put_hex(frame.sepc);
+        crate::arch::riscv64::sbi::putstr(" stval=");
+        sbi_put_hex(frame.stval);
+        crate::arch::riscv64::sbi::putstr("\n");
+    }
     let record_ptr = unsafe {
         (frame as *mut TrapFrame)
             .cast::<u8>()
@@ -1413,6 +1552,9 @@ fn dispatch_interrupt_occurrence(
     record.interrupt.setup_after_handler()?;
     record.interrupt.enable()?;
     record.interrupt.disable()?;
+    if frame.sstatus & csr::SSTATUS_SPP == 0 {
+        schedule_from_user_return_boundary(record.root.flow_ref(), entry)?;
+    }
     record.interrupt.cleanup()?;
     if let Some(observation) = TRAP_OBSERVATIONS.get(entry.cpu_ref.logical_id()) {
         observation
@@ -1430,6 +1572,7 @@ fn dispatch_exception_occurrence(
     frame: &mut TrapFrame,
     entry: TrapEntryAuthority,
 ) -> EventResult {
+    let from_user = frame.sstatus & csr::SSTATUS_SPP == 0;
     let address = core::ptr::addr_of!(record.exception) as usize;
     record.exception.declare_and_bind(
         entry.generation,
@@ -1455,7 +1598,6 @@ fn dispatch_exception_occurrence(
                 entry.cpu_ref,
                 entry.page_fault_state,
             )?;
-            let from_user = frame.sstatus & csr::SSTATUS_SPP == 0;
             record
                 .page_fault
                 .preset(frame.scause, frame.stval, from_user)?;
@@ -1489,6 +1631,9 @@ fn dispatch_exception_occurrence(
             }
             record.page_fault.enable_after_handler()?;
             record.page_fault.disable()?;
+            if from_user {
+                schedule_from_user_return_boundary(record.root.flow_ref(), entry)?;
+            }
             record.page_fault.cleanup()?;
             child_ref
         }
@@ -1507,6 +1652,9 @@ fn dispatch_exception_occurrence(
             crate::objects::exception_type::dispatch_trap(frame);
             record.syscall.enable_after_handler()?;
             record.syscall.disable()?;
+            if from_user {
+                schedule_from_user_return_boundary(record.root.flow_ref(), entry)?;
+            }
             record.syscall.cleanup()?;
             child_ref
         }
@@ -1525,6 +1673,9 @@ fn dispatch_exception_occurrence(
             record.breakpoint.setup_after_hook()?;
             record.breakpoint.enable()?;
             record.breakpoint.disable()?;
+            if from_user {
+                schedule_from_user_return_boundary(record.root.flow_ref(), entry)?;
+            }
             record.breakpoint.cleanup()?;
             child_ref
         }
@@ -1543,6 +1694,9 @@ fn dispatch_exception_occurrence(
             crate::objects::exception_type::dispatch_trap(frame);
             record.unexpected.enable()?;
             record.unexpected.disable()?;
+            if from_user {
+                schedule_from_user_return_boundary(record.root.flow_ref(), entry)?;
+            }
             record.unexpected.cleanup()?;
             child_ref
         }
@@ -1560,6 +1714,206 @@ fn dispatch_exception_occurrence(
             .fetch_add(1, Ordering::Relaxed);
     }
     record.root.mark_child_completed(exception_ref)
+}
+
+fn schedule_from_user_return_boundary(
+    root_ref: super::trap_flow_type::TrapFlowRef,
+    entry: TrapEntryAuthority,
+) -> EventResult {
+    schedule_from_user_safe_point(
+        root_ref,
+        entry.runtime,
+        entry.task_ref,
+        entry.task_flow_ref,
+        entry.cpu_ref,
+        entry.context_epoch,
+        "post_disable_pre_cleanup",
+    )
+}
+
+pub(crate) fn schedule_from_blocking_user_continuation(
+    logical_id: usize,
+    current_task_ref: TaskRef,
+) -> EventResult {
+    let address = TrapType::installed_entry_context_address(logical_id);
+    if address == 0 {
+        return Err(user_safe_point_failed(
+            "blocking_syscall_pre_sleep",
+            "installed entry context missing",
+        ));
+    }
+    // SAFETY: the CPU-local formal entry-context slot release-publishes the
+    // stable context embedded in that CPU's TrapType. TrapRuntimeLease::open
+    // validates it against the current Scheduler/Task/Flow binding.
+    let entry_context = unsafe { &*(address as *const TrapEntryContext) };
+    let runtime =
+        crate::context::TrapRuntimeLease::open(entry_context).map_err(|first_failed| {
+            user_safe_point_failed("blocking_syscall_pre_sleep", first_failed)
+        })?;
+    let task_access = runtime.task_access();
+    let task_ref = task_access.task_ref();
+    let task_flow_ref = task_access.flow_ref();
+    let cpu_ref = runtime.cpu_ref();
+    if cpu_ref.logical_id() != logical_id || !task_ref.same_identity(current_task_ref) {
+        return Err(user_safe_point_failed(
+            "blocking_syscall_pre_sleep",
+            "current Task/CPU does not match wait continuation",
+        ));
+    }
+    let root_ref = task_access.root_trap_flow_ref();
+    if !root_ref.is_valid() {
+        return Err(user_safe_point_failed(
+            "blocking_syscall_pre_sleep",
+            "active syscall root missing",
+        ));
+    }
+    let context_epoch = task_access.context_epoch().ok_or_else(|| {
+        user_safe_point_failed("blocking_syscall_pre_sleep", "context epoch missing")
+    })?;
+    schedule_from_user_safe_point(
+        root_ref,
+        runtime,
+        task_ref,
+        task_flow_ref,
+        cpu_ref,
+        context_epoch,
+        "blocking_syscall_pre_sleep",
+    )
+}
+
+fn schedule_from_user_safe_point(
+    root_ref: super::trap_flow_type::TrapFlowRef,
+    runtime: crate::context::TrapRuntimeLease,
+    task_ref: TaskRef,
+    task_flow_ref: TaskFlowRef,
+    cpu_ref: CpuRef,
+    entry_context_epoch: u64,
+    diagnostic_step: &'static str,
+) -> EventResult {
+    if !runtime.revalidate_current() {
+        let entry_context = unsafe { &*runtime.entry_context() };
+        let current = crate::context::TrapRuntimeLease::open(entry_context)
+            .map_err(|first_failed| user_safe_point_failed(diagnostic_step, first_failed))?;
+        if current.committed_terminal_switch_from(task_ref) {
+            return Ok(());
+        }
+        return Err(user_safe_point_failed(
+            diagnostic_step,
+            "entry task changed without terminal handoff",
+        ));
+    }
+
+    let logical_id = cpu_ref.logical_id();
+    let mut consumed_inbound = false;
+    while crate::objects::kernel_task::has_inbound(logical_id) {
+        crate::context::process_smp_inbound(logical_id).map_err(|error| {
+            user_safe_point_stage(error, diagnostic_step, "drain visible inbox")
+        })?;
+        consumed_inbound = true;
+    }
+    let ipi_pending = crate::objects::kernel_task::need_resched_pending(logical_id);
+    let tick_pending = super::scheduler_clockevent::need_resched_pending(logical_id);
+    if !consumed_inbound && !ipi_pending && !tick_pending {
+        return Ok(());
+    }
+    if let Some(observation) = TRAP_OBSERVATIONS.get(logical_id) {
+        observation.user_safe_points.fetch_add(1, Ordering::Relaxed);
+        if tick_pending {
+            observation
+                .user_tick_pending
+                .fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    let has_competitor = crate::context::smp_has_runnable_competitor(logical_id, task_ref)
+        .map_err(|error| {
+            user_safe_point_stage(
+                error,
+                diagnostic_step,
+                "current/runqueue competitor preflight",
+            )
+        })?;
+    if has_competitor && let Some(observation) = TRAP_OBSERVATIONS.get(logical_id) {
+        observation
+            .user_competitor_seen
+            .fetch_add(1, Ordering::Relaxed);
+    }
+    let _ = crate::objects::kernel_task::take_need_resched(logical_id);
+    if !has_competitor {
+        if tick_pending {
+            super::scheduler_clockevent::renew_identity_slice(logical_id);
+        }
+        return Ok(());
+    }
+    if tick_pending {
+        let _ = super::scheduler_clockevent::take_need_resched(logical_id);
+    }
+
+    if let Some(observation) = TRAP_OBSERVATIONS.get(logical_id) {
+        observation.user_schedules.fetch_add(1, Ordering::Relaxed);
+    }
+
+    crate::context::schedule_smp_current(logical_id, task_ref)
+        .map_err(|error| user_safe_point_stage(error, diagnostic_step, "scheduler round trip"))?;
+    if !runtime.revalidate_current() {
+        return Err(user_safe_point_failed(
+            diagnostic_step,
+            "entry task/flow/CPU revalidation after schedule",
+        ));
+    }
+    let task_access = runtime.task_access();
+    if !task_access.root_trap_flow_ref().same_identity(root_ref) {
+        return Err(user_safe_point_failed(
+            diagnostic_step,
+            "root generation revalidation after schedule",
+        ));
+    }
+    let context_epoch = task_access
+        .context_epoch()
+        .ok_or_else(|| user_safe_point_failed(diagnostic_step, "context epoch after schedule"))?;
+    let active_leaf_valid = if context_epoch == entry_context_epoch {
+        TrapFlowType::active_leaf_matches(root_ref, task_ref, task_flow_ref, cpu_ref)
+    } else {
+        TrapFlowType::active_leaf_resumed(root_ref, task_ref, task_flow_ref, cpu_ref, context_epoch)
+    };
+    if !active_leaf_valid {
+        return Err(user_safe_point_failed(
+            diagnostic_step,
+            "active leaf and Enter proof after schedule",
+        ));
+    }
+    Ok(())
+}
+
+fn user_safe_point_failed(diagnostic_step: &'static str, first_failed: &'static str) -> EventError {
+    EventError::failed(
+        EventErrorCode::ConditionFailed,
+        LifecycleEvent::Disable,
+        State::Offline,
+        State::Offline,
+        State::Destroyed,
+    )
+    .with_diagnostic(FailureDiagnostic::new(
+        "UserReturnPreemption",
+        diagnostic_step,
+        "SchedulerClockevent",
+        "CPU-local inbox/tick scheduling and trap-overlay round trip",
+        first_failed,
+    ))
+}
+
+fn user_safe_point_stage(
+    error: EventError,
+    diagnostic_step: &'static str,
+    first_failed: &'static str,
+) -> EventError {
+    error.with_diagnostic_if_absent(FailureDiagnostic::new(
+        "UserReturnPreemption",
+        diagnostic_step,
+        "SchedulerClockevent",
+        "CPU-local inbox/tick scheduling and trap-overlay round trip",
+        first_failed,
+    ))
 }
 
 fn schedule_from_kernel_page_fault(

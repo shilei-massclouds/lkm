@@ -321,6 +321,11 @@ impl SmokeScenario for UserBootElfScenario {
                 )
                 .is_ok(),
         );
+        assertions.assert(
+            "PID1 address-space binding",
+            ctx.user_task_set
+                .bind_kernel_init_address_space(&ctx.user_address_space),
+        );
 
         let elf = &ctx.elf_object;
         assertions.assert("elf online", elf.state() == State::Online);
@@ -1793,7 +1798,7 @@ fn exercise_kernel_trap_overflow_contract(assertions: &mut SmokeAssertions) {
         core::mem::size_of::<TrapFrame>() == TRAP_FRAME_SIZE
             && TRAP_FRAME_SIZE == 288
             && TRAP_STACK_RECORD_SIZE > TRAP_FRAME_SIZE
-            && KERNEL_TRAP_THREAD_SHIFT == 14
+            && KERNEL_TRAP_THREAD_SHIFT == 15
             && kernel_trap_overflow_stack_base().is_multiple_of(16)
             && kernel_trap_overflow_stack_top()
                 == kernel_trap_overflow_stack_base() + KERNEL_TRAP_OVERFLOW_STACK_SIZE,
@@ -2684,6 +2689,25 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
     {
         let ctx = context();
         let active = ctx.user_task_set.active_task_ref();
+        let continuation_address =
+            exercise_pid1_plain_fork_builtin_grandchild as *const () as usize;
+        let continuation_mapping = ctx
+            .user_address_space
+            .sv39_mapping_diagnostic(continuation_address, &ctx.page_metadata_map);
+        if !continuation_mapping.executable() {
+            print_sv39_mapping_diagnostic("child continuation", continuation_mapping);
+            assertions.assert("pid1 plain fork child kernel continuation mapped", false);
+            return;
+        }
+        let stvec = crate::arch::riscv64::csr::read_stvec();
+        let stvec_mapping = ctx
+            .user_address_space
+            .sv39_mapping_diagnostic(stvec, &ctx.page_metadata_map);
+        if !stvec_mapping.executable() {
+            print_sv39_mapping_diagnostic("child stvec", stvec_mapping);
+            assertions.assert("pid1 plain fork child stvec mapped", false);
+            return;
+        }
         if ctx.commit_user_dispatch(active).is_err() {
             assertions.assert("pid1 plain fork dispatch", false);
             return;
@@ -2945,6 +2969,18 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
         };
         handoff
     };
+    {
+        let ctx = context();
+        let stvec = crate::arch::riscv64::csr::read_stvec();
+        let mapping = ctx
+            .user_address_space
+            .sv39_mapping_diagnostic(stvec, &ctx.page_metadata_map);
+        if !mapping.executable() {
+            print_sv39_mapping_diagnostic("nested child stvec before dispatch", mapping);
+            assertions.assert("nested child kernel entry mapped before dispatch", false);
+            return;
+        }
+    }
     if !context()
         .kernel_init_user_state
         .switch_observed_child_process_visible(inner_parent_pid, inner_child_pid)
@@ -3024,6 +3060,7 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
         first_exec.is_some_and(|success| success.retired_pages_released != 0)
             && first_exec_closed_child_fd
             && context().user_address_space.satp_token() != script_satp
+            && crate::arch::riscv64::csr::read_satp() == context().user_address_space.satp_token()
             && !context()
                 .user_task_set
                 .builtin_grandchild_parent_exec_snapshot_saved()
@@ -3072,6 +3109,7 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
         "builtin grandchild consecutive exec releases intermediate image",
         second_exec.is_some_and(|success| success.retired_pages_released != 0)
             && context().user_address_space.satp_token() != first_exec_satp
+            && crate::arch::riscv64::csr::read_satp() == context().user_address_space.satp_token()
             && context()
                 .user_task_set
                 .builtin_grandchild_parent_exec_satp()
@@ -3106,6 +3144,7 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
             assertions.assert("builtin grandchild CurrentTask resolves before exit", false);
             return;
         };
+        let swapper_satp = ctx.vm.swapper_vm().satp();
         let Some((parent_frame, _, child_pid, parent_pid)) =
             ctx.user_task_set.child_exit_to_observed_child_parent_wait(
                 &mut ctx.user_address_space,
@@ -3114,6 +3153,7 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
                     &mut ctx.exec_transaction.retired_address_space,
                     &mut ctx.exec_transaction.retired_stack,
                 ),
+                swapper_satp,
                 &mut ctx.page_allocator,
                 &ctx.page_metadata_map,
                 0,
@@ -3122,6 +3162,10 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
             assertions.assert("builtin grandchild exits to pipe-read parent", false);
             return;
         };
+        if crate::arch::riscv64::csr::read_satp() != swapper_satp {
+            assertions.assert("builtin grandchild exit activates SwapperVm", false);
+            return;
+        }
         if child_pid != first_grandchild_pid || parent_pid != outer_child_pid {
             assertions.assert("builtin grandchild exit identity", false);
             return;
@@ -3183,6 +3227,9 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
     let mut pipe_data = [0u8; 9];
     let pipe_read = context().files_struct.read_fd(pipe_pair[0], &mut pipe_data);
     let pipe_eof = context().files_struct.read_fd(pipe_pair[0], &mut pipe_data);
+    if pipe_eof != Ok(0) {
+        print_pipe_state_diagnostic(context().files_struct.pipe_state_diagnostic());
+    }
     if context().files_struct.close_fd(pipe_pair[0]).is_err() {
         assertions.assert("builtin grandchild parent closes pipe reader", false);
         return;
@@ -3319,9 +3366,11 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
             assertions.assert("plain child CurrentTask resolves before exit", false);
             return;
         };
+        let swapper_satp = ctx.vm.swapper_vm().satp();
         let Some((parent_frame, _, child_pid)) = ctx.user_task_set.child_exit_to_parent_wait(
             &mut ctx.user_address_space,
             &mut ctx.user_stack,
+            swapper_satp,
             &mut ctx.page_allocator,
             &ctx.page_metadata_map,
             0,
@@ -3329,6 +3378,10 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
             assertions.assert("pid1 plain child exits to outer parent", false);
             return;
         };
+        if crate::arch::riscv64::csr::read_satp() != swapper_satp {
+            assertions.assert("pid1 plain child exit activates SwapperVm", false);
+            return;
+        }
         (parent_frame, child_pid, exiting_task)
     };
     {
@@ -3358,6 +3411,73 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
             && outer_parent_frame.sepc == 0x9010
             && context().user_task_set.active_task_record_available(),
     );
+}
+
+fn print_sv39_mapping_diagnostic(
+    label: &str,
+    diagnostic: crate::objects::user_boot::Sv39MappingDiagnostic,
+) {
+    crate::arch::riscv64::sbi::putstr("sv39 mapping failure ");
+    crate::arch::riscv64::sbi::putstr(label);
+    crate::arch::riscv64::sbi::putstr("\naddress=");
+    print_sv39_hex(diagnostic.address());
+    crate::arch::riscv64::sbi::putstr("mm_satp=");
+    print_sv39_hex(diagnostic.satp_token());
+    crate::arch::riscv64::sbi::putstr("root_phys=");
+    print_sv39_hex(diagnostic.root_phys());
+    crate::arch::riscv64::sbi::putstr("root_linear=");
+    print_sv39_hex(diagnostic.root_linear());
+    crate::arch::riscv64::sbi::putstr("root_pte=");
+    print_sv39_hex(diagnostic.root_pte());
+    crate::arch::riscv64::sbi::putstr("l1_pte=");
+    print_sv39_hex(diagnostic.l1_pte());
+    crate::arch::riscv64::sbi::putstr("l0_pte=");
+    print_sv39_hex(diagnostic.l0_pte());
+    crate::arch::riscv64::sbi::putstr("walked_levels=");
+    print_sv39_hex(diagnostic.walked_levels());
+    crate::arch::riscv64::sbi::putstr("terminal_level=");
+    print_sv39_hex(diagnostic.terminal_level().unwrap_or(usize::MAX));
+}
+
+fn print_pipe_state_diagnostic(diagnostic: crate::objects::files::PipeStateDiagnostic) {
+    crate::arch::riscv64::sbi::putstr("pipe EOF failure diagnostic\nlocal_readers=");
+    print_sv39_hex(diagnostic.local_readers);
+    crate::arch::riscv64::sbi::putstr("local_writers=");
+    print_sv39_hex(diagnostic.local_writers);
+    crate::arch::riscv64::sbi::putstr("shared_present=");
+    print_sv39_hex(diagnostic.shared_present as usize);
+    crate::arch::riscv64::sbi::putstr("shared_len=");
+    print_sv39_hex(diagnostic.shared_len);
+    crate::arch::riscv64::sbi::putstr("shared_readers=");
+    print_sv39_hex(diagnostic.shared_readers);
+    crate::arch::riscv64::sbi::putstr("shared_writers=");
+    print_sv39_hex(diagnostic.shared_writers);
+    crate::arch::riscv64::sbi::putstr("snapshot_live=");
+    print_sv39_hex(diagnostic.snapshot_live);
+    crate::arch::riscv64::sbi::putstr("snapshot_read_live=");
+    print_sv39_hex(diagnostic.snapshot_read_live);
+    crate::arch::riscv64::sbi::putstr("snapshot_write_live=");
+    print_sv39_hex(diagnostic.snapshot_write_live);
+}
+
+fn print_sv39_hex(value: usize) {
+    let mut buffer = [0u8; 19];
+    buffer[0] = b'0';
+    buffer[1] = b'x';
+    let mut index = 0usize;
+    while index < 16 {
+        let shift = (15 - index) * 4;
+        let digit = ((value >> shift) & 0xf) as u8;
+        buffer[index + 2] = if digit < 10 {
+            b'0' + digit
+        } else {
+            b'a' + digit - 10
+        };
+        index += 1;
+    }
+    buffer[18] = b'\n';
+    let rendered = unsafe { core::str::from_utf8_unchecked(&buffer) };
+    crate::arch::riscv64::sbi::putstr(rendered);
 }
 
 fn exercise_builtin_grandchild_wait4_exec(
@@ -3452,6 +3572,7 @@ fn exercise_builtin_grandchild_wait4_exec(
             );
             return false;
         };
+        let swapper_satp = ctx.vm.swapper_vm().satp();
         let Some((parent_frame, _, child_pid, parent_pid)) =
             ctx.user_task_set.child_exit_to_observed_child_parent_wait(
                 &mut ctx.user_address_space,
@@ -3460,6 +3581,7 @@ fn exercise_builtin_grandchild_wait4_exec(
                     &mut ctx.exec_transaction.retired_address_space,
                     &mut ctx.exec_transaction.retired_stack,
                 ),
+                swapper_satp,
                 &mut ctx.page_allocator,
                 &ctx.page_metadata_map,
                 0,
@@ -3468,6 +3590,10 @@ fn exercise_builtin_grandchild_wait4_exec(
             assertions.assert("builtin grandchild exec exits to wait4 parent", false);
             return false;
         };
+        if crate::arch::riscv64::csr::read_satp() != swapper_satp {
+            assertions.assert("builtin grandchild wait4 exit activates SwapperVm", false);
+            return false;
+        }
         if child_pid != wait_grandchild_pid || parent_pid != outer_child_pid {
             assertions.assert("builtin grandchild wait4 exit identity", false);
             return false;
@@ -3658,9 +3784,11 @@ fn archive_completed_vfork_child(index: usize) -> Option<usize> {
     let (child_pid, exiting_task) = {
         let ctx = context();
         let exiting_task = ctx.current_task().ok()?;
+        let swapper_satp = ctx.vm.swapper_vm().satp();
         let (_parent_frame, child_pid) = ctx.user_task_set.child_exit_to_vfork_parent(
             &mut ctx.user_address_space,
             &mut ctx.user_stack,
+            swapper_satp,
             &mut ctx.page_allocator,
             &ctx.page_metadata_map,
             index,
@@ -4017,6 +4145,7 @@ fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
             assertions.assert("observed child CurrentTask resolves before exit", false);
             return;
         };
+        let swapper_satp = ctx.vm.swapper_vm().satp();
         let Some((parent_frame, _status_ptr, exit_child_pid, exit_parent_pid)) =
             ctx.user_task_set.child_exit_to_observed_child_parent_wait(
                 &mut ctx.user_address_space,
@@ -4025,6 +4154,7 @@ fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
                     &mut ctx.exec_transaction.retired_address_space,
                     &mut ctx.exec_transaction.retired_stack,
                 ),
+                swapper_satp,
                 &mut ctx.page_allocator,
                 &ctx.page_metadata_map,
                 0,
@@ -4033,6 +4163,10 @@ fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
             assertions.assert("observed child exits to shell wait", false);
             return;
         };
+        if crate::arch::riscv64::csr::read_satp() != swapper_satp {
+            assertions.assert("observed child exit activates SwapperVm", false);
+            return;
+        }
         if ctx
             .replace_terminal_user_task(
                 ctx.user_task_set.last_exited_task_ref(),

@@ -67,14 +67,13 @@
  * BusyBox-init probing; it is not devtmpfs, VT allocation, /dev/console,
  * major/minor lookup or a multiple-TTY driver registry.
  *
- * The current bounded witness still shares the staged runtime FilesStruct
- * object. To preserve Linux's user-visible rule that a child's execve
- * close-on-exec pass does not close the parent's fd entries, the named child
- * witness saves a bounded parent fd table and regular-slot metadata snapshot
- * at clone time and restores it when the child returns to the parent. This is
- * a local rollback for that witness, not Task identity reuse and not full
- * copy_files(), CLONE_FILES, files_struct refcounting, fdtable expansion or
- * OFD lifetime management.
+ * A published ordinary-fork aggregate owns an independent FilesStruct and fd
+ * table. Each inherited live entry aliases the same bounded opened backing as
+ * its parent entry; closing or CLOEXEC-removing one table entry does not mutate
+ * the other table. The named serial witness may still save and restore its
+ * bounded parent table, but that rollback is not the ordinary-fork
+ * representation and cannot copy pipe bytes. CLONE_FILES, fdtable expansion
+ * and general OFD lifetime management remain deferred.
  *
  * dup3(2) first slice follows local Linux 6.12 ksys_dup3()/do_dup2() only at
  * fixed fd-table entry granularity: oldfd and newfd must differ, flags may be
@@ -93,12 +92,15 @@
  * substitution used by the LTP runner. Only flags == 0 is accepted. The fd
  * table atomically installs its two lowest free entries as a read end followed
  * by a write end, or leaves the table unchanged on EMFILE/user-copy rollback.
- * One fixed-capacity pipe buffer is shared across dup/close and the current
- * observed-child handoff. Parent fd snapshot restore rolls descriptor entries
- * back but deliberately does not restore pipe bytes written by the child.
- * Empty reads return EOF after the last writer closes. Multiple live pipes,
- * O_CLOEXEC/O_NONBLOCK, general blocking/wakeup, full OFD/task refcounts and
- * signal-producing EPIPE remain deferred.
+ * Each bounded pipe instance has one shared fixed-capacity backing selected by
+ * a generation-checked PipeRef. Fork and dup acquire endpoint aliases; close,
+ * CLOEXEC and process exit release them. Parent fd snapshot restore rolls
+ * descriptor entries back but deliberately does not restore pipe bytes.
+ * Empty blocking reads register the current generation-checked Task/CPU and
+ * sleep while any writer remains. The first write that makes data readable,
+ * or the release of the last writer, publishes one coalesced wake; the
+ * resumed reader rechecks the shared backing. O_CLOEXEC/O_NONBLOCK, unbounded
+ * wait queues, full OFD management and signal-producing EPIPE remain deferred.
  *
  * fchown(2) and fchmod(2) first slice is intentionally fd-local. It exists to
  * close the observed BusyBox login post-auth tty/stdin adjustment where local
@@ -173,6 +175,14 @@ predicate files_struct_pipe_buffer_bounded<T>(files: T) -> bool;
 predicate files_struct_pipe_direction_checks_bound<T>(files: T) -> bool;
 predicate files_struct_pipe_writer_close_eof_bound<T>(files: T) -> bool;
 predicate files_struct_pipe_snapshot_preserves_child_data<T>(files: T) -> bool;
+predicate files_struct_fork_fd_table_independent<T>(files: T) -> bool;
+predicate files_struct_fork_pipe_backing_shared<T>(files: T) -> bool;
+predicate files_struct_pipe_endpoint_refs_conserved<T>(files: T) -> bool;
+predicate files_struct_pipe_empty_read_wait_registered<T, R: TaskRef, C: CpuRef>(files: T, task_ref: R, cpu_ref: C) -> bool;
+predicate files_struct_pipe_wait_generation_and_cpu_checked<T>(files: T) -> bool;
+predicate files_struct_pipe_read_blocks_while_writer_live<T>(files: T) -> bool;
+predicate files_struct_pipe_write_or_last_writer_close_wakes_readers<T>(files: T) -> bool;
+predicate files_struct_pipe_resumed_read_rechecks_backing<T>(files: T) -> bool;
 predicate files_struct_pipe_full_linux_model_deferred<T>(files: T) -> bool;
 predicate files_struct_null_device_read_eof_observed<T>(files: T) -> bool;
 predicate files_struct_null_device_write_discard_observed<T>(files: T) -> bool;
@@ -568,6 +578,9 @@ object FilesStruct: ResourceObject {
                     files_struct_pipe_direction_checks_bound(self);
                     files_struct_pipe_writer_close_eof_bound(self);
                     files_struct_pipe_snapshot_preserves_child_data(self);
+                    files_struct_fork_fd_table_independent(self);
+                    files_struct_fork_pipe_backing_shared(self);
+                    files_struct_pipe_endpoint_refs_conserved(self);
                     fd_table_pipe_pair_lowest_free_installed(FileDescriptorTable);
                     fd_table_pipe_pair_failure_atomic(FileDescriptorTable);
                 }
@@ -588,6 +601,22 @@ object FilesStruct: ResourceObject {
                     files_struct_read_fd_routes_to_table(self, FileDescriptorTable);
                     files_struct_pipe_direction_checks_bound(self);
                     files_struct_pipe_writer_close_eof_bound(self);
+                    files_struct_pipe_endpoint_refs_conserved(self);
+                    files_struct_pipe_read_blocks_while_writer_live(self);
+                    files_struct_pipe_resumed_read_rechecks_backing(self);
+                }
+            }
+
+            on Action::RegisterPipeReadWait(task_ref: TaskRef, cpu_ref: CpuRef) {
+                depends_on {
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                    files_struct_pipe_read_blocks_while_writer_live(self);
+                }
+
+                ensures {
+                    files_struct_pipe_empty_read_wait_registered(self, task_ref, cpu_ref);
+                    files_struct_pipe_wait_generation_and_cpu_checked(self);
                 }
             }
 
@@ -606,6 +635,9 @@ object FilesStruct: ResourceObject {
                     files_struct_fd_lookup_routes_to_table(self, FileDescriptorTable);
                     files_struct_pipe_direction_checks_bound(self);
                     files_struct_pipe_buffer_bounded(self);
+                    files_struct_fork_pipe_backing_shared(self);
+                    files_struct_pipe_endpoint_refs_conserved(self);
+                    files_struct_pipe_write_or_last_writer_close_wakes_readers(self);
                 }
             }
 
@@ -653,6 +685,7 @@ object FilesStruct: ResourceObject {
                     files_struct_close_fd_routes_to_table(self, FileDescriptorTable);
                     files_struct_regular_file_closed(self);
                     files_struct_stdio_fd_close_supported(self);
+                    files_struct_pipe_write_or_last_writer_close_wakes_readers(self);
                     fd_table_fd_closed(FileDescriptorTable, fd);
                 }
             }

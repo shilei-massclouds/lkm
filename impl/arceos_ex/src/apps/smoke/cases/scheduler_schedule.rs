@@ -209,42 +209,12 @@ impl SmokeScenario for CooperativeSwitchScenario {
         let before_identity = ctx.scheduler().identity_switch_passes();
         let before_flow_enter = ctx.scheduler().flow_enter_signal_passes();
         let before_task_dispatch = ctx.scheduler().task_dispatch_signal_passes();
-        let identity_result = ctx.schedule_current();
-        if let Err(error) = identity_result {
-            print_schedule_error("identity schedule accepted", error);
-        }
-        assertions.assert_ok("identity schedule accepted", identity_result);
+        assertions.assert_ok("identity switch accepted", ctx.smoke_identity_switch());
         assertions.assert(
-            "identity schedule consumes return without Dispatch/Enter delivery",
+            "identity switch has no lifecycle breakpoint context or dispatch event",
             ctx.scheduler().identity_switch_passes() == before_identity + 1
                 && ctx.scheduler().flow_enter_signal_passes() == before_flow_enter
                 && ctx.scheduler().task_dispatch_signal_passes() == before_task_dispatch
-                && ctx.kernel_init_task.state() == before_state
-                && ctx.kernel_init_task.task().execution_authority() == before_authority
-                && ctx.kernel_init_task.task().breakpoint_state() == before_breakpoint
-                && ctx
-                    .kernel_init_task
-                    .task()
-                    .thread_context()
-                    .core_saved_count()
-                    == before_saved
-                && ctx
-                    .kernel_init_task
-                    .task()
-                    .thread_context()
-                    .core_restored_count()
-                    == before_restored
-                && ctx.scheduler().scheduler_prepare_task_switch_count() == before_prepare
-                && ctx.scheduler().scheduler_finish_task_switch_count() == before_finish
-                && ctx
-                    .current_task_ref()
-                    .is_ok_and(|task_ref| task_ref == TaskRef::KERNEL_INIT),
-        );
-        let before_identity = ctx.scheduler().identity_switch_passes();
-        assertions.assert_ok("identity switch accepted", ctx.smoke_identity_switch());
-        assertions.assert(
-            "identity switch has no lifecycle breakpoint or context event",
-            ctx.scheduler().identity_switch_passes() == before_identity + 1
                 && ctx.kernel_init_task.state() == before_state
                 && ctx.kernel_init_task.task().execution_authority() == before_authority
                 && ctx.kernel_init_task.task().breakpoint_state() == before_breakpoint

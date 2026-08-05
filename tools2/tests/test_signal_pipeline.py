@@ -6149,10 +6149,10 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
             self.assertEqual(resumed_checked["verdict"], "complete")
             self.assertEqual(resumed_checked["exit_code"], 0)
             self.assertTrue(resumed_checked["allowed"])
-            self.assertEqual(resumed_data["summary"]["inventory_deferred"], 135)
+            self.assertEqual(resumed_data["summary"]["inventory_deferred"], 133)
             self.assertEqual(resumed_data["summary"]["inventory_trimmed"], 57)
             self.assertEqual(resumed_data["summary"]["unresolved_obligations"], 0)
-            self.assertEqual(len(resumed_data["boundary_inventory"]), 192)
+            self.assertEqual(len(resumed_data["boundary_inventory"]), 190)
             occurrence_by_boundary = {
                 item["boundary_id"]: item
                 for item in resumed_data["boundary_occurrences"]
@@ -6672,7 +6672,7 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
                     "boundary_occurrences": 2,
                     "completed": 51,
                     "failed": 0,
-                    "inventory_deferred": 135,
+                    "inventory_deferred": 133,
                     "inventory_trimmed": 57,
                     "pending": 0,
                     "rejected": 0,
@@ -7161,14 +7161,14 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
             self.assertEqual(snapshot.read_bytes(), BOOT_INIT_SETUP_SCENARIO.read_bytes())
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "30a08254cded43b910dbb56a41304704b9eb8eb9aed5a64821b52008c86422c7",
+                "21f2076f4d701387caac6813e647ee0936bfb8e8f9a6519a8c538bb3b279ff6d",
             )
             self.assertEqual(
                 {
                     derivation["model_fingerprint"], model["model_fingerprint"],
                     view["model_fingerprint"], saved["model_fingerprint"],
                 },
-                {"sha256:cd41bce10c5759a3107ebf4a0bda860197ccd339de6b7500f23ee9fdcdd4b1e8"},
+                {"sha256:5085069ba0a65ad7982bd945797f5d188d552a7d3d20f8035acdf2710d91fcd6"},
             )
             with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
                 compact_text = render_text(view)
@@ -7299,7 +7299,7 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
                     "boundary_occurrences": 2,
                     "completed": 61,
                     "failed": 0,
-                    "inventory_deferred": 135,
+                    "inventory_deferred": 133,
                     "inventory_trimmed": 57,
                     "pending": 0,
                     "rejected": 0,
@@ -7444,7 +7444,7 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
                     "boundary_occurrences": 120,
                     "completed": 342,
                     "failed": 0,
-                    "inventory_deferred": 135,
+                    "inventory_deferred": 133,
                     "inventory_trimmed": 57,
                     "pending": 0,
                     "rejected": 0,
@@ -7507,7 +7507,7 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
             )
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "9adb866f24d7faf1b99169ea673d7ae443b49a660df6980a6d338dcc3dd52ffb",
+                "ca30520f61c046b183974f4e308db017b8b164909ca950f50a646624e0812333",
             )
             model = self.prepared_model_document
             assert view is not None
@@ -7519,10 +7519,10 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
                     view["model_fingerprint"],
                     saved["model_fingerprint"],
                 },
-                {"sha256:cd41bce10c5759a3107ebf4a0bda860197ccd339de6b7500f23ee9fdcdd4b1e8"},
+                {"sha256:5085069ba0a65ad7982bd945797f5d188d552a7d3d20f8035acdf2710d91fcd6"},
             )
 
-    def test_main_model_all_cpu_schedulers_expose_ap_mailbox_ipi_idle_protocol(self) -> None:
+    def test_main_model_all_cpu_schedulers_expose_inbox_ipi_tick_idle_protocol(self) -> None:
         model = self.prepared_model_document["model"]
 
         def facts(handler: dict, section: str) -> set[str]:
@@ -7535,9 +7535,11 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
             }
 
         required_handlers = {
+            "ReserveInbound",
             "PublishInbound",
             "ConsumeInbound",
             "MarkNeedResched",
+            "UserReturnSafePoint",
             "RunIdle",
         }
         for index in range(8):
@@ -7548,24 +7550,24 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
             publish = handlers["PublishInbound"][0]
             self.assertTrue(
                 {
-                    "scheduler_mailbox_message_published_release",
+                    "scheduler_inbox_message_published_release",
                     "scheduler_reschedule_ipi_requested_after_release",
-                    "scheduler_mailbox_rejects_stale_wrong_target_or_duplicate",
+                    "scheduler_inbox_rejects_stale_wrong_target_or_duplicate",
                 }.issubset(facts(publish, "ensures"))
             )
 
             consume = handlers["ConsumeInbound"][0]
             self.assertTrue(
                 {
-                    "scheduler_mailbox_message_published_release",
-                    "scheduler_mailbox_message_target_and_generation_valid",
-                    "scheduler_mailbox_ordinal_fresh",
+                    "scheduler_inbox_message_published_release",
+                    "scheduler_inbox_message_target_and_generation_valid",
+                    "scheduler_inbox_ordinal_fresh",
                 }.issubset(facts(consume, "depends_on"))
             )
             self.assertTrue(
                 {
-                    "scheduler_mailbox_message_consumed_once",
-                    "scheduler_mailbox_rejects_stale_wrong_target_or_duplicate",
+                    "scheduler_inbox_message_consumed_once",
+                    "scheduler_inbox_rejects_stale_wrong_target_or_duplicate",
                 }.issubset(facts(consume, "ensures"))
             )
 
@@ -7632,7 +7634,7 @@ class MainModelIntegrationTests(_ShortcutTestSupport, unittest.TestCase):
         self.assertTrue(
             {
                 "interrupt_reschedule_ipi_uses_formal_overlay",
-                "interrupt_reschedule_ipi_does_not_consume_mailbox",
+                "interrupt_reschedule_ipi_does_not_consume_inbox",
                 "interrupt_reschedule_ipi_does_not_switch_in_handler",
                 "interrupt_duplicate_reschedule_ipi_coalesced",
             }.issubset(facts(process_handler("InterruptType", "HandleRescheduleIpi")))

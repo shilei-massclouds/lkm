@@ -240,6 +240,41 @@ class CompositeConfigTests(unittest.TestCase):
             "unknown-failure",
         )
 
+    def test_busybox_login_focused_uses_wrapper_sync_acceptance(self) -> None:
+        path = (
+            self.repo_root
+            / "impl"
+            / "arceos_ex"
+            / "tests"
+            / "stress"
+            / "cases"
+            / "busybox-init-login-focused.toml"
+        )
+        case = runner._load_case(path, self.repo_root)
+        complete_output = "\n".join(
+            (
+                "Welcome to Alpine!",
+                "syscall trace nr=158 name=getgroups ret=1",
+                "syscall trace nr=154 name=setpgid ret=0",
+                "syscall trace nr=29 name=ioctl ret=0",
+                "lost+found",
+                "syscall trace nr=81 name=sync ret=0",
+            )
+        )
+        self.assertEqual(
+            runner._classify(complete_output, 0, False, case["rules"])["id"],
+            "busybox-init-login-focused-success",
+        )
+        self.assertEqual(
+            runner._classify(
+                complete_output.replace("syscall trace nr=81 name=sync ret=0", ""),
+                0,
+                False,
+                case["rules"],
+            )["id"],
+            "unknown-failure",
+        )
+
     def test_nonzero_suite_prepares_disk_exactly_once(self) -> None:
         first = stress_case("one")
         second = stress_case("two")

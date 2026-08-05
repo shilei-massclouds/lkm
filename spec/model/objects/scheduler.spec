@@ -18,8 +18,8 @@ enum SchedClassKind {
     Idle,
 }
 
-enum SchedulerMailboxMessageKind { Activate, Wake }
-type SchedulerMailboxOrdinal { }
+enum SchedulerInboxMessageKind { Activate, Wake }
+type SchedulerInboxOrdinal { }
 
 type SchedulerRef {
 }
@@ -49,33 +49,63 @@ predicate scheduler_stop_ref_is<S, T: TaskRef>(scheduler: S, task_ref: T) -> boo
 predicate scheduler_class_queue_ready<S>(scheduler: S, class: SchedClassKind) -> bool;
 predicate scheduler_class_priority_order_is_linux<S>(scheduler: S) -> bool;
 predicate scheduler_class_queues_store_only_task_refs<S>(scheduler: S) -> bool;
+predicate scheduler_runqueue_capacity_covers_all_deliverable_tasks<S>(scheduler: S) -> bool;
 predicate scheduler_root_domains_are_shared_separate_objects<S>(scheduler: S) -> bool;
 predicate scheduler_fairness_bandwidth_migration_deferred<S>(scheduler: S) -> bool;
 predicate scheduler_scx_trimmed_for_reference_config<S>(scheduler: S) -> bool;
-predicate scheduler_inbound_mailbox_cpu_local<S>(scheduler: S) -> bool;
-predicate scheduler_mailbox_message_published_release<S, T: TaskRef, C: CpuRef>(
+predicate scheduler_inbound_inbox_cpu_local<S>(scheduler: S) -> bool;
+predicate scheduler_inbox_capacity_covers_all_deliverable_tasks<S>(scheduler: S) -> bool;
+predicate scheduler_inbox_one_pending_notice_per_task<S>(scheduler: S) -> bool;
+predicate scheduler_inbox_duplicate_notice_coalesced<S, T: TaskRef>(scheduler: S, task_ref: T) -> bool;
+predicate scheduler_inbox_reservation_ready<S, T: TaskRef, C: CpuRef>(scheduler: S, task_ref: T, target_cpu: C) -> bool;
+predicate scheduler_inbox_reservation_cancelled_without_residue<S, T: TaskRef>(scheduler: S, task_ref: T) -> bool;
+predicate scheduler_inbox_message_published_release<S, T: TaskRef, C: CpuRef>(
     scheduler: S,
     task_ref: T,
     target_cpu: C,
-    ordinal: SchedulerMailboxOrdinal
+    ordinal: SchedulerInboxOrdinal
 ) -> bool;
 predicate scheduler_reschedule_ipi_requested_after_release<S, C: CpuRef>(
     scheduler: S,
     target_cpu: C
 ) -> bool;
-predicate scheduler_mailbox_message_target_and_generation_valid<S, T: TaskRef, C: CpuRef>(
+predicate scheduler_inbox_message_target_and_generation_valid<S, T: TaskRef, C: CpuRef>(
     scheduler: S,
     task_ref: T,
     target_cpu: C
 ) -> bool;
-predicate scheduler_mailbox_ordinal_fresh<S>(scheduler: S, ordinal: SchedulerMailboxOrdinal) -> bool;
-predicate scheduler_mailbox_message_consumed_once<S>(scheduler: S, ordinal: SchedulerMailboxOrdinal) -> bool;
-predicate scheduler_mailbox_rejects_stale_wrong_target_or_duplicate<S>(scheduler: S) -> bool;
+predicate scheduler_inbox_ordinal_fresh<S>(scheduler: S, ordinal: SchedulerInboxOrdinal) -> bool;
+predicate scheduler_inbox_message_consumed_once<S>(scheduler: S, ordinal: SchedulerInboxOrdinal) -> bool;
+predicate scheduler_inbox_rejects_stale_wrong_target_or_duplicate<S>(scheduler: S) -> bool;
 predicate scheduler_need_resched_set<S>(scheduler: S) -> bool;
 predicate scheduler_need_resched_coalesces_duplicate_ipi<S>(scheduler: S) -> bool;
 predicate scheduler_idle_sleep_recheck_complete<S>(scheduler: S) -> bool;
 predicate scheduler_idle_wfi_only_without_visible_work<S>(scheduler: S) -> bool;
 predicate scheduler_idle_uses_common_switch_protocol<S>(scheduler: S) -> bool;
+predicate scheduler_user_round_robin_cpu_local<S>(scheduler: S) -> bool;
+predicate scheduler_user_task_cpu_ownership_immutable<S, T: TaskRef>(scheduler: S, task_ref: T) -> bool;
+predicate scheduler_user_dispatch_commits_satp_and_local_sfence<S, T: TaskRef>(scheduler: S, task_ref: T) -> bool;
+predicate scheduler_user_slice_is_10ms<S, T: TaskRef>(scheduler: S, task_ref: T) -> bool;
+predicate scheduler_need_resched_consumed_only_at_safe_boundary<S>(scheduler: S) -> bool;
+predicate scheduler_user_return_work_pending<S>(scheduler: S) -> bool;
+predicate scheduler_user_safe_boundary_drains_visible_inbox<S>(scheduler: S) -> bool;
+predicate scheduler_user_safe_boundary_retains_unreleased_leaf<S, T: TaskRef>(scheduler: S, task_ref: T) -> bool;
+predicate scheduler_user_safe_boundary_saves_overlay<S, T: TaskRef>(scheduler: S, task_ref: T) -> bool;
+predicate scheduler_kernel_tick_remains_pending_until_user_return<S>(scheduler: S) -> bool;
+predicate scheduler_no_competitor_consumes_pending_and_renews_slice<S>(scheduler: S) -> bool;
+predicate scheduler_user_overlay_aba_restored<S>(scheduler: S) -> bool;
+predicate scheduler_blocking_user_wait_drains_cpu_local_work<S>(scheduler: S) -> bool;
+predicate scheduler_blocking_user_wait_preserves_leaf_aba<S, T: TaskRef>(scheduler: S, task_ref: T) -> bool;
+predicate scheduler_shared_mm_cross_cpu_deferred<S>(scheduler: S) -> bool;
+
+predicate scheduler_clockevent_cpu_local<C>(clockevent: C) -> bool;
+predicate scheduler_clockevent_muxes_cpu0_oneshot_and_scheduler<C>(clockevent: C) -> bool;
+predicate scheduler_clockevent_slice_deadline_10ms<C, T: TaskRef>(clockevent: C, task_ref: T) -> bool;
+predicate scheduler_clockevent_deadline_advances_from_prior<C>(clockevent: C) -> bool;
+predicate scheduler_clockevent_skips_missed_periods<C>(clockevent: C) -> bool;
+predicate scheduler_clockevent_hardirq_acknowledges_and_rearms<C>(clockevent: C) -> bool;
+predicate scheduler_clockevent_hardirq_only_merges_need_resched<C>(clockevent: C) -> bool;
+predicate scheduler_clockevent_pending_coalesced<C>(clockevent: C) -> bool;
 
 predicate scheduler_queue_runtime_state_is<S>(scheduler: S, state: SchedulerQueueRuntimeState) -> bool;
 predicate scheduler_queue_task_refs_empty<S>(scheduler: S) -> bool;
@@ -88,6 +118,10 @@ predicate scheduler_task_declares_sleeping<T: TaskRef>(task_ref: T) -> bool;
 predicate scheduler_task_pending_wake_signal_matches<T: TaskRef>(task_ref: T) -> bool;
 predicate scheduler_task_has_no_pending_wake_signal<T: TaskRef>(task_ref: T) -> bool;
 predicate scheduler_pending_wake_signal_consumed_once<T: TaskRef>(task_ref: T) -> bool;
+predicate scheduler_inbox_wake_current_sleep_becomes_pending<S, T: TaskRef>(scheduler: S, task_ref: T) -> bool;
+predicate scheduler_inbox_wake_blocked_task_enqueued<S, T: TaskRef>(scheduler: S, task_ref: T) -> bool;
+predicate scheduler_inbox_obsolete_wake_consumed_without_enqueue<S, T: TaskRef>(scheduler: S, task_ref: T) -> bool;
+predicate scheduler_sleep_wake_handoff_has_no_lost_window<S, T: TaskRef>(scheduler: S, task_ref: T) -> bool;
 
 predicate scheduler_schedule_occurrence_fresh<S>(scheduler: S) -> bool;
 predicate scheduler_schedule_has_no_payload<S>(scheduler: S) -> bool;
@@ -161,7 +195,53 @@ predicate scheduler_switch_order_save_suspend_restore_finish<S, T: TaskRef, U: T
 predicate scheduler_switch_preserves_prev_disposition<S, T: TaskRef>(scheduler: S, prev_ref: T) -> bool;
 predicate scheduler_switch_current_bindings_committed_before_dispatch<S, T: TaskRef>(scheduler: S, next_ref: T) -> bool;
 predicate scheduler_switch_finish_runs_on_next_stack<S, T: TaskRef>(scheduler: S, next_ref: T) -> bool;
+predicate scheduler_switch_local_interrupts_mask_intermediate_current<S, T: TaskRef, U: TaskRef>(
+    scheduler: S,
+    prev_ref: T,
+    next_ref: U
+) -> bool;
+predicate scheduler_switch_local_interrupts_restore_after_next_trap_owner<S, T: TaskRef>(
+    scheduler: S,
+    next_ref: T
+) -> bool;
 predicate scheduler_identity_has_no_switch_or_task_dispatch<S, T: TaskRef>(scheduler: S, task_ref: T) -> bool;
+
+type SchedulerClockevent: ResourceObject {
+    parent: Scheduler;
+    initial_state: State::Ready;
+
+    processes {
+        Action::BeginSlice(task_ref: TaskRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                task_ref_ready(task_ref);
+            }
+            ensures {
+                scheduler_clockevent_slice_deadline_10ms(self, task_ref);
+                scheduler_clockevent_deadline_advances_from_prior(self);
+                scheduler_clockevent_skips_missed_periods(self);
+            }
+        }
+
+        Action::HandleTimerInterrupt {
+            state_effect: StateEffect::None;
+            depends_on { self.state == State::Ready; }
+            ensures {
+                scheduler_clockevent_hardirq_acknowledges_and_rearms(self);
+                scheduler_clockevent_hardirq_only_merges_need_resched(self);
+                scheduler_clockevent_pending_coalesced(self);
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            scheduler_clockevent_cpu_local(self);
+            scheduler_clockevent_muxes_cpu0_oneshot_and_scheduler(self);
+        }
+    }
+}
 
 type Scheduler: ResourceObject {
     parent: CPU;
@@ -179,43 +259,87 @@ type Scheduler: ResourceObject {
 
     owned {
         lock: RawSpinLock;
+        clockevent: SchedulerClockevent;
     }
 
     processes {
         Action::PublishInbound(
             task_ref: TaskRef,
             target_cpu: CpuRef,
-            ordinal: SchedulerMailboxOrdinal
+            ordinal: SchedulerInboxOrdinal
         ) {
             state_effect: StateEffect::None;
             depends_on {
                 self.state == State::Online;
                 task_ref_ready(task_ref);
-                scheduler_mailbox_ordinal_fresh(self, ordinal);
+                scheduler_inbox_ordinal_fresh(self, ordinal);
+                scheduler_inbox_reservation_ready(self, task_ref, target_cpu);
             }
             ensures {
-                scheduler_mailbox_message_published_release(self, task_ref, target_cpu, ordinal);
+                scheduler_inbox_message_published_release(self, task_ref, target_cpu, ordinal);
                 scheduler_reschedule_ipi_requested_after_release(self, target_cpu);
-                scheduler_mailbox_rejects_stale_wrong_target_or_duplicate(self);
+                scheduler_inbox_duplicate_notice_coalesced(self, task_ref);
+                scheduler_inbox_rejects_stale_wrong_target_or_duplicate(self);
+            }
+        }
+
+        Action::ReserveInbound(task_ref: TaskRef, target_cpu: CpuRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Online;
+                task_ref_ready(task_ref);
+            }
+            ensures {
+                scheduler_inbox_reservation_ready(self, task_ref, target_cpu);
+                scheduler_inbox_one_pending_notice_per_task(self);
             }
         }
 
         Action::ConsumeInbound(
             task_ref: TaskRef,
             target_cpu: CpuRef,
-            ordinal: SchedulerMailboxOrdinal
+            ordinal: SchedulerInboxOrdinal
         ) {
             state_effect: StateEffect::None;
             depends_on {
                 self.state == State::Online;
-                scheduler_mailbox_message_published_release(self, task_ref, target_cpu, ordinal);
-                scheduler_mailbox_message_target_and_generation_valid(self, task_ref, target_cpu);
-                scheduler_mailbox_ordinal_fresh(self, ordinal);
+                scheduler_inbox_message_published_release(self, task_ref, target_cpu, ordinal);
+                scheduler_inbox_message_target_and_generation_valid(self, task_ref, target_cpu);
+                scheduler_inbox_ordinal_fresh(self, ordinal);
             }
-            drives { self.Transition::EnqueueTask(task_ref); }
+            drives {
+                self.Action::ConsumeWakeForCurrent(task_ref) ||
+                    self.Transition::EnqueueTask(task_ref) ||
+                    self.Action::ConsumeObsoleteWake(task_ref);
+            }
             ensures {
-                scheduler_mailbox_message_consumed_once(self, ordinal);
-                scheduler_mailbox_rejects_stale_wrong_target_or_duplicate(self);
+                scheduler_inbox_message_consumed_once(self, ordinal);
+                scheduler_inbox_rejects_stale_wrong_target_or_duplicate(self);
+                scheduler_sleep_wake_handoff_has_no_lost_window(self, task_ref);
+            }
+        }
+
+        Action::ConsumeWakeForCurrent(task_ref: TaskRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Online;
+                task_ref == self.curr;
+                scheduler_task_declares_sleeping(task_ref);
+            }
+            ensures {
+                scheduler_task_pending_wake_signal_matches(task_ref);
+                scheduler_inbox_wake_current_sleep_becomes_pending(self, task_ref);
+            }
+        }
+
+        Action::ConsumeObsoleteWake(task_ref: TaskRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Online;
+                task_ref_ready(task_ref);
+            }
+            ensures {
+                scheduler_inbox_obsolete_wake_consumed_without_enqueue(self, task_ref);
             }
         }
 
@@ -224,6 +348,55 @@ type Scheduler: ResourceObject {
             ensures {
                 scheduler_need_resched_set(self);
                 scheduler_need_resched_coalesces_duplicate_ipi(self);
+            }
+        }
+
+        Action::UserReturnSafePoint {
+            state_effect: StateEffect::None;
+            sender_flow_context: true;
+            depends_on {
+                self.state == State::Online;
+                task_ref_ready(self.curr);
+                scheduler_user_return_work_pending(self);
+            }
+            drives {
+                self.Action::Schedule || self.Action::RenewIdentitySlice;
+            }
+            ensures {
+                scheduler_need_resched_consumed_only_at_safe_boundary(self);
+                scheduler_user_safe_boundary_drains_visible_inbox(self);
+                scheduler_user_safe_boundary_retains_unreleased_leaf(self, self.curr);
+                scheduler_user_safe_boundary_saves_overlay(self, self.curr);
+                scheduler_user_overlay_aba_restored(self);
+            }
+        }
+
+        Action::BlockingUserWaitSafePoint {
+            state_effect: StateEffect::None;
+            sender_flow_context: true;
+            depends_on {
+                self.state == State::Online;
+                task_ref_ready(self.curr);
+                scheduler_user_return_work_pending(self);
+            }
+            drives {
+                self.Action::UserReturnSafePoint;
+            }
+            ensures {
+                scheduler_blocking_user_wait_drains_cpu_local_work(self);
+                scheduler_blocking_user_wait_preserves_leaf_aba(self, self.curr);
+            }
+        }
+
+        Action::RenewIdentitySlice {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Online;
+                task_ref_ready(self.curr);
+            }
+            drives { self.clockevent.Action::BeginSlice(self.curr); }
+            ensures {
+                scheduler_no_competitor_consumes_pending_and_renews_slice(self);
             }
         }
 
@@ -474,11 +647,15 @@ type Scheduler: ResourceObject {
                 scheduler_next_dispatch_preflight_complete(self, next_ref, next_ref.flow);
             }
             drives {
+                self.clockevent.Action::BeginSlice(next_ref);
                 next_ref.Transition::Dispatch;
                 next_ref.flow.Action::Enter;
             }
             ensures {
                 scheduler_task_does_not_forward_flow_dispatch(next_ref);
+                scheduler_user_task_cpu_ownership_immutable(self, next_ref);
+                scheduler_user_dispatch_commits_satp_and_local_sfence(self, next_ref);
+                scheduler_user_slice_is_10ms(self, next_ref);
             }
         }
 
@@ -506,6 +683,8 @@ type Scheduler: ResourceObject {
                 scheduler_switch_preserves_prev_disposition(self, prev_ref);
                 scheduler_switch_current_bindings_committed_before_dispatch(self, next_ref);
                 scheduler_schedule_nonidentity_dispatches_next_task(self, next_ref);
+                scheduler_switch_local_interrupts_mask_intermediate_current(self, prev_ref, next_ref);
+                scheduler_switch_local_interrupts_restore_after_next_trap_owner(self, next_ref);
             }
         }
 
@@ -547,10 +726,15 @@ type Scheduler: ResourceObject {
                     scheduler_class_queue_ready(self, SchedClassKind::Idle);
                     scheduler_class_priority_order_is_linux(self);
                     scheduler_class_queues_store_only_task_refs(self);
+                    scheduler_runqueue_capacity_covers_all_deliverable_tasks(self);
                     scheduler_root_domains_are_shared_separate_objects(self);
                     scheduler_fairness_bandwidth_migration_deferred(self);
                     scheduler_scx_trimmed_for_reference_config(self);
-                    scheduler_inbound_mailbox_cpu_local(self);
+                    scheduler_inbound_inbox_cpu_local(self);
+                    scheduler_inbox_capacity_covers_all_deliverable_tasks(self);
+                    scheduler_inbox_one_pending_notice_per_task(self);
+                    scheduler_user_round_robin_cpu_local(self);
+                    scheduler_shared_mm_cross_cpu_deferred(self);
                 }
             }
         }
@@ -586,8 +770,15 @@ type Scheduler: ResourceObject {
             scheduler_schedule_event_available(self);
             scheduler_class_priority_order_is_linux(self);
             scheduler_class_queues_store_only_task_refs(self);
-            scheduler_inbound_mailbox_cpu_local(self);
-            scheduler_mailbox_rejects_stale_wrong_target_or_duplicate(self);
+            scheduler_runqueue_capacity_covers_all_deliverable_tasks(self);
+            scheduler_inbound_inbox_cpu_local(self);
+            scheduler_inbox_capacity_covers_all_deliverable_tasks(self);
+            scheduler_inbox_one_pending_notice_per_task(self);
+            scheduler_inbox_rejects_stale_wrong_target_or_duplicate(self);
+            scheduler_user_round_robin_cpu_local(self);
+            scheduler_need_resched_consumed_only_at_safe_boundary(self);
+            scheduler_kernel_tick_remains_pending_until_user_return(self);
+            scheduler_shared_mm_cross_cpu_deferred(self);
         }
     }
 }

@@ -13,7 +13,10 @@ use super::files::OpenFileDescriptionRef;
 use super::user_boot::{ElfError, ElfObject, UserAddressSpace, UserTrapFrame};
 use super::{
     breakpoint_exception_type::BreakpointExceptionType,
-    files::{CloseOnExecReport, FILE_POLLIN, FileError, TERMIOS_SIZE, is_null_path, is_tty_path},
+    files::{
+        CloseOnExecReport, FILE_POLLIN, FileError, PipeReleaseReason, TERMIOS_SIZE, is_null_path,
+        is_tty_path,
+    },
     hwrng::HwRngError,
     page_fault_exception_type::PageFaultExceptionType,
     process_prepare::TaskCopyUserProcessInputs,
@@ -26,9 +29,10 @@ use super::{
         USER_SIGNAL_COUNT, USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE,
         USER_SUPPLEMENTARY_GROUP_MAX, USER_WAIT4_ALL_CHILDREN, USER_WAIT4_WUNTRACED,
         UserFaultAccess, UserFaultClass, UserFaultMappingDiagnostic, UserFaultRequest,
-        UserFaultResult, UserMappingKind, UserMmapError, UserProcessGroupLookup,
-        UserProcessGroupUpdate, UserRtSigtimedwaitResult, UserSignalAction,
+        UserFaultResolution, UserFaultResult, UserMappingKind, UserMmapError,
+        UserProcessGroupLookup, UserProcessGroupUpdate, UserRtSigtimedwaitResult, UserSignalAction,
     },
+    user_process_registry::UserProcessChildSelector,
 };
 
 const SCAUSE_INTERRUPT_BIT: usize = 1usize << (usize::BITS as usize - 1);
@@ -3603,29 +3607,46 @@ fn page_fault_exception_handler(frame: &mut TrapFrame) {
     let from_user = frame.sstatus & crate::arch::riscv64::csr::SSTATUS_SPP == 0;
     if from_user && PAGE_FAULT_CAUSES.contains(&cause) {
         let access = page_fault_access(frame);
-        let task_ref = crate::context::context_ref()
-            .current_task_ref()
-            .unwrap_or(super::task::TaskRef::NONE);
+        let smp_user = super::user_boot::current_smp_user_mm_task();
+        let task_ref = smp_user.map_or_else(
+            || match crate::context::context_ref().current_task_ref() {
+                Ok(task_ref) => task_ref,
+                Err(error) => {
+                    print_user_fault_current_task_error(error);
+                    super::task::TaskRef::NONE
+                }
+            },
+            |(task_ref, _)| task_ref,
+        );
         let request =
             UserFaultRequest::new(task_ref, current_satp, frame.stval, frame.sepc, access);
-        let stack_pages_before = crate::context::context_ref()
-            .user_stack
-            .backing_page_count();
-        let result = {
+        let (stack_pages_before, result, stack_pages_after, stack_base, stack_top) = if smp_user
+            .is_some()
+        {
+            let Some(fault) = super::user_boot::resolve_smp_user_fault(task_ref, request) else {
+                panic_dispatch_frame("SMP user page fault lease", frame)
+            };
+            fault
+        } else {
+            let _guard = super::user_boot::lock_user_memory_state();
             let ctx = crate::context::context();
-            ctx.user_address_space.resolve_user_fault(
+            let before = ctx.user_stack.backing_page_count();
+            let base = ctx.user_stack.rlimit_base();
+            let top = ctx.user_stack.top();
+            let result = ctx.user_address_space.resolve_user_fault(
                 &mut ctx.user_stack,
                 request,
                 &mut ctx.page_allocator,
                 &ctx.page_metadata_map,
-            )
+            );
+            let after = ctx.user_stack.backing_page_count();
+            (before, result, after, base, top)
         };
+        if !result.retry_same_instruction() {
+            print_user_fault_resolution_branch(task_ref, smp_user, result);
+        }
         if result.retry_same_instruction() {
-            if crate::context::context_ref()
-                .user_stack
-                .backing_page_count()
-                != stack_pages_before
-            {
+            if stack_pages_after != stack_pages_before {
                 crate::checkpoint::dispatch(
                     crate::checkpoint::Checkpoint::UserStackGrowComplete,
                     crate::context::context_ref(),
@@ -3633,16 +3654,20 @@ fn page_fault_exception_handler(frame: &mut TrapFrame) {
             }
             debug_assert_eq!(result.sepc(), frame.sepc);
             return;
-        }
-        if frame.stval >= crate::context::context_ref().user_stack.rlimit_base()
-            && frame.stval < crate::context::context_ref().user_stack.top()
-        {
+        };
+        if frame.stval >= stack_base && frame.stval < stack_top {
             crate::checkpoint::dispatch(
                 crate::checkpoint::Checkpoint::UserStackGrowRejected,
                 crate::context::context_ref(),
             );
         }
         if result.result() == UserFaultResult::TaskOom {
+            if smp_user.is_some() {
+                if !super::user_boot::record_current_smp_user_oom(task_ref) {
+                    panic_dispatch_frame("SMP user OOM terminal record", frame)
+                }
+                super::user_boot::exit_current_smp_user_task(0);
+            }
             let _ = {
                 let ctx = crate::context::context();
                 ctx.user_task_set.record_task_out_of_memory(task_ref)
@@ -3657,6 +3682,17 @@ fn page_fault_exception_handler(frame: &mut TrapFrame) {
             _ => None,
         };
         if let Some(segv_code) = segv_code {
+            if smp_user.is_some() {
+                let Some(info) = super::user_boot::record_current_smp_user_sigsegv(
+                    task_ref,
+                    segv_code,
+                    frame.stval,
+                ) else {
+                    panic_dispatch_frame("SMP user SIGSEGV terminal record", frame)
+                };
+                print_task_sigsegv_diagnostic(task_ref, info);
+                super::user_boot::exit_current_smp_user_task(0);
+            }
             let diagnostic = crate::context::context_ref()
                 .user_address_space
                 .last_user_fault();
@@ -3800,6 +3836,9 @@ fn complete_unsupported_syscall(frame: &mut TrapFrame) {
 }
 
 fn complete_unsupported_clone_syscall(frame: &mut TrapFrame, stage: &str) {
+    crate::arch::riscv64::sbi::putstr("clone failure stage=");
+    crate::arch::riscv64::sbi::putstr(stage);
+    crate::arch::riscv64::sbi::putchar(b'\n');
     print_unsupported_syscall_diagnostic_with_clone_stage(frame, stage);
     complete_successful_syscall(frame, 0usize.wrapping_sub(ENOSYS));
 }
@@ -3876,20 +3915,20 @@ fn syscall_table_openat(table: &SyscallTable, frame: &mut TrapFrame) {
         return;
     };
 
+    let _files_guard = super::user_boot::lock_user_files_state();
+    let (files_struct, fs_struct) = super::user_boot::current_user_process_resources();
     let ctx = crate::context::context();
     let fd_result = if is_tty_path(&path[..path_len]) {
-        ctx.files_struct
-            .open_tty_path(&path[..path_len], flags as u32)
+        files_struct.open_tty_path(&path[..path_len], flags as u32)
     } else if is_null_path(&path[..path_len]) {
-        ctx.files_struct
-            .open_null_path(&path[..path_len], flags as u32)
+        files_struct.open_null_path(&path[..path_len], flags as u32)
     } else if flags & (O_CREAT | O_TRUNC | O_NONBLOCK) != 0 {
         Err(FileError::InvalidArgument)
     } else if flags & O_ACCMODE != 0 {
         Err(FileError::PermissionDenied)
     } else {
-        ctx.files_struct.open_filesystem_path(
-            &ctx.fs_struct,
+        files_struct.open_filesystem_path(
+            fs_struct,
             &mut ctx.vfs_core,
             &mut ctx.ext2_filesystem,
             &mut ctx.block_device_registry,
@@ -3924,16 +3963,18 @@ fn syscall_table_chdir(table: &SyscallTable, frame: &mut TrapFrame) {
     };
 
     let result = {
+        let _files_guard = super::user_boot::lock_user_files_state();
+        let (_, fs_struct) = super::user_boot::current_user_process_resources();
         let ctx = crate::context::context();
         let mut provider = super::virtio_blk::live_provider(&ctx.kernel_image);
         match ctx.vfs_core.walk_path(
-            &ctx.fs_struct,
+            fs_struct,
             &mut ctx.ext2_filesystem,
             &mut ctx.block_device_registry,
             &mut provider,
             &path[..path_len],
         ) {
-            Ok(dentry_ref) => ctx.fs_struct.chdir(&ctx.vfs_core, dentry_ref),
+            Ok(dentry_ref) => fs_struct.chdir(&ctx.vfs_core, dentry_ref),
             Err(error) => Err(error),
         }
     };
@@ -3961,8 +4002,10 @@ fn syscall_table_getdents64(table: &SyscallTable, frame: &mut TrapFrame) {
     }
 
     let mut buffer = [0u8; USER_COPY_MAX];
+    let _files_guard = super::user_boot::lock_user_files_state();
+    let files_struct = super::user_boot::current_user_files_struct();
     let ctx = crate::context::context();
-    let read = match ctx.files_struct.getdents64_fd(
+    let read = match files_struct.getdents64_fd(
         fd,
         &mut buffer[..len],
         &mut ctx.ext2_filesystem,
@@ -3976,6 +4019,7 @@ fn syscall_table_getdents64(table: &SyscallTable, frame: &mut TrapFrame) {
             return;
         }
     };
+    drop(_files_guard);
     if !copy_to_user(user_ptr, &buffer[..read]) {
         complete_error_syscall(frame, EFAULT);
         return;
@@ -4005,33 +4049,26 @@ fn syscall_table_read_for_task(
     }
 
     let mut buffer = [0u8; USER_COPY_MAX];
-    let first_read = {
-        let ctx = crate::context::context();
-        ctx.files_struct.read_fd(fd, &mut buffer[..len])
-    };
-    let read = match first_read {
-        Ok(read) => read,
-        Err(FileError::NotReady) if pipe_read_yield_to_builtin_grandchild(frame, fd) => return,
-        Err(FileError::NotReady)
-            if crate::context::context_ref()
-                .files_struct
-                .fd_is_tty_read_wait_candidate(fd)
-                && tty_input_wait_for_fd_read_ready(fd) =>
-        {
-            let ctx = crate::context::context();
-            match ctx.files_struct.read_fd(fd, &mut buffer[..len]) {
-                Ok(read) => read,
-                Err(error) => {
-                    print_read_trace_file_error(frame, fd, requested, len, error);
-                    complete_unsupported_syscall(frame);
-                    return;
-                }
+    let read = loop {
+        let attempt = {
+            let _files_guard = super::user_boot::lock_user_files_state();
+            super::user_boot::current_user_files_struct().read_fd(fd, &mut buffer[..len])
+        };
+        match attempt {
+            Ok(read) => break read,
+            Err(FileError::NotReady) if pipe_read_yield_to_builtin_grandchild(frame, fd) => return,
+            Err(FileError::NotReady) if wait_for_current_smp_pipe_read(fd) => continue,
+            Err(FileError::NotReady)
+                if current_fd_is_tty_read_wait_candidate(fd)
+                    && tty_input_wait_for_fd_read_ready(fd) =>
+            {
+                continue;
             }
-        }
-        Err(error) => {
-            print_read_trace_file_error(frame, fd, requested, len, error);
-            complete_unsupported_syscall(frame);
-            return;
+            Err(error) => {
+                print_read_trace_file_error(frame, fd, requested, len, error);
+                complete_unsupported_syscall(frame);
+                return;
+            }
         }
     };
     if !copy_to_user_for_task(user_ptr, &buffer[..read], explicit_task_ref) {
@@ -4046,10 +4083,76 @@ fn syscall_table_read_for_task(
     complete_successful_syscall(frame, read);
 }
 
+fn current_fd_is_tty_read_wait_candidate(fd: usize) -> bool {
+    let _files_guard = super::user_boot::lock_user_files_state();
+    super::user_boot::current_user_files_struct().fd_is_tty_read_wait_candidate(fd)
+}
+
+fn wait_for_current_smp_pipe_read(fd: usize) -> bool {
+    let Some((task_ref, cpu_ref)) = super::user_boot::current_smp_user_task() else {
+        return false;
+    };
+    let Some(target_hartid) =
+        super::user_process_registry::global_registry().hartid_for_cpu(cpu_ref)
+    else {
+        return false;
+    };
+    let reservation = match super::kernel_task::reserve_inbound(
+        task_ref,
+        cpu_ref,
+        super::kernel_task::InboundKind::Wake,
+        super::kernel_task::next_inbound_ordinal(),
+    ) {
+        Ok(reservation) => reservation,
+        Err(_) => return false,
+    };
+    let registration = {
+        let _files_guard = super::user_boot::lock_user_files_state();
+        super::user_boot::current_user_files_struct().register_pipe_read_wait(
+            fd,
+            task_ref,
+            cpu_ref,
+            target_hartid,
+            reservation,
+        )
+    };
+    match registration {
+        Ok(super::files::PipeReadWaitRegistration::Ready(reservation)) => {
+            assert!(super::kernel_task::rollback_reserved(reservation));
+            true
+        }
+        Ok(super::files::PipeReadWaitRegistration::Registered) => {
+            if let Err(error) =
+                crate::context::declare_smp_task_sleep(cpu_ref.logical_id(), task_ref)
+            {
+                let reservation = {
+                    let _files_guard = super::user_boot::lock_user_files_state();
+                    super::user_boot::current_user_files_struct().cancel_pipe_read_wait(task_ref)
+                };
+                if let Some(reservation) = reservation {
+                    assert!(super::kernel_task::rollback_reserved(reservation));
+                }
+                panic_dispatch_event("SMP pipe read sleep declaration failed\n", error);
+            }
+            if let Err(error) = crate::context::schedule_smp_current(cpu_ref.logical_id(), task_ref)
+            {
+                panic_dispatch_event("SMP pipe read schedule failed\n", error);
+            }
+            true
+        }
+        Err((_error, reservation)) => {
+            assert!(super::kernel_task::rollback_reserved(reservation));
+            false
+        }
+    }
+}
+
 fn pipe_read_yield_to_builtin_grandchild(frame: &mut TrapFrame, fd: usize) -> bool {
-    if !crate::context::context_ref()
-        .files_struct
-        .fd_is_pipe_read_wait_candidate(fd)
+    let pipe_wait_candidate = {
+        let _files_guard = super::user_boot::lock_user_files_state();
+        super::user_boot::current_user_files_struct().fd_is_pipe_read_wait_candidate(fd)
+    };
+    if !pipe_wait_candidate
         || !crate::context::context_ref()
             .user_task_set
             .observed_plain_fork_child_pending_wait()
@@ -4224,6 +4327,8 @@ fn poll_user_fds_once(
     nfds: usize,
     revents_values: &mut [u16; USER_PPOLL_MAX],
 ) -> Result<usize, ()> {
+    let _files_guard = super::user_boot::lock_user_files_state();
+    let files_struct = super::user_boot::current_user_files_struct();
     let mut ready_count = 0usize;
     let mut index = 0usize;
     while index < nfds {
@@ -4231,10 +4336,7 @@ fn poll_user_fds_once(
         let revents = if pollfd.fd < 0 {
             0
         } else {
-            match crate::context::context_ref()
-                .files_struct
-                .poll_fd(pollfd.fd as usize, pollfd.events)
-            {
+            match files_struct.poll_fd(pollfd.fd as usize, pollfd.events) {
                 Ok(revents) => revents,
                 Err(FileError::BadFd) => POLLNVAL,
                 Err(FileError::NotReady) | Err(FileError::BackendUnavailable) => return Err(()),
@@ -4263,9 +4365,8 @@ fn count_ready_revents(revents_values: &[u16; USER_PPOLL_MAX], nfds: usize) -> u
 }
 
 fn tty_input_wait_enabled() -> bool {
-    crate::context::context_ref()
-        .files_struct
-        .stdin_blocking_wait_enabled()
+    let _files_guard = super::user_boot::lock_user_files_state();
+    super::user_boot::current_user_files_struct().stdin_blocking_wait_enabled()
 }
 
 fn tty_input_wait_for_fd_read_ready(fd: usize) -> bool {
@@ -4273,31 +4374,36 @@ fn tty_input_wait_for_fd_read_ready(fd: usize) -> bool {
         return false;
     }
 
-    crate::context::context_ref()
-        .files_struct
-        .record_tty_read_wait_entry();
+    {
+        let _files_guard = super::user_boot::lock_user_files_state();
+        super::user_boot::current_user_files_struct().record_tty_read_wait_entry();
+    }
     print_tty_wait_trace("read", "enter", fd, None);
     let saved_sstatus = crate::arch::riscv64::csr::read_sstatus();
     crate::arch::riscv64::csr::enable_supervisor_interrupts();
     loop {
-        match crate::context::context_ref()
-            .files_struct
-            .poll_fd(fd, FILE_POLLIN)
-        {
+        let poll_result = {
+            let _files_guard = super::user_boot::lock_user_files_state();
+            super::user_boot::current_user_files_struct().poll_fd(fd, FILE_POLLIN)
+        };
+        match poll_result {
             Ok(revents) if revents & FILE_POLLIN != 0 => {
                 crate::arch::riscv64::csr::restore_supervisor_interrupts(saved_sstatus);
-                crate::context::context_ref()
-                    .files_struct
-                    .record_tty_read_wait_finish(true);
+                {
+                    let _files_guard = super::user_boot::lock_user_files_state();
+                    super::user_boot::current_user_files_struct().record_tty_read_wait_finish(true);
+                }
                 print_tty_wait_trace("read", "finish", fd, Some(true));
                 return true;
             }
             Ok(_) => {}
             Err(_) => {
                 crate::arch::riscv64::csr::restore_supervisor_interrupts(saved_sstatus);
-                crate::context::context_ref()
-                    .files_struct
-                    .record_tty_read_wait_finish(false);
+                {
+                    let _files_guard = super::user_boot::lock_user_files_state();
+                    super::user_boot::current_user_files_struct()
+                        .record_tty_read_wait_finish(false);
+                }
                 print_tty_wait_trace("read", "finish", fd, Some(false));
                 return false;
             }
@@ -4315,9 +4421,10 @@ fn tty_input_wait_for_poll_ready(
         return false;
     }
 
-    crate::context::context_ref()
-        .files_struct
-        .record_tty_poll_wait_table();
+    {
+        let _files_guard = super::user_boot::lock_user_files_state();
+        super::user_boot::current_user_files_struct().record_tty_poll_wait_table();
+    }
     print_tty_wait_trace(
         "ppoll",
         "enter",
@@ -4330,9 +4437,10 @@ fn tty_input_wait_for_poll_ready(
         match poll_user_fds_once(pollfds, nfds, revents_values) {
             Ok(ready_count) if ready_count != 0 => {
                 crate::arch::riscv64::csr::restore_supervisor_interrupts(saved_sstatus);
-                crate::context::context_ref()
-                    .files_struct
-                    .record_tty_poll_freewait(true);
+                {
+                    let _files_guard = super::user_boot::lock_user_files_state();
+                    super::user_boot::current_user_files_struct().record_tty_poll_freewait(true);
+                }
                 print_tty_wait_trace(
                     "ppoll",
                     "freewait",
@@ -4344,9 +4452,10 @@ fn tty_input_wait_for_poll_ready(
             Ok(_) => {}
             Err(()) => {
                 crate::arch::riscv64::csr::restore_supervisor_interrupts(saved_sstatus);
-                crate::context::context_ref()
-                    .files_struct
-                    .record_tty_poll_freewait(false);
+                {
+                    let _files_guard = super::user_boot::lock_user_files_state();
+                    super::user_boot::current_user_files_struct().record_tty_poll_freewait(false);
+                }
                 print_tty_wait_trace(
                     "ppoll",
                     "freewait",
@@ -4361,14 +4470,14 @@ fn tty_input_wait_for_poll_ready(
 }
 
 fn pollfds_include_read_interest(pollfds: &[UserPollFd; USER_PPOLL_MAX], nfds: usize) -> bool {
+    let _files_guard = super::user_boot::lock_user_files_state();
+    let files_struct = super::user_boot::current_user_files_struct();
     let mut index = 0usize;
     while index < nfds {
         let pollfd = pollfds[index];
         if pollfd.fd >= 0
             && pollfd.events & FILE_POLLIN != 0
-            && crate::context::context_ref()
-                .files_struct
-                .fd_is_tty_read_wait_candidate(pollfd.fd as usize)
+            && files_struct.fd_is_tty_read_wait_candidate(pollfd.fd as usize)
         {
             return true;
         }
@@ -4378,14 +4487,14 @@ fn pollfds_include_read_interest(pollfds: &[UserPollFd; USER_PPOLL_MAX], nfds: u
 }
 
 fn first_read_interest_fd(pollfds: &[UserPollFd; USER_PPOLL_MAX], nfds: usize) -> usize {
+    let _files_guard = super::user_boot::lock_user_files_state();
+    let files_struct = super::user_boot::current_user_files_struct();
     let mut index = 0usize;
     while index < nfds {
         let pollfd = pollfds[index];
         if pollfd.fd >= 0
             && pollfd.events & FILE_POLLIN != 0
-            && crate::context::context_ref()
-                .files_struct
-                .fd_is_tty_read_wait_candidate(pollfd.fd as usize)
+            && files_struct.fd_is_tty_read_wait_candidate(pollfd.fd as usize)
         {
             return pollfd.fd as usize;
         }
@@ -4396,8 +4505,8 @@ fn first_read_interest_fd(pollfds: &[UserPollFd; USER_PPOLL_MAX], nfds: usize) -
 
 fn syscall_table_close(table: &SyscallTable, frame: &mut TrapFrame) {
     let fd = frame.reg(10);
-    let ctx = crate::context::context();
-    if let Err(error) = ctx.files_struct.close_fd(fd) {
+    let _files_guard = super::user_boot::lock_user_files_state();
+    if let Err(error) = super::user_boot::current_user_files_struct().close_fd(fd) {
         let errno = file_error_to_errno(error);
         print_close_error_detail(fd, error, errno);
         complete_error_syscall(frame, errno);
@@ -4425,9 +4534,11 @@ fn syscall_table_newfstatat(table: &SyscallTable, frame: &mut TrapFrame) {
         return;
     };
 
+    let _files_guard = super::user_boot::lock_user_files_state();
+    let (files_struct, fs_struct) = super::user_boot::current_user_process_resources();
     let ctx = crate::context::context();
-    let stat = match ctx.files_struct.stat_path(
-        &ctx.fs_struct,
+    let stat = match files_struct.stat_path(
+        fs_struct,
         &mut ctx.vfs_core,
         &mut ctx.ext2_filesystem,
         &mut ctx.block_device_registry,
@@ -4442,6 +4553,7 @@ fn syscall_table_newfstatat(table: &SyscallTable, frame: &mut TrapFrame) {
             return;
         }
     };
+    drop(_files_guard);
 
     let mut stat_buffer = [0u8; STAT_SIZE];
     write_linux_stat(&mut stat_buffer, stat.size(), stat.mode());
@@ -4480,9 +4592,11 @@ fn syscall_table_readlinkat(table: &SyscallTable, frame: &mut TrapFrame) {
 
     let len = core::cmp::min(bufsiz, USER_COPY_MAX);
     let mut buffer = [0u8; USER_COPY_MAX];
+    let _files_guard = super::user_boot::lock_user_files_state();
+    let (files_struct, fs_struct) = super::user_boot::current_user_process_resources();
     let ctx = crate::context::context();
-    let read = match ctx.files_struct.readlink_path(
-        &ctx.fs_struct,
+    let read = match files_struct.readlink_path(
+        fs_struct,
         &mut ctx.vfs_core,
         &mut ctx.ext2_filesystem,
         &mut ctx.block_device_registry,
@@ -4497,6 +4611,7 @@ fn syscall_table_readlinkat(table: &SyscallTable, frame: &mut TrapFrame) {
             return;
         }
     };
+    drop(_files_guard);
     if !copy_to_user(user_buf, &buffer[..read]) {
         complete_error_syscall(frame, EFAULT);
         return;
@@ -4516,11 +4631,12 @@ fn syscall_table_dup3(table: &SyscallTable, frame: &mut TrapFrame) {
         return;
     }
 
-    let ctx = crate::context::context();
-    let fd = match ctx
-        .files_struct
-        .dup3_fd(oldfd, newfd, flags & O_CLOEXEC != 0)
-    {
+    let _files_guard = super::user_boot::lock_user_files_state();
+    let fd = match super::user_boot::current_user_files_struct().dup3_fd(
+        oldfd,
+        newfd,
+        flags & O_CLOEXEC != 0,
+    ) {
         Ok(fd) => fd,
         Err(error) => {
             let errno = file_error_to_errno(error);
@@ -4542,10 +4658,9 @@ fn syscall_table_pipe2(table: &SyscallTable, frame: &mut TrapFrame) {
         return;
     }
 
-    let pair = match crate::context::context()
-        .files_struct
-        .pipe2_fd_pair(flags as u32)
-    {
+    let _files_guard = super::user_boot::lock_user_files_state();
+    let files_struct = super::user_boot::current_user_files_struct();
+    let pair = match files_struct.pipe2_fd_pair(flags as u32) {
         Ok(pair) => pair,
         Err(error) => {
             complete_error_syscall(frame, file_error_to_errno(error));
@@ -4555,10 +4670,10 @@ fn syscall_table_pipe2(table: &SyscallTable, frame: &mut TrapFrame) {
     let mut pair_bytes = [0u8; 8];
     pair_bytes[..4].copy_from_slice(&(pair[0] as u32).to_le_bytes());
     pair_bytes[4..].copy_from_slice(&(pair[1] as u32).to_le_bytes());
+    drop(_files_guard);
     if !copy_to_user(user_pair, &pair_bytes) {
-        let _ = crate::context::context()
-            .files_struct
-            .rollback_pipe2_usercopy(pair);
+        let _files_guard = super::user_boot::lock_user_files_state();
+        let _ = super::user_boot::current_user_files_struct().rollback_pipe2_usercopy(pair);
         complete_error_syscall(frame, EFAULT);
         return;
     }
@@ -4570,8 +4685,8 @@ fn syscall_table_pipe2(table: &SyscallTable, frame: &mut TrapFrame) {
 fn syscall_table_fchmod(table: &SyscallTable, frame: &mut TrapFrame) {
     let fd = frame.reg(10);
     let mode = frame.reg(11) as u32;
-    let ctx = crate::context::context();
-    if let Err(error) = ctx.files_struct.fchmod_fd(fd, mode) {
+    let _files_guard = super::user_boot::lock_user_files_state();
+    if let Err(error) = super::user_boot::current_user_files_struct().fchmod_fd(fd, mode) {
         complete_error_syscall(frame, file_error_to_errno(error));
         return;
     }
@@ -4584,8 +4699,8 @@ fn syscall_table_fchown(table: &SyscallTable, frame: &mut TrapFrame) {
     let fd = frame.reg(10);
     let uid = frame.reg(11);
     let gid = frame.reg(12);
-    let ctx = crate::context::context();
-    if let Err(error) = ctx.files_struct.fchown_fd(fd, uid, gid) {
+    let _files_guard = super::user_boot::lock_user_files_state();
+    if let Err(error) = super::user_boot::current_user_files_struct().fchown_fd(fd, uid, gid) {
         complete_error_syscall(frame, file_error_to_errno(error));
         return;
     }
@@ -4610,9 +4725,8 @@ fn syscall_table_socket(table: &SyscallTable, frame: &mut TrapFrame) {
         return;
     }
 
-    let ctx = crate::context::context();
-    let fd = match ctx
-        .files_struct
+    let _files_guard = super::user_boot::lock_user_files_state();
+    let fd = match super::user_boot::current_user_files_struct()
         .open_unix_stream_socket(socket_type & O_NONBLOCK != 0, socket_type & O_CLOEXEC != 0)
     {
         Ok(fd) => fd,
@@ -4642,10 +4756,11 @@ fn syscall_table_connect(frame: &mut TrapFrame) {
     let addr_ptr = frame.reg(11);
     let addrlen = frame.reg(12);
 
-    if !crate::context::context_ref()
-        .files_struct
-        .fd_is_unix_socket0(fd)
-    {
+    let socket_fd_valid = {
+        let _files_guard = super::user_boot::lock_user_files_state();
+        super::user_boot::current_user_files_struct().fd_is_unix_socket0(fd)
+    };
+    if !socket_fd_valid {
         complete_unsupported_syscall(frame);
         return;
     }
@@ -4663,9 +4778,11 @@ fn syscall_table_connect(frame: &mut TrapFrame) {
     };
 
     let lookup_result = {
+        let _files_guard = super::user_boot::lock_user_files_state();
+        let (files_struct, fs_struct) = super::user_boot::current_user_process_resources();
         let ctx = crate::context::context();
-        ctx.files_struct.lookup_path_kind(
-            &ctx.fs_struct,
+        files_struct.lookup_path_kind(
+            fs_struct,
             &mut ctx.vfs_core,
             &mut ctx.ext2_filesystem,
             &mut ctx.block_device_registry,
@@ -4783,13 +4900,13 @@ fn syscall_table_getcwd(table: &SyscallTable, frame: &mut TrapFrame) {
         return;
     }
 
+    let _files_guard = super::user_boot::lock_user_files_state();
+    let fs_struct = super::user_boot::current_user_fs_struct();
     let mut cwd = [0u8; USER_COPY_MAX];
-    let cwd_len = match crate::context::context_ref()
-        .fs_struct
-        .current_working_directory(
-            &crate::context::context_ref().vfs_core,
-            &mut cwd[..core::cmp::min(size, USER_COPY_MAX)],
-        ) {
+    let cwd_len = match fs_struct.current_working_directory(
+        &crate::context::context_ref().vfs_core,
+        &mut cwd[..core::cmp::min(size, USER_COPY_MAX)],
+    ) {
         Ok(len) => len,
         Err(super::vfs::VfsError::ShortBuffer) => {
             complete_error_syscall(frame, ERANGE);
@@ -4800,11 +4917,13 @@ fn syscall_table_getcwd(table: &SyscallTable, frame: &mut TrapFrame) {
             return;
         }
     };
+    let root_pwd_same = fs_struct.root_pwd_same();
+    drop(_files_guard);
     if !copy_to_user(user_ptr, &cwd[..cwd_len]) {
         complete_error_syscall(frame, EFAULT);
         return;
     }
-    if crate::context::context_ref().fs_struct.root_pwd_same()
+    if root_pwd_same
         && !crate::context::context()
             .kernel_init_user_state
             .observe_getcwd_root_slice()
@@ -4818,6 +4937,13 @@ fn syscall_table_getcwd(table: &SyscallTable, frame: &mut TrapFrame) {
 }
 
 fn syscall_table_getpid(table: &SyscallTable, frame: &mut TrapFrame) {
+    if let Some((task_ref, _)) = super::user_boot::current_smp_user_task()
+        && let Some(pid) = super::user_process_registry::global_registry().pid(task_ref)
+    {
+        table.getpid_observed.store(1, Ordering::Release);
+        complete_successful_syscall(frame, pid);
+        return;
+    }
     let current_child_continuation = crate::context::context()
         .user_task_set
         .current_child_continuation();
@@ -4835,6 +4961,17 @@ fn syscall_table_getpid(table: &SyscallTable, frame: &mut TrapFrame) {
 
 fn syscall_table_getpgid(table: &SyscallTable, frame: &mut TrapFrame) {
     let pid = frame.reg(10);
+    if let Some((task_ref, _)) = super::user_boot::current_smp_user_task() {
+        let Some(pgrp) =
+            super::user_process_registry::global_registry().process_group(task_ref, pid)
+        else {
+            complete_error_syscall(frame, ESRCH);
+            return;
+        };
+        table.getpgid_observed.store(1, Ordering::Release);
+        complete_successful_syscall(frame, pgrp);
+        return;
+    }
     let lookup = {
         let ctx = crate::context::context();
         let current_child_continuation = ctx.user_task_set.current_child_continuation();
@@ -4853,6 +4990,16 @@ fn syscall_table_getpgid(table: &SyscallTable, frame: &mut TrapFrame) {
 
 fn syscall_table_getsid(table: &SyscallTable, frame: &mut TrapFrame) {
     let pid = frame.reg(10);
+    if let Some((task_ref, _)) = super::user_boot::current_smp_user_task() {
+        let Some(sid) = super::user_process_registry::global_registry().session_id(task_ref, pid)
+        else {
+            complete_error_syscall(frame, ESRCH);
+            return;
+        };
+        table.getsid_observed.store(1, Ordering::Release);
+        complete_successful_syscall(frame, sid);
+        return;
+    }
     let lookup = {
         let ctx = crate::context::context();
         let current_child_continuation = ctx.user_task_set.current_child_continuation();
@@ -4872,6 +5019,50 @@ fn syscall_table_getsid(table: &SyscallTable, frame: &mut TrapFrame) {
 fn syscall_table_setpgid(table: &SyscallTable, frame: &mut TrapFrame) {
     let pid = frame.reg(10);
     let pgid = frame.reg(11);
+    if let Some((task_ref, cpu_ref)) = super::user_boot::current_smp_user_task() {
+        use super::user_process_registry::UserProcessSetPgidResult;
+
+        let update = super::user_process_registry::global_registry()
+            .set_process_group(task_ref, cpu_ref, pid, pgid);
+        match update {
+            UserProcessSetPgidResult::Updated(process_group) => {
+                // A serial vfork child still executes through the CPU0 legacy
+                // resource carrier. Mirror only that exact current occurrence
+                // after the registry transaction has committed.
+                if super::user_boot::current_smp_user_mm_task().is_none() {
+                    let ctx = crate::context::context();
+                    if !ctx.user_task_set.current_child_continuation()
+                        || !matches!(
+                            ctx.kernel_init_user_state.set_process_group_first_slice(
+                                pid,
+                                pgid,
+                                true,
+                            ),
+                            UserProcessGroupUpdate::Updated(value)
+                                | UserProcessGroupUpdate::UpdatedPendingChild(value)
+                                if value == process_group
+                        )
+                    {
+                        complete_unsupported_syscall(frame);
+                        return;
+                    }
+                }
+                table.setpgid_observed.store(1, Ordering::Release);
+                complete_successful_syscall(frame, 0);
+            }
+            UserProcessSetPgidResult::InvalidArgument => {
+                complete_error_syscall(frame, EINVAL);
+            }
+            UserProcessSetPgidResult::NoSuchProcess => {
+                complete_error_syscall(frame, ESRCH);
+            }
+            UserProcessSetPgidResult::PermissionDenied => {
+                complete_error_syscall(frame, EPERM);
+            }
+            UserProcessSetPgidResult::InvalidCurrent => complete_unsupported_syscall(frame),
+        }
+        return;
+    }
     let update = {
         let ctx = crate::context::context();
         let current_child_continuation = ctx.user_task_set.current_child_continuation();
@@ -4908,6 +5099,37 @@ fn syscall_table_setpgid(table: &SyscallTable, frame: &mut TrapFrame) {
 }
 
 fn syscall_table_setsid(table: &SyscallTable, frame: &mut TrapFrame) {
+    if let Some((task_ref, cpu_ref)) = super::user_boot::current_smp_user_task() {
+        use super::user_process_registry::UserProcessSetSidResult;
+
+        let update =
+            super::user_process_registry::global_registry().set_session_id(task_ref, cpu_ref);
+        match update {
+            UserProcessSetSidResult::Updated(sid) => {
+                // A serial vfork child still uses the CPU0 legacy resource
+                // carrier. Mirror the already-validated update to that exact
+                // occurrence until the carrier path is fully retired.
+                if super::user_boot::current_smp_user_mm_task().is_none() {
+                    let ctx = crate::context::context();
+                    if !ctx.user_task_set.current_child_continuation()
+                        || ctx.kernel_init_user_state.set_session_id_first_slice(true)
+                            != UserProcessGroupUpdate::Updated(sid)
+                    {
+                        complete_unsupported_syscall(frame);
+                        return;
+                    }
+                }
+                table.setsid_observed.store(1, Ordering::Release);
+                complete_successful_syscall(frame, sid);
+            }
+            UserProcessSetSidResult::PermissionDenied => {
+                table.setsid_observed.store(1, Ordering::Release);
+                complete_error_syscall(frame, EPERM);
+            }
+            UserProcessSetSidResult::InvalidCurrent => complete_unsupported_syscall(frame),
+        }
+        return;
+    }
     let update = {
         let ctx = crate::context::context();
         let current_child_continuation = ctx.user_task_set.current_child_continuation();
@@ -4931,6 +5153,14 @@ fn syscall_table_setsid(table: &SyscallTable, frame: &mut TrapFrame) {
 }
 
 fn syscall_table_getppid(table: &SyscallTable, frame: &mut TrapFrame) {
+    if let Some((task_ref, _)) = super::user_boot::current_smp_user_task()
+        && let Some(parent_pid) =
+            super::user_process_registry::global_registry().parent_pid(task_ref)
+    {
+        table.getppid_observed.store(1, Ordering::Release);
+        complete_successful_syscall(frame, parent_pid);
+        return;
+    }
     let Some(ppid) = crate::context::context().kernel_init_user_state.read_ppid() else {
         complete_unsupported_syscall(frame);
         return;
@@ -5518,14 +5748,17 @@ fn read_timer_parts(clockid: usize, subsec_scale: u64) -> Option<(u64, u64)> {
 fn syscall_table_fstat(table: &SyscallTable, frame: &mut TrapFrame) {
     let fd = frame.reg(10);
     let stat_ptr = frame.reg(11);
+    let _files_guard = super::user_boot::lock_user_files_state();
+    let files_struct = super::user_boot::current_user_files_struct();
     let ctx = crate::context::context();
-    let stat = match ctx.files_struct.fstat_fd(fd, &ctx.vfs_core) {
+    let stat = match files_struct.fstat_fd(fd, &ctx.vfs_core) {
         Ok(stat) => stat,
         Err(error) => {
             complete_error_syscall(frame, file_error_to_errno(error));
             return;
         }
     };
+    drop(_files_guard);
 
     let mut stat_buffer = [0u8; STAT_SIZE];
     write_linux_stat(&mut stat_buffer, stat.size(), stat.mode());
@@ -5542,13 +5775,11 @@ fn syscall_table_fcntl(table: &SyscallTable, frame: &mut TrapFrame) {
     let fd = frame.reg(10);
     let cmd = frame.reg(11);
     let arg = frame.reg(12);
+    let _files_guard = super::user_boot::lock_user_files_state();
+    let files_struct = super::user_boot::current_user_files_struct();
     match cmd {
         F_DUPFD | F_DUPFD_CLOEXEC => {
-            let ctx = crate::context::context();
-            let new_fd = match ctx
-                .files_struct
-                .fcntl_dupfd_fd(fd, arg, cmd == F_DUPFD_CLOEXEC)
-            {
+            let new_fd = match files_struct.fcntl_dupfd_fd(fd, arg, cmd == F_DUPFD_CLOEXEC) {
                 Ok(new_fd) => new_fd,
                 Err(error) => {
                     let errno = file_error_to_errno(error);
@@ -5562,8 +5793,7 @@ fn syscall_table_fcntl(table: &SyscallTable, frame: &mut TrapFrame) {
             complete_successful_syscall(frame, new_fd);
         }
         F_GETFL => {
-            let ctx = crate::context::context_ref();
-            let flags = match ctx.files_struct.fcntl_getfl_fd(fd) {
+            let flags = match files_struct.fcntl_getfl_fd(fd) {
                 Ok(flags) => flags,
                 Err(error) => {
                     let errno = file_error_to_errno(error);
@@ -5577,8 +5807,7 @@ fn syscall_table_fcntl(table: &SyscallTable, frame: &mut TrapFrame) {
             complete_successful_syscall(frame, flags as usize);
         }
         F_SETFL => {
-            let ctx = crate::context::context();
-            if let Err(error) = ctx.files_struct.fcntl_setfl_fd(fd, arg as u32) {
+            if let Err(error) = files_struct.fcntl_setfl_fd(fd, arg as u32) {
                 let errno = file_error_to_errno(error);
                 print_fcntl_error_detail(fd, cmd, arg, errno);
                 complete_error_syscall(frame, errno);
@@ -5589,8 +5818,7 @@ fn syscall_table_fcntl(table: &SyscallTable, frame: &mut TrapFrame) {
             complete_successful_syscall(frame, 0);
         }
         F_GETFD => {
-            let ctx = crate::context::context_ref();
-            let flags = match ctx.files_struct.fcntl_getfd_fd(fd) {
+            let flags = match files_struct.fcntl_getfd_fd(fd) {
                 Ok(flags) => flags,
                 Err(error) => {
                     let errno = file_error_to_errno(error);
@@ -5604,11 +5832,7 @@ fn syscall_table_fcntl(table: &SyscallTable, frame: &mut TrapFrame) {
             complete_successful_syscall(frame, flags as usize);
         }
         F_SETFD => {
-            let ctx = crate::context::context();
-            if let Err(error) = ctx
-                .files_struct
-                .fcntl_setfd_fd(fd, (arg & FD_CLOEXEC) as u32)
-            {
+            if let Err(error) = files_struct.fcntl_setfd_fd(fd, (arg & FD_CLOEXEC) as u32) {
                 let errno = file_error_to_errno(error);
                 print_fcntl_error_detail(fd, cmd, arg, errno);
                 complete_error_syscall(frame, errno);
@@ -5629,10 +5853,11 @@ fn syscall_table_ioctl(table: &SyscallTable, frame: &mut TrapFrame) {
     let fd = frame.reg(10);
     let cmd = frame.reg(11);
     let arg = frame.reg(12);
-    if let Err(error) = crate::context::context_ref()
-        .files_struct
-        .ioctl_validate_fd(fd)
-    {
+    let validation = {
+        let _files_guard = super::user_boot::lock_user_files_state();
+        super::user_boot::current_user_files_struct().ioctl_validate_fd(fd)
+    };
+    if let Err(error) = validation {
         let errno = file_error_to_errno(error);
         print_ioctl_error_detail(fd, cmd, arg, errno);
         complete_error_syscall(frame, errno);
@@ -5640,10 +5865,11 @@ fn syscall_table_ioctl(table: &SyscallTable, frame: &mut TrapFrame) {
     }
     match cmd {
         TIOCGWINSZ => {
-            let winsize = match crate::context::context_ref()
-                .files_struct
-                .ioctl_tiocgwinsz_fd(fd)
-            {
+            let winsize_result = {
+                let _files_guard = super::user_boot::lock_user_files_state();
+                super::user_boot::current_user_files_struct().ioctl_tiocgwinsz_fd(fd)
+            };
+            let winsize = match winsize_result {
                 Ok(winsize) => winsize,
                 Err(error) => {
                     let errno = file_error_to_errno(error);
@@ -5665,10 +5891,11 @@ fn syscall_table_ioctl(table: &SyscallTable, frame: &mut TrapFrame) {
             }
         }
         TCGETS => {
-            let termios = match crate::context::context_ref()
-                .files_struct
-                .ioctl_tcgets_fd(fd)
-            {
+            let termios_result = {
+                let _files_guard = super::user_boot::lock_user_files_state();
+                super::user_boot::current_user_files_struct().ioctl_tcgets_fd(fd)
+            };
+            let termios = match termios_result {
                 Ok(termios) => termios,
                 Err(error) => {
                     let errno = file_error_to_errno(error);
@@ -5690,10 +5917,11 @@ fn syscall_table_ioctl(table: &SyscallTable, frame: &mut TrapFrame) {
                 complete_error_syscall(frame, EFAULT);
                 return;
             }
-            if let Err(error) = crate::context::context()
-                .files_struct
-                .ioctl_tcsets_fd(fd, termios)
-            {
+            let update = {
+                let _files_guard = super::user_boot::lock_user_files_state();
+                super::user_boot::current_user_files_struct().ioctl_tcsets_fd(fd, termios)
+            };
+            if let Err(error) = update {
                 let errno = file_error_to_errno(error);
                 print_ioctl_error_detail(fd, cmd, arg, errno);
                 complete_error_syscall(frame, errno);
@@ -5701,19 +5929,27 @@ fn syscall_table_ioctl(table: &SyscallTable, frame: &mut TrapFrame) {
             }
         }
         TIOCGPGRP => {
-            if let Err(error) = crate::context::context_ref()
-                .files_struct
-                .ioctl_tiocgpgrp_fd(fd)
-            {
+            let validation = {
+                let _files_guard = super::user_boot::lock_user_files_state();
+                super::user_boot::current_user_files_struct().ioctl_tiocgpgrp_fd(fd)
+            };
+            if let Err(error) = validation {
                 let errno = file_error_to_errno(error);
                 print_ioctl_error_detail(fd, cmd, arg, errno);
                 complete_error_syscall(frame, errno);
                 return;
             }
-            let Some(pgrp) = crate::context::context()
-                .kernel_init_user_state
-                .read_foreground_pgrp()
-            else {
+            let pgrp = if let Some((task_ref, cpu_ref)) = super::user_boot::current_smp_user_task()
+            {
+                super::user_process_registry::global_registry()
+                    .tty_foreground_process_group(task_ref, cpu_ref)
+                    .ok()
+            } else {
+                crate::context::context()
+                    .kernel_init_user_state
+                    .read_foreground_pgrp()
+            };
+            let Some(pgrp) = pgrp else {
                 print_ioctl_error_detail(fd, cmd, arg, ENOTTY);
                 complete_error_syscall(frame, ENOTTY);
                 return;
@@ -5725,10 +5961,11 @@ fn syscall_table_ioctl(table: &SyscallTable, frame: &mut TrapFrame) {
             }
         }
         TIOCSPGRP => {
-            if let Err(error) = crate::context::context_ref()
-                .files_struct
-                .ioctl_tiocspgrp_fd(fd)
-            {
+            let validation = {
+                let _files_guard = super::user_boot::lock_user_files_state();
+                super::user_boot::current_user_files_struct().ioctl_tiocspgrp_fd(fd)
+            };
+            if let Err(error) = validation {
                 let errno = file_error_to_errno(error);
                 print_ioctl_error_detail(fd, cmd, arg, errno);
                 complete_error_syscall(frame, errno);
@@ -5739,50 +5976,78 @@ fn syscall_table_ioctl(table: &SyscallTable, frame: &mut TrapFrame) {
                 complete_error_syscall(frame, EFAULT);
                 return;
             };
-            let update = crate::context::context()
-                .kernel_init_user_state
-                .set_foreground_pgrp_first_slice(pgrp);
-            match update {
-                UserProcessGroupUpdate::Updated(_)
-                | UserProcessGroupUpdate::UpdatedPendingChild(_) => {}
-                UserProcessGroupUpdate::Invalid => {
-                    print_ioctl_error_detail(fd, cmd, arg, EINVAL);
-                    complete_error_syscall(frame, EINVAL);
+            if let Some((task_ref, cpu_ref)) = super::user_boot::current_smp_user_task() {
+                use super::user_process_registry::UserProcessJobControlError;
+
+                if let Err(error) = super::user_process_registry::global_registry()
+                    .set_tty_foreground_process_group(task_ref, cpu_ref, pgrp as usize)
+                {
+                    let errno = match error {
+                        UserProcessJobControlError::InvalidArgument => EINVAL,
+                        UserProcessJobControlError::NoSuchProcess => ESRCH,
+                        UserProcessJobControlError::PermissionDenied => EPERM,
+                        UserProcessJobControlError::NotControllingTty
+                        | UserProcessJobControlError::InvalidCurrent => ENOTTY,
+                    };
+                    print_ioctl_error_detail(fd, cmd, arg, errno);
+                    complete_error_syscall(frame, errno);
                     return;
                 }
-                UserProcessGroupUpdate::NoSuchProcess => {
-                    print_ioctl_error_detail(fd, cmd, arg, ESRCH);
-                    complete_error_syscall(frame, ESRCH);
-                    return;
-                }
-                UserProcessGroupUpdate::PermissionDenied => {
-                    print_ioctl_error_detail(fd, cmd, arg, EPERM);
-                    complete_error_syscall(frame, EPERM);
-                    return;
-                }
-                UserProcessGroupUpdate::NotReady => {
-                    print_ioctl_error_detail(fd, cmd, arg, ENOTTY);
-                    complete_error_syscall(frame, ENOTTY);
-                    return;
+            } else {
+                let update = crate::context::context()
+                    .kernel_init_user_state
+                    .set_foreground_pgrp_first_slice(pgrp);
+                match update {
+                    UserProcessGroupUpdate::Updated(_)
+                    | UserProcessGroupUpdate::UpdatedPendingChild(_) => {}
+                    UserProcessGroupUpdate::Invalid => {
+                        print_ioctl_error_detail(fd, cmd, arg, EINVAL);
+                        complete_error_syscall(frame, EINVAL);
+                        return;
+                    }
+                    UserProcessGroupUpdate::NoSuchProcess => {
+                        print_ioctl_error_detail(fd, cmd, arg, ESRCH);
+                        complete_error_syscall(frame, ESRCH);
+                        return;
+                    }
+                    UserProcessGroupUpdate::PermissionDenied => {
+                        print_ioctl_error_detail(fd, cmd, arg, EPERM);
+                        complete_error_syscall(frame, EPERM);
+                        return;
+                    }
+                    UserProcessGroupUpdate::NotReady => {
+                        print_ioctl_error_detail(fd, cmd, arg, ENOTTY);
+                        complete_error_syscall(frame, ENOTTY);
+                        return;
+                    }
                 }
             }
         }
         TIOCGSID => {
-            if let Err(error) = crate::context::context_ref()
-                .files_struct
-                .ioctl_tiocgsid_fd(fd)
-            {
+            let validation = {
+                let _files_guard = super::user_boot::lock_user_files_state();
+                super::user_boot::current_user_files_struct().ioctl_tiocgsid_fd(fd)
+            };
+            if let Err(error) = validation {
                 let errno = file_error_to_errno(error);
                 print_ioctl_error_detail(fd, cmd, arg, errno);
                 complete_error_syscall(frame, errno);
                 return;
             }
-            let lookup = {
-                let ctx = crate::context::context();
-                let current_child_continuation = ctx.user_task_set.current_child_continuation();
-                ctx.kernel_init_user_state
-                    .read_tty_session_id_first_slice(current_child_continuation)
-            };
+            let lookup =
+                if let Some((task_ref, cpu_ref)) = super::user_boot::current_smp_user_task() {
+                    match super::user_process_registry::global_registry()
+                        .tty_session_id(task_ref, cpu_ref)
+                    {
+                        Ok(sid) => UserProcessGroupLookup::Found(sid),
+                        Err(_) => UserProcessGroupLookup::NotReady,
+                    }
+                } else {
+                    let ctx = crate::context::context();
+                    let current_child_continuation = ctx.user_task_set.current_child_continuation();
+                    ctx.kernel_init_user_state
+                        .read_tty_session_id_first_slice(current_child_continuation)
+                };
             match lookup {
                 UserProcessGroupLookup::Found(sid) => {
                     if !write_user_u32(arg, sid as u32) {
@@ -5799,21 +6064,44 @@ fn syscall_table_ioctl(table: &SyscallTable, frame: &mut TrapFrame) {
             }
         }
         TIOCSCTTY => {
-            if let Err(error) = crate::context::context_ref()
-                .files_struct
-                .ioctl_tiocsctty_fd(fd)
-            {
+            let validation = {
+                let _files_guard = super::user_boot::lock_user_files_state();
+                super::user_boot::current_user_files_struct().ioctl_tiocsctty_fd(fd)
+            };
+            if let Err(error) = validation {
                 let errno = file_error_to_errno(error);
                 print_ioctl_error_detail(fd, cmd, arg, errno);
                 complete_error_syscall(frame, errno);
                 return;
             }
-            let update = {
-                let ctx = crate::context::context();
-                let current_child_continuation = ctx.user_task_set.current_child_continuation();
-                ctx.kernel_init_user_state
-                    .bind_controlling_tty_first_slice(current_child_continuation, arg)
-            };
+            let update =
+                if let Some((task_ref, cpu_ref)) = super::user_boot::current_smp_user_task() {
+                    use super::user_process_registry::UserProcessJobControlError;
+
+                    match super::user_process_registry::global_registry()
+                        .bind_controlling_tty(task_ref, cpu_ref, arg)
+                    {
+                        Ok(sid) => UserProcessGroupUpdate::Updated(sid),
+                        Err(UserProcessJobControlError::PermissionDenied) => {
+                            UserProcessGroupUpdate::PermissionDenied
+                        }
+                        Err(UserProcessJobControlError::InvalidArgument) => {
+                            UserProcessGroupUpdate::Invalid
+                        }
+                        Err(UserProcessJobControlError::NoSuchProcess) => {
+                            UserProcessGroupUpdate::NoSuchProcess
+                        }
+                        Err(
+                            UserProcessJobControlError::NotControllingTty
+                            | UserProcessJobControlError::InvalidCurrent,
+                        ) => UserProcessGroupUpdate::NotReady,
+                    }
+                } else {
+                    let ctx = crate::context::context();
+                    let current_child_continuation = ctx.user_task_set.current_child_continuation();
+                    ctx.kernel_init_user_state
+                        .bind_controlling_tty_first_slice(current_child_continuation, arg)
+                };
             match update {
                 UserProcessGroupUpdate::Updated(_)
                 | UserProcessGroupUpdate::UpdatedPendingChild(_) => {}
@@ -5870,9 +6158,11 @@ fn syscall_table_faccessat(table: &SyscallTable, frame: &mut TrapFrame) {
         return;
     };
 
+    let _files_guard = super::user_boot::lock_user_files_state();
+    let (files_struct, fs_struct) = super::user_boot::current_user_process_resources();
     let ctx = crate::context::context();
-    match ctx.files_struct.access_path(
-        &ctx.fs_struct,
+    match files_struct.access_path(
+        fs_struct,
         &mut ctx.vfs_core,
         &mut ctx.ext2_filesystem,
         &mut ctx.block_device_registry,
@@ -5895,8 +6185,10 @@ fn syscall_table_lseek(table: &SyscallTable, frame: &mut TrapFrame) {
     let fd = frame.reg(10);
     let offset = frame.reg(11) as isize;
     let whence = frame.reg(12);
+    let _files_guard = super::user_boot::lock_user_files_state();
+    let files_struct = super::user_boot::current_user_files_struct();
     let ctx = crate::context::context();
-    let target = match ctx.files_struct.lseek_fd(fd, offset, whence, &ctx.vfs_core) {
+    let target = match files_struct.lseek_fd(fd, offset, whence, &ctx.vfs_core) {
         Ok(target) => target,
         Err(error) => {
             complete_error_syscall(frame, file_error_to_errno(error));
@@ -5910,6 +6202,14 @@ fn syscall_table_lseek(table: &SyscallTable, frame: &mut TrapFrame) {
 
 fn syscall_table_brk(frame: &mut TrapFrame) {
     let requested = frame.reg(10);
+    if let Some((task_ref, _)) = super::user_boot::current_smp_user_mm_task() {
+        let Some(current) = super::user_boot::smp_user_brk(task_ref, requested) else {
+            complete_error_syscall(frame, ENOMEM);
+            return;
+        };
+        complete_successful_syscall(frame, current);
+        return;
+    }
     let ctx = crate::context::context();
     let current = ctx.user_address_space.user_brk(requested);
     complete_successful_syscall(frame, current);
@@ -5922,11 +6222,20 @@ fn syscall_table_mmap(frame: &mut TrapFrame) {
     let flags = frame.reg(13);
     let fd = frame.reg(14);
     let offset = frame.reg(15);
-    let ctx = crate::context::context();
-    let mapped = match ctx
-        .user_address_space
-        .user_mmap(addr, len, prot, flags, fd, offset)
-    {
+    let result = if let Some((task_ref, _)) = super::user_boot::current_smp_user_mm_task() {
+        let Some(result) =
+            super::user_boot::smp_user_mmap(task_ref, addr, len, prot, flags, fd, offset)
+        else {
+            complete_error_syscall(frame, ENOMEM);
+            return;
+        };
+        result
+    } else {
+        crate::context::context()
+            .user_address_space
+            .user_mmap(addr, len, prot, flags, fd, offset)
+    };
+    let mapped = match result {
         Ok(mapped) => mapped,
         Err(UserMmapError::Invalid) => {
             complete_error_syscall(frame, EINVAL);
@@ -5944,8 +6253,14 @@ fn syscall_table_mprotect(frame: &mut TrapFrame) {
     let addr = frame.reg(10);
     let len = frame.reg(11);
     let _prot = frame.reg(12);
-    let ctx = crate::context::context_ref();
-    if ctx.user_address_space.user_mprotect(addr, len) {
+    let protected = if let Some((task_ref, _)) = super::user_boot::current_smp_user_mm_task() {
+        super::user_boot::smp_user_mprotect(task_ref, addr, len).unwrap_or(false)
+    } else {
+        crate::context::context_ref()
+            .user_address_space
+            .user_mprotect(addr, len)
+    };
+    if protected {
         complete_successful_syscall(frame, 0);
     } else {
         complete_error_syscall(frame, ENOMEM);
@@ -5955,13 +6270,19 @@ fn syscall_table_mprotect(frame: &mut TrapFrame) {
 fn syscall_table_munmap(frame: &mut TrapFrame) {
     let addr = frame.reg(10);
     let len = frame.reg(11);
-    let ctx = crate::context::context();
-    if ctx.user_address_space.user_munmap(
-        addr,
-        len,
-        &mut ctx.page_allocator,
-        &ctx.page_metadata_map,
-    ) {
+    let unmapped = if let Some((task_ref, _)) = super::user_boot::current_smp_user_mm_task() {
+        super::user_boot::smp_user_munmap(task_ref, addr, len).unwrap_or(false)
+    } else {
+        let _guard = super::user_boot::lock_user_memory_state();
+        let ctx = crate::context::context();
+        ctx.user_address_space.user_munmap(
+            addr,
+            len,
+            &mut ctx.page_allocator,
+            &ctx.page_metadata_map,
+        )
+    };
+    if unmapped {
         complete_successful_syscall(frame, 0);
     } else {
         complete_error_syscall(frame, ENOMEM);
@@ -5983,9 +6304,8 @@ fn syscall_table_write(table: &SyscallTable, frame: &mut TrapFrame) {
         return;
     }
 
-    let Ok(written) = crate::context::context()
-        .files_struct
-        .write_fd(fd, &buffer[..len])
+    let _files_guard = super::user_boot::lock_user_files_state();
+    let Ok(written) = super::user_boot::current_user_files_struct().write_fd(fd, &buffer[..len])
     else {
         complete_unsupported_syscall(frame);
         return;
@@ -6009,6 +6329,7 @@ fn syscall_table_writev(table: &SyscallTable, frame: &mut TrapFrame) {
         return;
     }
 
+    let mut buffer = [0u8; USER_COPY_MAX * USER_IOV_MAX];
     let mut total = 0usize;
     let mut index = 0usize;
     while index < iovcnt {
@@ -6021,35 +6342,34 @@ fn syscall_table_writev(table: &SyscallTable, frame: &mut TrapFrame) {
             complete_error_syscall(frame, EFAULT);
             return;
         };
-        if len > USER_COPY_MAX || total.checked_add(len).is_none() {
+        let Some(end) = total.checked_add(len) else {
+            complete_error_syscall(frame, EINVAL);
+            return;
+        };
+        if len > USER_COPY_MAX || end > buffer.len() {
             complete_error_syscall(frame, EINVAL);
             return;
         }
-        if len != 0 {
-            let mut buffer = [0u8; USER_COPY_MAX];
-            if !copy_from_user(base, &mut buffer[..len]) {
-                complete_error_syscall(frame, EFAULT);
-                return;
-            }
-            let Ok(written) = crate::context::context()
-                .files_struct
-                .write_fd(fd, &buffer[..len])
-            else {
-                complete_unsupported_syscall(frame);
-                return;
-            };
-            total += written;
-            if written != len {
-                table.writev_observed.store(1, Ordering::Release);
-                crate::checkpoint::dispatch(
-                    Checkpoint::SyscallTableWritev,
-                    crate::context::context_ref(),
-                );
-                complete_successful_syscall(frame, total);
-                return;
-            }
+        if len != 0 && !copy_from_user(base, &mut buffer[total..end]) {
+            complete_error_syscall(frame, EFAULT);
+            return;
         }
+        total = end;
         index += 1;
+    }
+
+    if total != 0 {
+        let _files_guard = super::user_boot::lock_user_files_state();
+        let written =
+            match super::user_boot::current_user_files_struct().write_fd(fd, &buffer[..total]) {
+                Ok(written) => written,
+                Err(error) => {
+                    trace_writev_file_failure(fd, error);
+                    complete_unsupported_syscall(frame);
+                    return;
+                }
+            };
+        total = written;
     }
 
     table.writev_observed.store(1, Ordering::Release);
@@ -6058,6 +6378,80 @@ fn syscall_table_writev(table: &SyscallTable, frame: &mut TrapFrame) {
         crate::context::context_ref(),
     );
     complete_successful_syscall(frame, total);
+}
+
+fn trace_writev_file_failure(fd: usize, error: FileError) {
+    crate::arch::riscv64::sbi::putstr("writev file failure fd=");
+    print_decimal(fd);
+    crate::arch::riscv64::sbi::putstr(" error=");
+    print_file_error_name(error);
+    if let Some((task_ref, cpu_ref)) = super::user_boot::current_smp_user_task() {
+        crate::arch::riscv64::sbi::putstr(" task_slot=");
+        print_decimal(task_ref.slot());
+        crate::arch::riscv64::sbi::putstr(" task_generation=");
+        print_decimal(task_ref.generation() as usize);
+        crate::arch::riscv64::sbi::putstr(" cpu=");
+        print_decimal(cpu_ref.logical_id());
+    }
+    let pipe = super::user_boot::current_user_files_struct().pipe_state_diagnostic();
+    crate::arch::riscv64::sbi::putstr(" pipe_ref=");
+    print_decimal(pipe.pipe_ref_present as usize);
+    crate::arch::riscv64::sbi::putstr(" pipe_slot=");
+    print_decimal(pipe.pipe_slot);
+    crate::arch::riscv64::sbi::putstr(" pipe_generation=");
+    print_decimal(pipe.pipe_generation as usize);
+    crate::arch::riscv64::sbi::putstr(" local_readers=");
+    print_decimal(pipe.local_readers);
+    crate::arch::riscv64::sbi::putstr(" local_writers=");
+    print_decimal(pipe.local_writers);
+    crate::arch::riscv64::sbi::putstr(" shared_present=");
+    print_decimal(pipe.shared_present as usize);
+    crate::arch::riscv64::sbi::putstr(" shared_len=");
+    print_decimal(pipe.shared_len);
+    crate::arch::riscv64::sbi::putstr(" shared_readers=");
+    print_decimal(pipe.shared_readers);
+    crate::arch::riscv64::sbi::putstr(" shared_writers=");
+    print_decimal(pipe.shared_writers);
+    crate::arch::riscv64::sbi::putstr(" snapshots=");
+    print_decimal(pipe.snapshot_live);
+    crate::arch::riscv64::sbi::putstr("/");
+    print_decimal(pipe.snapshot_read_live);
+    crate::arch::riscv64::sbi::putstr("/");
+    print_decimal(pipe.snapshot_write_live);
+    crate::arch::riscv64::sbi::putstr(" last_release=");
+    print_pipe_release_reason(pipe.last_release_reason);
+    crate::arch::riscv64::sbi::putstr("(");
+    print_decimal(pipe.last_release_readers_before);
+    crate::arch::riscv64::sbi::putstr("/");
+    print_decimal(pipe.last_release_writers_before);
+    crate::arch::riscv64::sbi::putstr("->");
+    print_decimal(pipe.last_release_readers);
+    crate::arch::riscv64::sbi::putstr("/");
+    print_decimal(pipe.last_release_writers);
+    crate::arch::riscv64::sbi::putstr(" task=");
+    print_decimal(pipe.last_release_task_slot);
+    crate::arch::riscv64::sbi::putstr(":");
+    print_decimal(pipe.last_release_task_generation as usize);
+    crate::arch::riscv64::sbi::putstr(" cpu=");
+    print_decimal(pipe.last_release_cpu);
+    crate::arch::riscv64::sbi::putstr(" tp=");
+    print_hex(pipe.last_release_task_identity);
+    crate::arch::riscv64::sbi::putstr(" fd=");
+    print_decimal(pipe.last_release_fd);
+    crate::arch::riscv64::sbi::putstr(")");
+    crate::arch::riscv64::sbi::putstr("\n");
+}
+
+fn print_pipe_release_reason(reason: PipeReleaseReason) {
+    crate::arch::riscv64::sbi::putstr(match reason {
+        PipeReleaseReason::None => "none",
+        PipeReleaseReason::AllocationRollback => "allocation_rollback",
+        PipeReleaseReason::DupRollback => "dup_rollback",
+        PipeReleaseReason::DescriptorClose => "descriptor_close",
+        PipeReleaseReason::SnapshotRestoreCurrent => "snapshot_restore_current",
+        PipeReleaseReason::SnapshotDiscard => "snapshot_discard",
+        PipeReleaseReason::ProcessTeardown => "process_teardown",
+    });
 }
 
 fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
@@ -6078,6 +6472,28 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
         .accepts_vfork_vm_first_slice(clone_flags);
 
     if clone_is_plain_fork {
+        if super::user_boot::current_smp_user_mm_task().is_some() {
+            match super::user_boot::fork_current_smp_user(frame) {
+                Ok(child_pid) => {
+                    table.clone_observed.store(1, Ordering::Release);
+                    crate::checkpoint::dispatch(
+                        Checkpoint::SyscallTableClone,
+                        crate::context::context_ref(),
+                    );
+                    complete_successful_syscall(frame, child_pid);
+                }
+                Err(super::user_boot::CurrentSmpForkError::Again) => {
+                    complete_error_syscall(frame, EAGAIN);
+                }
+                Err(super::user_boot::CurrentSmpForkError::NoMemory) => {
+                    complete_error_syscall(frame, ENOMEM);
+                }
+                Err(super::user_boot::CurrentSmpForkError::InvalidParent) => {
+                    complete_unsupported_clone_syscall(frame, "current_smp_parent");
+                }
+            }
+            return;
+        }
         if crate::context::context_ref()
             .user_task_set
             .free_task_slot_count()
@@ -6091,6 +6507,7 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
             .current_child_continuation()
         {
             let child_pid = {
+                let (files_struct, fs_struct) = super::user_boot::current_user_process_resources();
                 let ctx = crate::context::context();
                 let parent_pid = ctx.user_task_set.pid();
                 let next_child_pid = ctx.user_task_set.next_child_pid();
@@ -6110,8 +6527,8 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
                     &mut ctx.user_address_space,
                     &ctx.user_stack,
                     &ctx.user_trap_frame,
-                    &ctx.fs_struct,
-                    &ctx.files_struct,
+                    fs_struct,
+                    files_struct,
                     &mut ctx.page_allocator,
                     &ctx.page_metadata_map,
                     frame,
@@ -6140,6 +6557,7 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
         }
 
         let child_pid = {
+            let (files_struct, fs_struct) = super::user_boot::current_user_process_resources();
             let ctx = crate::context::context();
             let next_child_pid = ctx.user_task_set.next_child_pid();
             let runqueue_ref = match ctx
@@ -6169,8 +6587,8 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
                         .boot_scheduler()
                         .expect("CPU0 Scheduler must be published"),
                     cpu_group: &ctx.cpu_group,
-                    fs_struct: &ctx.fs_struct,
-                    files_struct: &ctx.files_struct,
+                    fs_struct,
+                    files_struct,
                     address_space: &ctx.user_address_space,
                     trap_frame: &ctx.user_trap_frame,
                     boundaries: &ctx.user_clone_deferred_boundaries,
@@ -6195,8 +6613,8 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
                 &mut ctx.user_address_space,
                 &ctx.user_stack,
                 &ctx.user_trap_frame,
-                &ctx.fs_struct,
-                &ctx.files_struct,
+                fs_struct,
+                files_struct,
                 &mut ctx.page_allocator,
                 &ctx.page_metadata_map,
                 frame,
@@ -6212,14 +6630,19 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
             };
 
             let child_ref = ctx.user_task_set.active_task_ref();
-            if ctx
-                .scheduler_mut()
-                .enqueue_task_on_scheduler(child_pid, child_ref, runqueue_ref)
-                .is_err()
+            let Some(child_cpu) = ctx.user_task_set.cpu_ref_for_task(child_ref) else {
+                panic_dispatch("declared child CPU placement invariant failed\n");
+            };
+            if child_cpu.is_boot_cpu()
+                && ctx
+                    .scheduler_mut()
+                    .enqueue_task_on_scheduler(child_pid, child_ref, runqueue_ref)
+                    .is_err()
             {
                 panic_dispatch("declared child runqueue publish invariant failed\n");
             }
             if !ctx.user_task_set.mark_enqueued() {
+                print_clone_boundary(frame, "mark_enqueued");
                 panic_dispatch("declared child enqueue invariant failed\n");
             }
             if !ctx
@@ -6244,6 +6667,32 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
     if clone_is_vfork_pidfd && parent_tidptr == 0 {
         print_clone_boundary(frame, "parent_tidptr_null");
         complete_error_syscall(frame, EFAULT);
+        return;
+    }
+    if super::user_boot::current_smp_vfork_parent() {
+        let pidfd_user_ptr = clone_is_vfork_pidfd.then_some(parent_tidptr);
+        match super::user_boot::vfork_current_smp_user(frame, pidfd_user_ptr) {
+            Ok(child_pid) => {
+                table.clone_observed.store(1, Ordering::Release);
+                crate::checkpoint::dispatch(
+                    Checkpoint::SyscallTableClone,
+                    crate::context::context_ref(),
+                );
+                complete_successful_syscall(frame, child_pid);
+            }
+            Err(super::user_boot::CurrentSmpVforkError::Again) => {
+                complete_error_syscall(frame, EAGAIN);
+            }
+            Err(super::user_boot::CurrentSmpVforkError::NoMemory) => {
+                complete_error_syscall(frame, ENOMEM);
+            }
+            Err(super::user_boot::CurrentSmpVforkError::Fault) => {
+                complete_error_syscall(frame, EFAULT);
+            }
+            Err(super::user_boot::CurrentSmpVforkError::InvalidParent) => {
+                complete_unsupported_clone_syscall(frame, "current_smp_vfork_parent");
+            }
+        }
         return;
     }
     if crate::context::context_ref()
@@ -6414,6 +6863,7 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
                 panic_dispatch("declared child runqueue publish invariant failed\n");
             }
             if !ctx.user_task_set.mark_enqueued() {
+                print_clone_boundary(frame, "mark_enqueued");
                 panic_dispatch("declared child enqueue invariant failed\n");
             }
         } else if ctx
@@ -6970,7 +7420,15 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
     let options = frame.reg(12);
     let rusage = frame.reg(13);
 
-    if upid != USER_WAIT4_ALL_CHILDREN || rusage != 0 {
+    let child_selector = if upid == USER_WAIT4_ALL_CHILDREN {
+        UserProcessChildSelector::Any
+    } else if upid != 0 && upid <= i32::MAX as usize {
+        UserProcessChildSelector::ExactPid(upid)
+    } else {
+        complete_unsupported_syscall(frame);
+        return;
+    };
+    if rusage != 0 {
         complete_unsupported_syscall(frame);
         return;
     }
@@ -6979,9 +7437,131 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
         return;
     }
 
+    let registry = super::user_process_registry::global_registry();
+    let (registry_parent_ref, registry_parent_pid, registry_parent_cpu) =
+        if let Some((task_ref, cpu_ref)) = super::user_boot::current_smp_user_task() {
+            let Some(pid) = registry.pid(task_ref) else {
+                complete_error_syscall(frame, ECHILD);
+                return;
+            };
+            (task_ref, pid, cpu_ref)
+        } else {
+            (
+                super::task::TaskRef::KERNEL_INIT,
+                super::rest_init::KERNEL_INIT_PID,
+                super::cpu::CpuRef::new(0),
+            )
+        };
+    // CPU0 legacy continuations publish both the registry zombie and the
+    // completed-child record. The completed record owns that task's wait/reap
+    // transaction; do not reinterpret the same terminal aggregate as a
+    // still-running registry child.
+    let completed_child_record_pending = crate::context::context_ref()
+        .user_task_set
+        .first_unreaped_completed_child_matching(child_selector)
+        .is_some();
+    if !completed_child_record_pending
+        && registry.has_child(registry_parent_ref, registry_parent_pid, child_selector)
+    {
+        loop {
+            if let Some((task_ref, child_pid, wait_status)) =
+                super::user_process_registry::global_registry().first_zombie_child(
+                    registry_parent_ref,
+                    registry_parent_pid,
+                    child_selector,
+                )
+            {
+                if stat_addr != 0 && !write_user_u32(stat_addr, wait_status as u32) {
+                    complete_error_syscall(frame, EFAULT);
+                    return;
+                }
+                let reaped = {
+                    let ctx = crate::context::context();
+                    ctx.user_task_set.reap_smp_zombie(
+                        task_ref,
+                        &mut ctx.page_allocator,
+                        &ctx.page_metadata_map,
+                    )
+                };
+                if reaped {
+                    table.wait4_observed.store(1, Ordering::Release);
+                    crate::checkpoint::dispatch(
+                        Checkpoint::SyscallTableWait4,
+                        crate::context::context_ref(),
+                    );
+                    crate::checkpoint::dispatch(
+                        Checkpoint::UserChildRecordReaped,
+                        crate::context::context_ref(),
+                    );
+                    complete_successful_syscall(frame, child_pid);
+                    return;
+                }
+            } else if options & WAIT4_WNOHANG != 0 {
+                table.wait4_observed.store(1, Ordering::Release);
+                crate::checkpoint::dispatch(
+                    Checkpoint::SyscallTableWait4,
+                    crate::context::context_ref(),
+                );
+                complete_successful_syscall(frame, 0);
+                return;
+            } else if !super::user_process_registry::global_registry().has_child(
+                registry_parent_ref,
+                registry_parent_pid,
+                child_selector,
+            ) {
+                table.wait4_observed.store(1, Ordering::Release);
+                crate::checkpoint::dispatch(
+                    Checkpoint::SyscallTableWait4,
+                    crate::context::context_ref(),
+                );
+                complete_error_syscall(frame, ECHILD);
+                return;
+            }
+            if super::kernel_task::has_inbound(registry_parent_cpu.logical_id())
+                || super::kernel_task::need_resched_pending(registry_parent_cpu.logical_id())
+                || super::scheduler_clockevent::need_resched_pending(
+                    registry_parent_cpu.logical_id(),
+                )
+            {
+                if let Err(error) = super::trap_type::schedule_from_blocking_user_continuation(
+                    registry_parent_cpu.logical_id(),
+                    registry_parent_ref,
+                ) {
+                    panic_dispatch_event("SMP wait safe-point schedule invariant failed\n", error);
+                }
+                continue;
+            }
+            if registry
+                .first_published_child_on_cpu(
+                    registry_parent_ref,
+                    registry_parent_pid,
+                    registry_parent_cpu,
+                    child_selector,
+                )
+                .is_some()
+            {
+                let schedule_result = if registry_parent_cpu.is_boot_cpu() {
+                    crate::context::context().schedule_current()
+                } else {
+                    crate::context::schedule_smp_current(
+                        registry_parent_cpu.logical_id(),
+                        registry_parent_ref,
+                    )
+                };
+                if let Err(error) = schedule_result {
+                    panic_dispatch_event("SMP wait child schedule invariant failed\n", error);
+                }
+                continue;
+            }
+            crate::arch::riscv64::csr::enable_supervisor_interrupts();
+            unsafe { core::arch::asm!("wfi", options(nomem, nostack)) };
+            crate::arch::riscv64::csr::disable_supervisor_interrupts();
+        }
+    }
+
     if let Some((child_pid, _exit_status, wait_status, _pidfd_fd)) = crate::context::context_ref()
         .user_task_set
-        .first_unreaped_completed_child()
+        .first_unreaped_completed_child_matching(child_selector)
     {
         let status_copied = stat_addr == 0 || write_user_u32(stat_addr, wait_status as u32);
         table.wait4_observed.store(1, Ordering::Release);
@@ -7008,6 +7588,11 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
     if crate::context::context_ref()
         .user_task_set
         .builtin_grandchild_exit_waitable()
+        && child_selector.matches(
+            crate::context::context_ref()
+                .user_task_set
+                .observed_plain_fork_child_pid(),
+        )
     {
         let (child_pid, wait_status) = {
             let child = &crate::context::context_ref().user_task_set;
@@ -7041,6 +7626,11 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
     if crate::context::context_ref()
         .user_task_set
         .observed_plain_fork_child_pending_wait()
+        && child_selector.matches(
+            crate::context::context_ref()
+                .user_task_set
+                .observed_plain_fork_child_pid(),
+        )
     {
         if options & WAIT4_WNOHANG != 0 {
             table.wait4_observed.store(1, Ordering::Release);
@@ -7121,6 +7711,7 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
         let child = &crate::context::context_ref().user_task_set;
         child.active_task_state() == State::Online
             && child.enqueued()
+            && child_selector.matches(child.pid())
             && !child.child_continuation_taken()
             && !child.child_exit_status_observed()
             && !child.parent_wait_resumed()
@@ -7218,6 +7809,9 @@ fn syscall_table_exit(table: &SyscallTable, frame: &mut TrapFrame) {
     crate::checkpoint::dispatch(Checkpoint::SyscallTableExit, crate::context::context_ref());
     let status = frame.reg(10);
     print_syscall_trace_exit(frame, status);
+    if super::user_boot::current_smp_user_mm_task().is_some() {
+        super::user_boot::exit_current_smp_user_task(status);
+    }
     if complete_observed_child_exit_to_parent_wait(table, frame, status) {
         return;
     }
@@ -7227,6 +7821,8 @@ fn syscall_table_exit(table: &SyscallTable, frame: &mut TrapFrame) {
     if complete_child_exit_to_parent_wait(frame, status) {
         return;
     }
+    #[cfg(checkpoint_handler_user_syscall_trace)]
+    print_user_scheduler_diagnostics();
     crate::arch::riscv64::sbi::putstr("user exit status=");
     print_decimal(status);
     crate::arch::riscv64::sbi::putchar(b'\n');
@@ -7234,6 +7830,36 @@ fn syscall_table_exit(table: &SyscallTable, frame: &mut TrapFrame) {
         crate::arch::riscv64::sbi::putstr("current Task/TaskFlow shutdown cleanup failed\n");
     }
     crate::arch::riscv64::sbi::system_shutdown()
+}
+
+#[cfg(checkpoint_handler_user_syscall_trace)]
+fn print_user_scheduler_diagnostics() {
+    let mut logical_id = 0usize;
+    while logical_id < crate::objects::cpu::MAX_CPUS {
+        let clockevent = super::scheduler_clockevent::counters(logical_id);
+        let safe_point = super::trap_type::user_safe_point_counters(logical_id);
+        if let (
+            Some((ticks, missed, renewals, slices)),
+            Some((safe, pending, competitor, schedules)),
+        ) = (clockevent, safe_point)
+        {
+            if ticks != 0 || slices != 0 || safe != 0 {
+                crate::arch::riscv64::sbi::write_record(format_args!(
+                    "user scheduler diagnostic cpu={} slices={} ticks={} missed={} renewals={} safe_points={} tick_pending={} competitor={} schedules={}\n",
+                    logical_id,
+                    slices,
+                    ticks,
+                    missed,
+                    renewals,
+                    safe,
+                    pending,
+                    competitor,
+                    schedules,
+                ));
+            }
+        }
+        logical_id += 1;
+    }
 }
 
 fn cleanup_current_task_for_shutdown() -> bool {
@@ -7262,6 +7888,7 @@ fn complete_observed_child_exit_to_parent_wait(
         let Ok(exiting_task) = ctx.current_task() else {
             return false;
         };
+        let swapper_satp = ctx.vm.swapper_vm().satp();
         let Some((parent_frame, status_ptr, child_pid, parent_pid)) =
             ctx.user_task_set.child_exit_to_observed_child_parent_wait(
                 &mut ctx.user_address_space,
@@ -7270,6 +7897,7 @@ fn complete_observed_child_exit_to_parent_wait(
                     &mut ctx.exec_transaction.retired_address_space,
                     &mut ctx.exec_transaction.retired_stack,
                 ),
+                swapper_satp,
                 &mut ctx.page_allocator,
                 &ctx.page_metadata_map,
                 status,
@@ -7467,9 +8095,11 @@ fn complete_child_exit_to_vfork_parent_clone(frame: &mut TrapFrame, status: usiz
         let Ok(exiting_task) = ctx.current_task() else {
             return false;
         };
+        let swapper_satp = ctx.vm.swapper_vm().satp();
         let Some((parent_frame, child_pid)) = ctx.user_task_set.child_exit_to_vfork_parent(
             &mut ctx.user_address_space,
             &mut ctx.user_stack,
+            swapper_satp,
             &mut ctx.page_allocator,
             &ctx.page_metadata_map,
             status,
@@ -7598,10 +8228,12 @@ fn complete_child_exit_to_parent_wait(frame: &mut TrapFrame, status: usize) -> b
         let Ok(exiting_task) = ctx.current_task() else {
             return false;
         };
+        let swapper_satp = ctx.vm.swapper_vm().satp();
         let Some((parent_frame, status_ptr, child_pid)) =
             ctx.user_task_set.child_exit_to_parent_wait(
                 &mut ctx.user_address_space,
                 &mut ctx.user_stack,
+                swapper_satp,
                 &mut ctx.page_allocator,
                 &ctx.page_metadata_map,
                 status,
@@ -7819,9 +8451,11 @@ fn user_copy_range_accessible_for_task(
     };
 
     let current_satp = crate::arch::riscv64::csr::read_satp();
+    let smp_current = super::user_boot::current_smp_user_mm_task();
     let task_ref = match explicit_task_ref {
         Some(task_ref) if task_ref.is_valid() => task_ref,
         Some(_) => return false,
+        None if smp_current.is_some() => smp_current.expect("checked SMP user").0,
         None => match crate::context::context_ref().current_task_ref() {
             Ok(task_ref) => task_ref,
             Err(_) => {
@@ -7830,6 +8464,29 @@ fn user_copy_range_accessible_for_task(
             }
         },
     };
+    if smp_current.is_some() {
+        let Some(outcome) = super::user_boot::resolve_smp_user_copy_range(
+            task_ref,
+            user_ptr,
+            len,
+            access,
+            current_satp,
+        ) else {
+            return false;
+        };
+        if outcome.stack_grew() {
+            crate::checkpoint::dispatch(
+                crate::checkpoint::Checkpoint::UserStackGrowComplete,
+                crate::context::context_ref(),
+            );
+        } else if !outcome.accessible() && outcome.in_stack_range() {
+            crate::checkpoint::dispatch(
+                crate::checkpoint::Checkpoint::UserStackGrowRejected,
+                crate::context::context_ref(),
+            );
+        }
+        return outcome.accessible();
+    }
     let pages_before = crate::context::context_ref()
         .user_stack
         .backing_page_count();
@@ -8082,7 +8739,7 @@ fn kernel_only_signal(signal: usize) -> bool {
     signal == SIGKILL || signal == SIGSTOP
 }
 
-fn write_user_u32(user_ptr: usize, value: u32) -> bool {
+pub(crate) fn write_user_u32(user_ptr: usize, value: u32) -> bool {
     debug_assert_eq!(UID_T_SIZE, core::mem::size_of::<u32>());
     debug_assert_eq!(GID_T_SIZE, core::mem::size_of::<u32>());
     debug_assert_eq!(PID_T_SIZE, core::mem::size_of::<u32>());
@@ -8224,10 +8881,11 @@ fn copy_execve_vector(
         let entry_ptr = argv_ptr
             .checked_add(index * core::mem::size_of::<usize>())
             .ok_or(ExecveArgvCopyError::Fault)?;
-        if !crate::context::context_ref()
-            .user_address_space
-            .user_range_mapped(entry_ptr, core::mem::size_of::<usize>())
-        {
+        if !user_copy_range_accessible(
+            entry_ptr,
+            core::mem::size_of::<usize>(),
+            UserFaultAccess::Load,
+        ) {
             return Err(ExecveArgvCopyError::Fault);
         }
         let arg_ptr = read_user_usize(entry_ptr).ok_or(ExecveArgvCopyError::Fault)?;
@@ -8614,6 +9272,49 @@ fn print_task_sigsegv_diagnostic(task_ref: super::task::TaskRef, info: TaskSegvI
     crate::arch::riscv64::sbi::putchar(b'\n');
 }
 
+fn print_user_fault_current_task_error(error: super::current_task::CurrentTaskError) {
+    let diagnostic = error.diagnostic();
+    crate::arch::riscv64::sbi::putstr("user fault CurrentTask error code=");
+    print_decimal(error.code() as usize);
+    crate::arch::riscv64::sbi::putstr(" tp=0x");
+    print_hex(diagnostic.tp());
+    crate::arch::riscv64::sbi::putstr(" task_slot=");
+    print_decimal(diagnostic.task_ref().slot());
+    crate::arch::riscv64::sbi::putstr(" task_generation=");
+    print_decimal(diagnostic.task_ref().generation() as usize);
+    crate::arch::riscv64::sbi::putstr(" flow_slot=");
+    print_decimal(diagnostic.flow_ref().slot());
+    crate::arch::riscv64::sbi::putstr(" flow_generation=");
+    print_decimal(diagnostic.flow_ref().generation() as usize);
+    crate::arch::riscv64::sbi::putstr(" cpu=");
+    print_decimal(diagnostic.cpu_ref().logical_id());
+    crate::arch::riscv64::sbi::putchar(b'\n');
+}
+
+fn print_user_fault_resolution_branch(
+    task_ref: super::task::TaskRef,
+    smp_user: Option<(super::task::TaskRef, super::cpu::CpuRef)>,
+    result: UserFaultResolution,
+) {
+    crate::arch::riscv64::sbi::putstr("user fault resolution branch=");
+    crate::arch::riscv64::sbi::putstr(if smp_user.is_some() { "smp" } else { "pid1" });
+    crate::arch::riscv64::sbi::putstr(" task_slot=");
+    print_decimal(task_ref.slot());
+    crate::arch::riscv64::sbi::putstr(" task_generation=");
+    print_decimal(task_ref.generation() as usize);
+    crate::arch::riscv64::sbi::putstr(" cpu=");
+    print_decimal(
+        smp_user
+            .map_or(super::cpu::CpuRef::new(0), |(_, cpu_ref)| cpu_ref)
+            .logical_id(),
+    );
+    crate::arch::riscv64::sbi::putstr(" class=");
+    print_decimal(result.class() as usize);
+    crate::arch::riscv64::sbi::putstr(" result=");
+    print_decimal(result.result() as usize);
+    crate::arch::riscv64::sbi::putchar(b'\n');
+}
+
 fn print_fault_access(access: UserFaultAccess) {
     match access {
         UserFaultAccess::Instruction => crate::arch::riscv64::sbi::putstr("execute"),
@@ -8670,6 +9371,8 @@ fn print_clone_boundary(frame: &TrapFrame, stage: &str) {
     let files = &ctx.files_struct;
     let process = &ctx.kernel_init_user_state;
     let clone_kind = clone_boundary_kind(boundaries, flags, frame.reg(11));
+    let current_task_ref = ctx.current_task_ref().unwrap_or(super::task::TaskRef::NONE);
+    let current_smp_user = super::user_boot::current_smp_user_task();
 
     crate::arch::riscv64::sbi::putstr(" clone_kind=");
     crate::arch::riscv64::sbi::putstr(clone_kind);
@@ -8679,6 +9382,20 @@ fn print_clone_boundary(frame: &TrapFrame, stage: &str) {
         _ => crate::arch::riscv64::sbi::putstr(" clone_unsupported stage="),
     }
     crate::arch::riscv64::sbi::putstr(stage);
+    crate::arch::riscv64::sbi::putstr(" current_task_slot=");
+    print_decimal(current_task_ref.slot());
+    crate::arch::riscv64::sbi::putstr(" current_task_generation=");
+    print_decimal(current_task_ref.generation() as usize);
+    crate::arch::riscv64::sbi::putstr(" current_smp_user=");
+    print_bool_digit(current_smp_user.is_some());
+    crate::arch::riscv64::sbi::putstr(" current_smp_cpu=");
+    print_decimal(current_smp_user.map_or(usize::MAX, |(_, cpu_ref)| cpu_ref.logical_id()));
+    crate::arch::riscv64::sbi::putstr(" current_registry_pid=");
+    print_decimal(
+        current_smp_user
+            .and_then(|(task_ref, _)| super::user_process_registry::global_registry().pid(task_ref))
+            .unwrap_or(0),
+    );
     crate::arch::riscv64::sbi::putstr(" flags=0x");
     print_hex(flags);
     crate::arch::riscv64::sbi::putstr(" flags_wo_csignal=0x");
@@ -9442,24 +10159,26 @@ fn print_read_trace_prefix(frame: &TrapFrame, fd: usize, requested: usize, cappe
 
 #[cfg(checkpoint_handler_user_syscall_trace)]
 fn print_syscall_trace_return(frame: &TrapFrame, value: usize) {
-    crate::arch::riscv64::sbi::putstr("syscall trace nr=");
-    print_decimal(frame.reg(17));
-    crate::arch::riscv64::sbi::putstr(" name=");
-    print_syscall_name(frame.reg(17));
-    crate::arch::riscv64::sbi::putstr(" ret=");
-    print_syscall_trace_value(value);
-    crate::arch::riscv64::sbi::putstr(" ret_hex=0x");
-    print_hex(value);
-    crate::arch::riscv64::sbi::putstr(" mode=");
-    print_trap_mode(frame);
-    print_syscall_arg_registers(frame);
-    print_trap_return_address(frame);
-    print_trap_saved_registers(frame);
-    crate::arch::riscv64::sbi::putstr(" sepc=0x");
-    print_hex(frame.sepc);
-    crate::arch::riscv64::sbi::putstr(" stval=0x");
-    print_hex(frame.stval);
-    crate::arch::riscv64::sbi::putchar(b'\n');
+    crate::arch::riscv64::sbi::write_record(format_args!(
+        "syscall trace nr={} name={} ret={} ret_hex=0x{:016x} mode={} a0=0x{:016x} a1=0x{:016x} a2=0x{:016x} a3=0x{:016x} a4=0x{:016x} a5=0x{:016x} ra=0x{:016x} s2=0x{:016x} s3=0x{:016x} s4=0x{:016x} sepc=0x{:016x} stval=0x{:016x}\n",
+        frame.reg(17),
+        syscall_name(frame.reg(17)),
+        SyscallTraceValue(value),
+        value,
+        trap_mode(frame),
+        frame.reg(10),
+        frame.reg(11),
+        frame.reg(12),
+        frame.reg(13),
+        frame.reg(14),
+        frame.reg(15),
+        frame.reg(1),
+        frame.reg(18),
+        frame.reg(19),
+        frame.reg(20),
+        frame.sepc,
+        frame.stval,
+    ));
 }
 
 #[cfg(not(checkpoint_handler_user_syscall_trace))]
@@ -9467,22 +10186,25 @@ fn print_syscall_trace_return(_frame: &TrapFrame, _value: usize) {}
 
 #[cfg(checkpoint_handler_user_syscall_trace)]
 fn print_syscall_trace_exit(frame: &TrapFrame, status: usize) {
-    crate::arch::riscv64::sbi::putstr("syscall trace nr=");
-    print_decimal(frame.reg(17));
-    crate::arch::riscv64::sbi::putstr(" name=");
-    print_syscall_name(frame.reg(17));
-    crate::arch::riscv64::sbi::putstr(" exit_status=");
-    print_decimal(status);
-    crate::arch::riscv64::sbi::putstr(" mode=");
-    print_trap_mode(frame);
-    print_syscall_arg_registers(frame);
-    print_trap_return_address(frame);
-    print_trap_saved_registers(frame);
-    crate::arch::riscv64::sbi::putstr(" sepc=0x");
-    print_hex(frame.sepc);
-    crate::arch::riscv64::sbi::putstr(" stval=0x");
-    print_hex(frame.stval);
-    crate::arch::riscv64::sbi::putchar(b'\n');
+    crate::arch::riscv64::sbi::write_record(format_args!(
+        "syscall trace nr={} name={} exit_status={} mode={} a0=0x{:016x} a1=0x{:016x} a2=0x{:016x} a3=0x{:016x} a4=0x{:016x} a5=0x{:016x} ra=0x{:016x} s2=0x{:016x} s3=0x{:016x} s4=0x{:016x} sepc=0x{:016x} stval=0x{:016x}\n",
+        frame.reg(17),
+        syscall_name(frame.reg(17)),
+        status,
+        trap_mode(frame),
+        frame.reg(10),
+        frame.reg(11),
+        frame.reg(12),
+        frame.reg(13),
+        frame.reg(14),
+        frame.reg(15),
+        frame.reg(1),
+        frame.reg(18),
+        frame.reg(19),
+        frame.reg(20),
+        frame.sepc,
+        frame.stval,
+    ));
 }
 
 #[cfg(not(checkpoint_handler_user_syscall_trace))]
@@ -9578,12 +10300,24 @@ fn print_tty_wait_trace(kind: &str, event: &str, fd: usize, ready: Option<bool>)
 fn print_tty_wait_trace(_kind: &str, _event: &str, _fd: usize, _ready: Option<bool>) {}
 
 #[cfg(checkpoint_handler_user_syscall_trace)]
-fn print_syscall_trace_value(value: usize) {
-    if value > usize::MAX - 4095 {
-        crate::arch::riscv64::sbi::putchar(b'-');
-        print_decimal(0usize.wrapping_sub(value));
+struct SyscallTraceValue(usize);
+
+#[cfg(checkpoint_handler_user_syscall_trace)]
+impl core::fmt::Display for SyscallTraceValue {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        if self.0 > usize::MAX - 4095 {
+            write!(formatter, "-{}", 0usize.wrapping_sub(self.0))
+        } else {
+            write!(formatter, "{}", self.0)
+        }
+    }
+}
+
+fn trap_mode(frame: &TrapFrame) -> &'static str {
+    if frame.sstatus & crate::arch::riscv64::csr::SSTATUS_SPP == 0 {
+        "user"
     } else {
-        print_decimal(value);
+        "supervisor"
     }
 }
 
@@ -9593,7 +10327,7 @@ fn print_syscall_error_diagnostic(frame: &TrapFrame, errno: usize) {
     crate::arch::riscv64::sbi::putstr(" nr=");
     print_decimal(frame.reg(17));
     crate::arch::riscv64::sbi::putstr(" name=");
-    print_syscall_name(frame.reg(17));
+    crate::arch::riscv64::sbi::putstr(syscall_name(frame.reg(17)));
     crate::arch::riscv64::sbi::putstr(" errno=");
     print_decimal(errno);
     crate::arch::riscv64::sbi::putstr(" mode=");
@@ -9621,8 +10355,8 @@ fn print_syscall_error_detail(frame: &TrapFrame, _errno: usize) {
     checkpoint_handler_user_syscall_error,
     checkpoint_handler_user_syscall_trace
 ))]
-fn print_syscall_name(nr: usize) {
-    let name = match nr {
+fn syscall_name(nr: usize) -> &'static str {
+    match nr {
         SYSCALL_GETCWD => "getcwd",
         SYSCALL_DUP3 => "dup3",
         SYSCALL_FCNTL => "fcntl",
@@ -9683,8 +10417,7 @@ fn print_syscall_name(nr: usize) {
         SYSCALL_EXIT => "exit",
         SYSCALL_EXIT_GROUP => "exit_group",
         _ => "unknown",
-    };
-    crate::arch::riscv64::sbi::putstr(name);
+    }
 }
 
 #[cfg(checkpoint_handler_user_syscall_error)]
@@ -10264,10 +10997,6 @@ fn print_path_bytes(path: &[u8]) {
 #[cfg(not(checkpoint_handler_user_syscall_error))]
 fn print_path_syscall_error_detail(_error: FileError, _path: &[u8]) {}
 
-#[cfg(any(
-    checkpoint_handler_user_syscall_error,
-    checkpoint_handler_user_read_trace
-))]
 fn print_file_error_name(error: FileError) {
     let name = match error {
         FileError::NotReady => "NotReady",
@@ -10293,11 +11022,7 @@ fn print_file_error_name(error: FileError) {
 }
 
 fn print_trap_mode(frame: &TrapFrame) {
-    if frame.sstatus & crate::arch::riscv64::csr::SSTATUS_SPP == 0 {
-        crate::arch::riscv64::sbi::putstr("user");
-    } else {
-        crate::arch::riscv64::sbi::putstr("supervisor");
-    }
+    crate::arch::riscv64::sbi::putstr(trap_mode(frame));
 }
 
 fn print_syscall_arg_registers(frame: &TrapFrame) {

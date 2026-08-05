@@ -2,6 +2,7 @@ use super::{
     boot_param::BootParam,
     earlycon,
     interrupt_type::InterruptType,
+    irq_spinlock::IrqSpinLock,
     memblock::MemBlock,
     ns16550a,
     per_cpu_storage::PerCpuStorage,
@@ -17,8 +18,9 @@ use core::fmt::{self, Write};
 const BUFFER_SIZE: usize = 4096;
 
 #[allow(dead_code)]
-static mut PRINTK_BUFFER: PrintkBuffer = PrintkBuffer::new();
-static mut CONSOLE_REGISTRY: ConsoleRegistry = ConsoleRegistry::new();
+static PRINTK_BUFFER: IrqSpinLock<PrintkBuffer> = IrqSpinLock::new(PrintkBuffer::new());
+static CONSOLE_REGISTRY: IrqSpinLock<ConsoleRegistry> = IrqSpinLock::new(ConsoleRegistry::new());
+static PRINTK_WRITE_LOCK: IrqSpinLock<()> = IrqSpinLock::new(());
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum PrintkRoute {
@@ -95,13 +97,11 @@ impl ConsoleRegistry {
         self.route = PrintkRoute::Serial8250;
         self.handoff_complete = true;
         self.legacy_earlycon_drain_blocked_after_handoff = true;
-        checkpoint::checkpoint(Checkpoint::Serial8250ConsoleOnline);
         self.serial8250_online_trace_emitted = true;
         if !self.keep_bootcon {
             self.boot_console_online = false;
             self.boot_console_unregistered = true;
             self.boot_console_removed_from_registry = true;
-            checkpoint::checkpoint(Checkpoint::BootConsoleOffline);
             self.boot_console_offline_trace_emitted = true;
         }
         true
@@ -267,7 +267,7 @@ impl PrintkBuffer {
 
 #[allow(dead_code)]
 pub fn preset() -> EventResult {
-    unsafe { (&raw mut PRINTK_BUFFER).as_mut().unwrap().preset() }
+    PRINTK_BUFFER.lock().preset()
 }
 
 #[allow(dead_code)]
@@ -276,31 +276,21 @@ pub fn write_str(message: &str) {
 }
 
 pub fn write_bytes(bytes: &[u8]) {
+    let _write_guard = PRINTK_WRITE_LOCK.lock();
     if capture_stress_mem(bytes) {
         return;
     }
 
-    unsafe {
-        (&raw mut PRINTK_BUFFER)
-            .as_mut()
-            .unwrap()
-            .write_bytes(bytes);
-    }
+    PRINTK_BUFFER.lock().write_bytes(bytes);
     match route() {
         PrintkRoute::BufferOnly => {}
         PrintkRoute::BootConsole => {}
         PrintkRoute::Serial8250 => {
             if ns16550a::write_console_bytes(bytes) {
-                unsafe {
-                    (&raw mut PRINTK_BUFFER)
-                        .as_mut()
-                        .unwrap()
-                        .discard_delivered();
-                    (&raw mut CONSOLE_REGISTRY)
-                        .as_mut()
-                        .unwrap()
-                        .serial8250_delivered_records_not_replayed = true;
-                }
+                PRINTK_BUFFER.lock().discard_delivered();
+                CONSOLE_REGISTRY
+                    .lock()
+                    .serial8250_delivered_records_not_replayed = true;
             }
         }
     }
@@ -318,21 +308,29 @@ fn capture_stress_mem(_bytes: &[u8]) -> bool {
 }
 
 pub fn register_boot_console() {
-    unsafe {
-        (&raw mut CONSOLE_REGISTRY)
-            .as_mut()
-            .unwrap()
-            .register_boot_console();
-    }
+    let _write_guard = PRINTK_WRITE_LOCK.lock();
+    CONSOLE_REGISTRY.lock().register_boot_console();
 }
 
 pub fn register_serial8250_console(preferred_from_stdout: bool) -> bool {
-    let registered = unsafe {
-        (&raw mut CONSOLE_REGISTRY)
-            .as_mut()
-            .unwrap()
-            .register_serial8250_console(preferred_from_stdout)
+    let (registered, emit_serial_online, emit_boot_offline) = {
+        let _write_guard = PRINTK_WRITE_LOCK.lock();
+        let mut registry = CONSOLE_REGISTRY.lock();
+        let serial_online_before = registry.serial8250_online_trace_emitted;
+        let boot_offline_before = registry.boot_console_offline_trace_emitted;
+        let registered = registry.register_serial8250_console(preferred_from_stdout);
+        (
+            registered,
+            registered && !serial_online_before && registry.serial8250_online_trace_emitted,
+            registered && !boot_offline_before && registry.boot_console_offline_trace_emitted,
+        )
     };
+    if emit_serial_online {
+        checkpoint::checkpoint(Checkpoint::Serial8250ConsoleOnline);
+    }
+    if emit_boot_offline {
+        checkpoint::checkpoint(Checkpoint::BootConsoleOffline);
+    }
     if registered && console_handoff_complete() && earlycon::disable_after_handoff().is_err() {
         panic!("earlycon disable failed during console handoff");
     }
@@ -342,158 +340,95 @@ pub fn register_serial8250_console(preferred_from_stdout: bool) -> bool {
 #[allow(dead_code)]
 #[cfg(checkpoint_handler_console_handoff)]
 pub fn set_keep_bootcon(enabled: bool) {
-    unsafe {
-        (&raw mut CONSOLE_REGISTRY)
-            .as_mut()
-            .unwrap()
-            .set_keep_bootcon(enabled);
-    }
+    CONSOLE_REGISTRY.lock().set_keep_bootcon(enabled);
 }
 
 pub fn boot_console_registered() -> bool {
-    unsafe {
-        (&raw const CONSOLE_REGISTRY)
-            .as_ref()
-            .unwrap()
-            .boot_console_registered
-    }
+    CONSOLE_REGISTRY.lock().boot_console_registered
 }
 
 pub fn boot_console_online() -> bool {
-    unsafe {
-        (&raw const CONSOLE_REGISTRY)
-            .as_ref()
-            .unwrap()
-            .boot_console_online
-    }
+    CONSOLE_REGISTRY.lock().boot_console_online
 }
 
 pub fn boot_console_unregistered() -> bool {
-    unsafe {
-        (&raw const CONSOLE_REGISTRY)
-            .as_ref()
-            .unwrap()
-            .boot_console_unregistered
-    }
+    CONSOLE_REGISTRY.lock().boot_console_unregistered
 }
 
 pub fn boot_console_removed_from_registry() -> bool {
-    unsafe {
-        (&raw const CONSOLE_REGISTRY)
-            .as_ref()
-            .unwrap()
-            .boot_console_removed_from_registry
-    }
+    CONSOLE_REGISTRY.lock().boot_console_removed_from_registry
 }
 
 pub fn serial8250_console_registered() -> bool {
-    unsafe {
-        (&raw const CONSOLE_REGISTRY)
-            .as_ref()
-            .unwrap()
-            .serial8250_console_registered
-    }
+    CONSOLE_REGISTRY.lock().serial8250_console_registered
 }
 
 #[cfg(checkpoint_handler_console_handoff)]
 pub fn serial8250_consdev() -> bool {
-    unsafe {
-        (&raw const CONSOLE_REGISTRY)
-            .as_ref()
-            .unwrap()
-            .serial8250_consdev
-    }
+    CONSOLE_REGISTRY.lock().serial8250_consdev
 }
 
 #[cfg(checkpoint_handler_console_handoff)]
 pub fn serial8250_write_ready() -> bool {
-    unsafe {
-        (&raw const CONSOLE_REGISTRY)
-            .as_ref()
-            .unwrap()
-            .serial8250_write_ready
-    }
+    CONSOLE_REGISTRY.lock().serial8250_write_ready
 }
 
 pub fn preferred_console_from_stdout() -> bool {
-    unsafe {
-        (&raw const CONSOLE_REGISTRY)
-            .as_ref()
-            .unwrap()
-            .preferred_console_from_stdout
-    }
+    CONSOLE_REGISTRY.lock().preferred_console_from_stdout
 }
 
 #[cfg(checkpoint_handler_console_handoff)]
 pub fn keep_bootcon() -> bool {
-    unsafe { (&raw const CONSOLE_REGISTRY).as_ref().unwrap().keep_bootcon }
+    CONSOLE_REGISTRY.lock().keep_bootcon
 }
 
 pub fn console_handoff_complete() -> bool {
-    unsafe {
-        (&raw const CONSOLE_REGISTRY)
-            .as_ref()
-            .unwrap()
-            .handoff_complete
-    }
+    CONSOLE_REGISTRY.lock().handoff_complete
 }
 
 pub fn route() -> PrintkRoute {
-    unsafe { (&raw const CONSOLE_REGISTRY).as_ref().unwrap().route }
+    CONSOLE_REGISTRY.lock().route
 }
 
 #[cfg(checkpoint_handler_console_handoff)]
 pub fn boot_pending_flushed_before_serial_handoff() -> bool {
-    unsafe {
-        (&raw const CONSOLE_REGISTRY)
-            .as_ref()
-            .unwrap()
+    {
+        CONSOLE_REGISTRY
+            .lock()
             .boot_pending_flushed_before_serial_handoff
     }
 }
 
 #[cfg(checkpoint_handler_console_handoff)]
 pub fn legacy_earlycon_drain_blocked_after_handoff() -> bool {
-    unsafe {
-        (&raw const CONSOLE_REGISTRY)
-            .as_ref()
-            .unwrap()
+    {
+        CONSOLE_REGISTRY
+            .lock()
             .legacy_earlycon_drain_blocked_after_handoff
     }
 }
 
 #[cfg(checkpoint_handler_console_handoff)]
 pub fn serial8250_online_trace_emitted() -> bool {
-    unsafe {
-        (&raw const CONSOLE_REGISTRY)
-            .as_ref()
-            .unwrap()
-            .serial8250_online_trace_emitted
-    }
+    CONSOLE_REGISTRY.lock().serial8250_online_trace_emitted
 }
 
 #[cfg(checkpoint_handler_console_handoff)]
 pub fn boot_console_offline_trace_emitted() -> bool {
-    unsafe {
-        (&raw const CONSOLE_REGISTRY)
-            .as_ref()
-            .unwrap()
-            .boot_console_offline_trace_emitted
-    }
+    CONSOLE_REGISTRY.lock().boot_console_offline_trace_emitted
 }
 
 #[cfg(checkpoint_handler_console_handoff)]
 pub fn serial8250_delivered_records_not_replayed() -> bool {
-    unsafe {
-        (&raw const CONSOLE_REGISTRY)
-            .as_ref()
-            .unwrap()
+    {
+        CONSOLE_REGISTRY
+            .lock()
             .serial8250_delivered_records_not_replayed
     }
 }
 
 pub fn earlycon_drain_allowed() -> bool {
-    let registry = unsafe { (&raw const CONSOLE_REGISTRY).as_ref().unwrap() };
+    let registry = CONSOLE_REGISTRY.lock();
     registry.route == PrintkRoute::BootConsole
         || (registry.keep_bootcon && registry.boot_console_online && !registry.handoff_complete)
 }
@@ -505,14 +440,12 @@ pub fn setup(
     boot_param: &BootParam,
     boot_cpu_local_interrupt: &mut InterruptType,
 ) -> EventResult {
-    unsafe {
-        (&raw mut PRINTK_BUFFER).as_mut().unwrap().setup(
-            memblock,
-            per_cpu_storage,
-            boot_param,
-            boot_cpu_local_interrupt,
-        )
-    }
+    PRINTK_BUFFER.lock().setup(
+        memblock,
+        per_cpu_storage,
+        boot_param,
+        boot_cpu_local_interrupt,
+    )
 }
 
 #[allow(dead_code)]
@@ -526,41 +459,34 @@ pub fn write_fmt(args: fmt::Arguments<'_>) {
 }
 
 pub fn is_prepared() -> bool {
-    unsafe { (&raw const PRINTK_BUFFER).as_ref().unwrap().is_prepared() }
+    PRINTK_BUFFER.lock().is_prepared()
 }
 
 pub fn is_ready() -> bool {
-    unsafe { (&raw const PRINTK_BUFFER).as_ref().unwrap().is_ready() }
+    PRINTK_BUFFER.lock().is_ready()
 }
 
 pub fn setup_local_irq_save_restore_used() -> bool {
-    unsafe {
-        (&raw const PRINTK_BUFFER)
-            .as_ref()
-            .unwrap()
-            .setup_local_irq_save_restore_used()
-    }
+    PRINTK_BUFFER.lock().setup_local_irq_save_restore_used()
 }
 
 pub fn setup_local_irq_guard_used_by(boot_cpu_local_interrupt: &InterruptType) -> bool {
-    unsafe {
-        (&raw const PRINTK_BUFFER)
-            .as_ref()
-            .unwrap()
+    {
+        PRINTK_BUFFER
+            .lock()
             .setup_local_irq_guard_used_by(boot_cpu_local_interrupt)
     }
 }
 
 #[allow(dead_code)]
 pub fn drain_to(sink: impl FnMut(u8)) {
+    let _write_guard = PRINTK_WRITE_LOCK.lock();
     drain_buffer_to(sink);
 }
 
 #[allow(dead_code)]
 fn drain_buffer_to(sink: impl FnMut(u8)) {
-    unsafe {
-        (&raw mut PRINTK_BUFFER).as_mut().unwrap().drain_to(sink);
-    }
+    PRINTK_BUFFER.lock().drain_to(sink);
 }
 
 #[allow(dead_code)]

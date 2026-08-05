@@ -7,6 +7,7 @@ int smoke_signal(void);
 int smoke_stdin(void);
 int smoke_fpu_mmap(void);
 int smoke_fork_mm(void);
+int smoke_preempt(void);
 int smoke_credentials(void);
 int smoke_process_identity(void);
 int smoke_tty_termios(void);

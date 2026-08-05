@@ -49,15 +49,28 @@ claim `/sbin/init` was replaced. The historically named DF-0003 case repeats `sc
 five-line command sequence. The exact paired shell baseline remains independent: it sends the existing
 structured delayed input to both sides and retains the complete announce stream.
 
-`user-smoke-native` and `user-smoke-linux-object` are the only user-smoke acceptance identities. They remain
-non-interactive, boot `/opt/lkm/tests/user-smoke`, and enter the default regression gate explicitly by TEST
-name. DF-0001 likewise repeats `TEST=user-smoke-native`; it must not depend on a TTY, the APP variable-name
-alias, or a retired test-name mapping.
+`user-smoke-native` and `user-smoke-linux-object` are the default 8-CPU user-smoke acceptance identities. They
+remain non-interactive, boot `/opt/lkm/tests/user-smoke`, and enter the default regression gate explicitly by
+TEST name. The explicit `user-smoke-smp2-*` and `user-smoke-smp16-*` variants run the same payload with both
+providers at the lower and upper supported CPU-count boundaries. DF-0001 likewise repeats
+`TEST=user-smoke-native`; it must not depend on a TTY, the APP variable-name alias, or a retired test-name
+mapping.
+
+The pure-compute preemption subtest publishes 17 consecutive children and selects the first and seventeenth as
+its only competitors. Their PIDs differ by 16, so fixed PID-modulo placement puts them on one CPU for each
+supported validation count 2, 8 and 16. Both children wait for one of two start tokens at the head of the single
+shared pipe until all children are published. The parent writes those tokens and reaps all children before it
+reads the later A/B bytes, so the parent cannot consume a start token intended for a target; a leaked start token
+is nevertheless an explicit test failure. Acceptance requires both byte counts and at least two A/B transitions.
+Parallel execution on different CPUs or completion of the first child before publication of the second cannot
+satisfy this evidence.
 
 `scripted-shell` and `scripted-shell-lo` are the default scripted shell acceptance identities. They use the
 native and linux-object providers, respectively, attach the canonical template read-only, wait for `~ #`,
 send exactly `echo "OK"\nls\nls /lib\nls /\nexit\n`, and apply a 120-second limit. Both enter default
-`make test`. The removed public spellings `script-shell`, `script-shell-lo`, `distro-sh-native` and
+`make test`. Neither provider may emit an Ext2 block-read failure even if a later retry happens to make the
+fixed command loop complete; this guards the synchronous single-request owner against leaking transient
+completion contention into VFS. The removed public spellings `script-shell`, `script-shell-lo`, `distro-sh-native` and
 `distro-sh-linux-object` are unknown tests; they have no alias, retired-name mapping or alias TOML.
 
 `shell` and `shell-lo` are their provider-matched terminal diagnostic counterparts. In each pair, the
@@ -88,6 +101,12 @@ not replace or edit `/etc`.
 `init=/opt/lkm/tests/rc-local-init`. They require the script markers, clean guest outcome, and absence of panic,
 visible unsupported or launcher-failure markers. Both enter default `make test`.
 
+The focused native `announce,stress-mem` stability case repeats `rc-local-native` 50 times. Every repetition must
+retain one contiguous `lost+found` listing marker, complete named checkpoint records and the ordered begin/end
+markers, with zero timeout, panic, corrupt checkpoint name or marker-only failure. This repetition validates the
+shared Printk/diagnostic write-batch boundary; unique byte-interleaving traces are failures, not acceptable test
+jitter.
+
 The same launcher path is the default paired difftest. Linux and arceos_ex each consume a private copy of
 the canonical template; neither side constructs an overlay or changes inittab. The checkpoint hard scope is
 based on the observed paired run through launcher -> shell -> `/bin/ls`, not the deleted direct-inittab path.
@@ -112,8 +131,10 @@ private canonical copy. Scripted input
 waits in order for `login:`, `Password:` and the non-root shell prompt before sending fixed `/bin/ls`/`exit`.
 
 Acceptance requires the Alpine greeting, login/password/prompt steps, non-root credential observation,
-successful pending-child `setpgid`, foreground-pgrp handling, `lost+found`, guest exit 0, and no panic,
-unsupported, init child exec failure or `reason=pid_not_visible` marker. Both providers enter default `make test`. The focused stress
+successful `setpgid` of the exact published child, foreground-pgrp handling, `lost+found`, the deterministic
+wrapper reaching successful `sync` before poweroff, a clean QEMU guest-shutdown exit, and no panic, unsupported,
+init child exec failure or `reason=pid_not_visible` marker. A child `exit_group` must return through wait/reap to
+the wrapper; it is not a PID1 `user exit status` shutdown boundary. Both providers enter default `make test`. The focused stress
 case repeats this basic-test entry; it does not build an account overlay. This bounded closure does not claim a
 general task graph, multiple pending children, post-exec parent setpgid, job-control signals or full pgrp lookup.
 
@@ -160,9 +181,15 @@ exec releases its own retired image, two consecutive execs preserving the same T
 child-view-only close-on-exec, wait4 and pipe-read resume, script exit restoring PID1, and atomic rollback for
 argument/staging/ELF/address-space failures without page or fd-reference leaks. Non-builtin sources, deeper clone,
 and a second pending child remain rejected. Fork/exec failure injection must leave the current executable,
-all published Task-owned mm values, pending identity and fd views unchanged. The object-smoke two-level
+live SATP, all published Task-owned mm values, pending identity and fd views unchanged. Each successful exec must
+observe live SATP equal to the replacement Task-owned mm before its retired address space is released. Child exit
+must observe the exiting Task-owned SATP, activate and fence the shared SwapperVm SATP, and only then release the
+exiting mm and dispatch the parent. CPU0 continuation exit coverage must additionally observe registry
+`Published -> Zombie` only after SwapperVm activation, scheduler quiescence published by the terminal switch on
+the selected parent stack, and exclusive EFAULT/retry/reap ownership by any co-published transitional completed
+record until that legacy record path is removed. The object-smoke two-level
 plain-fork coverage is a separate smoke scenario, so its bounded Task/mm call chain does not inherit the
-large canonical-ELF scenario frame or cross the fixed 16 KiB kernel-init stack boundary. It runs before the
+large canonical-ELF scenario frame or cross the specified 32 KiB kernel-init stack boundary. It runs before the
 separate legacy child-lifecycle scenario, whose observed-plain-fork coverage intentionally finishes with a
 second child pending from the current shell continuation rather than an idle reusable top-level slot.
 

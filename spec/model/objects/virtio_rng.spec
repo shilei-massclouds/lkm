@@ -5,7 +5,10 @@
  * a virtio driver matches VIRTIO_ID_RNG, probes a generic VirtioDevice, owns a
  * single input VirtQueue, submits one input buffer during probe_common,
  * receives a used-buffer completion through the virtio-mmio IRQ callback, and
- * updates data_avail/data_idx. virtrng_scan() registers the embedded hwrng with
+ * updates data_avail/data_idx. A read that otherwise has no data also polls the
+ * device-visible used index once and collects an already-published completion
+ * before reporting an empty nonblocking read; it does not wait for a future
+ * device completion. virtrng_scan() registers the embedded hwrng with
  * HwRngCore; users then read through HwRngCore.current_rng rather than reaching
  * into VirtioRngDevice directly. Random pool integration, /dev/hwrng plumbing,
  * sysfs selection, freeze/restore, blocking wait semantics and full
@@ -54,6 +57,8 @@ predicate virtio_rng_complete_gets_used_buffer<T, Q>(device: T, queue: Q) -> boo
 predicate virtio_rng_complete_updates_data_avail<T>(device: T) -> bool;
 predicate virtio_rng_complete_resets_data_idx<T>(device: T) -> bool;
 predicate virtio_rng_completion_count_incremented<T>(device: T) -> bool;
+predicate virtio_rng_read_collects_published_completion_before_empty<T, Q>(device: T, queue: Q) -> bool;
+predicate virtio_rng_irq_and_read_completion_serialized<T>(device: T) -> bool;
 predicate virtio_rng_read_consumes_available_data<T>(device: T) -> bool;
 predicate virtio_rng_read_updates_data_idx<T>(device: T) -> bool;
 predicate virtio_rng_read_updates_data_avail<T>(device: T) -> bool;
@@ -153,6 +158,7 @@ object VirtioRngDevice: DeviceObject {
                     virtio_rng_have_data_completion_ready(self);
                     virtio_rng_random_pool_deferred(self);
                     virtio_rng_dev_hwrng_plumbing_deferred(self);
+                    virtio_rng_irq_and_read_completion_serialized(self);
                 }
             }
         }
@@ -168,6 +174,7 @@ object VirtioRngDevice: DeviceObject {
             virtio_rng_have_data_completion_ready(self);
             virtio_rng_random_pool_deferred(self);
             virtio_rng_dev_hwrng_plumbing_deferred(self);
+            virtio_rng_irq_and_read_completion_serialized(self);
         }
 
         transitions {
@@ -284,6 +291,8 @@ object VirtioRngDevice: DeviceObject {
                     virtio_rng_read_updates_data_idx(self);
                     virtio_rng_read_updates_data_avail(self);
                     virtio_rng_read_returns_nonzero(self);
+                    virtio_rng_read_collects_published_completion_before_empty(self, VirtQueue);
+                    virtio_rng_irq_and_read_completion_serialized(self);
                     virtio_rng_read_nonblocking_first_slice(self);
                     virtio_rng_blocking_wait_deferred(self);
                     virtio_rng_read_requeues_when_empty(self);

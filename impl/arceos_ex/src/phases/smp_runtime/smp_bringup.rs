@@ -248,6 +248,10 @@ pub(crate) fn ap_after_online_idle(logical_id: usize) -> ! {
             "parent-continuation",
         );
     }
+    crate::objects::smp_bringup::enter_ap_idle_on_clean_stack(logical_id, ap_idle_loop_entry)
+}
+
+extern "C" fn ap_idle_loop_entry(logical_id: usize) -> ! {
     super::ap_online_idle::mark_park_loop_entered(logical_id);
     while !crate::context::secondary_runtime_open(logical_id) {
         core::hint::spin_loop();

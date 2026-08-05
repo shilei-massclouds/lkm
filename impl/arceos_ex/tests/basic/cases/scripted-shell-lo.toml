@@ -27,7 +27,7 @@ stdin_steps = [
 [expect]
 process_exit = 0
 guest_exit_status = 0
-forbidden_markers = ["Function not implemented", "arceos_ex panic"]
+forbidden_markers = ["Function not implemented", "arceos_ex panic", "ext2 block read failure"]
 marker_counts = [
   { marker = "\nOK\n", exactly = 1 },
   { marker = "ld-musl-riscv64.so.1", exactly = 1 },

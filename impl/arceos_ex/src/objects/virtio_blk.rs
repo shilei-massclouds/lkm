@@ -2,6 +2,7 @@ use super::{
     block_device::{
         BlockDevice, BlockDeviceError, BlockDeviceProvider, BlockDeviceRef, BlockDeviceRegistry,
     },
+    irq_spinlock::IrqSpinLock,
     irq_time::{Plic, PlicIrqDomain},
     kernel_image::KernelImage,
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
@@ -9,7 +10,7 @@ use super::{
     virtio_mmio::{VIRTIO_ID_BLOCK, VIRTIO_MMIO_INT_VRING, VirtioMmioTransportDevice},
     virtio_ring::{VirtQueue, VirtqueueBufferToken, VirtqueueDescriptorSpec, VirtqueueError},
 };
-use core::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 const VIRTIO_BLK_QUEUE_SIZE: u16 = 8;
 const VIRTIO_BLK_QUEUE_INDEX: u16 = 0;
@@ -50,22 +51,7 @@ static VIRTIO_BLK_READ_READY_CHECKPOINTS: AtomicUsize = AtomicUsize::new(0);
 static VIRTIO_BLK_LIVE_PTR: AtomicUsize = AtomicUsize::new(0);
 static VIRTIO_BLK_LIVE_READ_SUBMITTED_CHECKPOINTS: AtomicUsize = AtomicUsize::new(0);
 static VIRTIO_BLK_LIVE_READ_COMPLETED_CHECKPOINTS: AtomicUsize = AtomicUsize::new(0);
-static VIRTIO_BLK_SYNC_OWNER: AtomicBool = AtomicBool::new(false);
-
-struct VirtioBlkSyncOwner;
-
-impl Drop for VirtioBlkSyncOwner {
-    fn drop(&mut self) {
-        VIRTIO_BLK_SYNC_OWNER.store(false, Ordering::Release);
-    }
-}
-
-fn claim_sync_owner() -> Result<VirtioBlkSyncOwner, VirtioBlkError> {
-    VIRTIO_BLK_SYNC_OWNER
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        .map(|_| VirtioBlkSyncOwner)
-        .map_err(|_| VirtioBlkError::RequestPending)
-}
+static VIRTIO_BLK_SYNC_OWNER: IrqSpinLock<()> = IrqSpinLock::new(());
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum VirtioBlkError {
@@ -514,7 +500,7 @@ impl VirtioBlkDevice {
         &mut self,
         kernel_image: &KernelImage,
     ) -> Result<(), VirtioBlkError> {
-        let _owner = claim_sync_owner()?;
+        let _owner = VIRTIO_BLK_SYNC_OWNER.lock();
         self.converge_pending_read()?;
         let start_completion_count = self.completion_count();
         self.submit_ext2_superblock_read(kernel_image)?;
@@ -773,7 +759,7 @@ pub fn live_mmio_transport() -> Option<VirtioMmioTransportDevice> {
 
 pub fn note_mmio_irq(status: u32) {
     VIRTIO_BLK_LAST_IRQ_STATUS.store(status, Ordering::Release);
-    if VIRTIO_BLK_SYNC_OWNER.load(Ordering::Acquire) {
+    if VIRTIO_BLK_SYNC_OWNER.is_locked() {
         return;
     }
     let Some(runtime) = live_runtime_mut() else {
@@ -787,7 +773,7 @@ pub fn note_mmio_irq(status: u32) {
 
 pub fn handle_irq_completion() {
     VIRTIO_BLK_IRQ_COMPLETION_CALLS.fetch_add(1, Ordering::AcqRel);
-    let Ok(_owner) = claim_sync_owner() else {
+    let Some(_owner) = VIRTIO_BLK_SYNC_OWNER.try_lock() else {
         return;
     };
     let Some(runtime) = live_runtime_mut() else {
@@ -909,7 +895,7 @@ fn read_live_block(
         return Err(BlockDeviceError::DeviceNotReady);
     }
 
-    let _owner = claim_sync_owner().map_err(block_error_from_virtio)?;
+    let _owner = VIRTIO_BLK_SYNC_OWNER.lock();
     let start_completion_count = {
         let runtime = live_runtime_mut().ok_or(BlockDeviceError::ProviderUnavailable)?;
         let device = runtime

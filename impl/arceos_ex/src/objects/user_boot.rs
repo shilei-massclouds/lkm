@@ -1,4 +1,9 @@
-use core::sync::atomic::{AtomicU8, Ordering};
+use core::{
+    cell::UnsafeCell,
+    mem::MaybeUninit,
+    ops::{Index, IndexMut},
+    sync::atomic::{AtomicU8, Ordering},
+};
 
 #[cfg(app_user_boot)]
 use core::sync::atomic::AtomicUsize;
@@ -37,11 +42,15 @@ use super::{
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     static_page_tables,
     swapper_vm::SwapperVm,
-    task::{Task, TaskEntry, TaskRef, USER_TASK_SLOT_COUNT},
+    task::{Task, TaskEntry, TaskRef, TaskSegvCode, TaskSegvInfo, USER_TASK_SLOT_COUNT},
     task_flow::{TaskFlow, TaskFlowRef},
     trap_type::TrapFrame,
+    user_process_registry::{UserProcessChildSelector, UserProcessSlotState, global_registry},
     vfs::{FsStruct, FsStructSnapshot},
 };
+
+#[cfg(app_smoke)]
+use super::page_table::{sv39_pte_executable, sv39_pte_leaf, sv39_pte_phys, sv39_pte_valid};
 
 pub const USER_INIT_PATH: &[u8] = b"/sbin/init";
 // Alternate candidates are consumed only by the user-boot init-selection path.
@@ -59,6 +68,10 @@ pub const USER_CLONE_SIGCHLD: usize = 17;
 pub const USER_SIGCHLD_MASK: usize = 1usize << (USER_CLONE_SIGCHLD - 1);
 pub const USER_WAIT4_ALL_CHILDREN: usize = usize::MAX;
 pub const USER_WAIT4_WUNTRACED: usize = 2;
+
+const fn user_wait4_pid_matches(upid: usize, child_pid: usize) -> bool {
+    upid == USER_WAIT4_ALL_CHILDREN || upid == child_pid
+}
 pub const USER_SIGNAL_WAIT_REASON_NONE: usize = 0;
 pub const USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE: usize = 1;
 
@@ -75,7 +88,7 @@ pub const USER_PARENT_WAIT_DIRTY_PAGE_PROBE_MAX: usize = 768;
 pub const USER_COMPLETED_CHILD_RECORD_CAPACITY: usize = 8;
 pub const USER_SUPPLEMENTARY_GROUP_MAX: usize = 1;
 #[cfg(app_user_boot)]
-pub const USER_KERNEL_TRAP_STACK_ORDER: usize = 2;
+pub const USER_KERNEL_TRAP_STACK_ORDER: usize = 3;
 #[cfg(app_user_boot)]
 pub const USER_KERNEL_TRAP_STACK_SIZE: usize = USER_PAGE_SIZE << USER_KERNEL_TRAP_STACK_ORDER;
 #[cfg(app_user_boot)]
@@ -305,6 +318,13 @@ impl UserCompletedChildRecord {
     }
 }
 
+const USER_TASK_KERNEL_STACK_WORDS: usize = 4096;
+
+#[repr(C, align(16))]
+struct UserTaskKernelStack {
+    words: [usize; USER_TASK_KERNEL_STACK_WORDS],
+}
+
 struct UserTaskStorageSlot {
     generation: u32,
     flow_generation: u32,
@@ -315,31 +335,1748 @@ struct UserTaskStorageSlot {
     runtime: UserAppRuntime,
     inactive_address_space: UserAddressSpace,
     inactive_stack: UserStack,
+    exec_elf: ElfObject,
+    exec_interpreter: ElfObject,
+    exec_trap_frame: UserTrapFrame,
+    files_struct: MaybeUninit<FilesStruct>,
+    fs_struct: MaybeUninit<FsStruct>,
+    process_resources_present: bool,
     mm_present: bool,
+    shared_mm_owner_ref: TaskRef,
+    vfork_parent_ref: TaskRef,
+    inbox_reservation: Option<super::kernel_task::InboxReservation>,
+    vfork_parent_wake_reservation: Option<super::kernel_task::InboxReservation>,
+    kernel_stack: UserTaskKernelStack,
+    initial_trap_frame: Option<TrapFrame>,
 }
 
 impl UserTaskStorageSlot {
-    const fn new(_slot: usize) -> Self {
-        Self {
-            generation: 0,
-            flow_generation: 0,
-            reserved: false,
-            occupied: false,
-            pid: 0,
-            task: Task::new(),
-            runtime: UserAppRuntime::new(),
-            inactive_address_space: UserAddressSpace::new(),
-            inactive_stack: UserStack::new(),
-            mm_present: false,
-        }
-    }
-
     const fn task_ref(&self) -> TaskRef {
         self.task.task_ref()
     }
 
     const fn state(&self) -> State {
         self.task.state()
+    }
+}
+
+const USER_TASK_STORAGE_EMPTY: u8 = 0;
+const USER_TASK_STORAGE_INITIALIZING: u8 = 1;
+const USER_TASK_STORAGE_READY: u8 = 2;
+
+struct UserTaskStorageCell {
+    state: AtomicU8,
+    value: UnsafeCell<MaybeUninit<UserTaskStorageSlot>>,
+}
+
+// Each slot is unpublished until its registry release-publication. After
+// publication only the immutable owning CPU mutates it, and reap waits for
+// scheduler/current/inbox references to disappear before slot reuse.
+unsafe impl Sync for UserTaskStorageCell {}
+
+impl UserTaskStorageCell {
+    const fn new() -> Self {
+        Self {
+            state: AtomicU8::new(USER_TASK_STORAGE_EMPTY),
+            value: UnsafeCell::new(MaybeUninit::uninit()),
+        }
+    }
+
+    fn initialize(&self, _index: usize) -> bool {
+        match self.state.compare_exchange(
+            USER_TASK_STORAGE_EMPTY,
+            USER_TASK_STORAGE_INITIALIZING,
+            Ordering::Acquire,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => {}
+            Err(USER_TASK_STORAGE_READY) => return true,
+            Err(_) => return false,
+        }
+        // SAFETY: the successful state transition grants the unpublished
+        // creator exclusive initialization access to this backing slot. Each
+        // field is initialized in place so the embedded kernel stack never
+        // becomes a stack-sized temporary on the creator's kernel stack.
+        unsafe {
+            let slot = (*self.value.get()).as_mut_ptr();
+            core::ptr::addr_of_mut!((*slot).generation).write(0);
+            core::ptr::addr_of_mut!((*slot).flow_generation).write(0);
+            core::ptr::addr_of_mut!((*slot).reserved).write(false);
+            core::ptr::addr_of_mut!((*slot).occupied).write(false);
+            core::ptr::addr_of_mut!((*slot).pid).write(0);
+            core::ptr::addr_of_mut!((*slot).task).write(Task::new());
+            core::ptr::addr_of_mut!((*slot).runtime).write(UserAppRuntime::new());
+            core::ptr::addr_of_mut!((*slot).inactive_address_space).write(UserAddressSpace::new());
+            core::ptr::addr_of_mut!((*slot).inactive_stack).write(UserStack::new());
+            core::ptr::addr_of_mut!((*slot).exec_elf).write(ElfObject::new());
+            core::ptr::addr_of_mut!((*slot).exec_interpreter).write(ElfObject::new());
+            core::ptr::addr_of_mut!((*slot).exec_trap_frame).write(UserTrapFrame::new());
+            core::ptr::addr_of_mut!((*slot).files_struct).write(MaybeUninit::uninit());
+            core::ptr::addr_of_mut!((*slot).fs_struct).write(MaybeUninit::uninit());
+            core::ptr::addr_of_mut!((*slot).process_resources_present).write(false);
+            core::ptr::addr_of_mut!((*slot).mm_present).write(false);
+            core::ptr::addr_of_mut!((*slot).shared_mm_owner_ref).write(TaskRef::NONE);
+            core::ptr::addr_of_mut!((*slot).vfork_parent_ref).write(TaskRef::NONE);
+            core::ptr::addr_of_mut!((*slot).inbox_reservation).write(None);
+            core::ptr::addr_of_mut!((*slot).vfork_parent_wake_reservation).write(None);
+            core::ptr::write_bytes(
+                core::ptr::addr_of_mut!((*slot).kernel_stack).cast::<u8>(),
+                0,
+                core::mem::size_of::<UserTaskKernelStack>(),
+            );
+            core::ptr::addr_of_mut!((*slot).initial_trap_frame).write(None);
+        }
+        self.state.store(USER_TASK_STORAGE_READY, Ordering::Release);
+        true
+    }
+
+    fn get(&self) -> Option<&UserTaskStorageSlot> {
+        if self.state.load(Ordering::Acquire) != USER_TASK_STORAGE_READY {
+            return None;
+        }
+        // SAFETY: READY release-publishes the completed in-place value; reap
+        // does not retire it until scheduler/current/inbox references vanish.
+        Some(unsafe { (&*self.value.get()).assume_init_ref() })
+    }
+
+    #[allow(clippy::mut_from_ref)]
+    fn get_mut(&self) -> Option<&mut UserTaskStorageSlot> {
+        if self.state.load(Ordering::Acquire) != USER_TASK_STORAGE_READY {
+            return None;
+        }
+        // SAFETY: mutation is restricted to the unpublished creator or the
+        // immutable owning CPU, as documented on UserTaskStorageCell.
+        Some(unsafe { (&mut *self.value.get()).assume_init_mut() })
+    }
+}
+
+static USER_TASK_STORAGE: [UserTaskStorageCell; USER_TASK_SLOT_COUNT] =
+    [const { UserTaskStorageCell::new() }; USER_TASK_SLOT_COUNT];
+static USER_MEMORY_STATE_LOCK: super::irq_spinlock::IrqSpinLock<()> =
+    super::irq_spinlock::IrqSpinLock::new(());
+static USER_FILES_STATE_LOCK: super::irq_spinlock::IrqSpinLock<()> =
+    super::irq_spinlock::IrqSpinLock::new(());
+
+pub(crate) fn lock_user_memory_state() -> super::irq_spinlock::IrqSpinLockGuard<'static, ()> {
+    USER_MEMORY_STATE_LOCK.lock()
+}
+
+pub(crate) fn lock_user_files_state() -> super::irq_spinlock::IrqSpinLockGuard<'static, ()> {
+    USER_FILES_STATE_LOCK.lock()
+}
+
+struct UserTaskStorageHandle;
+
+impl UserTaskStorageHandle {
+    const fn new() -> Self {
+        Self
+    }
+
+    fn initialize(&mut self, index: usize) -> bool {
+        USER_TASK_STORAGE
+            .get(index)
+            .is_some_and(|slot| slot.initialize(index))
+    }
+
+    fn get(&self, index: usize) -> Option<&UserTaskStorageSlot> {
+        USER_TASK_STORAGE.get(index)?.get()
+    }
+}
+
+impl Index<usize> for UserTaskStorageHandle {
+    type Output = UserTaskStorageSlot;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        self.get(index)
+            .expect("user task storage must be initialized before access")
+    }
+}
+
+impl IndexMut<usize> for UserTaskStorageHandle {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        USER_TASK_STORAGE[index]
+            .get_mut()
+            .expect("user task storage must be initialized before mutable access")
+    }
+}
+
+pub(crate) fn smp_task_candidate_by_ref(
+    task_ref: TaskRef,
+    logical_id: usize,
+) -> Option<super::current_task::CurrentTaskCandidate<'static>> {
+    let cpu_ref = super::cpu::CpuRef::new(logical_id);
+    if !global_registry().live_target_valid(task_ref, cpu_ref) {
+        return None;
+    }
+    let index = task_ref.user_slot()?;
+    // SAFETY: registry publication is the acquire boundary for this stable
+    // slot, and its Task/Flow identity is immutable for the occurrence.
+    let slot = USER_TASK_STORAGE.get(index)?.get()?;
+    if !slot.occupied
+        || !slot.task_ref().same_identity(task_ref)
+        || slot.task.flow_cpu_ref() != Some(cpu_ref)
+    {
+        return None;
+    }
+    Some(super::current_task::CurrentTaskCandidate {
+        task: &slot.task,
+        flow: slot.task.embedded_flow(),
+    })
+}
+
+pub(crate) fn smp_task_candidate_by_identity(
+    identity: usize,
+    logical_id: usize,
+) -> Option<super::current_task::CurrentTaskCandidate<'static>> {
+    let mut index = 0usize;
+    while index < USER_TASK_SLOT_COUNT {
+        if let Some(slot) = USER_TASK_STORAGE[index].get()
+            && slot.occupied
+            && core::ptr::addr_of!(slot.task) as usize == identity
+        {
+            return smp_task_candidate_by_ref(slot.task_ref(), logical_id);
+        }
+        index += 1;
+    }
+    None
+}
+
+pub(crate) fn smp_task_mut_by_ref_on_cpu(
+    task_ref: TaskRef,
+    logical_id: usize,
+) -> Option<&'static mut Task> {
+    smp_task_candidate_by_ref(task_ref, logical_id)?;
+    let index = task_ref.user_slot()?;
+    // SAFETY: the registry fixes this slot to logical_id for its full live
+    // occurrence, making that CPU the sole post-publication mutable owner.
+    Some(&mut USER_TASK_STORAGE[index].get_mut()?.task)
+}
+
+#[derive(Clone, Copy)]
+struct SmpEffectiveMmBinding {
+    current_ref: TaskRef,
+    cpu_ref: super::cpu::CpuRef,
+    owner_ref: TaskRef,
+    owner_index: Option<usize>,
+}
+
+fn smp_effective_mm_binding(
+    task_ref: TaskRef,
+    cpu_ref: super::cpu::CpuRef,
+) -> Option<SmpEffectiveMmBinding> {
+    smp_task_candidate_by_ref(task_ref, cpu_ref.logical_id())?;
+    let current = USER_TASK_STORAGE.get(task_ref.user_slot()?)?.get()?;
+    if !current.occupied
+        || !current.task_ref().same_identity(task_ref)
+        || current.task.flow_cpu_ref() != Some(cpu_ref)
+    {
+        return None;
+    }
+    let owner_ref = if current.mm_present {
+        if current.shared_mm_owner_ref.is_valid() || current.vfork_parent_ref.is_valid() {
+            return None;
+        }
+        task_ref
+    } else {
+        if !current.shared_mm_owner_ref.is_valid() || !current.vfork_parent_ref.is_valid() {
+            return None;
+        }
+        current.shared_mm_owner_ref
+    };
+    let owner_index = if owner_ref.same_identity(TaskRef::KERNEL_INIT) {
+        if !cpu_ref.is_boot_cpu() || !global_registry().live_target_valid(owner_ref, cpu_ref) {
+            return None;
+        }
+        let (address_space, stack) = crate::context::pid1_user_mm_resource_ptrs();
+        // SAFETY: PID1 and every serial shared-mm child are fixed to CPU0.
+        // These stable aggregate fields are only inspected by that owner CPU.
+        let (address_space, stack) = unsafe { (&*address_space, &*stack) };
+        if address_space.state() != State::Online
+            || !address_space.owned_by(owner_ref)
+            || address_space.satp_token() == 0
+            || stack.state() != State::Ready
+        {
+            return None;
+        }
+        None
+    } else {
+        let owner_index = owner_ref.user_slot()?;
+        let owner = USER_TASK_STORAGE.get(owner_index)?.get()?;
+        if !owner.occupied
+            || !owner.task_ref().same_identity(owner_ref)
+            || owner.task.flow_cpu_ref() != Some(cpu_ref)
+            || !owner.mm_present
+            || owner.shared_mm_owner_ref.is_valid()
+            || owner.inactive_address_space.state() != State::Online
+            || !owner.inactive_address_space.owned_by(owner_ref)
+            || owner.inactive_address_space.satp_token() == 0
+            || !global_registry().live_target_valid(owner_ref, cpu_ref)
+        {
+            return None;
+        }
+        Some(owner_index)
+    };
+    Some(SmpEffectiveMmBinding {
+        current_ref: task_ref,
+        cpu_ref,
+        owner_ref,
+        owner_index,
+    })
+}
+
+fn smp_effective_mm_resource_ptrs(
+    binding: SmpEffectiveMmBinding,
+) -> Option<(*mut UserAddressSpace, *mut UserStack)> {
+    if binding.owner_ref.same_identity(TaskRef::KERNEL_INIT) {
+        if binding.owner_index.is_some() || !binding.cpu_ref.is_boot_cpu() {
+            return None;
+        }
+        let (address_space, stack) = crate::context::pid1_user_mm_resource_ptrs();
+        // SAFETY: callers use these pointers only on CPU0; mutating callers
+        // additionally hold USER_MEMORY_STATE_LOCK.
+        let (address_space_ref, stack_ref) = unsafe { (&*address_space, &*stack) };
+        return (address_space_ref.state() == State::Online
+            && address_space_ref.owned_by(TaskRef::KERNEL_INIT)
+            && address_space_ref.satp_token() != 0
+            && stack_ref.state() == State::Ready)
+            .then_some((address_space, stack));
+    }
+    let index = binding.owner_index?;
+    let owner = USER_TASK_STORAGE.get(index)?.get_mut()?;
+    (owner.occupied
+        && owner.task_ref().same_identity(binding.owner_ref)
+        && owner.task.flow_cpu_ref() == Some(binding.cpu_ref)
+        && owner.mm_present
+        && !owner.shared_mm_owner_ref.is_valid()
+        && owner.inactive_address_space.state() == State::Online
+        && owner.inactive_address_space.owned_by(binding.owner_ref)
+        && owner.inactive_address_space.satp_token() != 0
+        && owner.inactive_stack.state() == State::Ready)
+        .then_some((
+            core::ptr::addr_of_mut!(owner.inactive_address_space),
+            core::ptr::addr_of_mut!(owner.inactive_stack),
+        ))
+}
+
+fn current_smp_effective_mm_binding() -> Option<SmpEffectiveMmBinding> {
+    let (task_ref, cpu_ref) = current_smp_user_task()?;
+    let binding = smp_effective_mm_binding(task_ref, cpu_ref)?;
+    let (address_space, _) = smp_effective_mm_resource_ptrs(binding)?;
+    // SAFETY: binding validation proves a stable owner-CPU field capability.
+    (unsafe { (*address_space).satp_token() } == csr::read_satp()).then_some(binding)
+}
+
+pub(crate) fn smp_task_satp_token(task_ref: TaskRef, logical_id: usize) -> Option<usize> {
+    let binding = smp_effective_mm_binding(task_ref, super::cpu::CpuRef::new(logical_id))?;
+    let (address_space, _) = smp_effective_mm_resource_ptrs(binding)?;
+    // SAFETY: binding validation proves a stable owner-CPU field capability.
+    Some(unsafe { (*address_space).satp_token() })
+}
+
+pub(crate) fn current_smp_user_task() -> Option<(TaskRef, super::cpu::CpuRef)> {
+    let identity = crate::arch::riscv64::csr::read_tp();
+    let mut index = 0usize;
+    while index < USER_TASK_SLOT_COUNT {
+        if let Some(slot) = USER_TASK_STORAGE[index].get()
+            && slot.occupied
+            && core::ptr::addr_of!(slot.task) as usize == identity
+        {
+            let task_ref = slot.task_ref();
+            let cpu_ref = slot.task.flow_cpu_ref()?;
+            if global_registry().live_target_valid(task_ref, cpu_ref) {
+                return Some((task_ref, cpu_ref));
+            }
+        }
+        index += 1;
+    }
+    None
+}
+
+pub(crate) fn current_smp_user_mm_task() -> Option<(TaskRef, super::cpu::CpuRef)> {
+    let binding = current_smp_effective_mm_binding()?;
+    Some((binding.current_ref, binding.cpu_ref))
+}
+
+fn smp_process_resources_mut(
+    task_ref: TaskRef,
+) -> Option<(&'static mut FilesStruct, &'static mut FsStruct)> {
+    let slot = USER_TASK_STORAGE[task_ref.user_slot()?].get_mut()?;
+    if !slot.occupied || !slot.process_resources_present || !slot.task_ref().same_identity(task_ref)
+    {
+        return None;
+    }
+    // SAFETY: process_resources_present is published only after both in-place
+    // copies complete, and the immutable CPU owner is the only live mutator.
+    Some(unsafe {
+        (
+            slot.files_struct.assume_init_mut(),
+            slot.fs_struct.assume_init_mut(),
+        )
+    })
+}
+
+pub(crate) fn current_user_files_struct() -> &'static mut FilesStruct {
+    current_user_process_resources().0
+}
+
+pub(crate) fn current_user_fs_struct() -> &'static mut FsStruct {
+    current_user_process_resources().1
+}
+
+pub(crate) fn current_user_process_resources() -> (&'static mut FilesStruct, &'static mut FsStruct)
+{
+    if let Some((task_ref, _)) = current_smp_user_task()
+        && let Some(resources) = smp_process_resources_mut(task_ref)
+    {
+        return resources;
+    }
+    let ctx = crate::context::context();
+    (&mut ctx.files_struct, &mut ctx.fs_struct)
+}
+
+fn prepare_reserved_process_resources(
+    task_ref: TaskRef,
+    parent_files: &FilesStruct,
+    parent_fs: &FsStruct,
+) -> bool {
+    let Some(slot) = task_ref
+        .user_slot()
+        .and_then(|index| USER_TASK_STORAGE[index].get_mut())
+    else {
+        return false;
+    };
+    if !slot.reserved
+        || slot.occupied
+        || slot.process_resources_present
+        || !slot.task_ref().same_identity(task_ref)
+        || parent_files.state() != State::Ready
+        || parent_fs.state() != State::Ready
+    {
+        return false;
+    }
+    // SAFETY: this aggregate remains unpublished and exclusively owned by
+    // the fork preparer. FilesStruct/FsStruct have no destructor; copying
+    // their value creates the child's private table/state snapshot in place.
+    unsafe {
+        core::ptr::copy_nonoverlapping(parent_files, slot.files_struct.as_mut_ptr(), 1);
+        core::ptr::copy_nonoverlapping(parent_fs, slot.fs_struct.as_mut_ptr(), 1);
+    }
+    // SAFETY: the unpublished copy above initialized the child's private
+    // FilesStruct. Inherited fd entries become owners only after the shared
+    // backing references are acquired successfully.
+    if !unsafe { slot.files_struct.assume_init_mut() }.fork_acquire_shared_resources() {
+        return false;
+    }
+    slot.process_resources_present = true;
+    true
+}
+
+fn release_slot_process_shared_resources(slot: &mut UserTaskStorageSlot) -> bool {
+    if !slot.process_resources_present {
+        return true;
+    }
+    // SAFETY: process_resources_present is set only after the in-place copy
+    // and shared-resource acquisition both complete.
+    unsafe { slot.files_struct.assume_init_mut() }.release_shared_resources()
+}
+
+fn clear_slot_process_resources(slot: &mut UserTaskStorageSlot) -> bool {
+    if !release_slot_process_shared_resources(slot) {
+        return false;
+    }
+    slot.process_resources_present = false;
+    true
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CurrentSmpForkError {
+    Again,
+    NoMemory,
+    InvalidParent,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CurrentSmpVforkError {
+    Again,
+    NoMemory,
+    Fault,
+    InvalidParent,
+}
+
+fn reserve_current_smp_fork_task(
+    parent_ref: TaskRef,
+    parent_pid: usize,
+    parent_cpu: super::cpu::CpuRef,
+    same_cpu: bool,
+) -> Result<(usize, TaskRef, super::cpu::CpuRef), CurrentSmpForkError> {
+    let (pid, task_ref, target_cpu) = global_registry()
+        .reserve_next(parent_ref, parent_pid, parent_cpu, same_cpu)
+        .ok_or(CurrentSmpForkError::Again)?;
+    let index = task_ref.user_slot().ok_or(CurrentSmpForkError::Again)?;
+    let storage = USER_TASK_STORAGE
+        .get(index)
+        .ok_or(CurrentSmpForkError::Again)?;
+    if !storage.initialize(index) {
+        assert!(global_registry().rollback(task_ref));
+        return Err(CurrentSmpForkError::Again);
+    }
+    let slot = storage.get_mut().ok_or(CurrentSmpForkError::Again)?;
+    if slot.reserved
+        || slot.occupied
+        || slot.mm_present
+        || slot.shared_mm_owner_ref.is_valid()
+        || slot.vfork_parent_ref.is_valid()
+        || slot.vfork_parent_wake_reservation.is_some()
+        || slot.inactive_address_space.state() != State::Base
+        || slot.inactive_stack.state() != State::Base
+    {
+        assert!(global_registry().rollback(task_ref));
+        return Err(CurrentSmpForkError::Again);
+    }
+
+    slot.generation = task_ref.generation();
+    slot.task = Task::new_user(task_ref, slot.flow_generation);
+    slot.pid = pid;
+    slot.runtime = UserAppRuntime::new();
+    slot.exec_elf = ElfObject::new();
+    slot.exec_interpreter = ElfObject::new();
+    slot.exec_trap_frame = UserTrapFrame::new();
+    slot.process_resources_present = false;
+    slot.shared_mm_owner_ref = TaskRef::NONE;
+    slot.vfork_parent_ref = TaskRef::NONE;
+    slot.vfork_parent_wake_reservation = None;
+    slot.initial_trap_frame = None;
+    let reservation = match super::kernel_task::reserve_inbound(
+        task_ref,
+        target_cpu,
+        super::kernel_task::InboundKind::Activate,
+        super::kernel_task::next_inbound_ordinal(),
+    ) {
+        Ok(reservation) => reservation,
+        Err(_) => {
+            slot.pid = 0;
+            assert!(global_registry().rollback(task_ref));
+            return Err(CurrentSmpForkError::Again);
+        }
+    };
+    slot.inbox_reservation = Some(reservation);
+    slot.reserved = true;
+    slot.occupied = false;
+    Ok((pid, task_ref, target_cpu))
+}
+
+fn rollback_current_smp_fork_task(
+    task_ref: TaskRef,
+    page_allocator: &mut PageAllocator,
+    page_metadata_map: &PageMetadataMap,
+) {
+    if let Some(index) = task_ref.user_slot()
+        && let Some(slot) = USER_TASK_STORAGE[index].get_mut()
+        && slot.reserved
+        && !slot.occupied
+        && slot.task_ref().same_identity(task_ref)
+    {
+        if slot.mm_present {
+            slot.inactive_address_space
+                .release_retired_exec_image(page_allocator, page_metadata_map);
+            slot.inactive_stack
+                .release_exec_backing(page_allocator, page_metadata_map);
+            slot.mm_present = false;
+        }
+        if let Some(reservation) = slot.inbox_reservation.take() {
+            assert!(super::kernel_task::rollback_reserved(reservation));
+        }
+        if let Some(reservation) = slot.vfork_parent_wake_reservation.take() {
+            assert!(super::kernel_task::rollback_reserved(reservation));
+        }
+        slot.reserved = false;
+        slot.pid = 0;
+        slot.shared_mm_owner_ref = TaskRef::NONE;
+        slot.vfork_parent_ref = TaskRef::NONE;
+        assert!(clear_slot_process_resources(slot));
+        slot.initial_trap_frame = None;
+    }
+    if global_registry().slot_state(task_ref) == Some(UserProcessSlotState::Reserved) {
+        assert!(global_registry().rollback(task_ref));
+    }
+}
+
+fn prepare_current_smp_fork_mm(
+    child_ref: TaskRef,
+    parent_address_space: &mut UserAddressSpace,
+    parent_stack: &UserStack,
+    page_allocator: &mut PageAllocator,
+    page_metadata_map: &PageMetadataMap,
+) -> bool {
+    let Some(index) = child_ref.user_slot() else {
+        return false;
+    };
+    let Some(slot) = USER_TASK_STORAGE[index].get_mut() else {
+        return false;
+    };
+    if !slot.reserved
+        || slot.occupied
+        || !slot.task_ref().same_identity(child_ref)
+        || slot.mm_present
+        || slot.inactive_address_space.state() != State::Base
+        || slot.inactive_stack.state() != State::Base
+        || !slot.inactive_address_space.cow_duplicate_from(
+            parent_address_space,
+            parent_stack,
+            &mut slot.inactive_stack,
+            child_ref,
+            page_allocator,
+            page_metadata_map,
+        )
+    {
+        return false;
+    }
+    slot.mm_present = true;
+    true
+}
+
+fn prepare_current_smp_fork_snapshot(task_ref: TaskRef) -> Option<ForkChildSnapshotCandidate> {
+    let index = task_ref.user_slot()?;
+    let slot = USER_TASK_STORAGE[index].get()?;
+    if !slot.reserved
+        || slot.occupied
+        || !slot.task_ref().same_identity(task_ref)
+        || slot.task.state() != State::Base
+        || slot.runtime.state() != State::Base
+    {
+        return None;
+    }
+    let cpu_ref = global_registry().cpu_ref(task_ref)?;
+    let stack_base = core::ptr::addr_of!(slot.kernel_stack) as usize;
+    let stack_top = stack_base + core::mem::size_of::<UserTaskKernelStack>();
+    let mut task = Task::new_user(task_ref, slot.flow_generation);
+    task.materialize_fork_child_snapshot(slot.pid, cpu_ref, stack_base, stack_top)
+        .ok()?;
+    task.init_switch_context(user_task_entry, stack_base, stack_top);
+    let mut runtime = UserAppRuntime::new();
+    runtime
+        .materialize_fork_child_snapshot(&task, task.embedded_flow(), slot.pid)
+        .ok()?;
+    let candidate = ForkChildSnapshotCandidate {
+        flow_generation: task.flow_ref().generation(),
+        task,
+        runtime,
+    };
+    (candidate.task.fork_snapshot_candidate_valid()
+        && candidate
+            .runtime
+            .fork_snapshot_candidate_valid(&candidate.task))
+    .then_some(candidate)
+}
+
+fn current_smp_fork_publish_ready(
+    task_ref: TaskRef,
+    candidate: &ForkChildSnapshotCandidate,
+    shared_mm: bool,
+) -> bool {
+    let Some(index) = task_ref.user_slot() else {
+        return false;
+    };
+    let Some(slot) = USER_TASK_STORAGE[index].get() else {
+        return false;
+    };
+    let mm_ready = if shared_mm {
+        !slot.mm_present
+            && slot.shared_mm_owner_ref.is_valid()
+            && slot.vfork_parent_ref.is_valid()
+            && slot.vfork_parent_wake_reservation.is_some()
+            && slot.inactive_address_space.state() == State::Base
+            && slot.inactive_stack.state() == State::Base
+    } else {
+        slot.mm_present
+            && !slot.shared_mm_owner_ref.is_valid()
+            && !slot.vfork_parent_ref.is_valid()
+            && slot.vfork_parent_wake_reservation.is_none()
+    };
+    slot.reserved
+        && !slot.occupied
+        && slot.task_ref().same_identity(task_ref)
+        && slot.task.state() == State::Base
+        && slot.runtime.state() == State::Base
+        && mm_ready
+        && slot.process_resources_present
+        && slot.inbox_reservation.is_some()
+        && global_registry().slot_state(task_ref) == Some(UserProcessSlotState::Reserved)
+        && global_registry().cpu_ref(task_ref) == candidate.task.flow_cpu_ref()
+        && candidate.task.fork_snapshot_candidate_valid()
+        && candidate
+            .runtime
+            .fork_snapshot_candidate_valid(&candidate.task)
+}
+
+fn commit_current_smp_fork_snapshot(
+    task_ref: TaskRef,
+    candidate: ForkChildSnapshotCandidate,
+    initial_trap_frame: TrapFrame,
+    shared_mm: bool,
+) -> (super::kernel_task::InboxReservation, super::cpu::CpuRef) {
+    let index = task_ref.user_slot().expect("SMP fork snapshot user slot");
+    let slot = USER_TASK_STORAGE[index]
+        .get_mut()
+        .expect("SMP fork snapshot storage");
+    assert!(current_smp_fork_publish_ready(
+        task_ref, &candidate, shared_mm
+    ));
+    let reservation = slot
+        .inbox_reservation
+        .take()
+        .expect("SMP fork snapshot inbox reservation");
+    let target_cpu = candidate.task.flow_cpu_ref().expect("SMP fork target CPU");
+    assert!(global_registry().mark_prepared(task_ref, true));
+    slot.task = candidate.task;
+    slot.runtime = candidate.runtime;
+    slot.flow_generation = candidate.flow_generation;
+    slot.initial_trap_frame = Some(initial_trap_frame);
+    slot.reserved = false;
+    slot.occupied = true;
+    assert!(global_registry().publish(task_ref));
+    (reservation, target_cpu)
+}
+
+pub(crate) fn fork_current_smp_user(
+    current_frame: &TrapFrame,
+) -> Result<usize, CurrentSmpForkError> {
+    let Some((parent_ref, parent_cpu)) = current_smp_user_task() else {
+        trace_current_smp_fork_parent_failure("current_task");
+        return Err(CurrentSmpForkError::InvalidParent);
+    };
+    let _lease = global_registry()
+        .acquire(parent_ref, parent_cpu)
+        .ok_or_else(|| {
+            trace_current_smp_fork_parent_failure("lease");
+            CurrentSmpForkError::InvalidParent
+        })?;
+    let parent_index = parent_ref
+        .user_slot()
+        .ok_or(CurrentSmpForkError::InvalidParent)?;
+    let parent_pid = global_registry()
+        .pid(parent_ref)
+        .ok_or(CurrentSmpForkError::InvalidParent)?;
+
+    let (pid, child_ref, reservation, target_cpu) = {
+        let _memory_guard = lock_user_memory_state();
+        let _files_guard = lock_user_files_state();
+        let (parent_address_space_ptr, parent_stack_ptr, parent_files_ptr, parent_fs_ptr) = {
+            let binding = smp_effective_mm_binding(parent_ref, parent_cpu).ok_or_else(|| {
+                trace_current_smp_fork_parent_failure("effective_mm_binding");
+                CurrentSmpForkError::InvalidParent
+            })?;
+            let parent = USER_TASK_STORAGE[parent_index]
+                .get_mut()
+                .ok_or(CurrentSmpForkError::InvalidParent)?;
+            if !parent.occupied
+                || !parent.task_ref().same_identity(parent_ref)
+                || parent.task.state() != State::OnCpu
+                || parent.task.execution_authority() != super::task::TaskExecutionAuthority::Live
+                || parent.task.flow_state() != State::Online
+                || parent.task.flow_cpu_ref() != Some(parent_cpu)
+                || parent.runtime.state() != State::Online
+                || !parent.runtime.task_ref_owner().same_identity(parent_ref)
+                || !parent
+                    .runtime
+                    .flow_ref()
+                    .same_identity(parent.task.flow_ref())
+                || !parent.process_resources_present
+            {
+                trace_current_smp_fork_parent_failure("task_runtime_state");
+                return Err(CurrentSmpForkError::InvalidParent);
+            }
+            // SAFETY: process_resources_present proves both in-place values
+            // are initialized, and the files lock owns their stable fields.
+            let (files, fs) = unsafe {
+                (
+                    parent.files_struct.assume_init_ref(),
+                    parent.fs_struct.assume_init_ref(),
+                )
+            };
+            let (address_space, stack) = smp_effective_mm_resource_ptrs(binding)
+                .ok_or(CurrentSmpForkError::InvalidParent)?;
+            // SAFETY: both resource locks are held and the effective binding
+            // was generation/CPU checked before exposing these capabilities.
+            let (address_space_ref, stack_ref) = unsafe { (&*address_space, &*stack) };
+            if address_space_ref.satp_token() != csr::read_satp()
+                || stack_ref.state() != State::Ready
+            {
+                trace_current_smp_fork_parent_failure("effective_mm_live_satp");
+                return Err(CurrentSmpForkError::InvalidParent);
+            }
+            (
+                address_space,
+                stack.cast_const(),
+                core::ptr::from_ref(files),
+                core::ptr::from_ref(fs),
+            )
+        };
+        let (page_allocator, page_metadata_map) = crate::context::user_memory_resource_ptrs();
+        // SAFETY: the user-memory lock serializes the allocator, frame
+        // metadata and the resolved current-mm binding. The files lock owns
+        // access to the resolved current process resources. The binding was
+        // generation/current-SATP checked above before exposing these fields.
+        let (
+            parent_address_space,
+            parent_stack,
+            parent_files,
+            parent_fs,
+            page_allocator,
+            page_metadata_map,
+        ) = unsafe {
+            (
+                &mut *parent_address_space_ptr,
+                &*parent_stack_ptr,
+                &*parent_files_ptr,
+                &*parent_fs_ptr,
+                &mut *page_allocator,
+                &*page_metadata_map,
+            )
+        };
+        let (pid, child_ref, _) =
+            reserve_current_smp_fork_task(parent_ref, parent_pid, parent_cpu, false)?;
+        if !prepare_current_smp_fork_mm(
+            child_ref,
+            parent_address_space,
+            parent_stack,
+            page_allocator,
+            page_metadata_map,
+        ) {
+            rollback_current_smp_fork_task(child_ref, page_allocator, page_metadata_map);
+            return Err(CurrentSmpForkError::NoMemory);
+        }
+        if !prepare_reserved_process_resources(child_ref, parent_files, parent_fs) {
+            rollback_current_smp_fork_task(child_ref, page_allocator, page_metadata_map);
+            return Err(CurrentSmpForkError::NoMemory);
+        }
+        let Some(candidate) = prepare_current_smp_fork_snapshot(child_ref) else {
+            rollback_current_smp_fork_task(child_ref, page_allocator, page_metadata_map);
+            return Err(CurrentSmpForkError::NoMemory);
+        };
+        if !current_smp_fork_publish_ready(child_ref, &candidate, false)
+            || !parent_address_space.commit_prepared_cow_fork(parent_stack, page_metadata_map)
+        {
+            rollback_current_smp_fork_task(child_ref, page_allocator, page_metadata_map);
+            return Err(CurrentSmpForkError::NoMemory);
+        }
+        let mut child_frame = *current_frame;
+        child_frame.set_reg(10, 0);
+        child_frame.sepc = child_frame.sepc.wrapping_add(4);
+        let (reservation, target_cpu) =
+            commit_current_smp_fork_snapshot(child_ref, candidate, child_frame, false);
+        (pid, child_ref, reservation, target_cpu)
+    };
+
+    let target_hartid = global_registry()
+        .hartid_for_cpu(target_cpu)
+        .expect("SMP fork target hartid");
+    if super::kernel_task::publish_reserved_and_signal_from(reservation, target_hartid, parent_cpu)
+        .is_err()
+    {
+        user_boot_panic("SMP fork inbox publication failed\n");
+    }
+    let _ = child_ref;
+    Ok(pid)
+}
+
+fn rollback_current_smp_fork_task_with_locks(task_ref: TaskRef) {
+    let _memory_guard = lock_user_memory_state();
+    let _files_guard = lock_user_files_state();
+    let (page_allocator, page_metadata_map) = crate::context::user_memory_resource_ptrs();
+    // SAFETY: both global user resource locks are held for rollback.
+    let (page_allocator, page_metadata_map) =
+        unsafe { (&mut *page_allocator, &*page_metadata_map) };
+    rollback_current_smp_fork_task(task_ref, page_allocator, page_metadata_map);
+}
+
+fn current_pid1_smp_user() -> Option<(TaskRef, super::cpu::CpuRef)> {
+    let task_ref = TaskRef::KERNEL_INIT;
+    let cpu_ref = super::cpu::CpuRef::new(0);
+    if !crate::context::context_ref()
+        .current_task_ref()
+        .ok()?
+        .same_identity(task_ref)
+        || !global_registry().live_target_valid(task_ref, cpu_ref)
+    {
+        return None;
+    }
+    let (address_space, stack) = crate::context::pid1_user_mm_resource_ptrs();
+    // SAFETY: these are stable PID1 aggregate fields and this predicate is
+    // valid only for its immutable owner CPU.
+    let (address_space, stack) = unsafe { (&*address_space, &*stack) };
+    (address_space.state() == State::Online
+        && address_space.owned_by(task_ref)
+        && address_space.satp_token() == csr::read_satp()
+        && stack.state() == State::Ready)
+        .then_some((task_ref, cpu_ref))
+}
+
+pub(crate) fn current_smp_vfork_parent() -> bool {
+    current_smp_user_mm_task().is_some() || current_pid1_smp_user().is_some()
+}
+
+fn vfork_pid1_smp_user(
+    current_frame: &TrapFrame,
+    pidfd_user_ptr: Option<usize>,
+) -> Result<usize, CurrentSmpVforkError> {
+    let (parent_ref, parent_cpu) =
+        current_pid1_smp_user().ok_or(CurrentSmpVforkError::InvalidParent)?;
+    let _lease = global_registry()
+        .acquire(parent_ref, parent_cpu)
+        .ok_or(CurrentSmpVforkError::InvalidParent)?;
+    let parent_pid = global_registry()
+        .pid(parent_ref)
+        .ok_or(CurrentSmpVforkError::InvalidParent)?;
+
+    let (pid, child_ref, target_cpu) = {
+        let _memory_guard = lock_user_memory_state();
+        let (pid, child_ref, target_cpu) = reserve_current_smp_fork_task(
+            parent_ref, parent_pid, parent_cpu, true,
+        )
+        .map_err(|error| match error {
+            CurrentSmpForkError::Again => CurrentSmpVforkError::Again,
+            CurrentSmpForkError::NoMemory => CurrentSmpVforkError::NoMemory,
+            CurrentSmpForkError::InvalidParent => CurrentSmpVforkError::InvalidParent,
+        })?;
+        if target_cpu != parent_cpu {
+            let (page_allocator, page_metadata_map) = crate::context::user_memory_resource_ptrs();
+            // SAFETY: the user-memory lock owns allocator rollback here.
+            let (page_allocator, page_metadata_map) =
+                unsafe { (&mut *page_allocator, &*page_metadata_map) };
+            rollback_current_smp_fork_task(child_ref, page_allocator, page_metadata_map);
+            return Err(CurrentSmpVforkError::InvalidParent);
+        }
+        let wake = match super::kernel_task::reserve_inbound(
+            parent_ref,
+            parent_cpu,
+            super::kernel_task::InboundKind::Wake,
+            super::kernel_task::next_inbound_ordinal(),
+        ) {
+            Ok(wake) => wake,
+            Err(_) => {
+                let (page_allocator, page_metadata_map) =
+                    crate::context::user_memory_resource_ptrs();
+                // SAFETY: the user-memory lock owns allocator rollback here.
+                let (page_allocator, page_metadata_map) =
+                    unsafe { (&mut *page_allocator, &*page_metadata_map) };
+                rollback_current_smp_fork_task(child_ref, page_allocator, page_metadata_map);
+                return Err(CurrentSmpVforkError::Again);
+            }
+        };
+        let child = USER_TASK_STORAGE[child_ref.user_slot().ok_or(CurrentSmpVforkError::Again)?]
+            .get_mut()
+            .ok_or(CurrentSmpVforkError::Again)?;
+        child.shared_mm_owner_ref = parent_ref;
+        child.vfork_parent_ref = parent_ref;
+        child.vfork_parent_wake_reservation = Some(wake);
+        (pid, child_ref, target_cpu)
+    };
+
+    let pidfd_fd = if let Some(user_ptr) = pidfd_user_ptr {
+        let install = {
+            let _files_guard = lock_user_files_state();
+            let (files, _) = crate::context::pid1_user_process_resource_ptrs();
+            // SAFETY: the PID1 files lock owns this stable field capability.
+            unsafe { (&mut *files).install_pidfd(pid) }
+        };
+        let fd = match install {
+            Ok(fd) => fd,
+            Err(_) => {
+                rollback_current_smp_fork_task_with_locks(child_ref);
+                return Err(CurrentSmpVforkError::Again);
+            }
+        };
+        if !super::exception_type::write_user_u32(user_ptr, fd as u32) {
+            {
+                let _files_guard = lock_user_files_state();
+                let (files, _) = crate::context::pid1_user_process_resource_ptrs();
+                // SAFETY: the PID1 files lock owns this stable field capability.
+                let _ = unsafe { (&mut *files).close_fd(fd) };
+            }
+            rollback_current_smp_fork_task_with_locks(child_ref);
+            return Err(CurrentSmpVforkError::Fault);
+        }
+        Some(fd)
+    } else {
+        None
+    };
+
+    let publication = {
+        let _memory_guard = lock_user_memory_state();
+        let _files_guard = lock_user_files_state();
+        let rollback = |error, pidfd_fd: Option<usize>| {
+            let (files, _) = crate::context::pid1_user_process_resource_ptrs();
+            if let Some(fd) = pidfd_fd {
+                // SAFETY: the PID1 files lock owns this stable field capability.
+                let _ = unsafe { (&mut *files).close_fd(fd) };
+            }
+            let (page_allocator, page_metadata_map) = crate::context::user_memory_resource_ptrs();
+            // SAFETY: both resource locks own rollback and shared references.
+            let (page_allocator, page_metadata_map) =
+                unsafe { (&mut *page_allocator, &*page_metadata_map) };
+            rollback_current_smp_fork_task(child_ref, page_allocator, page_metadata_map);
+            error
+        };
+        if current_pid1_smp_user() != Some((parent_ref, parent_cpu)) {
+            return Err(rollback(CurrentSmpVforkError::InvalidParent, pidfd_fd));
+        }
+        let ctx = crate::context::context_ref();
+        let parent = ctx.kernel_init_task.task();
+        if parent.state() != State::OnCpu
+            || parent.execution_authority() != super::task::TaskExecutionAuthority::Live
+            || parent.flow_state() != State::Online
+            || parent.flow_cpu_ref() != Some(parent_cpu)
+            || ctx.kernel_init_user_runtime.state() != State::Online
+            || !ctx
+                .kernel_init_user_runtime
+                .task_ref_owner()
+                .same_identity(parent_ref)
+            || !ctx
+                .kernel_init_user_runtime
+                .flow_ref()
+                .same_identity(parent.flow_ref())
+        {
+            return Err(rollback(CurrentSmpVforkError::InvalidParent, pidfd_fd));
+        }
+        let (parent_files, parent_fs) = crate::context::pid1_user_process_resource_ptrs();
+        // SAFETY: the PID1 files lock owns these stable aggregate fields.
+        let (parent_files, parent_fs) = unsafe { (&*parent_files, &*parent_fs) };
+        if !prepare_reserved_process_resources(child_ref, parent_files, parent_fs) {
+            return Err(rollback(CurrentSmpVforkError::NoMemory, pidfd_fd));
+        }
+        let Some(candidate) = prepare_current_smp_fork_snapshot(child_ref) else {
+            return Err(rollback(CurrentSmpVforkError::NoMemory, pidfd_fd));
+        };
+        if !current_smp_fork_publish_ready(child_ref, &candidate, true) {
+            return Err(rollback(CurrentSmpVforkError::NoMemory, pidfd_fd));
+        }
+        let mut child_frame = *current_frame;
+        child_frame.set_reg(10, 0);
+        child_frame.sepc = child_frame.sepc.wrapping_add(4);
+        commit_current_smp_fork_snapshot(child_ref, candidate, child_frame, true)
+    };
+
+    let (activation, published_cpu) = publication;
+    if published_cpu != target_cpu {
+        user_boot_panic("PID1 SMP vfork CPU publication mismatch\n");
+    }
+    let target_hartid = global_registry()
+        .hartid_for_cpu(target_cpu)
+        .expect("PID1 SMP vfork target hartid");
+    if super::kernel_task::publish_reserved_and_signal_from(activation, target_hartid, parent_cpu)
+        .is_err()
+        || crate::context::process_smp_inbound(parent_cpu.logical_id()).is_err()
+        || crate::context::declare_smp_task_sleep(parent_cpu.logical_id(), parent_ref).is_err()
+    {
+        user_boot_panic("PID1 SMP vfork child handoff failed\n");
+    }
+    if let Err(error) = crate::context::schedule_smp_current(parent_cpu.logical_id(), parent_ref) {
+        crate::phases::print_event_error(error);
+        user_boot_panic("PID1 SMP vfork parent blocking schedule failed\n");
+    }
+    if current_pid1_smp_user() != Some((parent_ref, parent_cpu)) {
+        user_boot_panic("PID1 SMP vfork wrong parent resumed\n");
+    }
+    Ok(pid)
+}
+
+pub(crate) fn vfork_current_smp_user(
+    current_frame: &TrapFrame,
+    pidfd_user_ptr: Option<usize>,
+) -> Result<usize, CurrentSmpVforkError> {
+    let Some((parent_ref, parent_cpu)) = current_smp_user_task() else {
+        return vfork_pid1_smp_user(current_frame, pidfd_user_ptr);
+    };
+    let _lease = global_registry()
+        .acquire(parent_ref, parent_cpu)
+        .ok_or(CurrentSmpVforkError::InvalidParent)?;
+    let parent_pid = global_registry()
+        .pid(parent_ref)
+        .ok_or(CurrentSmpVforkError::InvalidParent)?;
+    let binding = current_smp_effective_mm_binding().ok_or(CurrentSmpVforkError::InvalidParent)?;
+    if !binding.current_ref.same_identity(parent_ref) || binding.cpu_ref != parent_cpu {
+        return Err(CurrentSmpVforkError::InvalidParent);
+    }
+
+    let (pid, child_ref, target_cpu) = {
+        let _memory_guard = lock_user_memory_state();
+        let (pid, child_ref, target_cpu) = reserve_current_smp_fork_task(
+            parent_ref, parent_pid, parent_cpu, true,
+        )
+        .map_err(|error| match error {
+            CurrentSmpForkError::Again => CurrentSmpVforkError::Again,
+            CurrentSmpForkError::NoMemory => CurrentSmpVforkError::NoMemory,
+            CurrentSmpForkError::InvalidParent => CurrentSmpVforkError::InvalidParent,
+        })?;
+        if target_cpu != parent_cpu {
+            let (page_allocator, page_metadata_map) = crate::context::user_memory_resource_ptrs();
+            // SAFETY: the user-memory lock owns allocator rollback here.
+            let (page_allocator, page_metadata_map) =
+                unsafe { (&mut *page_allocator, &*page_metadata_map) };
+            rollback_current_smp_fork_task(child_ref, page_allocator, page_metadata_map);
+            return Err(CurrentSmpVforkError::InvalidParent);
+        }
+        let wake = match super::kernel_task::reserve_inbound(
+            parent_ref,
+            parent_cpu,
+            super::kernel_task::InboundKind::Wake,
+            super::kernel_task::next_inbound_ordinal(),
+        ) {
+            Ok(wake) => wake,
+            Err(_) => {
+                let (page_allocator, page_metadata_map) =
+                    crate::context::user_memory_resource_ptrs();
+                // SAFETY: the user-memory lock owns allocator rollback here.
+                let (page_allocator, page_metadata_map) =
+                    unsafe { (&mut *page_allocator, &*page_metadata_map) };
+                rollback_current_smp_fork_task(child_ref, page_allocator, page_metadata_map);
+                return Err(CurrentSmpVforkError::Again);
+            }
+        };
+        let child = USER_TASK_STORAGE[child_ref.user_slot().ok_or(CurrentSmpVforkError::Again)?]
+            .get_mut()
+            .ok_or(CurrentSmpVforkError::Again)?;
+        child.shared_mm_owner_ref = binding.owner_ref;
+        child.vfork_parent_ref = parent_ref;
+        child.vfork_parent_wake_reservation = Some(wake);
+        (pid, child_ref, target_cpu)
+    };
+
+    let pidfd_fd = if let Some(user_ptr) = pidfd_user_ptr {
+        let install = {
+            let _files_guard = lock_user_files_state();
+            current_user_files_struct().install_pidfd(pid)
+        };
+        let fd = match install {
+            Ok(fd) => fd,
+            Err(_) => {
+                rollback_current_smp_fork_task_with_locks(child_ref);
+                return Err(CurrentSmpVforkError::Again);
+            }
+        };
+        if !super::exception_type::write_user_u32(user_ptr, fd as u32) {
+            let _files_guard = lock_user_files_state();
+            let _ = current_user_files_struct().close_fd(fd);
+            drop(_files_guard);
+            rollback_current_smp_fork_task_with_locks(child_ref);
+            return Err(CurrentSmpVforkError::Fault);
+        }
+        Some(fd)
+    } else {
+        None
+    };
+
+    let publication = {
+        let _memory_guard = lock_user_memory_state();
+        let _files_guard = lock_user_files_state();
+        let current_binding = smp_effective_mm_binding(parent_ref, parent_cpu)
+            .ok_or(CurrentSmpVforkError::InvalidParent)?;
+        let parent = USER_TASK_STORAGE[parent_ref
+            .user_slot()
+            .ok_or(CurrentSmpVforkError::InvalidParent)?]
+        .get_mut()
+        .ok_or(CurrentSmpVforkError::InvalidParent)?;
+        if current_binding.owner_ref != binding.owner_ref
+            || !parent.occupied
+            || !parent.task_ref().same_identity(parent_ref)
+            || parent.task.state() != State::OnCpu
+            || parent.task.execution_authority() != super::task::TaskExecutionAuthority::Live
+            || parent.task.flow_state() != State::Online
+            || parent.task.flow_cpu_ref() != Some(parent_cpu)
+            || parent.runtime.state() != State::Online
+            || !parent.runtime.task_ref_owner().same_identity(parent_ref)
+            || !parent.process_resources_present
+        {
+            if let Some(fd) = pidfd_fd {
+                let _ = unsafe { parent.files_struct.assume_init_mut() }.close_fd(fd);
+            }
+            let (page_allocator, page_metadata_map) = crate::context::user_memory_resource_ptrs();
+            // SAFETY: memory and files locks own all rollback resources.
+            let (page_allocator, page_metadata_map) =
+                unsafe { (&mut *page_allocator, &*page_metadata_map) };
+            rollback_current_smp_fork_task(child_ref, page_allocator, page_metadata_map);
+            return Err(CurrentSmpVforkError::InvalidParent);
+        }
+        // SAFETY: process_resources_present and the files lock prove these
+        // stable in-place process-resource values are initialized.
+        let (parent_files, parent_fs) = unsafe {
+            (
+                parent.files_struct.assume_init_ref(),
+                parent.fs_struct.assume_init_ref(),
+            )
+        };
+        let (page_allocator, page_metadata_map) = crate::context::user_memory_resource_ptrs();
+        // SAFETY: the memory lock owns allocator/frame metadata rollback.
+        let (page_allocator, page_metadata_map) =
+            unsafe { (&mut *page_allocator, &*page_metadata_map) };
+        if !prepare_reserved_process_resources(child_ref, parent_files, parent_fs) {
+            if let Some(fd) = pidfd_fd {
+                let _ = unsafe { parent.files_struct.assume_init_mut() }.close_fd(fd);
+            }
+            rollback_current_smp_fork_task(child_ref, page_allocator, page_metadata_map);
+            return Err(CurrentSmpVforkError::NoMemory);
+        }
+        let Some(candidate) = prepare_current_smp_fork_snapshot(child_ref) else {
+            if let Some(fd) = pidfd_fd {
+                let _ = unsafe { parent.files_struct.assume_init_mut() }.close_fd(fd);
+            }
+            rollback_current_smp_fork_task(child_ref, page_allocator, page_metadata_map);
+            return Err(CurrentSmpVforkError::NoMemory);
+        };
+        if !current_smp_fork_publish_ready(child_ref, &candidate, true) {
+            if let Some(fd) = pidfd_fd {
+                let _ = unsafe { parent.files_struct.assume_init_mut() }.close_fd(fd);
+            }
+            rollback_current_smp_fork_task(child_ref, page_allocator, page_metadata_map);
+            return Err(CurrentSmpVforkError::NoMemory);
+        }
+        let mut child_frame = *current_frame;
+        child_frame.set_reg(10, 0);
+        child_frame.sepc = child_frame.sepc.wrapping_add(4);
+        commit_current_smp_fork_snapshot(child_ref, candidate, child_frame, true)
+    };
+
+    let (activation, published_cpu) = publication;
+    if published_cpu != target_cpu {
+        user_boot_panic("SMP vfork CPU publication mismatch\n");
+    }
+    let target_hartid = global_registry()
+        .hartid_for_cpu(target_cpu)
+        .expect("SMP vfork target hartid");
+    if super::kernel_task::publish_reserved_and_signal_from(activation, target_hartid, parent_cpu)
+        .is_err()
+        || crate::context::process_smp_inbound(parent_cpu.logical_id()).is_err()
+        || crate::context::declare_smp_task_sleep(parent_cpu.logical_id(), parent_ref).is_err()
+    {
+        user_boot_panic("SMP vfork child handoff failed\n");
+    }
+    if let Err(error) = crate::context::schedule_smp_current(parent_cpu.logical_id(), parent_ref) {
+        crate::phases::print_event_error(error);
+        user_boot_panic("SMP vfork parent blocking schedule failed\n");
+    }
+    let Some((resumed_ref, resumed_cpu)) = current_smp_user_task() else {
+        user_boot_panic("SMP vfork parent resume identity missing\n");
+    };
+    if !resumed_ref.same_identity(parent_ref) || resumed_cpu != parent_cpu {
+        user_boot_panic("SMP vfork wrong parent resumed\n");
+    }
+    Ok(pid)
+}
+
+fn trace_current_smp_fork_parent_failure(stage: &str) {
+    crate::arch::riscv64::sbi::putstr("SMP fork parent reject stage=");
+    crate::arch::riscv64::sbi::putstr(stage);
+    crate::arch::riscv64::sbi::putstr(" current_satp=");
+    trace_smp_fork_hex(csr::read_satp());
+    if let Some((task_ref, cpu_ref)) = current_smp_user_task() {
+        crate::arch::riscv64::sbi::putstr(" task_slot=");
+        trace_smp_fork_hex(task_ref.slot());
+        crate::arch::riscv64::sbi::putstr(" task_generation=");
+        trace_smp_fork_hex(task_ref.generation() as usize);
+        crate::arch::riscv64::sbi::putstr(" cpu=");
+        trace_smp_fork_hex(cpu_ref.logical_id());
+        if let Some(index) = task_ref.user_slot()
+            && let Some(slot) = USER_TASK_STORAGE[index].get()
+        {
+            crate::arch::riscv64::sbi::putstr(" occupied=");
+            trace_smp_fork_hex(slot.occupied as usize);
+            crate::arch::riscv64::sbi::putstr(" mm_present=");
+            trace_smp_fork_hex(slot.mm_present as usize);
+            crate::arch::riscv64::sbi::putstr(" resources_present=");
+            trace_smp_fork_hex(slot.process_resources_present as usize);
+            crate::arch::riscv64::sbi::putstr(" task_state=");
+            trace_smp_fork_hex(slot.task.state() as usize);
+            crate::arch::riscv64::sbi::putstr(" authority=");
+            trace_smp_fork_hex(slot.task.execution_authority() as usize);
+            crate::arch::riscv64::sbi::putstr(" flow_state=");
+            trace_smp_fork_hex(slot.task.flow_state() as usize);
+            crate::arch::riscv64::sbi::putstr(" runtime_state=");
+            trace_smp_fork_hex(slot.runtime.state() as usize);
+            crate::arch::riscv64::sbi::putstr(" mm_state=");
+            trace_smp_fork_hex(slot.inactive_address_space.state() as usize);
+            crate::arch::riscv64::sbi::putstr(" mm_owner_slot=");
+            trace_smp_fork_hex(slot.inactive_address_space.owner_task_ref().slot());
+            crate::arch::riscv64::sbi::putstr(" mm_owner_generation=");
+            trace_smp_fork_hex(slot.inactive_address_space.owner_task_ref().generation() as usize);
+            crate::arch::riscv64::sbi::putstr(" mm_satp=");
+            trace_smp_fork_hex(slot.inactive_address_space.satp_token());
+        }
+    } else {
+        crate::arch::riscv64::sbi::putstr(" current_smp_user=0");
+    }
+    crate::arch::riscv64::sbi::putstr("\n");
+}
+
+fn trace_smp_fork_hex(value: usize) {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    crate::arch::riscv64::sbi::putstr("0x");
+    let mut shift = usize::BITS as usize;
+    while shift != 0 {
+        shift -= 4;
+        crate::arch::riscv64::sbi::putchar(HEX[(value >> shift) & 0xf]);
+    }
+}
+
+/// Stable field-specific capabilities for committing a runtime exec into the
+/// current dynamic process aggregate. The caller must hold the exec and user
+/// memory locks while dereferencing these pointers.
+#[derive(Clone, Copy)]
+#[cfg(app_user_boot)]
+pub(crate) struct SmpExecTarget {
+    pub(crate) task_ref: TaskRef,
+    pub(crate) replaces_shared_mm: bool,
+    pub(crate) address_space: *mut UserAddressSpace,
+    pub(crate) stack: *mut UserStack,
+    pub(crate) elf: *mut ElfObject,
+    pub(crate) interpreter: *mut ElfObject,
+    pub(crate) trap_frame: *mut UserTrapFrame,
+    pub(crate) files_struct: *mut FilesStruct,
+    pub(crate) fs_struct: *mut FsStruct,
+}
+
+#[cfg(app_user_boot)]
+pub(crate) fn current_smp_exec_target() -> Option<SmpExecTarget> {
+    let binding = current_smp_effective_mm_binding()?;
+    let task_ref = binding.current_ref;
+    let cpu_ref = binding.cpu_ref;
+    let index = task_ref.user_slot()?;
+    let slot = USER_TASK_STORAGE[index].get_mut()?;
+    let replaces_shared_mm = !slot.mm_present;
+    if !slot.occupied
+        || !slot.process_resources_present
+        || !slot.task_ref().same_identity(task_ref)
+        || slot.task.flow_cpu_ref() != Some(cpu_ref)
+        || (replaces_shared_mm
+            && (slot.shared_mm_owner_ref != binding.owner_ref
+                || slot.inactive_address_space.state() != State::Base
+                || slot.inactive_stack.state() != State::Base))
+        || (!replaces_shared_mm
+            && (binding.owner_ref != task_ref
+                || slot.inactive_address_space.satp_token() != csr::read_satp()))
+    {
+        return None;
+    }
+    Some(SmpExecTarget {
+        task_ref,
+        replaces_shared_mm,
+        address_space: core::ptr::addr_of_mut!(slot.inactive_address_space),
+        stack: core::ptr::addr_of_mut!(slot.inactive_stack),
+        elf: core::ptr::addr_of_mut!(slot.exec_elf),
+        interpreter: core::ptr::addr_of_mut!(slot.exec_interpreter),
+        trap_frame: core::ptr::addr_of_mut!(slot.exec_trap_frame),
+        files_struct: slot.files_struct.as_mut_ptr(),
+        fs_struct: slot.fs_struct.as_mut_ptr(),
+    })
+}
+
+#[cfg(app_user_boot)]
+pub(crate) fn commit_smp_application_replacement(task_ref: TaskRef) -> bool {
+    let Some((current_ref, cpu_ref)) = current_smp_user_task() else {
+        return false;
+    };
+    if !current_ref.same_identity(task_ref) {
+        return false;
+    }
+    let Some(slot) = task_ref
+        .user_slot()
+        .and_then(|index| USER_TASK_STORAGE[index].get_mut())
+    else {
+        return false;
+    };
+    slot.occupied
+        && slot.task_ref().same_identity(task_ref)
+        && slot.task.flow_cpu_ref() == Some(cpu_ref)
+        && slot
+            .runtime
+            .replace_dynamic_application(&slot.task, slot.task.embedded_flow())
+}
+
+#[cfg(app_user_boot)]
+pub(crate) fn commit_smp_exec_mm_ownership(task_ref: TaskRef) -> bool {
+    let Some((current_ref, cpu_ref)) = current_smp_user_task() else {
+        return false;
+    };
+    if !current_ref.same_identity(task_ref) {
+        return false;
+    }
+    let Some(slot) = task_ref
+        .user_slot()
+        .and_then(|index| USER_TASK_STORAGE[index].get_mut())
+    else {
+        return false;
+    };
+    if !slot.occupied
+        || slot.mm_present
+        || !slot.shared_mm_owner_ref.is_valid()
+        || !slot.vfork_parent_ref.is_valid()
+        || slot.vfork_parent_wake_reservation.is_none()
+        || slot.task.flow_cpu_ref() != Some(cpu_ref)
+        || slot.inactive_address_space.state() != State::Online
+        || !slot.inactive_address_space.owned_by(task_ref)
+        || slot.inactive_address_space.satp_token() == 0
+        || slot.inactive_stack.state() != State::Ready
+    {
+        return false;
+    }
+    slot.mm_present = true;
+    slot.shared_mm_owner_ref = TaskRef::NONE;
+    true
+}
+
+#[cfg(app_user_boot)]
+pub(crate) fn finish_current_smp_vfork_exec_handoff() -> bool {
+    if current_smp_user_task().is_none() {
+        return true;
+    }
+    publish_current_smp_vfork_parent_wake(true).is_ok()
+}
+
+fn publish_current_smp_vfork_parent_wake(after_exec: bool) -> Result<bool, ()> {
+    let (task_ref, cpu_ref) = current_smp_user_task().ok_or(())?;
+    let Some(index) = task_ref.user_slot() else {
+        return Err(());
+    };
+    let Some(slot) = USER_TASK_STORAGE[index].get_mut() else {
+        return Err(());
+    };
+    if !slot.vfork_parent_ref.is_valid() && slot.vfork_parent_wake_reservation.is_none() {
+        return Ok(false);
+    }
+    if !slot.occupied
+        || !slot.task_ref().same_identity(task_ref)
+        || !slot.vfork_parent_ref.is_valid()
+        || slot.vfork_parent_wake_reservation.is_none()
+        || (after_exec && (!slot.mm_present || slot.shared_mm_owner_ref.is_valid()))
+        || (!after_exec && slot.mm_present)
+    {
+        return Err(());
+    }
+    let parent_ref = slot.vfork_parent_ref;
+    if global_registry().cpu_ref(parent_ref) != Some(cpu_ref) {
+        return Err(());
+    }
+    let reservation = slot.vfork_parent_wake_reservation.take().ok_or(())?;
+    slot.vfork_parent_ref = TaskRef::NONE;
+    if !after_exec {
+        slot.shared_mm_owner_ref = TaskRef::NONE;
+    }
+    let parent_hartid = global_registry().hartid_for_cpu(cpu_ref).ok_or(())?;
+    super::kernel_task::publish_reserved_and_signal_from(reservation, parent_hartid, cpu_ref)
+        .map_err(|_| ())?;
+    crate::context::process_smp_inbound(cpu_ref.logical_id()).map_err(|_| ())?;
+    Ok(true)
+}
+
+pub(crate) fn record_current_smp_user_oom(task_ref: TaskRef) -> bool {
+    let Some((current_ref, cpu_ref)) = current_smp_user_task() else {
+        return false;
+    };
+    current_ref.same_identity(task_ref)
+        && smp_task_mut_by_ref_on_cpu(task_ref, cpu_ref.logical_id())
+            .is_some_and(Task::record_out_of_memory_terminal)
+}
+
+pub(crate) fn record_current_smp_user_sigsegv(
+    task_ref: TaskRef,
+    code: TaskSegvCode,
+    address: usize,
+) -> Option<TaskSegvInfo> {
+    let (current_ref, cpu_ref) = current_smp_user_task()?;
+    if !current_ref.same_identity(task_ref) {
+        return None;
+    }
+    let task = smp_task_mut_by_ref_on_cpu(task_ref, cpu_ref.logical_id())?;
+    task.record_segmentation_fault_terminal(code, address)
+        .then(|| task.segv_info())?
+}
+
+pub(crate) fn resolve_smp_user_fault(
+    task_ref: TaskRef,
+    request: UserFaultRequest,
+) -> Option<(usize, UserFaultResolution, usize, usize, usize)> {
+    let binding = current_smp_effective_mm_binding()?;
+    if !task_ref.same_identity(request.task_ref()) {
+        return None;
+    }
+    if !task_ref.same_identity(binding.current_ref) {
+        return None;
+    }
+    let _guard = lock_user_memory_state();
+    let (address_space, stack) = smp_effective_mm_resource_ptrs(binding)?;
+    let (page_allocator, page_metadata_map) = crate::context::user_memory_resource_ptrs();
+    // SAFETY: USER_MEMORY_STATE_LOCK serializes the resolved stable mm,
+    // allocator and frame metadata; the binding fixes this caller to its CPU.
+    let (address_space, stack) = unsafe { (&mut *address_space, &mut *stack) };
+    let (page_allocator, page_metadata_map) =
+        unsafe { (&mut *page_allocator, &*page_metadata_map) };
+    let before = stack.backing_page_count();
+    let base = stack.rlimit_base();
+    let top = stack.top();
+    let result = address_space.resolve_user_fault(
+        stack,
+        request.with_task_ref(binding.owner_ref),
+        page_allocator,
+        page_metadata_map,
+    );
+    let after = stack.backing_page_count();
+    Some((before, result, after, base, top))
+}
+
+pub(crate) struct SmpUserCopyRangeOutcome {
+    accessible: bool,
+    stack_grew: bool,
+    in_stack_range: bool,
+}
+
+impl SmpUserCopyRangeOutcome {
+    pub const fn accessible(&self) -> bool {
+        self.accessible
+    }
+
+    pub const fn stack_grew(&self) -> bool {
+        self.stack_grew
+    }
+
+    pub const fn in_stack_range(&self) -> bool {
+        self.in_stack_range
+    }
+}
+
+pub(crate) fn resolve_smp_user_copy_range(
+    task_ref: TaskRef,
+    user_ptr: usize,
+    len: usize,
+    access: UserFaultAccess,
+    current_satp: usize,
+) -> Option<SmpUserCopyRangeOutcome> {
+    let binding = current_smp_effective_mm_binding()?;
+    if !binding.current_ref.same_identity(task_ref) {
+        return None;
+    }
+    let end = user_ptr.checked_add(len)?;
+    let last = end.checked_sub(1)?;
+    let _guard = lock_user_memory_state();
+    let (address_space, stack) = smp_effective_mm_resource_ptrs(binding)?;
+    // SAFETY: USER_MEMORY_STATE_LOCK owns the resolved current mm capability.
+    let (address_space, stack) = unsafe { (&mut *address_space, &mut *stack) };
+    if address_space.satp_token() != current_satp {
+        return None;
+    }
+    let (page_allocator, page_metadata_map) = crate::context::user_memory_resource_ptrs();
+    let (page_allocator, page_metadata_map) =
+        unsafe { (&mut *page_allocator, &*page_metadata_map) };
+    let pages_before = stack.backing_page_count();
+    let resolved = address_space.resolve_user_fault_range(
+        stack,
+        binding.owner_ref,
+        user_ptr,
+        len,
+        access,
+        current_satp,
+        page_allocator,
+        page_metadata_map,
+    );
+    let pages_after = stack.backing_page_count();
+    let in_stack_range = user_ptr >= stack.rlimit_base() && end <= stack.top();
+    let mapped = resolved && address_space.user_range_mapped(user_ptr, len);
+    let permitted = if mapped {
+        address_space
+            .fault_mapping_diagnostic(user_ptr, access)
+            .permission_satisfied()
+            && address_space
+                .fault_mapping_diagnostic(last, access)
+                .permission_satisfied()
+    } else {
+        false
+    };
+    Some(SmpUserCopyRangeOutcome {
+        accessible: resolved && mapped && permitted,
+        stack_grew: pages_after != pages_before,
+        in_stack_range,
+    })
+}
+
+pub(crate) fn smp_user_brk(task_ref: TaskRef, requested: usize) -> Option<usize> {
+    let binding = current_smp_effective_mm_binding()?;
+    if !binding.current_ref.same_identity(task_ref) {
+        return None;
+    }
+    let _guard = lock_user_memory_state();
+    let (address_space, _) = smp_effective_mm_resource_ptrs(binding)?;
+    // SAFETY: USER_MEMORY_STATE_LOCK owns the resolved current mm capability.
+    Some(unsafe { (&mut *address_space).user_brk(requested) })
+}
+
+pub(crate) fn smp_user_mmap(
+    task_ref: TaskRef,
+    addr: usize,
+    len: usize,
+    prot: usize,
+    flags: usize,
+    fd: usize,
+    offset: usize,
+) -> Option<Result<usize, UserMmapError>> {
+    let binding = current_smp_effective_mm_binding()?;
+    if !binding.current_ref.same_identity(task_ref) {
+        return None;
+    }
+    let _guard = lock_user_memory_state();
+    let (address_space, _) = smp_effective_mm_resource_ptrs(binding)?;
+    // SAFETY: USER_MEMORY_STATE_LOCK owns the resolved current mm capability.
+    Some(unsafe { (&mut *address_space).user_mmap(addr, len, prot, flags, fd, offset) })
+}
+
+pub(crate) fn smp_user_mprotect(task_ref: TaskRef, addr: usize, len: usize) -> Option<bool> {
+    let binding = current_smp_effective_mm_binding()?;
+    if !binding.current_ref.same_identity(task_ref) {
+        return None;
+    }
+    let _guard = lock_user_memory_state();
+    let (address_space, _) = smp_effective_mm_resource_ptrs(binding)?;
+    // SAFETY: USER_MEMORY_STATE_LOCK owns the resolved current mm capability.
+    Some(unsafe { (&*address_space).user_mprotect(addr, len) })
+}
+
+pub(crate) fn smp_user_munmap(task_ref: TaskRef, addr: usize, len: usize) -> Option<bool> {
+    let binding = current_smp_effective_mm_binding()?;
+    if !binding.current_ref.same_identity(task_ref) {
+        return None;
+    }
+    let _guard = lock_user_memory_state();
+    let (address_space, _) = smp_effective_mm_resource_ptrs(binding)?;
+    let (page_allocator, page_metadata_map) = crate::context::user_memory_resource_ptrs();
+    // SAFETY: USER_MEMORY_STATE_LOCK serializes both global allocator fields.
+    let (page_allocator, page_metadata_map) =
+        unsafe { (&mut *page_allocator, &*page_metadata_map) };
+    // SAFETY: USER_MEMORY_STATE_LOCK owns the resolved current mm capability.
+    Some(unsafe { (&mut *address_space).user_munmap(addr, len, page_allocator, page_metadata_map) })
+}
+
+pub(crate) fn exit_current_smp_user_task(exit_status: usize) -> ! {
+    let Some((task_ref, cpu_ref)) = current_smp_user_task() else {
+        user_boot_panic("SMP user exit identity failed\n");
+    };
+    let Some(wait_status) = task_ref.user_slot().and_then(|index| {
+        USER_TASK_STORAGE[index].get().and_then(|slot| {
+            slot.task_ref()
+                .same_identity(task_ref)
+                .then_some(slot.task.terminal_wait_status(exit_status))
+        })
+    }) else {
+        user_boot_panic("SMP user wait status encoding failed\n");
+    };
+    if crate::context::disable_smp_task_flow_for_exit(cpu_ref.logical_id(), task_ref).is_err()
+        || crate::context::declare_smp_task_sleep(cpu_ref.logical_id(), task_ref).is_err()
+    {
+        user_boot_panic("SMP user terminal state failed\n");
+    }
+    {
+        let _files_guard = lock_user_files_state();
+        let Some(index) = task_ref.user_slot() else {
+            user_boot_panic("SMP user files slot missing\n");
+        };
+        let Some(slot) = USER_TASK_STORAGE[index].get_mut() else {
+            user_boot_panic("SMP user files aggregate missing\n");
+        };
+        if !slot.task_ref().same_identity(task_ref) || !release_slot_process_shared_resources(slot)
+        {
+            user_boot_panic("SMP user shared files release failed\n");
+        }
+    }
+    let swapper_satp = crate::context::context_ref().vm.swapper_vm().satp();
+    if swapper_satp == 0 {
+        user_boot_panic("SMP user SwapperVm SATP missing\n");
+    }
+    crate::arch::riscv64::csr::write_satp(swapper_satp);
+    crate::arch::riscv64::csr::sfence_vma();
+    if crate::arch::riscv64::csr::read_satp() != swapper_satp {
+        user_boot_panic("SMP user SwapperVm SATP handoff failed\n");
+    }
+    let Some(parent_cpu_ref) = global_registry().parent_cpu_ref(task_ref) else {
+        user_boot_panic("SMP user parent CPU lookup failed\n");
+    };
+    if !global_registry().publish_zombie(task_ref, wait_status) {
+        user_boot_panic("SMP user zombie publication failed\n");
+    }
+    let parent_ref = global_registry()
+        .parent_task_ref(task_ref)
+        .unwrap_or_else(|| user_boot_panic("SMP user parent identity lookup failed\n"));
+    if parent_ref.same_identity(TaskRef::KERNEL_INIT) {
+        let signal_wait_woken = crate::context::context()
+            .kernel_init_user_state
+            .record_child_exit_sigchld()
+            .unwrap_or_else(|| user_boot_panic("SMP user SIGCHLD publication failed\n"));
+        if signal_wait_woken {
+            crate::checkpoint::dispatch(
+                crate::checkpoint::Checkpoint::UserSignalWaitWakeSigchld,
+                crate::context::context_ref(),
+            );
+        }
+    }
+    let vfork_parent_woken = publish_current_smp_vfork_parent_wake(false)
+        .unwrap_or_else(|_| user_boot_panic("SMP vfork exit parent wake failed\n"));
+    if !vfork_parent_woken {
+        let Some(parent_hartid) = global_registry().hartid_for_cpu(parent_cpu_ref) else {
+            user_boot_panic("SMP user parent hart lookup failed\n");
+        };
+        if crate::arch::riscv64::sbi::send_ipi(parent_hartid).is_err() {
+            user_boot_panic("SMP user parent wake failed\n");
+        }
+    }
+    if let Err(error) = crate::context::schedule_smp_current(cpu_ref.logical_id(), task_ref) {
+        crate::phases::print_event_error(error);
+        user_boot_panic("SMP user terminal schedule failed\n");
+    }
+    user_boot_panic("SMP user terminal schedule returned\n")
+}
+
+extern "C" fn user_task_entry() -> ! {
+    #[cfg(app_user_boot)]
+    {
+        let identity = crate::arch::riscv64::csr::read_tp();
+        let mut found = None;
+        let mut index = 0usize;
+        while index < USER_TASK_SLOT_COUNT {
+            if let Some(slot) = USER_TASK_STORAGE[index].get()
+                && slot.occupied
+                && core::ptr::addr_of!(slot.task) as usize == identity
+            {
+                found = Some((index, slot.task_ref(), slot.task.flow_cpu_ref()));
+                break;
+            }
+            index += 1;
+        }
+        let Some((index, task_ref, Some(cpu_ref))) = found else {
+            user_boot_panic("user Task entry identity failed\n");
+        };
+        if crate::context::finish_smp_task_switch(cpu_ref.logical_id(), task_ref).is_err() {
+            user_boot_panic("user Task first dispatch failed\n");
+        }
+        let Some(slot) = USER_TASK_STORAGE[index].get() else {
+            user_boot_panic("user Task aggregate missing\n");
+        };
+        let Some(frame) = slot.initial_trap_frame else {
+            user_boot_panic("user Task initial trap frame missing\n");
+        };
+        let Some(satp_token) = smp_task_satp_token(task_ref, cpu_ref.logical_id()) else {
+            user_boot_panic("user Task address space missing\n");
+        };
+        let Some(trap_entry_context) = crate::context::smp_trap_entry_context(cpu_ref.logical_id())
+        else {
+            user_boot_panic("user Task trap entry context missing\n");
+        };
+        unsafe {
+            crate::arch::riscv64::csr::enter_user_mode_from_trap_frame(
+                satp_token,
+                &frame,
+                trap_entry_context,
+            )
+        }
+    }
+    #[cfg(not(app_user_boot))]
+    loop {
+        unsafe { core::arch::asm!("wfi", options(nomem, nostack)) };
     }
 }
 
@@ -787,6 +2524,14 @@ impl UserFaultRequest {
             sepc,
             access,
         }
+    }
+
+    pub const fn task_ref(self) -> TaskRef {
+        self.task_ref
+    }
+
+    const fn with_task_ref(self, task_ref: TaskRef) -> Self {
+        Self { task_ref, ..self }
     }
 }
 
@@ -1403,6 +3148,83 @@ pub struct UserAddressSpace {
     fail_next_stack_pte_install: bool,
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+#[cfg(app_smoke)]
+pub struct Sv39MappingDiagnostic {
+    address: usize,
+    satp_token: usize,
+    root_phys: usize,
+    root_linear: usize,
+    root_pte: usize,
+    l1_pte: usize,
+    l0_pte: usize,
+    walked_levels: usize,
+    terminal_level: usize,
+    executable: bool,
+}
+
+#[cfg(app_smoke)]
+impl Sv39MappingDiagnostic {
+    const fn new(address: usize) -> Self {
+        Self {
+            address,
+            satp_token: 0,
+            root_phys: 0,
+            root_linear: 0,
+            root_pte: 0,
+            l1_pte: 0,
+            l0_pte: 0,
+            walked_levels: 0,
+            terminal_level: usize::MAX,
+            executable: false,
+        }
+    }
+
+    pub const fn address(self) -> usize {
+        self.address
+    }
+
+    pub const fn satp_token(self) -> usize {
+        self.satp_token
+    }
+
+    pub const fn root_phys(self) -> usize {
+        self.root_phys
+    }
+
+    pub const fn root_linear(self) -> usize {
+        self.root_linear
+    }
+
+    pub const fn root_pte(self) -> usize {
+        self.root_pte
+    }
+
+    pub const fn l1_pte(self) -> usize {
+        self.l1_pte
+    }
+
+    pub const fn l0_pte(self) -> usize {
+        self.l0_pte
+    }
+
+    pub const fn walked_levels(self) -> usize {
+        self.walked_levels
+    }
+
+    pub const fn terminal_level(self) -> Option<usize> {
+        if self.terminal_level != usize::MAX {
+            Some(self.terminal_level)
+        } else {
+            None
+        }
+    }
+
+    pub const fn executable(self) -> bool {
+        self.executable
+    }
+}
+
 #[derive(Clone, Copy)]
 struct UserL0TableSlot {
     vpn1: usize,
@@ -1772,6 +3594,69 @@ impl UserAddressSpace {
 
     pub const fn last_user_fault(&self) -> UserFaultDiagnostic {
         self.last_user_fault
+    }
+
+    #[cfg(app_smoke)]
+    pub fn sv39_mapping_diagnostic(
+        &self,
+        address: usize,
+        page_metadata_map: &PageMetadataMap,
+    ) -> Sv39MappingDiagnostic {
+        let mut diagnostic = Sv39MappingDiagnostic::new(address);
+        diagnostic.satp_token = self.satp_token;
+        let Some(root_page) = self.page_table_root else {
+            return diagnostic;
+        };
+        diagnostic.root_phys = root_page.phys().value();
+        diagnostic.root_linear = root_page.linear().value();
+        let Some(root) = page_table_page(root_page, page_metadata_map) else {
+            return diagnostic;
+        };
+        let (vpn2, vpn1, vpn0) = sv39_indices(address);
+        let Some(root_pte) = root.entry(vpn2) else {
+            return diagnostic;
+        };
+        diagnostic.root_pte = root_pte;
+        diagnostic.walked_levels = 1;
+        if !sv39_pte_valid(root_pte) {
+            return diagnostic;
+        }
+        if sv39_pte_leaf(root_pte) {
+            diagnostic.terminal_level = 2;
+            diagnostic.executable = sv39_pte_executable(root_pte);
+            return diagnostic;
+        }
+
+        let Some(l1) = page_table_page_from_pte(root_pte, page_metadata_map) else {
+            return diagnostic;
+        };
+        let Some(l1_pte) = l1.entry(vpn1) else {
+            return diagnostic;
+        };
+        diagnostic.l1_pte = l1_pte;
+        diagnostic.walked_levels = 2;
+        if !sv39_pte_valid(l1_pte) {
+            return diagnostic;
+        }
+        if sv39_pte_leaf(l1_pte) {
+            diagnostic.terminal_level = 1;
+            diagnostic.executable = sv39_pte_executable(l1_pte);
+            return diagnostic;
+        }
+
+        let Some(l0) = page_table_page_from_pte(l1_pte, page_metadata_map) else {
+            return diagnostic;
+        };
+        let Some(l0_pte) = l0.entry(vpn0) else {
+            return diagnostic;
+        };
+        diagnostic.l0_pte = l0_pte;
+        diagnostic.walked_levels = 3;
+        if sv39_pte_valid(l0_pte) && sv39_pte_leaf(l0_pte) {
+            diagnostic.terminal_level = 0;
+            diagnostic.executable = sv39_pte_executable(l0_pte);
+        }
+        diagnostic
     }
 
     pub fn cow_leaf_diagnostic(
@@ -3700,6 +5585,8 @@ impl UserAddressSpace {
             let _ = page_allocator.free_pages(page, 0, page_metadata_map);
         }
         if let Some(page) = self.page_table_root.take() {
+            #[cfg(app_smoke)]
+            trace_active_satp_root_page("release", page, self as *const Self as usize);
             let _ = page_allocator.free_pages(page, 0, page_metadata_map);
         }
         self.page_table_l0s = [UserL0TableSlot::empty(); MAX_USER_L0_TABLES];
@@ -3741,12 +5628,46 @@ fn allocate_zeroed_page_table_page(
     page_metadata_map: &PageMetadataMap,
 ) -> Option<PageRef> {
     let page = page_allocator.alloc_page(GfpFlags::kernel(), page_metadata_map)?;
+    #[cfg(app_smoke)]
+    trace_active_satp_root_page("reallocate-before-clear", page, 0);
     let Some(table) = page_table_page_mut(page, page_metadata_map) else {
         let _ = page_allocator.free_pages(page, 0, page_metadata_map);
         return None;
     };
     table.clear();
     Some(page)
+}
+
+#[cfg(app_smoke)]
+fn trace_active_satp_root_page(event: &str, page: PageRef, address_space: usize) {
+    const SATP_PPN_MASK: usize = (1usize << 44) - 1;
+
+    let satp = csr::read_satp();
+    let active_root_phys = (satp & SATP_PPN_MASK) << 12;
+    if active_root_phys == 0 || page.phys().value() != active_root_phys {
+        return;
+    }
+
+    crate::objects::printk::write_str("app-smoke active SATP root ");
+    crate::objects::printk::write_str(event);
+    crate::objects::printk::write_str(" mm=0x");
+    trace_page_table_hex(address_space);
+    crate::objects::printk::write_str(" root=0x");
+    trace_page_table_hex(active_root_phys);
+    crate::objects::printk::write_str(" satp=0x");
+    trace_page_table_hex(satp);
+    crate::objects::printk::write_str("\n");
+}
+
+#[cfg(app_smoke)]
+fn trace_page_table_hex(value: usize) {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+
+    let mut shift = usize::BITS as usize;
+    while shift != 0 {
+        shift -= 4;
+        crate::arch::riscv64::sbi::putchar(HEX[(value >> shift) & 0xf]);
+    }
 }
 
 fn page_table_page_mut(
@@ -3758,6 +5679,28 @@ fn page_table_page_mut(
         return None;
     }
     Some(unsafe { &mut *(linear as *mut PageTablePage) })
+}
+
+#[cfg(app_smoke)]
+fn page_table_page(
+    page: PageRef,
+    page_metadata_map: &PageMetadataMap,
+) -> Option<&'static PageTablePage> {
+    let linear = page_metadata_map.page_address(page)?;
+    if !page_table_storage_ready(linear, USER_PAGE_SIZE) {
+        return None;
+    }
+    Some(unsafe { &*(linear as *const PageTablePage) })
+}
+
+#[cfg(app_smoke)]
+fn page_table_page_from_pte(
+    pte: usize,
+    page_metadata_map: &PageMetadataMap,
+) -> Option<&'static PageTablePage> {
+    let page =
+        page_metadata_map.phys_to_page(super::mm_core::PhysPageAddr::new(sv39_pte_phys(pte)))?;
+    page_table_page(page, page_metadata_map)
 }
 
 fn total_mapping_page_count(mappings: &[UserMapping; MAX_USER_MAPPINGS], count: usize) -> usize {
@@ -4621,11 +6564,12 @@ impl BuiltinGrandchildContinuation {
 
 pub struct UserTaskSet {
     set_lifecycle: Lifecycle,
-    task_slots: [UserTaskStorageSlot; USER_TASK_SLOT_COUNT],
+    task_slots: UserTaskStorageHandle,
     active_task_ref: TaskRef,
     parent_task_ref: TaskRef,
     pending_task_ref: TaskRef,
     last_exited_task_ref: TaskRef,
+    kernel_init_address_space: usize,
     kernel_init_inactive_address_space: UserAddressSpace,
     kernel_init_inactive_stack: UserStack,
     kernel_init_mm_present: bool,
@@ -4758,20 +6702,12 @@ impl UserTaskSet {
     pub const fn new() -> Self {
         Self {
             set_lifecycle: Lifecycle::new(State::Base),
-            task_slots: [
-                UserTaskStorageSlot::new(0),
-                UserTaskStorageSlot::new(1),
-                UserTaskStorageSlot::new(2),
-                UserTaskStorageSlot::new(3),
-                UserTaskStorageSlot::new(4),
-                UserTaskStorageSlot::new(5),
-                UserTaskStorageSlot::new(6),
-                UserTaskStorageSlot::new(7),
-            ],
+            task_slots: UserTaskStorageHandle::new(),
             active_task_ref: TaskRef::NONE,
             parent_task_ref: TaskRef::NONE,
             pending_task_ref: TaskRef::NONE,
             last_exited_task_ref: TaskRef::NONE,
+            kernel_init_address_space: 0,
             kernel_init_inactive_address_space: UserAddressSpace::new(),
             kernel_init_inactive_stack: UserStack::new(),
             kernel_init_mm_present: false,
@@ -4904,7 +6840,7 @@ impl UserTaskSet {
         self.set_lifecycle.state()
     }
 
-    pub const fn active_task_state(&self) -> State {
+    pub fn active_task_state(&self) -> State {
         if let Some(slot) = self.slot_for_ref(self.active_task_ref) {
             slot.state()
         } else if self.active_task_record_available {
@@ -4924,7 +6860,7 @@ impl UserTaskSet {
         self.last_exited_task_ref
     }
 
-    pub const fn last_exited_flow_ref(&self) -> TaskFlowRef {
+    pub fn last_exited_flow_ref(&self) -> TaskFlowRef {
         if let Some(slot) = self.slot_for_ref(self.last_exited_task_ref) {
             slot.task.flow_ref()
         } else {
@@ -4948,7 +6884,7 @@ impl UserTaskSet {
         self.active_task_ref.generation()
     }
 
-    pub const fn flow_ref(&self) -> TaskFlowRef {
+    pub fn flow_ref(&self) -> TaskFlowRef {
         if let Some(slot) = self.slot_for_ref(self.active_task_ref) {
             slot.task.flow()
         } else {
@@ -5019,29 +6955,69 @@ impl UserTaskSet {
         }
     }
 
-    pub const fn cpu_ref_for_task(&self, task_ref: TaskRef) -> Option<super::cpu::CpuRef> {
-        let Some(slot) = self.slot_for_ref(task_ref) else {
-            return None;
-        };
+    pub fn cpu_ref_for_task(&self, task_ref: TaskRef) -> Option<super::cpu::CpuRef> {
+        let slot = self.slot_for_ref(task_ref)?;
         slot.task.flow_cpu_ref()
     }
 
-    pub const fn task_ref_valid(&self, task_ref: TaskRef) -> bool {
+    pub fn bind_kernel_init_address_space(&mut self, address_space: &UserAddressSpace) -> bool {
+        let address = core::ptr::from_ref(address_space) as usize;
+        if address == 0
+            || address_space.state() != State::Online
+            || address_space.satp_token() == 0
+            || (self.kernel_init_address_space != 0 && self.kernel_init_address_space != address)
+        {
+            return false;
+        }
+        self.kernel_init_address_space = address;
+        true
+    }
+
+    pub(crate) fn satp_token_for_task(&self, task_ref: TaskRef) -> Option<usize> {
+        if self.kernel_init_address_space != 0 {
+            // SAFETY: first-user-entry binds the stable Context-owned address
+            // space object. A simulated CPU0 continuation can exchange that
+            // object's contents with a child aggregate, so ownership rather
+            // than the original PID1 label selects the live token.
+            let address_space =
+                unsafe { &*(self.kernel_init_address_space as *const UserAddressSpace) };
+            if address_space.state() == State::Online
+                && address_space.satp_token() != 0
+                && address_space.owned_by(task_ref)
+            {
+                return Some(address_space.satp_token());
+            }
+        }
+        if task_ref.same_identity(TaskRef::KERNEL_INIT) {
+            return None;
+        }
+        let slot = self.slot_for_ref(task_ref)?;
+        (slot.mm_present
+            && slot.inactive_address_space.state() == State::Online
+            && slot.inactive_address_space.satp_token() != 0)
+            .then_some(slot.inactive_address_space.satp_token())
+    }
+
+    pub fn task_ref_valid(&self, task_ref: TaskRef) -> bool {
         self.slot_for_ref(task_ref).is_some()
     }
 
-    pub const fn flow_ref_valid(&self, task_ref: TaskRef, flow_ref: TaskFlowRef) -> bool {
+    pub fn flow_ref_valid(&self, task_ref: TaskRef, flow_ref: TaskFlowRef) -> bool {
         let Some(slot) = self.slot_for_ref(task_ref) else {
             return false;
         };
         slot.task.embedded_flow().declared() && slot.task.flow_ref().same_identity(flow_ref)
     }
 
-    pub const fn free_task_slot_count(&self) -> usize {
+    pub fn free_task_slot_count(&self) -> usize {
         let mut count = 0usize;
         let mut index = 0usize;
         while index < USER_TASK_SLOT_COUNT {
-            if !self.task_slots[index].reserved && !self.task_slots[index].occupied {
+            if self
+                .task_slots
+                .get(index)
+                .is_none_or(|slot| !slot.reserved && !slot.occupied)
+            {
                 count += 1;
             }
             index += 1;
@@ -5049,11 +7025,18 @@ impl UserTaskSet {
         count
     }
 
-    const fn slot_for_ref(&self, task_ref: TaskRef) -> Option<&UserTaskStorageSlot> {
-        let Some(index) = task_ref.user_slot() else {
-            return None;
-        };
-        let slot = &self.task_slots[index];
+    pub(crate) fn plain_fork_reservation_ready(&self) -> bool {
+        self.set_lifecycle.state() == State::Ready
+            && self.prepared
+            && self.active_task_state() == State::Prepared
+            && self.active_task_record_available
+            && self.task_entry == TaskEntry::UserChild
+            && self.free_task_slot_count() != 0
+    }
+
+    fn slot_for_ref(&self, task_ref: TaskRef) -> Option<&UserTaskStorageSlot> {
+        let index = task_ref.user_slot()?;
+        let slot = self.task_slots.get(index)?;
         if slot.occupied && slot.task_ref().same_identity(task_ref) {
             Some(slot)
         } else {
@@ -5102,8 +7085,10 @@ impl UserTaskSet {
     ) -> Option<super::current_task::CurrentTaskCandidate<'_>> {
         let mut index = 0usize;
         while index < USER_TASK_SLOT_COUNT {
-            let slot = &self.task_slots[index];
-            if slot.occupied && (&slot.task as *const Task as usize) == identity {
+            if let Some(slot) = self.task_slots.get(index)
+                && slot.occupied
+                && (&slot.task as *const Task as usize) == identity
+            {
                 return Some(super::current_task::CurrentTaskCandidate {
                     task: &slot.task,
                     flow: slot.task.embedded_flow(),
@@ -5272,12 +7257,20 @@ impl UserTaskSet {
                     }
                     slot.reserved = false;
                     slot.pid = 0;
+                    assert!(clear_slot_process_resources(slot));
+                    slot.initial_trap_frame = None;
+                    if let Some(reservation) = slot.inbox_reservation.take() {
+                        assert!(super::kernel_task::rollback_reserved(reservation));
+                    }
                     #[cfg(app_smoke)]
                     {
                         self.last_unpublished_rollback_stage = 4;
                     }
                 }
             }
+        }
+        if global_registry().slot_state(child_ref) == Some(UserProcessSlotState::Reserved) {
+            assert!(global_registry().rollback(child_ref));
         }
         #[cfg(app_smoke)]
         {
@@ -5363,18 +7356,22 @@ impl UserTaskSet {
         self.ordinary_independent_mm
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn release_child_and_restore_parent_mm(
         &mut self,
         child_ref: TaskRef,
         parent_ref: TaskRef,
         address_space: &mut UserAddressSpace,
         stack: &mut UserStack,
+        swapper_satp: usize,
         page_allocator: &mut PageAllocator,
         page_metadata_map: &PageMetadataMap,
     ) -> bool {
         if !self.ordinary_independent_mm
             || !address_space.owned_by(child_ref)
             || address_space.satp_token() == 0
+            || csr::read_satp() != address_space.satp_token()
+            || swapper_satp == 0
         {
             return false;
         }
@@ -5394,6 +7391,11 @@ impl UserTaskSet {
             return false;
         }
 
+        csr::write_satp(swapper_satp);
+        csr::sfence_vma();
+        if csr::read_satp() != swapper_satp {
+            return false;
+        }
         address_space.release_retired_exec_image(page_allocator, page_metadata_map);
         stack.release_exec_backing(page_allocator, page_metadata_map);
         if parent_ref.same_identity(TaskRef::KERNEL_INIT) {
@@ -5412,32 +7414,77 @@ impl UserTaskSet {
         address_space.owned_by(parent_ref) && address_space.satp_token() != 0
     }
 
-    fn reserve_user_task(&mut self, pid: usize) -> Option<TaskRef> {
+    fn placement_parent_cpu(&self, parent_ref: TaskRef) -> super::cpu::CpuRef {
+        if parent_ref.same_identity(TaskRef::KERNEL_INIT) || !parent_ref.is_valid() {
+            super::cpu::CpuRef::new(0)
+        } else {
+            self.slot_for_ref(parent_ref)
+                .and_then(|slot| slot.task.flow_cpu_ref())
+                .unwrap_or(super::cpu::CpuRef::new(0))
+        }
+    }
+
+    fn placement_parent_pid(&self, parent_ref: TaskRef) -> usize {
+        if parent_ref.same_identity(TaskRef::KERNEL_INIT) {
+            super::rest_init::KERNEL_INIT_PID
+        } else {
+            self.slot_for_ref(parent_ref).map_or(0, |slot| slot.pid)
+        }
+    }
+
+    fn reserve_user_task(
+        &mut self,
+        pid: usize,
+        parent_ref: TaskRef,
+        same_cpu: bool,
+    ) -> Option<TaskRef> {
         if pid == 0 {
             return None;
         }
-        let mut index = 0usize;
-        while index < USER_TASK_SLOT_COUNT
-            && (self.task_slots[index].reserved || self.task_slots[index].occupied)
-        {
-            index += 1;
-        }
-        if index == USER_TASK_SLOT_COUNT {
+        let parent_cpu = self.placement_parent_cpu(parent_ref);
+        let parent_pid = self.placement_parent_pid(parent_ref);
+        let (task_ref, target_cpu) =
+            global_registry().reserve(pid, parent_ref, parent_pid, parent_cpu, same_cpu)?;
+        let index = task_ref.user_slot()?;
+
+        if !self.task_slots.initialize(index) {
+            assert!(global_registry().rollback(task_ref));
             return None;
         }
 
         let slot = &mut self.task_slots[index];
-        if slot.mm_present
+        if slot.reserved
+            || slot.occupied
+            || slot.mm_present
             || slot.inactive_address_space.state() != State::Base
             || slot.inactive_stack.state() != State::Base
         {
+            assert!(global_registry().rollback(task_ref));
             return None;
         }
-        slot.generation = next_generation(slot.generation);
-        let task_ref = TaskRef::user(index, slot.generation);
+        slot.generation = task_ref.generation();
         slot.task = Task::new_user(task_ref, slot.flow_generation);
         slot.pid = pid;
         slot.runtime = UserAppRuntime::new();
+        slot.exec_elf = ElfObject::new();
+        slot.exec_interpreter = ElfObject::new();
+        slot.exec_trap_frame = UserTrapFrame::new();
+        slot.process_resources_present = false;
+        slot.initial_trap_frame = None;
+        let reservation = match super::kernel_task::reserve_inbound(
+            task_ref,
+            target_cpu,
+            super::kernel_task::InboundKind::Activate,
+            super::kernel_task::next_inbound_ordinal(),
+        ) {
+            Ok(reservation) => reservation,
+            Err(_) => {
+                assert!(global_registry().rollback(task_ref));
+                slot.pid = 0;
+                return None;
+            }
+        };
+        slot.inbox_reservation = Some(reservation);
         slot.reserved = true;
         slot.occupied = false;
 
@@ -5455,20 +7502,17 @@ impl UserTaskSet {
             || !slot.task_ref().same_identity(task_ref)
             || slot.task.state() != State::Base
             || slot.runtime.state() != State::Base
-            || self.carrier_stack_base == 0
-            || self.carrier_stack_top <= self.carrier_stack_base
         {
             return None;
         }
         let pid = slot.pid;
+        let cpu_ref = global_registry().cpu_ref(task_ref)?;
+        let stack_base = core::ptr::addr_of!(slot.kernel_stack) as usize;
+        let stack_top = stack_base + core::mem::size_of::<UserTaskKernelStack>();
         let mut task = Task::new_user(task_ref, slot.flow_generation);
-        task.materialize_fork_child_snapshot(
-            pid,
-            super::cpu::CpuRef::new(0),
-            self.carrier_stack_base,
-            self.carrier_stack_top,
-        )
-        .ok()?;
+        task.materialize_fork_child_snapshot(pid, cpu_ref, stack_base, stack_top)
+            .ok()?;
+        task.init_switch_context(user_task_entry, stack_base, stack_top);
         let mut runtime = UserAppRuntime::new();
         runtime
             .materialize_fork_child_snapshot(&task, task.embedded_flow(), pid)
@@ -5496,6 +7540,7 @@ impl UserTaskSet {
         task_ref: TaskRef,
         parent_ref: TaskRef,
         candidate: ForkChildSnapshotCandidate,
+        initial_trap_frame: TrapFrame,
     ) {
         let index = task_ref.user_slot().expect("fork snapshot user slot");
         let slot = &mut self.task_slots[index];
@@ -5510,14 +7555,34 @@ impl UserTaskSet {
                 .runtime
                 .fork_snapshot_candidate_valid(&candidate.task)
         );
+        let reservation = slot
+            .inbox_reservation
+            .take()
+            .expect("fork snapshot inbox reservation");
+        let target_cpu = candidate.task.flow_cpu_ref().expect("fork snapshot CPU");
+        assert!(global_registry().mark_prepared(task_ref, true));
 
         slot.task = candidate.task;
         slot.runtime = candidate.runtime;
         slot.flow_generation = candidate.flow_generation;
+        slot.initial_trap_frame = Some(initial_trap_frame);
         slot.reserved = false;
         // `occupied` is the resolver-visible publication marker.  Every
         // identity, binding and committed state is already complete here.
         slot.occupied = true;
+        assert!(global_registry().publish(task_ref));
+        let target_hartid = global_registry()
+            .hartid_for_cpu(target_cpu)
+            .expect("frozen online CPU hartid");
+        assert!(
+            super::kernel_task::publish_reserved_and_signal(reservation, target_hartid).is_ok()
+        );
+        if target_cpu.is_boot_cpu() {
+            let message = super::kernel_task::take_inbound(0)
+                .expect("CPU0 fork activation reservation must be consumable");
+            assert!(message.task_ref.same_identity(task_ref));
+            assert!(message.target_cpu == target_cpu);
+        }
         self.parent_task_ref = parent_ref;
         self.pending_task_ref = TaskRef::NONE;
         self.last_exited_task_ref = TaskRef::NONE;
@@ -5539,28 +7604,45 @@ impl UserTaskSet {
             && slot.task.state() == State::Base
             && slot.runtime.state() == State::Base
             && slot.mm_present
-            && self.carrier_stack_base != 0
-            && self.carrier_stack_top > self.carrier_stack_base
+            && slot.process_resources_present
+            && slot.inbox_reservation.is_some()
             && candidate.task.task_ref().same_identity(task_ref)
+            && global_registry().slot_state(task_ref) == Some(UserProcessSlotState::Reserved)
+            && global_registry().cpu_ref(task_ref) == candidate.task.flow_cpu_ref()
             && candidate.task.fork_snapshot_candidate_valid()
             && candidate
                 .runtime
                 .fork_snapshot_candidate_valid(&candidate.task)
     }
 
-    fn allocate_user_task(&mut self, pid: usize, parent_ref: TaskRef) -> Option<TaskRef> {
-        let task_ref = self.reserve_user_task(pid)?;
+    fn allocate_user_task(
+        &mut self,
+        pid: usize,
+        parent_ref: TaskRef,
+        same_cpu: bool,
+        initial_trap_frame: TrapFrame,
+    ) -> Option<TaskRef> {
+        let task_ref = self.reserve_user_task(pid, parent_ref, same_cpu)?;
         let candidate = match self.prepare_reserved_user_task_snapshot(task_ref) {
             Some(candidate) => candidate,
             None => {
                 let index = task_ref.user_slot()?;
                 let slot = &mut self.task_slots[index];
+                if let Some(reservation) = slot.inbox_reservation.take() {
+                    assert!(super::kernel_task::rollback_reserved(reservation));
+                }
                 slot.reserved = false;
                 slot.pid = 0;
+                assert!(global_registry().rollback(task_ref));
                 return None;
             }
         };
-        self.commit_reserved_user_task_snapshot(task_ref, parent_ref, candidate);
+        self.commit_reserved_user_task_snapshot(
+            task_ref,
+            parent_ref,
+            candidate,
+            initial_trap_frame,
+        );
         Some(task_ref)
     }
 
@@ -5669,6 +7751,31 @@ impl UserTaskSet {
         true
     }
 
+    fn destroy_active_user_task_and_publish_zombie(&mut self, exit_status: usize) -> bool {
+        let task_ref = self.active_task_ref;
+        if global_registry().slot_state(task_ref) != Some(UserProcessSlotState::Published) {
+            return false;
+        }
+        let wait_status = self.task_wait_status(task_ref, exit_status);
+        if !self.destroy_active_user_task() || !self.last_exited_task_ref.same_identity(task_ref) {
+            return false;
+        }
+        {
+            let _files_guard = lock_user_files_state();
+            let Some(index) = task_ref.user_slot() else {
+                return false;
+            };
+            let slot = &mut self.task_slots[index];
+            if !slot.occupied
+                || !slot.task_ref().same_identity(task_ref)
+                || !release_slot_process_shared_resources(slot)
+            {
+                return false;
+            }
+        }
+        global_registry().publish_zombie(task_ref, wait_status)
+    }
+
     fn release_destroyed_task_ref(&mut self, task_ref: TaskRef) -> bool {
         let Some(index) = task_ref.user_slot() else {
             return false;
@@ -5678,13 +7785,138 @@ impl UserTaskSet {
             || !slot.task_ref().same_identity(task_ref)
             || slot.state() != State::Destroyed
             || slot.mm_present
+            || slot.shared_mm_owner_ref.is_valid()
+            || slot.vfork_parent_ref.is_valid()
+            || slot.vfork_parent_wake_reservation.is_some()
             || slot.inactive_address_space.state() != State::Base
             || slot.inactive_stack.state() != State::Base
         {
             return false;
         }
+        let cpu_ref = slot
+            .task
+            .flow_cpu_ref()
+            .unwrap_or(super::cpu::CpuRef::new(0));
+        if !release_slot_process_shared_resources(slot) {
+            return false;
+        }
+        match global_registry().slot_state(task_ref) {
+            Some(UserProcessSlotState::Published) => {
+                if !global_registry().publish_zombie(task_ref, 0)
+                    || !global_registry().publish_scheduler_quiesced(task_ref, cpu_ref)
+                    || !global_registry().reap(task_ref)
+                {
+                    return false;
+                }
+            }
+            Some(UserProcessSlotState::Zombie) => {
+                // A real terminal switch publishes scheduler quiescence from
+                // the selected next Task's stack. Reap that acknowledged
+                // zombie directly; never fabricate a second acknowledgement.
+                if !global_registry().reap(task_ref) {
+                    return false;
+                }
+            }
+            _ => return false,
+        }
         slot.occupied = false;
         slot.pid = 0;
+        slot.exec_elf = ElfObject::new();
+        slot.exec_interpreter = ElfObject::new();
+        slot.exec_trap_frame = UserTrapFrame::new();
+        if !clear_slot_process_resources(slot) {
+            return false;
+        }
+        slot.initial_trap_frame = None;
+        slot.shared_mm_owner_ref = TaskRef::NONE;
+        slot.vfork_parent_ref = TaskRef::NONE;
+        slot.vfork_parent_wake_reservation = None;
+        if self.last_exited_task_ref.same_identity(task_ref) {
+            self.last_exited_task_ref = TaskRef::NONE;
+        }
+        true
+    }
+
+    pub(crate) fn reap_smp_zombie(
+        &mut self,
+        task_ref: TaskRef,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) -> bool {
+        let Some(index) = task_ref.user_slot() else {
+            return false;
+        };
+        let slot = &mut self.task_slots[index];
+        if !slot.occupied
+            || !slot.task_ref().same_identity(task_ref)
+            || global_registry().slot_state(task_ref) != Some(UserProcessSlotState::Zombie)
+            || slot.task.state() != State::Online
+            || slot.task.flow_state() != State::Offline
+            || slot.task.running()
+            || slot.task.runqueue_published()
+        {
+            return false;
+        }
+        if slot
+            .runtime
+            .cleanup_dynamic(&slot.task, slot.task.embedded_flow())
+            .is_err()
+            || slot.task.cleanup_embedded_flow().is_err()
+            || slot.task.cleanup_suspended_terminal().is_err()
+        {
+            return false;
+        }
+        {
+            let _guard = lock_user_memory_state();
+            if slot.mm_present {
+                slot.inactive_address_space
+                    .release_retired_exec_image(page_allocator, page_metadata_map);
+                slot.inactive_stack
+                    .release_exec_backing(page_allocator, page_metadata_map);
+                slot.mm_present = false;
+            }
+        }
+        if slot.inactive_address_space.state() != State::Base
+            || slot.inactive_stack.state() != State::Base
+            || slot.shared_mm_owner_ref.is_valid()
+            || slot.vfork_parent_ref.is_valid()
+            || slot.vfork_parent_wake_reservation.is_some()
+            || !release_slot_process_shared_resources(slot)
+            || !global_registry().reap(task_ref)
+        {
+            return false;
+        }
+        slot.occupied = false;
+        slot.pid = 0;
+        slot.exec_elf = ElfObject::new();
+        slot.exec_interpreter = ElfObject::new();
+        slot.exec_trap_frame = UserTrapFrame::new();
+        if !clear_slot_process_resources(slot) {
+            return false;
+        }
+        slot.initial_trap_frame = None;
+        slot.shared_mm_owner_ref = TaskRef::NONE;
+        slot.vfork_parent_ref = TaskRef::NONE;
+        slot.vfork_parent_wake_reservation = None;
+        if self.active_task_ref.same_identity(task_ref) {
+            self.active_task_ref = TaskRef::NONE;
+            self.pid = 0;
+            self.parent_pid = 0;
+            self.tgid = 0;
+            self.enqueued = false;
+            self.child_continuation_taken = false;
+            self.child_exit_status_observed = false;
+            self.wait4_status_copied = false;
+            self.parent_wait_resumed = false;
+            self.clear_observed_plain_fork_state();
+            self.active_task_record_available = true;
+        }
+        if self.parent_task_ref.same_identity(task_ref) {
+            self.parent_task_ref = TaskRef::NONE;
+        }
+        if self.pending_task_ref.same_identity(task_ref) {
+            self.pending_task_ref = TaskRef::NONE;
+        }
         if self.last_exited_task_ref.same_identity(task_ref) {
             self.last_exited_task_ref = TaskRef::NONE;
         }
@@ -5730,7 +7962,12 @@ impl UserTaskSet {
         let mut flow_refs = [TaskFlowRef::NONE; USER_TASK_SLOT_COUNT];
         let mut index = 0usize;
         while index < USER_TASK_SLOT_COUNT {
-            let Some(task_ref) = self.allocate_user_task(10_000 + index, TaskRef::NONE) else {
+            let Some(task_ref) = self.allocate_user_task(
+                10_000 + index,
+                TaskRef::KERNEL_INIT,
+                false,
+                TrapFrame::zeroed(),
+            ) else {
                 return Err("allocate all user task slots");
             };
             task_refs[index] = task_ref;
@@ -5739,8 +7976,14 @@ impl UserTaskSet {
         }
 
         if self.free_task_slot_count() != 0
+            || global_registry().free_slot_count() != 0
             || self
-                .allocate_user_task(10_000 + USER_TASK_SLOT_COUNT, TaskRef::NONE)
+                .allocate_user_task(
+                    10_000 + USER_TASK_SLOT_COUNT,
+                    TaskRef::KERNEL_INIT,
+                    false,
+                    TrapFrame::zeroed(),
+                )
                 .is_some()
             || self.next_child_pid != next_pid_before
             || !self.task_slots[0].task.cleanup().is_err()
@@ -5749,6 +7992,26 @@ impl UserTaskSet {
         {
             return Err("full slot set invariants");
         }
+
+        let lease = global_registry()
+            .acquire(task_refs[0], super::cpu::CpuRef::new(0))
+            .ok_or("generation and CPU lease")?;
+        if !lease.task_ref().same_identity(task_refs[0])
+            || lease.cpu_ref() != super::cpu::CpuRef::new(0)
+            || global_registry()
+                .acquire(task_refs[0], super::cpu::CpuRef::new(1))
+                .is_some()
+            || global_registry()
+                .acquire(
+                    task_refs[0]
+                        .with_generation_for_test(next_generation(task_refs[0].generation())),
+                    super::cpu::CpuRef::new(0),
+                )
+                .is_some()
+        {
+            return Err("lease rejects wrong CPU and stale generation");
+        }
+        drop(lease);
 
         index = 0;
         while index < USER_TASK_SLOT_COUNT {
@@ -5789,7 +8052,9 @@ impl UserTaskSet {
             return Err("stale task and flow refs invalidated");
         }
 
-        let Some(recycled_ref) = self.allocate_user_task(20_000, TaskRef::NONE) else {
+        let Some(recycled_ref) =
+            self.allocate_user_task(20_000, TaskRef::KERNEL_INIT, false, TrapFrame::zeroed())
+        else {
             return Err("allocate recycled task slot");
         };
         let recycled_flow_ref = self
@@ -5818,6 +8083,7 @@ impl UserTaskSet {
         let destroyed_ref = self.last_exited_task_ref;
         if !self.release_destroyed_task_ref(destroyed_ref)
             || self.free_task_slot_count() != USER_TASK_SLOT_COUNT
+            || global_registry().free_slot_count() != USER_TASK_SLOT_COUNT
             || self.next_child_pid != next_pid_before
         {
             return Err("recycled slot release and pid stability");
@@ -6184,8 +8450,11 @@ impl UserTaskSet {
         self.task_allocation_count
     }
 
-    pub const fn next_child_pid(&self) -> usize {
-        self.next_child_pid
+    pub fn next_child_pid(&self) -> usize {
+        global_registry()
+            .next_pid()
+            .unwrap_or(self.next_child_pid)
+            .max(self.next_child_pid)
     }
 
     pub const fn completed_child_record_capacity(&self) -> usize {
@@ -6265,10 +8534,17 @@ impl UserTaskSet {
     }
 
     pub fn first_unreaped_completed_child(&self) -> Option<(usize, usize, usize, usize)> {
+        self.first_unreaped_completed_child_matching(UserProcessChildSelector::Any)
+    }
+
+    pub fn first_unreaped_completed_child_matching(
+        &self,
+        selector: UserProcessChildSelector,
+    ) -> Option<(usize, usize, usize, usize)> {
         let mut index = 0usize;
         while index < USER_COMPLETED_CHILD_RECORD_CAPACITY {
             let record = self.completed_child_records[index];
-            if record.occupied && !record.reaped {
+            if record.occupied && !record.reaped && selector.matches(record.pid) {
                 return Some((
                     record.pid,
                     record.exit_status,
@@ -6531,6 +8807,36 @@ impl UserTaskSet {
         carrier_stack_base: usize,
         carrier_stack_top: usize,
     ) -> EventResult {
+        self.setup_with_optional_cpu_group_and_carrier_stack(
+            carrier,
+            carrier_stack_base,
+            carrier_stack_top,
+            None,
+        )
+    }
+
+    pub fn setup_with_cpu_group_and_carrier_stack(
+        &mut self,
+        carrier: &KernelInitTask,
+        carrier_stack_base: usize,
+        carrier_stack_top: usize,
+        cpu_group: &super::cpu_group::CpuGroup,
+    ) -> EventResult {
+        self.setup_with_optional_cpu_group_and_carrier_stack(
+            carrier,
+            carrier_stack_base,
+            carrier_stack_top,
+            Some(cpu_group),
+        )
+    }
+
+    fn setup_with_optional_cpu_group_and_carrier_stack(
+        &mut self,
+        carrier: &KernelInitTask,
+        carrier_stack_base: usize,
+        carrier_stack_top: usize,
+        cpu_group: Option<&super::cpu_group::CpuGroup>,
+    ) -> EventResult {
         if self.set_lifecycle.state() != State::Base
             || self.active_task_state() != State::Base
             || carrier.state() != State::OnCpu
@@ -6538,6 +8844,14 @@ impl UserTaskSet {
             || carrier_stack_base == 0
             || carrier_stack_top <= carrier_stack_base
         {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.set_lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+        if !global_registry().setup(cpu_group) {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.set_lifecycle.state(),
@@ -6579,11 +8893,7 @@ impl UserTaskSet {
         sched_entity_ready: bool,
         task_state_new: bool,
     ) -> Option<usize> {
-        if self.active_task_state() != State::Prepared
-            || !self.prepared
-            || !self.active_task_record_available
-            || self.free_task_slot_count() == 0
-            || self.task_entry != TaskEntry::UserChild
+        if !self.plain_fork_reservation_ready()
             || !parent.active_user_flow_online()
             || !parent.pid1_preserved()
             || parent_task.state() != State::OnCpu
@@ -6610,11 +8920,14 @@ impl UserTaskSet {
             return None;
         }
 
+        let _memory_guard = lock_user_memory_state();
+        let _files_guard = lock_user_files_state();
+
         let mut child_frame = *current_frame;
         child_frame.set_reg(10, 0);
         child_frame.sepc = child_frame.sepc.wrapping_add(4);
         let child_pid = self.next_child_pid;
-        let child_ref = self.reserve_user_task(child_pid)?;
+        let child_ref = self.reserve_user_task(child_pid, TaskRef::KERNEL_INIT, false)?;
         if !self.prepare_cow_child_mm(
             child_ref,
             address_space,
@@ -6632,6 +8945,11 @@ impl UserTaskSet {
                 return None;
             }
         };
+        if !prepare_reserved_process_resources(child_ref, files_struct, fs_struct) {
+            files_struct.discard_parent_fd_snapshot(&parent_fd_snapshot);
+            self.rollback_unpublished_user_task(child_ref, page_allocator, page_metadata_map);
+            return None;
+        }
         let child_candidate = match self.prepare_reserved_user_task_snapshot(child_ref) {
             Some(candidate) => candidate,
             None => {
@@ -6653,7 +8971,12 @@ impl UserTaskSet {
             self.rollback_unpublished_user_task(child_ref, page_allocator, page_metadata_map);
             return None;
         }
-        self.commit_reserved_user_task_snapshot(child_ref, TaskRef::KERNEL_INIT, child_candidate);
+        self.commit_reserved_user_task_snapshot(
+            child_ref,
+            TaskRef::KERNEL_INIT,
+            child_candidate,
+            child_frame,
+        );
         self.pid = child_pid;
         self.parent_pid = super::rest_init::KERNEL_INIT_PID;
         self.tgid = child_pid;
@@ -6814,7 +9137,8 @@ impl UserTaskSet {
         )?;
 
         let child_pid = self.next_child_pid;
-        let child_ref = self.allocate_user_task(child_pid, TaskRef::NONE)?;
+        let child_ref =
+            self.allocate_user_task(child_pid, TaskRef::KERNEL_INIT, true, child_frame)?;
         self.ordinary_independent_mm = false;
         if !address_space.rebind_owner_after_exec(child_ref) {
             return None;
@@ -6988,7 +9312,7 @@ impl UserTaskSet {
             &mut self.parent_wait_writable_page_checksums,
         )?;
 
-        let child_ref = self.allocate_user_task(child_pid, parent_task_ref)?;
+        let child_ref = self.allocate_user_task(child_pid, parent_task_ref, true, child_frame)?;
         self.ordinary_independent_mm = false;
         if !address_space.rebind_owner_after_exec(child_ref) {
             return None;
@@ -7122,6 +9446,9 @@ impl UserTaskSet {
             return None;
         }
 
+        let _memory_guard = lock_user_memory_state();
+        let _files_guard = lock_user_files_state();
+
         let parent_pid = self.pid;
         let parent_task_ref = self.active_task_ref;
         let parent_parent_pid = self.parent_pid;
@@ -7130,7 +9457,7 @@ impl UserTaskSet {
         let mut child_frame = *current_frame;
         child_frame.set_reg(10, 0);
         child_frame.sepc = child_frame.sepc.wrapping_add(4);
-        let child_ref = self.reserve_user_task(child_pid)?;
+        let child_ref = self.reserve_user_task(child_pid, parent_task_ref, false)?;
         if !self.prepare_cow_child_mm(
             child_ref,
             address_space,
@@ -7148,6 +9475,11 @@ impl UserTaskSet {
                 return None;
             }
         };
+        if !prepare_reserved_process_resources(child_ref, files_struct, fs_struct) {
+            files_struct.discard_parent_fd_snapshot(&fork_fd_snapshot);
+            self.rollback_unpublished_user_task(child_ref, page_allocator, page_metadata_map);
+            return None;
+        }
         let child_candidate = match self.prepare_reserved_user_task_snapshot(child_ref) {
             Some(candidate) => candidate,
             None => {
@@ -7169,7 +9501,12 @@ impl UserTaskSet {
             self.rollback_unpublished_user_task(child_ref, page_allocator, page_metadata_map);
             return None;
         }
-        self.commit_reserved_user_task_snapshot(child_ref, parent_task_ref, child_candidate);
+        self.commit_reserved_user_task_snapshot(
+            child_ref,
+            parent_task_ref,
+            child_candidate,
+            child_frame,
+        );
         if builtin_grandchild_source {
             self.builtin_grandchild.reset_empty();
             self.builtin_grandchild.bound = true;
@@ -7226,7 +9563,7 @@ impl UserTaskSet {
     }
 
     pub fn mark_enqueued(&mut self) -> bool {
-        if self.active_task_state() != State::Online
+        if (self.active_task_state() != State::Online && self.active_task_state() != State::OnCpu)
             || self.pid == 0
             || self.active_task_record_available
         {
@@ -7274,7 +9611,7 @@ impl UserTaskSet {
             || !parent.active_user_flow_online()
             || address_space.state() != State::Online
             || !parent.pid1_preserved()
-            || upid != USER_WAIT4_ALL_CHILDREN
+            || !user_wait4_pid_matches(upid, self.pid)
             || (options != 0 && options != USER_WAIT4_WUNTRACED)
             || rusage != 0
         {
@@ -7331,7 +9668,7 @@ impl UserTaskSet {
             || !parent.active_user_flow_online()
             || address_space.state() != State::Online
             || !parent.pid1_preserved()
-            || upid != USER_WAIT4_ALL_CHILDREN
+            || !user_wait4_pid_matches(upid, self.observed_plain_fork_child_pid)
             || rusage != 0
             || !self.trap_frame_copied
             || !self.trap_frame_child_return_zero
@@ -7414,7 +9751,7 @@ impl UserTaskSet {
             || fs_struct.state() != State::Ready
             || files_struct.state() != State::Ready
             || !parent.pid1_preserved()
-            || upid != USER_WAIT4_ALL_CHILDREN
+            || !user_wait4_pid_matches(upid, self.observed_plain_fork_child_pid)
             || rusage != 0
             || !self.builtin_grandchild.child_fd_snapshot_saved
             || self.builtin_grandchild.child_fd_snapshot_restored
@@ -7491,6 +9828,7 @@ impl UserTaskSet {
         &mut self,
         address_space: &mut UserAddressSpace,
         stack: &mut UserStack,
+        swapper_satp: usize,
         page_allocator: &mut PageAllocator,
         page_metadata_map: &PageMetadataMap,
         exit_status: usize,
@@ -7513,6 +9851,7 @@ impl UserTaskSet {
             TaskRef::KERNEL_INIT,
             address_space,
             stack,
+            swapper_satp,
             page_allocator,
             page_metadata_map,
         ) {
@@ -7520,7 +9859,7 @@ impl UserTaskSet {
         }
         self.child_exit_status = exit_status;
         self.child_exit_status_observed = true;
-        if !self.destroy_active_user_task() {
+        if !self.destroy_active_user_task_and_publish_zombie(exit_status) {
             return None;
         }
         Some((parent_frame, self.parent_wait_status_ptr, child_pid))
@@ -7532,6 +9871,7 @@ impl UserTaskSet {
         address_space: &mut UserAddressSpace,
         stack: &mut UserStack,
         retained_exec_objects: (&mut UserAddressSpace, &mut UserStack),
+        swapper_satp: usize,
         page_allocator: &mut PageAllocator,
         page_metadata_map: &PageMetadataMap,
         exit_status: usize,
@@ -7560,6 +9900,7 @@ impl UserTaskSet {
                 parent_ref,
                 address_space,
                 stack,
+                swapper_satp,
                 page_allocator,
                 page_metadata_map,
             ) {
@@ -7567,7 +9908,7 @@ impl UserTaskSet {
             }
             self.child_exit_status = exit_status;
             self.child_exit_status_observed = true;
-            if !self.destroy_active_user_task() {
+            if !self.destroy_active_user_task_and_publish_zombie(exit_status) {
                 return None;
             }
             return Some((
@@ -7599,6 +9940,7 @@ impl UserTaskSet {
             parent_ref,
             address_space,
             stack,
+            swapper_satp,
             page_allocator,
             page_metadata_map,
         ) {
@@ -7606,7 +9948,7 @@ impl UserTaskSet {
         }
         self.child_exit_status = exit_status;
         self.child_exit_status_observed = true;
-        if !self.destroy_active_user_task() {
+        if !self.destroy_active_user_task_and_publish_zombie(exit_status) {
             return None;
         }
         Some((
@@ -7621,6 +9963,7 @@ impl UserTaskSet {
         &mut self,
         address_space: &mut UserAddressSpace,
         stack: &mut UserStack,
+        swapper_satp: usize,
         page_allocator: &mut PageAllocator,
         page_metadata_map: &PageMetadataMap,
         exit_status: usize,
@@ -7642,6 +9985,7 @@ impl UserTaskSet {
         if !self.restore_parent_exec_objects(
             address_space,
             stack,
+            swapper_satp,
             page_allocator,
             page_metadata_map,
         ) {
@@ -7652,7 +9996,7 @@ impl UserTaskSet {
         }
         self.child_exit_status = exit_status;
         self.child_exit_status_observed = true;
-        if !self.destroy_active_user_task() {
+        if !self.destroy_active_user_task_and_publish_zombie(exit_status) {
             return None;
         }
         Some((parent_frame, self.pid))
@@ -7662,19 +10006,30 @@ impl UserTaskSet {
         &mut self,
         address_space: &mut UserAddressSpace,
         stack: &mut UserStack,
+        swapper_satp: usize,
         page_allocator: &mut PageAllocator,
         page_metadata_map: &PageMetadataMap,
     ) -> bool {
-        if address_space.satp_token() == self.parent_address_space_snapshot.satp_token() {
-            return true;
-        }
-        if address_space.satp_token() == 0
-            || self.parent_address_space_snapshot.satp_token() == 0
-            || !self.parent_exec_stack_snapshot_saved
+        let child_satp = address_space.satp_token();
+        let parent_satp = self.parent_address_space_snapshot.satp_token();
+        let shared_parent_mm = child_satp == parent_satp;
+        if child_satp == 0
+            || parent_satp == 0
+            || (!shared_parent_mm && !self.parent_exec_stack_snapshot_saved)
+            || csr::read_satp() != child_satp
+            || swapper_satp == 0
         {
             return false;
         }
 
+        csr::write_satp(swapper_satp);
+        csr::sfence_vma();
+        if csr::read_satp() != swapper_satp {
+            return false;
+        }
+        if shared_parent_mm {
+            return true;
+        }
         address_space.release_retired_exec_image(page_allocator, page_metadata_map);
         stack.release_exec_backing(page_allocator, page_metadata_map);
         unsafe {
@@ -10823,10 +13178,11 @@ pub fn prepare_first_user_init_handoff(ctx: &mut crate::context::Context) -> Eve
     }
     if ctx
         .user_task_set
-        .setup_with_carrier_stack(
+        .setup_with_cpu_group_and_carrier_stack(
             &ctx.kernel_init_task,
             user_kernel_trap_stack_base(),
             user_kernel_trap_stack_top(),
+            &ctx.cpu_group,
         )
         .is_err()
     {
@@ -10835,6 +13191,12 @@ pub fn prepare_first_user_init_handoff(ctx: &mut crate::context::Context) -> Eve
 
     let success = select_and_exec_user_init(ctx);
     let selected_path = ctx.user_boot_payload.selected_path();
+    if !ctx
+        .user_task_set
+        .bind_kernel_init_address_space(&ctx.user_address_space)
+    {
+        user_boot_panic("PID 1 address-space binding failed\n");
+    }
 
     if ctx
         .cpu_group
@@ -11491,7 +13853,6 @@ fn prepare_user_kernel_trap_stack(
     true
 }
 
-#[cfg(app_user_boot)]
 fn user_boot_panic(message: &str) -> ! {
     crate::arch::riscv64::sbi::putstr(message);
     crate::arch::riscv64::sbi::system_shutdown()

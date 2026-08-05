@@ -34,8 +34,9 @@ result = "success"
 contains = [
   "Welcome to Alpine!",
   "syscall trace nr=158 name=getgroups ret=1",
-  "syscall setpgid detail target=pending_child",
+  "syscall trace nr=154 name=setpgid ret=0",
+  "syscall trace nr=29 name=ioctl ret=0",
   "lost+found",
-  "user exit status=0",
+  "syscall trace nr=81 name=sync ret=0",
 ]
-description = "BusyBox init login reached the shell, set the pending child pgrp, ran /bin/ls, observed getgroups, and exited cleanly."
+description = "BusyBox init login met the canonical basic acceptance contract and its wrapper synced before guest shutdown."

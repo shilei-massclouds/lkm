@@ -38,6 +38,10 @@ argument/string capacity, `ENOENT` for main/interpreter lookup, `ENOEXEC` for fo
 for backing/page-table allocation, and `EAGAIN` for unavailable or any non-24-byte HWRNG input. Entropy acquisition is
 pre-commit; boot treats this failure as terminal while runtime preserves the old image. Abort releases every staging page/page-table and resets the active slot;
 current address space, SATP, trap frame, fd table and process identity are immutable on this path.
+An entropy failure diagnostic must preserve the underlying HWRNG error (or short-read length) together with the
+virtio-rng request-pending/data-available indices, software/device-visible used-ring indices, and
+request/notify/IRQ/completion/read counters. It is observation only: collecting it must not retry the request,
+consume entropy, change the returned error, or move the transaction boundary.
 
 When bounded usercopy reaches a configured count, string, or aggregate limit, the syscall-error diagnostic may
 inspect the accepted prefix plus the first rejected entry. This observation happens before `begin` and must not
@@ -49,13 +53,11 @@ current/staging image, applies the prechecked bounded CLOEXEC pass, installs mai
 does the owner handoff, releases retired backing after SATP no longer references it, and resets the slot.
 Returning `ExecError` after point-of-no-return is forbidden; an invariant failure is terminal.
 
-The bounded `UserTaskSet` fork/vfork continuation record is an ownership exception, not a leak: when its saved
-parent snapshot has the same SATP as the retired image, commit transfers the retired address-space and
-`UserStack` ownership to that snapshot instead of freeing parent pages. Child exit releases the replacement
-child image (including page tables and stack backing), restores both parent objects, and only then resumes the
-parent. A transaction may reset only after either release or this explicit ownership transfer succeeds.
-For PID 1 self-exec there is no saved parent owner: commit preserves PID/process identity and releases the
-retired address space/stack after switching to the replacement image.
+The transaction operates on the current `UserProcessLease`; the aggregate's address-space object and UserStack
+identity do not move. Commit swaps their prepared contents in place and releases retired pages only after local
+SATP plus `sfence.vma` no longer reference them. A vfork child uses its own registry aggregate on the parent's CPU;
+completion wakes the blocked parent but does not restore or byte-copy parent objects. PID 1 self-exec follows the
+same identity-preserving rule.
 
 Checkpoint ownership stays owner-scoped. The transaction dispatches the existing stable `UserBoot.*` or
 `UserExec.*` sequence without renaming, reordering or double-emitting checkpoints. Observation fields live

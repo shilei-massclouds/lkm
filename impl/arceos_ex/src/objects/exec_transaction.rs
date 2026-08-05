@@ -372,6 +372,9 @@ static mut EXEC_MAIN_READ_BUFFER: [u8; super::user_boot::USER_BOOT_READ_MAX] =
 #[cfg(app_user_boot)]
 static mut EXEC_INTERPRETER_READ_BUFFER: [u8; super::user_boot::USER_BOOT_READ_MAX] =
     [0; super::user_boot::USER_BOOT_READ_MAX];
+#[cfg(app_user_boot)]
+static EXEC_TRANSACTION_LOCK: super::irq_spinlock::IrqSpinLock<()> =
+    super::irq_spinlock::IrqSpinLock::new(());
 
 #[cfg(app_user_boot)]
 #[allow(dead_code)]
@@ -381,14 +384,21 @@ pub fn execute(
     owner: ExecOwner,
     runtime_frame: Option<&mut super::trap_type::TrapFrame>,
 ) -> Result<ExecSuccess, ExecError> {
+    let _exec_guard = EXEC_TRANSACTION_LOCK.lock();
+    let _memory_guard = super::user_boot::lock_user_memory_state();
+    let smp_target = runtime_exec_target(owner)?;
     ctx.exec_transaction.begin(owner, arguments)?;
-    let result = prepare_and_commit(ctx, runtime_frame);
+    let result = prepare_and_commit(ctx, runtime_frame, smp_target);
     if let Err(error) = result {
         if ctx.exec_transaction.point_of_no_return() {
             exec_terminal("exec failure after point-of-no-return\n");
         }
         ctx.exec_transaction
             .abort(error, &mut ctx.page_allocator, &ctx.page_metadata_map);
+    }
+    drop(_memory_guard);
+    if result.is_ok() && !super::user_boot::finish_current_smp_vfork_exec_handoff() {
+        exec_terminal("SMP vfork exec parent wake invariant failed\n");
     }
     result
 }
@@ -402,10 +412,13 @@ pub fn execute_slices(
     owner: ExecOwner,
     runtime_frame: Option<&mut super::trap_type::TrapFrame>,
 ) -> Result<ExecSuccess, ExecError> {
+    let _exec_guard = EXEC_TRANSACTION_LOCK.lock();
+    let _memory_guard = super::user_boot::lock_user_memory_state();
+    let smp_target = runtime_exec_target(owner)?;
     let limits = ctx.config.exec_argument_limits();
     ctx.exec_transaction
         .begin_slices(owner, filename, argv, envp, limits)?;
-    let result = prepare_and_commit(ctx, runtime_frame);
+    let result = prepare_and_commit(ctx, runtime_frame, smp_target);
     if let Err(error) = result {
         if ctx.exec_transaction.point_of_no_return() {
             exec_terminal("exec failure after point-of-no-return\n");
@@ -413,7 +426,21 @@ pub fn execute_slices(
         ctx.exec_transaction
             .abort(error, &mut ctx.page_allocator, &ctx.page_metadata_map);
     }
+    drop(_memory_guard);
+    if result.is_ok() && !super::user_boot::finish_current_smp_vfork_exec_handoff() {
+        exec_terminal("SMP vfork exec parent wake invariant failed\n");
+    }
     result
+}
+
+#[cfg(app_user_boot)]
+fn runtime_exec_target(
+    owner: ExecOwner,
+) -> Result<Option<super::user_boot::SmpExecTarget>, ExecError> {
+    if owner != ExecOwner::Runtime {
+        return Ok(None);
+    }
+    Ok(super::user_boot::current_smp_exec_target())
 }
 
 #[cfg(app_smoke)]
@@ -593,6 +620,7 @@ pub fn smoke_builtin_grandchild_precommit_failure_is_atomic(
     let open_fds_before = ctx.files_struct.fd_table_open_count();
     let outer_snapshot_before = ctx.user_task_set.parent_address_space_snapshot_saved();
     let abort_count_before = ctx.exec_transaction.abort_count();
+    let live_satp_before = crate::arch::riscv64::csr::read_satp();
     if ctx
         .exec_transaction
         .begin_slices(
@@ -623,6 +651,7 @@ pub fn smoke_builtin_grandchild_precommit_failure_is_atomic(
     );
     ctx.page_allocator.buddy_total_free_pages() == free_pages_before
         && ctx.user_address_space.satp_token() == current_satp_before
+        && crate::arch::riscv64::csr::read_satp() == live_satp_before
         && ctx.user_stack.top() == current_stack_top_before
         && ctx.files_struct.fd_table_open_count() == open_fds_before
         && ctx.user_task_set.parent_address_space_snapshot_saved() == outer_snapshot_before
@@ -840,6 +869,8 @@ pub fn smoke_commit_builtin_grandchild_exec_image(
         RetiredImageRetention::None => {}
         RetiredImageRetention::OuterChild => return None,
     }
+    crate::arch::riscv64::csr::write_satp(ctx.user_address_space.satp_token());
+    crate::arch::riscv64::csr::sfence_vma();
     let released = if builtin_subsequent_exec {
         directly_released
     } else if retention == RetiredImageRetention::None {
@@ -881,12 +912,13 @@ pub fn smoke_commit_builtin_grandchild_exec_image(
 fn prepare_and_commit(
     ctx: &mut crate::context::Context,
     runtime_frame: Option<&mut super::trap_type::TrapFrame>,
+    smp_target: Option<super::user_boot::SmpExecTarget>,
 ) -> Result<ExecSuccess, ExecError> {
     use super::exception_type as observation;
     use crate::checkpoint::Checkpoint;
 
     let owner = ctx.exec_transaction.owner;
-    let image = read_main_exec_image(ctx).map_err(|_| {
+    let image = read_main_exec_image(ctx, smp_target).map_err(|_| {
         observe_failure(
             owner,
             observation::EXECVE_FAIL_STAGE_PATH_READ,
@@ -936,7 +968,7 @@ fn prepare_and_commit(
         if owner == ExecOwner::Runtime {
             observation::record_execve_interpreter_path(path);
         }
-        let image = read_exec_image(ctx, path, true).map_err(|_| {
+        let image = read_exec_image(ctx, path, true, smp_target).map_err(|_| {
             observe_failure(
                 owner,
                 observation::EXECVE_FAIL_STAGE_INTERPRETER_READ,
@@ -1160,7 +1192,19 @@ fn prepare_and_commit(
         );
         return Err(elf_exec_error(error));
     }
-    if owner == ExecOwner::Runtime && ctx.files_struct.precheck_close_on_exec().is_err() {
+    let close_on_exec_ready = if owner == ExecOwner::Runtime {
+        let _files_guard = super::user_boot::lock_user_files_state();
+        let files = smp_target
+            .map(|target| target.files_struct)
+            .unwrap_or(core::ptr::addr_of_mut!(ctx.files_struct));
+        // SAFETY: an SMP target is the current immutable-CPU-owned process
+        // aggregate and the files lock protects its table; the fallback is
+        // the legacy PID1/vfork table borrowed through ctx.
+        unsafe { (&*files).precheck_close_on_exec().is_ok() }
+    } else {
+        true
+    };
+    if !close_on_exec_ready {
         observe_failure(
             owner,
             observation::EXECVE_FAIL_STAGE_CLOSE_ON_EXEC,
@@ -1171,12 +1215,13 @@ fn prepare_and_commit(
         return Err(ExecError::InvalidState);
     }
 
-    commit_prepared(ctx, owner, runtime_frame, image)
+    commit_prepared(ctx, owner, runtime_frame, image, smp_target)
 }
 
 #[cfg(any(app_smoke, app_user_boot))]
 fn commit_runtime_application_replacement(ctx: &mut crate::context::Context) -> bool {
-    if ctx.user_task_set.active_task_ref().is_valid() {
+    let active_task_ref = ctx.user_task_set.active_task_ref();
+    let replacement = if active_task_ref.is_valid() {
         ctx.user_task_set.commit_active_application_replacement()
     } else if ctx.kernel_init_user_runtime.state() == State::Online {
         ctx.kernel_init_user_runtime
@@ -1184,7 +1229,49 @@ fn commit_runtime_application_replacement(ctx: &mut crate::context::Context) -> 
             .is_ok()
     } else {
         true
+    };
+    #[cfg(app_user_boot)]
+    if !replacement {
+        trace_runtime_application_replacement_failure(ctx, active_task_ref);
     }
+    replacement
+}
+
+#[cfg(app_user_boot)]
+fn trace_runtime_application_replacement_failure(
+    ctx: &crate::context::Context,
+    active_task_ref: super::task::TaskRef,
+) {
+    crate::arch::riscv64::sbi::putstr("exec runtime replacement reject active_slot=");
+    put_exec_diag_hex(active_task_ref.slot());
+    crate::arch::riscv64::sbi::putstr(" active_generation=");
+    put_exec_diag_hex(active_task_ref.generation() as usize);
+    crate::arch::riscv64::sbi::putstr(" active_state=");
+    crate::arch::riscv64::sbi::putchar(ctx.user_task_set.active_task_state().code());
+    crate::arch::riscv64::sbi::putstr(" pid1_task_state=");
+    crate::arch::riscv64::sbi::putchar(ctx.kernel_init_task.state().code());
+    crate::arch::riscv64::sbi::putstr(" pid1_flow_state=");
+    crate::arch::riscv64::sbi::putchar(ctx.kernel_init_task.task().flow_state().code());
+    crate::arch::riscv64::sbi::putstr(" pid1_runtime_state=");
+    crate::arch::riscv64::sbi::putchar(ctx.kernel_init_user_runtime.state().code());
+    let runtime_owner = ctx.kernel_init_user_runtime.task_ref_owner();
+    crate::arch::riscv64::sbi::putstr(" runtime_owner_slot=");
+    put_exec_diag_hex(runtime_owner.slot());
+    crate::arch::riscv64::sbi::putstr(" runtime_owner_generation=");
+    put_exec_diag_hex(runtime_owner.generation() as usize);
+    crate::arch::riscv64::sbi::putstr(" tp=");
+    put_exec_diag_hex(crate::arch::riscv64::csr::read_tp());
+    if let Some((task_ref, cpu_ref)) = super::user_boot::current_smp_user_task() {
+        crate::arch::riscv64::sbi::putstr(" smp_slot=");
+        put_exec_diag_hex(task_ref.slot());
+        crate::arch::riscv64::sbi::putstr(" smp_generation=");
+        put_exec_diag_hex(task_ref.generation() as usize);
+        crate::arch::riscv64::sbi::putstr(" smp_cpu=");
+        put_exec_diag_hex(cpu_ref.logical_id());
+    } else {
+        crate::arch::riscv64::sbi::putstr(" smp_task=none");
+    }
+    crate::arch::riscv64::sbi::putchar(b'\n');
 }
 
 #[cfg(any(app_smoke, app_user_boot))]
@@ -1193,10 +1280,17 @@ fn acquire_exec_entropy(
     hwrng_core: &mut super::hwrng::HwRngCore,
 ) -> Result<ExecEntropy, ExecError> {
     let mut entropy = [0u8; super::user_stack::USER_STACK_ENTROPY_BYTES];
-    let len = runtime
-        .read_current_hwrng(hwrng_core, &mut entropy, false)
-        .map_err(|_| ExecError::EntropyUnavailable)?;
-    validate_exec_entropy_len(len)?;
+    let len = match runtime.read_current_hwrng(hwrng_core, &mut entropy, false) {
+        Ok(len) => len,
+        Err(error) => {
+            trace_exec_entropy_failure(runtime, hwrng_core, Some(error), 0);
+            return Err(ExecError::EntropyUnavailable);
+        }
+    };
+    if validate_exec_entropy_len(len).is_err() {
+        trace_exec_entropy_failure(runtime, hwrng_core, None, len);
+        return Err(ExecError::EntropyUnavailable);
+    }
     let mut at_random = [0; super::user_stack::USER_STACK_RANDOM_BYTES];
     let mut stack_aslr = [0; super::user_stack::USER_STACK_ASLR_BYTES];
     at_random.copy_from_slice(&entropy[..super::user_stack::USER_STACK_RANDOM_BYTES]);
@@ -1205,6 +1299,74 @@ fn acquire_exec_entropy(
         at_random,
         stack_aslr,
     })
+}
+
+#[cfg(app_user_boot)]
+fn trace_exec_entropy_failure(
+    runtime: &super::virtio_rng::VirtioRngRuntime,
+    hwrng_core: &super::hwrng::HwRngCore,
+    error: Option<super::hwrng::HwRngError>,
+    short_len: usize,
+) {
+    use super::hwrng::HwRngError;
+
+    crate::arch::riscv64::sbi::putstr("exec entropy unavailable hwrng_error=");
+    crate::arch::riscv64::sbi::putstr(match error {
+        Some(HwRngError::CoreNotReady) => "core_not_ready",
+        Some(HwRngError::DeviceNotReady) => "device_not_ready",
+        Some(HwRngError::DuplicateName) => "duplicate_name",
+        Some(HwRngError::NoCurrentDevice) => "no_current_device",
+        Some(HwRngError::ProviderUnavailable) => "provider_unavailable",
+        Some(HwRngError::EmptyRead) => "empty_read",
+        None => "short_read",
+    });
+    crate::arch::riscv64::sbi::putstr(" short_len=");
+    put_exec_diag_hex(short_len);
+    crate::arch::riscv64::sbi::putstr(" core_reads=");
+    put_exec_diag_hex(hwrng_core.read_current_count());
+    if let Some(device) = runtime.device() {
+        crate::arch::riscv64::sbi::putstr(" request_pending=");
+        put_exec_diag_hex(device.request_pending() as usize);
+        crate::arch::riscv64::sbi::putstr(" data_avail=");
+        put_exec_diag_hex(device.data_avail() as usize);
+        crate::arch::riscv64::sbi::putstr(" data_idx=");
+        put_exec_diag_hex(device.data_idx() as usize);
+        crate::arch::riscv64::sbi::putstr(" requests=");
+        put_exec_diag_hex(device.request_count());
+        crate::arch::riscv64::sbi::putstr(" notifies=");
+        put_exec_diag_hex(device.notify_count());
+        crate::arch::riscv64::sbi::putstr(" irqs=");
+        put_exec_diag_hex(device.irq_count());
+        crate::arch::riscv64::sbi::putstr(" polled_completions=");
+        put_exec_diag_hex(device.poll_completion_count());
+        crate::arch::riscv64::sbi::putstr(" completions=");
+        put_exec_diag_hex(device.completion_count());
+        crate::arch::riscv64::sbi::putstr(" used_idx=");
+        put_exec_diag_hex(device.queue().ring_used_idx() as usize);
+        crate::arch::riscv64::sbi::putstr(" last_used_idx=");
+        put_exec_diag_hex(device.queue().ring_last_used_idx() as usize);
+        crate::arch::riscv64::sbi::putstr(" raw_used_idx=");
+        match device.queue().raw_used_idx() {
+            Some(index) => put_exec_diag_hex(index as usize),
+            None => crate::arch::riscv64::sbi::putstr("unavailable"),
+        }
+        crate::arch::riscv64::sbi::putstr(" reads=");
+        put_exec_diag_hex(device.read_count());
+        crate::arch::riscv64::sbi::putstr(" last_read_len=");
+        put_exec_diag_hex(device.last_read_len());
+    } else {
+        crate::arch::riscv64::sbi::putstr(" device=none");
+    }
+    crate::arch::riscv64::sbi::putchar(b'\n');
+}
+
+#[cfg(all(app_smoke, not(app_user_boot)))]
+fn trace_exec_entropy_failure(
+    _runtime: &super::virtio_rng::VirtioRngRuntime,
+    _hwrng_core: &super::hwrng::HwRngCore,
+    _error: Option<super::hwrng::HwRngError>,
+    _short_len: usize,
+) {
 }
 
 #[cfg(any(app_smoke, app_user_boot))]
@@ -1217,14 +1379,180 @@ fn validate_exec_entropy_len(len: usize) -> Result<(), ExecError> {
 }
 
 #[cfg(app_user_boot)]
+fn commit_prepared_smp(
+    ctx: &mut crate::context::Context,
+    owner: ExecOwner,
+    runtime_frame: Option<&mut super::trap_type::TrapFrame>,
+    main_image: &[u8],
+    target: super::user_boot::SmpExecTarget,
+) -> Result<ExecSuccess, ExecError> {
+    use super::exception_type as observation;
+    use crate::checkpoint::Checkpoint;
+
+    if owner != ExecOwner::Runtime {
+        return Err(ExecError::InvalidState);
+    }
+    let old_satp = crate::arch::riscv64::csr::read_satp();
+    let new_satp = ctx.exec_transaction.staging_address_space.satp_token();
+    // SAFETY: runtime_exec_target validated these stable, field-specific
+    // capabilities for the current CPU-owned aggregate while the exec lock
+    // prevents the shared staging transaction from being reused.
+    let target_ready = unsafe {
+        if target.replaces_shared_mm {
+            (&*target.address_space).state() == State::Base
+                && (&*target.stack).state() == State::Base
+        } else {
+            (&*target.address_space).owned_by(target.task_ref)
+                && (&*target.address_space).satp_token() == old_satp
+                && (&*target.address_space).state() == State::Online
+                && (&*target.stack).state() == State::Ready
+        }
+    };
+    if !target_ready
+        || new_satp == 0
+        || ctx.exec_transaction.retired_address_space.state() != State::Base
+        || ctx.exec_transaction.retired_stack.state() != State::Base
+    {
+        observe_failure(
+            owner,
+            observation::EXECVE_FAIL_STAGE_IMAGE_RETENTION,
+            observation::EXECVE_FAIL_REASON_INVALID_STATE,
+            0,
+            ctx,
+        );
+        return Err(ExecError::InvalidState);
+    }
+
+    ctx.exec_transaction.mark_point_of_no_return()?;
+    if !super::user_boot::commit_smp_application_replacement(target.task_ref) {
+        exec_terminal("SMP runtime application replacement invariant failed\n");
+    }
+    let close_report = {
+        let _files_guard = super::user_boot::lock_user_files_state();
+        // SAFETY: target.files_struct is a stable field capability for the
+        // current process aggregate and the files lock owns mutable access.
+        unsafe { &mut *target.files_struct }
+            .close_on_exec()
+            .unwrap_or_else(|_| exec_terminal("exec CLOEXEC invariant failed\n"))
+    };
+
+    // SAFETY: the current CPU is the immutable owner of this live aggregate,
+    // USER_MEMORY_STATE_LOCK serializes allocator/frame-metadata mutation, and
+    // the exec lock uniquely owns the staging and retired transaction fields.
+    let (target_address_space, target_stack, target_elf, target_interpreter, target_trap_frame) = unsafe {
+        (
+            &mut *target.address_space,
+            &mut *target.stack,
+            &mut *target.elf,
+            &mut *target.interpreter,
+            &mut *target.trap_frame,
+        )
+    };
+    unsafe {
+        if !target.replaces_shared_mm {
+            core::ptr::copy_nonoverlapping(
+                target_address_space,
+                &mut ctx.exec_transaction.retired_address_space,
+                1,
+            );
+        }
+        core::ptr::copy_nonoverlapping(
+            &ctx.exec_transaction.staging_address_space,
+            target_address_space,
+            1,
+        );
+    }
+    if !target_address_space.rebind_owner_after_exec(target.task_ref) {
+        exec_terminal("SMP exec mm owner replacement invariant failed\n");
+    }
+    ctx.exec_transaction
+        .staging_address_space
+        .reset_staging_after_exec_commit();
+
+    core::mem::swap(target_stack, &mut ctx.exec_transaction.retired_stack);
+    core::mem::swap(target_stack, &mut ctx.exec_transaction.staging_stack);
+    unsafe {
+        core::ptr::copy_nonoverlapping(&ctx.exec_transaction.staging_elf, target_elf, 1);
+        core::ptr::copy_nonoverlapping(
+            &ctx.exec_transaction.staging_interpreter,
+            target_interpreter,
+            1,
+        );
+        core::ptr::copy_nonoverlapping(
+            &ctx.exec_transaction.staging_trap_frame,
+            target_trap_frame,
+            1,
+        );
+    }
+    ctx.exec_transaction
+        .staging_stack
+        .reset_staging_after_exec_commit();
+    if target.replaces_shared_mm && !super::user_boot::commit_smp_exec_mm_ownership(target.task_ref)
+    {
+        exec_terminal("SMP vfork exec mm ownership invariant failed\n");
+    }
+    ctx.exec_transaction.staging_elf = ElfObject::new();
+    ctx.exec_transaction.staging_interpreter = ElfObject::new();
+    ctx.exec_transaction.staging_trap_frame = UserTrapFrame::new();
+
+    observation::print_execve_close_on_exec_report(close_report);
+    observation::record_execve_context_replaced(old_satp, new_satp);
+    crate::checkpoint::dispatch(Checkpoint::UserExecContextReplaced, ctx);
+    observation::record_execve_address_space(
+        observation::EXECVE_OBS_STAGE_SATP_READY,
+        target_address_space,
+    );
+    crate::checkpoint::dispatch(Checkpoint::UserExecSatpReady, ctx);
+    observation::record_execve_trap_frame(target_trap_frame);
+    crate::checkpoint::dispatch(Checkpoint::UserExecTrapFrameReady, ctx);
+
+    crate::arch::riscv64::csr::write_satp(new_satp);
+    crate::arch::riscv64::csr::sfence_vma();
+    observation::record_execve_stage(observation::EXECVE_OBS_STAGE_SATP_SWITCHED);
+    crate::checkpoint::dispatch(Checkpoint::UserExecSatpSwitched, ctx);
+    let frame =
+        runtime_frame.unwrap_or_else(|| exec_terminal("runtime exec frame missing after commit\n"));
+    reset_frame_for_exec_start(
+        frame,
+        target_trap_frame.entry(),
+        target_trap_frame.sp(),
+        target_trap_frame.sstatus(),
+    );
+    observation::record_execve_return_frame(frame);
+    crate::checkpoint::dispatch(Checkpoint::UserExecReturnFrameReady, ctx);
+
+    let mut released = ctx
+        .exec_transaction
+        .retired_address_space
+        .release_retired_exec_image(&mut ctx.page_allocator, &ctx.page_metadata_map);
+    released += ctx
+        .exec_transaction
+        .retired_stack
+        .release_exec_backing(&mut ctx.page_allocator, &ctx.page_metadata_map);
+    ctx.exec_transaction.finish_commit(released);
+    Ok(ExecSuccess {
+        image_contains_stdin_fixture: super::elf_object::contains_bytes(
+            main_image,
+            b"user-smoke: begin",
+        ),
+        retired_pages_released: released,
+    })
+}
+
+#[cfg(app_user_boot)]
 fn commit_prepared(
     ctx: &mut crate::context::Context,
     owner: ExecOwner,
     runtime_frame: Option<&mut super::trap_type::TrapFrame>,
     main_image: &[u8],
+    smp_target: Option<super::user_boot::SmpExecTarget>,
 ) -> Result<ExecSuccess, ExecError> {
     use super::exception_type as observation;
     use crate::checkpoint::Checkpoint;
+
+    if let Some(target) = smp_target {
+        return commit_prepared_smp(ctx, owner, runtime_frame, main_image, target);
+    }
 
     let retention = classify_retired_image_retention(ctx, owner).inspect_err(|_| {
         observe_failure(
@@ -1285,6 +1613,7 @@ fn commit_prepared(
         .reset_staging_after_exec_commit();
 
     if owner == ExecOwner::Runtime {
+        let _files_guard = super::user_boot::lock_user_files_state();
         let report = ctx
             .files_struct
             .close_on_exec()
@@ -1480,7 +1809,9 @@ fn read_exec_image(
     ctx: &mut crate::context::Context,
     path: &[u8],
     interpreter: bool,
+    smp_target: Option<super::user_boot::SmpExecTarget>,
 ) -> Result<&'static [u8], ()> {
+    let _files_guard = super::user_boot::lock_user_files_state();
     let mut provider = super::virtio_blk::live_provider(&ctx.kernel_image);
     let buffer = unsafe {
         if interpreter {
@@ -1490,26 +1821,94 @@ fn read_exec_image(
         }
     };
     buffer.fill(0);
+    let fs = smp_target
+        .map(|target| target.fs_struct)
+        .unwrap_or(core::ptr::addr_of_mut!(ctx.fs_struct));
     let len = ctx
         .vfs_core
         .read_path(
-            &ctx.fs_struct,
+            // SAFETY: an SMP target is the current immutable-CPU-owned
+            // aggregate and the files/VFS resource lock protects this read.
+            unsafe { &*fs },
             &mut ctx.ext2_filesystem,
             &mut ctx.block_device_registry,
             &mut provider,
             path,
             buffer,
         )
-        .map_err(|_| ())?;
+        .map_err(|error| {
+            trace_exec_vfs_read_failure(error, path, unsafe { &*fs });
+        })?;
     Ok(&buffer[..len])
 }
 
 #[cfg(app_user_boot)]
-fn read_main_exec_image(ctx: &mut crate::context::Context) -> Result<&'static [u8], ()> {
+fn trace_exec_vfs_read_failure(
+    error: super::vfs::VfsError,
+    path: &[u8],
+    fs: &super::vfs::FsStruct,
+) {
+    let error_name = match error {
+        super::vfs::VfsError::CoreNotReady => "CoreNotReady",
+        super::vfs::VfsError::FsTypeNotReady => "FsTypeNotReady",
+        super::vfs::VfsError::FsTypeAlreadyRegistered => "FsTypeAlreadyRegistered",
+        super::vfs::VfsError::FsTypeMissing => "FsTypeMissing",
+        super::vfs::VfsError::MountMissing => "MountMissing",
+        super::vfs::VfsError::AlreadyMounted => "AlreadyMounted",
+        super::vfs::VfsError::InvalidRef => "InvalidRef",
+        super::vfs::VfsError::InvalidName => "InvalidName",
+        super::vfs::VfsError::NameTooLong => "NameTooLong",
+        super::vfs::VfsError::NotDirectory => "NotDirectory",
+        super::vfs::VfsError::NotFile => "NotFile",
+        super::vfs::VfsError::AlreadyExists => "AlreadyExists",
+        super::vfs::VfsError::NotFound => "NotFound",
+        super::vfs::VfsError::DirectoryNotEmpty => "DirectoryNotEmpty",
+        super::vfs::VfsError::ReadOnly => "ReadOnly",
+        super::vfs::VfsError::ShortBuffer => "ShortBuffer",
+        super::vfs::VfsError::Backend => "Backend",
+        super::vfs::VfsError::UnsupportedPath => "UnsupportedPath",
+        super::vfs::VfsError::SymlinkLoop => "SymlinkLoop",
+    };
+    crate::arch::riscv64::sbi::putstr("exec VFS read failure error=");
+    crate::arch::riscv64::sbi::putstr(error_name);
+    crate::arch::riscv64::sbi::putstr(" task_slot=");
+    let task_ref = super::user_boot::current_smp_user_task()
+        .map(|(task_ref, _)| task_ref)
+        .unwrap_or(super::task::TaskRef::KERNEL_INIT);
+    put_exec_diag_hex(task_ref.slot());
+    crate::arch::riscv64::sbi::putstr(" task_generation=");
+    put_exec_diag_hex(task_ref.generation() as usize);
+    crate::arch::riscv64::sbi::putstr(" root=");
+    put_exec_diag_hex(fs.root_dentry().map_or(usize::MAX, |entry| entry.index()));
+    crate::arch::riscv64::sbi::putstr(" pwd=");
+    put_exec_diag_hex(fs.pwd_dentry().map_or(usize::MAX, |entry| entry.index()));
+    crate::arch::riscv64::sbi::putstr(" path=\"");
+    for &byte in path {
+        crate::arch::riscv64::sbi::putchar(if byte.is_ascii_graphic() { byte } else { b'?' });
+    }
+    crate::arch::riscv64::sbi::putstr("\"\n");
+}
+
+#[cfg(app_user_boot)]
+fn put_exec_diag_hex(value: usize) {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    crate::arch::riscv64::sbi::putstr("0x");
+    let mut shift = usize::BITS as usize;
+    while shift != 0 {
+        shift -= 4;
+        crate::arch::riscv64::sbi::putchar(DIGITS[(value >> shift) & 0xf]);
+    }
+}
+
+#[cfg(app_user_boot)]
+fn read_main_exec_image(
+    ctx: &mut crate::context::Context,
+    smp_target: Option<super::user_boot::SmpExecTarget>,
+) -> Result<&'static [u8], ()> {
     let path_ptr = ctx.exec_transaction.arguments.filename.as_ptr();
     let path_len = ctx.exec_transaction.arguments.filename_len;
     let path = unsafe { core::slice::from_raw_parts(path_ptr, path_len) };
-    read_exec_image(ctx, path, false)
+    read_exec_image(ctx, path, false, smp_target)
 }
 
 #[cfg(app_user_boot)]

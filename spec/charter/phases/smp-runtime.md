@@ -30,9 +30,11 @@ stopped AP 的 active translation controller 必须 absent。AP 入口按 Physic
 SwapperVm pointwise 激活，不经过 EarlyVm；CPU-local journal、SATP 和 committed count 不得由全局
 Ready/Online 事实代替。
 
-本轮只引入显式目标 CPU 的 activation/wake inbound mailbox 与 reschedule IPI；不引入 GlobalArbiter、
-自动负载选择、运行中 migration、用户任务 AP 执行、timer preemption 或 schedule replay，且不为其
-保留 initial/active Flow 或首次/恢复 dispatch 兼容字段。
+SMP bringup 完成后按 logical ID 冻结 online CpuRef 序列，并为每个 online CPU 开放可容纳全部可投递
+Task 的 inbox、用户 Task registry lease、timer clockevent 与用户返回安全点。PID 1 固定 CPU0；普通
+fork 依据 PID 公式跨 CPU 发布，vfork/CLONE_VM 固定父核。GlobalArbiter、自动负载选择、运行中
+migration、CPU hotplug、内核态立即抢占或 schedule replay 仍不引入，且不为其保留 initial/active Flow
+或首次/恢复 dispatch 兼容字段。
 
 ## 引用
 

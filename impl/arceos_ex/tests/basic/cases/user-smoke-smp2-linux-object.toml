@@ -1,0 +1,28 @@
+schema_version = 2
+name = "user-smoke-smp2-linux-object"
+purpose = "acceptance"
+timeout_seconds = 120
+
+[kernel]
+app = "user-boot"
+provider = "linux-object"
+probe = []
+profile = "release"
+
+[disk]
+mode = "private-copy"
+profile = "canonical"
+
+[qemu]
+memory_mb = 128
+smp = 2
+kernel_cmdline = "earlycon=sbi init=/opt/lkm/tests/user-smoke"
+rng = true
+exit_policy = "guest-shutdown"
+interaction = "none"
+
+[expect]
+process_exit = 0
+guest_exit_status = 0
+markers = ["user preempt child A compute begin", "user preempt child B compute begin", "user preempt children published", "user timer preemption A-B-A round robin ok", "user-smoke: end status=0"]
+forbidden_markers = ["Function not implemented", "trap runtime lease failure", "arceos_ex panic"]

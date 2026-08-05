@@ -2,10 +2,14 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use super::{
     block_device::BlockDeviceRegistry,
+    cpu::CpuRef,
     ext2::{Ext2FileSystem, Ext2FileType},
+    irq_spinlock::IrqSpinLock,
     kernel_image::KernelImage,
+    kernel_task::InboxReservation,
     rest_init::KernelInitTask,
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
+    task::{TaskRef, USER_TASK_SLOT_COUNT},
     vfs::{FileRef, FsStruct, VfsCore, VfsError, VfsInodeKind},
     virtio_blk,
 };
@@ -17,6 +21,8 @@ pub const REGULAR0_FD: usize = 3;
 pub const FILE_PATH_MAX: usize = 128;
 pub const REGULAR_FILE_BUFFER_SIZE: usize = 64 * 1024;
 pub const PIPE_BUFFER_SIZE: usize = 4096;
+const SHARED_PIPE_COUNT: usize = 32;
+const SHARED_PIPE_WAITER_COUNT: usize = USER_TASK_SLOT_COUNT;
 pub const LINUX_DIRENT64_HEADER_SIZE: usize = 19;
 pub const TERMIOS_SIZE: usize = 36;
 // Consumed by the user-boot stdin fixture configuration.
@@ -181,6 +187,417 @@ impl PipeBuffer {
             self.read_offset = 0;
         }
         read
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+struct SharedPipeRef {
+    slot: u8,
+    generation: u32,
+}
+
+struct SharedPipeSlot {
+    generation: u32,
+    occupied: bool,
+    readers: usize,
+    writers: usize,
+    buffer: PipeBuffer,
+    read_waiters: [Option<PipeReadWaiter>; SHARED_PIPE_WAITER_COUNT],
+    last_release_reason: PipeReleaseReason,
+    last_release_readers_before: usize,
+    last_release_writers_before: usize,
+    last_release_readers: usize,
+    last_release_writers: usize,
+    last_release_task_slot: usize,
+    last_release_task_generation: u32,
+    last_release_cpu: usize,
+    last_release_task_identity: usize,
+    last_release_fd: usize,
+}
+
+impl SharedPipeSlot {
+    const fn new() -> Self {
+        Self {
+            generation: 0,
+            occupied: false,
+            readers: 0,
+            writers: 0,
+            buffer: PipeBuffer::new(),
+            read_waiters: [const { None }; SHARED_PIPE_WAITER_COUNT],
+            last_release_reason: PipeReleaseReason::None,
+            last_release_readers_before: 0,
+            last_release_writers_before: 0,
+            last_release_readers: 0,
+            last_release_writers: 0,
+            last_release_task_slot: usize::MAX,
+            last_release_task_generation: 0,
+            last_release_cpu: usize::MAX,
+            last_release_task_identity: 0,
+            last_release_fd: usize::MAX,
+        }
+    }
+
+    fn matches(&self, pipe_ref: SharedPipeRef) -> bool {
+        self.occupied && self.generation == pipe_ref.generation && pipe_ref.generation != 0
+    }
+}
+
+struct PipeReadWaiter {
+    task_ref: TaskRef,
+    cpu_ref: CpuRef,
+    target_hartid: usize,
+    reservation: InboxReservation,
+}
+
+struct PipeWakeBatch {
+    wakes: [Option<PipeReadWaiter>; SHARED_PIPE_WAITER_COUNT],
+    len: usize,
+}
+
+impl PipeWakeBatch {
+    const fn new() -> Self {
+        Self {
+            wakes: [const { None }; SHARED_PIPE_WAITER_COUNT],
+            len: 0,
+        }
+    }
+
+    fn push(&mut self, waiter: PipeReadWaiter) {
+        assert!(self.len < self.wakes.len());
+        self.wakes[self.len] = Some(waiter);
+        self.len += 1;
+    }
+}
+
+pub(crate) enum PipeReadWaitRegistration {
+    Ready(InboxReservation),
+    Registered,
+}
+
+#[derive(Clone, Copy)]
+struct SharedPipeState {
+    len: usize,
+    readers: usize,
+    writers: usize,
+    last_release_reason: PipeReleaseReason,
+    last_release_readers_before: usize,
+    last_release_writers_before: usize,
+    last_release_readers: usize,
+    last_release_writers: usize,
+    last_release_task_slot: usize,
+    last_release_task_generation: u32,
+    last_release_cpu: usize,
+    last_release_task_identity: usize,
+    last_release_fd: usize,
+}
+
+#[derive(Clone, Copy)]
+struct PipeReleaseActor {
+    task_slot: usize,
+    task_generation: u32,
+    cpu: usize,
+    task_identity: usize,
+    fd: usize,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum PipeReleaseReason {
+    None,
+    AllocationRollback,
+    DupRollback,
+    DescriptorClose,
+    SnapshotRestoreCurrent,
+    SnapshotDiscard,
+    ProcessTeardown,
+}
+
+struct SharedPipeRegistry {
+    slots: [SharedPipeSlot; SHARED_PIPE_COUNT],
+}
+
+impl SharedPipeRegistry {
+    const fn new() -> Self {
+        Self {
+            slots: [const { SharedPipeSlot::new() }; SHARED_PIPE_COUNT],
+        }
+    }
+
+    fn allocate(&mut self) -> Option<SharedPipeRef> {
+        let mut index = 0usize;
+        while index < self.slots.len() {
+            let slot = &mut self.slots[index];
+            if !slot.occupied {
+                slot.generation = slot.generation.wrapping_add(1);
+                if slot.generation == 0 {
+                    slot.generation = 1;
+                }
+                slot.occupied = true;
+                slot.readers = 1;
+                slot.writers = 1;
+                slot.buffer.reset();
+                assert!(slot.read_waiters.iter().all(Option::is_none));
+                slot.last_release_reason = PipeReleaseReason::None;
+                slot.last_release_readers_before = 0;
+                slot.last_release_writers_before = 0;
+                slot.last_release_readers = 0;
+                slot.last_release_writers = 0;
+                slot.last_release_task_slot = usize::MAX;
+                slot.last_release_task_generation = 0;
+                slot.last_release_cpu = usize::MAX;
+                slot.last_release_task_identity = 0;
+                slot.last_release_fd = usize::MAX;
+                return Some(SharedPipeRef {
+                    slot: index as u8,
+                    generation: slot.generation,
+                });
+            }
+            index += 1;
+        }
+        None
+    }
+
+    fn acquire(&mut self, pipe_ref: SharedPipeRef, readers: usize, writers: usize) -> bool {
+        let Some(slot) = self.slots.get_mut(pipe_ref.slot as usize) else {
+            return false;
+        };
+        if !slot.matches(pipe_ref) {
+            return false;
+        }
+        let Some(next_readers) = slot.readers.checked_add(readers) else {
+            return false;
+        };
+        let Some(next_writers) = slot.writers.checked_add(writers) else {
+            return false;
+        };
+        slot.readers = next_readers;
+        slot.writers = next_writers;
+        true
+    }
+
+    fn release(
+        &mut self,
+        pipe_ref: SharedPipeRef,
+        readers: usize,
+        writers: usize,
+        reason: PipeReleaseReason,
+        actor: PipeReleaseActor,
+    ) -> (bool, PipeWakeBatch) {
+        let mut wakes = PipeWakeBatch::new();
+        let Some(slot) = self.slots.get_mut(pipe_ref.slot as usize) else {
+            return (false, wakes);
+        };
+        if !slot.matches(pipe_ref) || slot.readers < readers || slot.writers < writers {
+            return (false, wakes);
+        }
+        slot.last_release_reason = reason;
+        slot.last_release_readers_before = slot.readers;
+        slot.last_release_writers_before = slot.writers;
+        slot.readers -= readers;
+        slot.writers -= writers;
+        slot.last_release_readers = slot.readers;
+        slot.last_release_writers = slot.writers;
+        slot.last_release_task_slot = actor.task_slot;
+        slot.last_release_task_generation = actor.task_generation;
+        slot.last_release_cpu = actor.cpu;
+        slot.last_release_task_identity = actor.task_identity;
+        slot.last_release_fd = actor.fd;
+        if slot.writers == 0 {
+            Self::detach_read_waiters(slot, &mut wakes);
+        }
+        if slot.readers == 0 && slot.writers == 0 {
+            assert!(slot.read_waiters.iter().all(Option::is_none));
+            slot.buffer.reset();
+            slot.occupied = false;
+        }
+        (true, wakes)
+    }
+
+    fn state(&self, pipe_ref: SharedPipeRef) -> Option<SharedPipeState> {
+        let slot = self.slots.get(pipe_ref.slot as usize)?;
+        slot.matches(pipe_ref).then_some(SharedPipeState {
+            len: slot.buffer.len(),
+            readers: slot.readers,
+            writers: slot.writers,
+            last_release_reason: slot.last_release_reason,
+            last_release_readers_before: slot.last_release_readers_before,
+            last_release_writers_before: slot.last_release_writers_before,
+            last_release_readers: slot.last_release_readers,
+            last_release_writers: slot.last_release_writers,
+            last_release_task_slot: slot.last_release_task_slot,
+            last_release_task_generation: slot.last_release_task_generation,
+            last_release_cpu: slot.last_release_cpu,
+            last_release_task_identity: slot.last_release_task_identity,
+            last_release_fd: slot.last_release_fd,
+        })
+    }
+
+    fn read(&mut self, pipe_ref: SharedPipeRef, output: &mut [u8]) -> FileResult<usize> {
+        let slot = self
+            .slots
+            .get_mut(pipe_ref.slot as usize)
+            .filter(|slot| slot.matches(pipe_ref))
+            .ok_or(FileError::BadFd)?;
+        let read = slot.buffer.read(output);
+        if read != 0 || slot.writers == 0 {
+            Ok(read)
+        } else {
+            Err(FileError::NotReady)
+        }
+    }
+
+    fn write(
+        &mut self,
+        pipe_ref: SharedPipeRef,
+        input: &[u8],
+    ) -> FileResult<(usize, PipeWakeBatch)> {
+        let slot = self
+            .slots
+            .get_mut(pipe_ref.slot as usize)
+            .filter(|slot| slot.matches(pipe_ref))
+            .ok_or(FileError::BadFd)?;
+        if slot.readers == 0 {
+            return Err(FileError::BrokenPipe);
+        }
+        let was_empty = slot.buffer.len() == 0;
+        let written = slot.buffer.write(input)?;
+        let mut wakes = PipeWakeBatch::new();
+        if was_empty && written != 0 {
+            Self::detach_read_waiters(slot, &mut wakes);
+        }
+        Ok((written, wakes))
+    }
+
+    fn register_read_wait(
+        &mut self,
+        pipe_ref: SharedPipeRef,
+        waiter: PipeReadWaiter,
+    ) -> Result<PipeReadWaitRegistration, (FileError, InboxReservation)> {
+        let Some(slot) = self.slots.get_mut(pipe_ref.slot as usize) else {
+            return Err((FileError::BadFd, waiter.reservation));
+        };
+        if !slot.matches(pipe_ref) {
+            return Err((FileError::BadFd, waiter.reservation));
+        }
+        if slot.buffer.len() != 0 || slot.writers == 0 {
+            return Ok(PipeReadWaitRegistration::Ready(waiter.reservation));
+        }
+        if slot.read_waiters.iter().flatten().any(|registered| {
+            registered.task_ref.same_identity(waiter.task_ref)
+                || registered.cpu_ref == waiter.cpu_ref
+                    && registered.task_ref.slot() == waiter.task_ref.slot()
+        }) {
+            return Err((FileError::NotReady, waiter.reservation));
+        }
+        let Some(waiter_slot) = slot.read_waiters.iter_mut().find(|entry| entry.is_none()) else {
+            return Err((FileError::NotReady, waiter.reservation));
+        };
+        *waiter_slot = Some(waiter);
+        Ok(PipeReadWaitRegistration::Registered)
+    }
+
+    fn cancel_read_wait(
+        &mut self,
+        pipe_ref: SharedPipeRef,
+        task_ref: TaskRef,
+    ) -> Option<InboxReservation> {
+        let slot = self
+            .slots
+            .get_mut(pipe_ref.slot as usize)
+            .filter(|slot| slot.matches(pipe_ref))?;
+        let waiter = slot.read_waiters.iter_mut().find(|entry| {
+            entry
+                .as_ref()
+                .is_some_and(|waiter| waiter.task_ref.same_identity(task_ref))
+        })?;
+        waiter.take().map(|waiter| waiter.reservation)
+    }
+
+    fn detach_read_waiters(slot: &mut SharedPipeSlot, wakes: &mut PipeWakeBatch) {
+        for waiter in &mut slot.read_waiters {
+            if let Some(waiter) = waiter.take() {
+                wakes.push(waiter);
+            }
+        }
+    }
+}
+
+static SHARED_PIPE_REGISTRY: IrqSpinLock<SharedPipeRegistry> =
+    IrqSpinLock::new(SharedPipeRegistry::new());
+
+fn allocate_shared_pipe() -> FileResult<SharedPipeRef> {
+    SHARED_PIPE_REGISTRY
+        .lock()
+        .allocate()
+        .ok_or(FileError::TooManyOpenFiles)
+}
+
+fn acquire_shared_pipe(pipe_ref: SharedPipeRef, readers: usize, writers: usize) -> bool {
+    SHARED_PIPE_REGISTRY
+        .lock()
+        .acquire(pipe_ref, readers, writers)
+}
+
+fn release_shared_pipe(
+    pipe_ref: SharedPipeRef,
+    readers: usize,
+    writers: usize,
+    reason: PipeReleaseReason,
+    fd: usize,
+) -> bool {
+    let task_identity = crate::arch::riscv64::csr::read_tp();
+    let actor = super::user_boot::current_smp_user_task().map_or(
+        PipeReleaseActor {
+            task_slot: usize::MAX,
+            task_generation: 0,
+            cpu: usize::MAX,
+            task_identity,
+            fd,
+        },
+        |(task_ref, cpu_ref)| PipeReleaseActor {
+            task_slot: task_ref.slot(),
+            task_generation: task_ref.generation(),
+            cpu: cpu_ref.logical_id(),
+            task_identity,
+            fd,
+        },
+    );
+    let (released, wakes) = SHARED_PIPE_REGISTRY
+        .lock()
+        .release(pipe_ref, readers, writers, reason, actor);
+    publish_pipe_wakes(wakes);
+    released
+}
+
+fn shared_pipe_state(pipe_ref: SharedPipeRef) -> Option<SharedPipeState> {
+    SHARED_PIPE_REGISTRY.lock().state(pipe_ref)
+}
+
+fn read_shared_pipe(pipe_ref: SharedPipeRef, output: &mut [u8]) -> FileResult<usize> {
+    SHARED_PIPE_REGISTRY.lock().read(pipe_ref, output)
+}
+
+fn write_shared_pipe(pipe_ref: SharedPipeRef, input: &[u8]) -> FileResult<usize> {
+    let (written, wakes) = SHARED_PIPE_REGISTRY.lock().write(pipe_ref, input)?;
+    publish_pipe_wakes(wakes);
+    Ok(written)
+}
+
+fn publish_pipe_wakes(mut wakes: PipeWakeBatch) {
+    let producer_cpu = super::user_boot::current_smp_user_task()
+        .map(|(_, cpu_ref)| cpu_ref)
+        .unwrap_or(CpuRef::new(0));
+    let mut index = 0usize;
+    while index < wakes.len {
+        let waiter = wakes.wakes[index].take().expect("pipe wake batch entry");
+        assert!(
+            super::kernel_task::publish_reserved_and_signal_from(
+                waiter.reservation,
+                waiter.target_hartid,
+                producer_cpu,
+            )
+            .is_ok()
+        );
+        index += 1;
     }
 }
 
@@ -396,6 +813,32 @@ pub struct CloseOnExecReport {
     pub remaining_open: usize,
 }
 
+#[derive(Clone, Copy)]
+pub struct PipeStateDiagnostic {
+    pub pipe_ref_present: bool,
+    pub pipe_slot: usize,
+    pub pipe_generation: u32,
+    pub local_readers: usize,
+    pub local_writers: usize,
+    pub shared_present: bool,
+    pub shared_len: usize,
+    pub shared_readers: usize,
+    pub shared_writers: usize,
+    pub snapshot_live: usize,
+    pub snapshot_read_live: usize,
+    pub snapshot_write_live: usize,
+    pub last_release_reason: PipeReleaseReason,
+    pub last_release_readers_before: usize,
+    pub last_release_writers_before: usize,
+    pub last_release_readers: usize,
+    pub last_release_writers: usize,
+    pub last_release_task_slot: usize,
+    pub last_release_task_generation: u32,
+    pub last_release_cpu: usize,
+    pub last_release_task_identity: usize,
+    pub last_release_fd: usize,
+}
+
 impl CloseOnExecReport {
     const fn empty() -> Self {
         Self {
@@ -422,8 +865,9 @@ pub struct FilesStructSnapshot {
     pidfd_child_pid: usize,
     pidfd_exit_status: usize,
     socket0_fd: usize,
-    pipe_read_end_open: bool,
-    pipe_write_end_open: bool,
+    pipe_ref: Option<SharedPipeRef>,
+    pipe_read_refs: usize,
+    pipe_write_refs: usize,
 }
 
 impl FilesStructSnapshot {
@@ -442,8 +886,9 @@ impl FilesStructSnapshot {
             pidfd_child_pid: 0,
             pidfd_exit_status: 0,
             socket0_fd: usize::MAX,
-            pipe_read_end_open: false,
-            pipe_write_end_open: false,
+            pipe_ref: None,
+            pipe_read_refs: 0,
+            pipe_write_refs: 0,
         }
     }
 }
@@ -1484,6 +1929,18 @@ impl FileDescriptorTable {
         None
     }
 
+    fn count_for_ofd(&self, ofd: OpenFileDescriptionRef) -> usize {
+        let mut count = 0usize;
+        let mut fd = 0usize;
+        while fd < FILE_FD_COUNT {
+            if self.entries[fd].is_some_and(|entry| entry.ofd == ofd) {
+                count += 1;
+            }
+            fd += 1;
+        }
+        count
+    }
+
     fn pipe_end_open(&self, ofd: OpenFileDescriptionRef) -> bool {
         self.first_fd_for_ofd(ofd).is_some()
     }
@@ -1635,7 +2092,7 @@ pub struct FilesStruct {
     pidfd_child_pid: usize,
     pidfd_exit_status: usize,
     socket0_fd: usize,
-    pipe0_buffer: PipeBuffer,
+    pipe_ref: Option<SharedPipeRef>,
     tty_termios: [u8; TERMIOS_SIZE],
     allocated: bool,
     owned_by_kernel_init_task: bool,
@@ -1734,7 +2191,7 @@ impl FilesStruct {
             pidfd_child_pid: 0,
             pidfd_exit_status: 0,
             socket0_fd: usize::MAX,
-            pipe0_buffer: PipeBuffer::new(),
+            pipe_ref: None,
             tty_termios: [0; TERMIOS_SIZE],
             allocated: false,
             owned_by_kernel_init_task: false,
@@ -2034,8 +2491,43 @@ impl FilesStruct {
         self.pipe_usercopy_rollbacks.load(Ordering::Acquire) != 0
     }
 
-    pub const fn pipe_buffer_len(&self) -> usize {
-        self.pipe0_buffer.len()
+    pub fn pipe_state_diagnostic(&self) -> PipeStateDiagnostic {
+        let (local_readers, local_writers) = self.pipe_endpoint_counts();
+        let state = self.pipe_ref.and_then(shared_pipe_state);
+        PipeStateDiagnostic {
+            pipe_ref_present: self.pipe_ref.is_some(),
+            pipe_slot: self
+                .pipe_ref
+                .map_or(usize::MAX, |pipe_ref| pipe_ref.slot as usize),
+            pipe_generation: self.pipe_ref.map_or(0, |pipe_ref| pipe_ref.generation),
+            local_readers,
+            local_writers,
+            shared_present: state.is_some(),
+            shared_len: state.map_or(0, |state| state.len),
+            shared_readers: state.map_or(0, |state| state.readers),
+            shared_writers: state.map_or(0, |state| state.writers),
+            snapshot_live: self.parent_fd_snapshot_live.load(Ordering::Acquire),
+            snapshot_read_live: self.parent_pipe_read_snapshot_live.load(Ordering::Acquire),
+            snapshot_write_live: self.parent_pipe_write_snapshot_live.load(Ordering::Acquire),
+            last_release_reason: state
+                .map_or(PipeReleaseReason::None, |state| state.last_release_reason),
+            last_release_readers_before: state.map_or(0, |state| state.last_release_readers_before),
+            last_release_writers_before: state.map_or(0, |state| state.last_release_writers_before),
+            last_release_readers: state.map_or(0, |state| state.last_release_readers),
+            last_release_writers: state.map_or(0, |state| state.last_release_writers),
+            last_release_task_slot: state.map_or(usize::MAX, |state| state.last_release_task_slot),
+            last_release_task_generation: state
+                .map_or(0, |state| state.last_release_task_generation),
+            last_release_cpu: state.map_or(usize::MAX, |state| state.last_release_cpu),
+            last_release_task_identity: state.map_or(0, |state| state.last_release_task_identity),
+            last_release_fd: state.map_or(usize::MAX, |state| state.last_release_fd),
+        }
+    }
+
+    pub fn pipe_buffer_len(&self) -> usize {
+        self.pipe_ref
+            .and_then(shared_pipe_state)
+            .map_or(0, |state| state.len)
     }
 
     pub fn pipe_read_end_open(&self) -> bool {
@@ -2049,13 +2541,89 @@ impl FilesStruct {
     }
 
     fn pipe_reader_available(&self) -> bool {
-        self.pipe_read_end_open()
-            || self.parent_pipe_read_snapshot_live.load(Ordering::Acquire) != 0
+        self.pipe_ref
+            .and_then(shared_pipe_state)
+            .is_some_and(|state| state.readers != 0)
     }
 
     fn pipe_writer_available(&self) -> bool {
-        self.pipe_write_end_open()
-            || self.parent_pipe_write_snapshot_live.load(Ordering::Acquire) != 0
+        self.pipe_ref
+            .and_then(shared_pipe_state)
+            .is_some_and(|state| state.writers != 0)
+    }
+
+    fn pipe_endpoint_counts(&self) -> (usize, usize) {
+        (
+            self.fd_table
+                .count_for_ofd(OpenFileDescriptionRef::PipeRead0),
+            self.fd_table
+                .count_for_ofd(OpenFileDescriptionRef::PipeWrite0),
+        )
+    }
+
+    fn acquire_pipe_entry(&self, entry: FileDescriptorEntry) -> FileResult<bool> {
+        let (readers, writers) = match entry.ofd {
+            OpenFileDescriptionRef::PipeRead0 => (1, 0),
+            OpenFileDescriptionRef::PipeWrite0 => (0, 1),
+            _ => return Ok(false),
+        };
+        let pipe_ref = self.pipe_ref.ok_or(FileError::BadFd)?;
+        if !acquire_shared_pipe(pipe_ref, readers, writers) {
+            return Err(FileError::BadFd);
+        }
+        Ok(true)
+    }
+
+    fn release_pipe_entry(&self, entry: FileDescriptorEntry) -> bool {
+        let (readers, writers) = match entry.ofd {
+            OpenFileDescriptionRef::PipeRead0 => (1, 0),
+            OpenFileDescriptionRef::PipeWrite0 => (0, 1),
+            _ => return true,
+        };
+        self.pipe_ref.is_some_and(|pipe_ref| {
+            release_shared_pipe(
+                pipe_ref,
+                readers,
+                writers,
+                PipeReleaseReason::DupRollback,
+                usize::MAX,
+            )
+        })
+    }
+
+    pub fn fork_acquire_shared_resources(&mut self) -> bool {
+        let (readers, writers) = self.pipe_endpoint_counts();
+        self.parent_fd_snapshot_live.store(0, Ordering::Release);
+        self.parent_pipe_read_snapshot_live
+            .store(0, Ordering::Release);
+        self.parent_pipe_write_snapshot_live
+            .store(0, Ordering::Release);
+        if readers == 0 && writers == 0 {
+            self.pipe_ref = None;
+            return true;
+        }
+        let Some(pipe_ref) = self.pipe_ref else {
+            return false;
+        };
+        acquire_shared_pipe(pipe_ref, readers, writers)
+    }
+
+    pub fn release_shared_resources(&mut self) -> bool {
+        let Some(pipe_ref) = self.pipe_ref else {
+            return true;
+        };
+        let (readers, writers) = self.pipe_endpoint_counts();
+        let released = release_shared_pipe(
+            pipe_ref,
+            readers,
+            writers,
+            PipeReleaseReason::ProcessTeardown,
+            usize::MAX,
+        );
+        if released {
+            self.pipe_ref = None;
+        }
+        released
     }
 
     pub const fn pidfd_fd(&self) -> usize {
@@ -2711,12 +3279,25 @@ impl FilesStruct {
         if flags != 0 {
             return Err(FileError::InvalidArgument);
         }
-        if self.pipe_reader_available() || self.pipe_writer_available() {
+        if self.pipe_ref.is_some() || self.pipe_reader_available() || self.pipe_writer_available() {
             return Err(FileError::TooManyOpenFiles);
         }
 
-        let pair = self.fd_table.install_pipe_pair()?;
-        self.pipe0_buffer.reset();
+        let pipe_ref = allocate_shared_pipe()?;
+        let pair = match self.fd_table.install_pipe_pair() {
+            Ok(pair) => pair,
+            Err(error) => {
+                assert!(release_shared_pipe(
+                    pipe_ref,
+                    1,
+                    1,
+                    PipeReleaseReason::AllocationRollback,
+                    usize::MAX,
+                ));
+                return Err(error);
+            }
+        };
+        self.pipe_ref = Some(pipe_ref);
         self.pipe_pairs_installed.fetch_add(1, Ordering::AcqRel);
         Ok(pair)
     }
@@ -2737,7 +3318,6 @@ impl FilesStruct {
         self.finish_closed_entry(pair[0], read_entry);
         let write_entry = self.fd_table.close(pair[1])?;
         self.finish_closed_entry(pair[1], write_entry);
-        self.pipe0_buffer.reset();
         self.pipe_usercopy_rollbacks.fetch_add(1, Ordering::AcqRel);
         Ok(())
     }
@@ -2799,12 +3379,7 @@ impl FilesStruct {
             OpenFileDescriptionRef::UnixSocket0 => Err(FileError::Unsupported),
             OpenFileDescriptionRef::Pidfd0 => Err(FileError::Unsupported),
             OpenFileDescriptionRef::PipeRead0 => {
-                let read = self.pipe0_buffer.read(buffer);
-                if read != 0 || !self.pipe_writer_available() {
-                    Ok(read)
-                } else {
-                    Err(FileError::NotReady)
-                }
+                read_shared_pipe(self.pipe_ref.ok_or(FileError::BadFd)?, buffer)
             }
             OpenFileDescriptionRef::PipeWrite0 => Err(FileError::NotReadable),
             OpenFileDescriptionRef::Stdout | OpenFileDescriptionRef::Stderr => {
@@ -2847,7 +3422,11 @@ impl FilesStruct {
                     ready |= FILE_POLLIN | FILE_POLLRDNORM;
                 }
                 OpenFileDescriptionRef::PipeRead0 => {
-                    if self.pipe0_buffer.len() != 0 || !self.pipe_writer_available() {
+                    let state = self
+                        .pipe_ref
+                        .and_then(shared_pipe_state)
+                        .ok_or(FileError::BadFd)?;
+                    if state.len != 0 || state.writers == 0 {
                         ready |= FILE_POLLIN | FILE_POLLRDNORM;
                     }
                 }
@@ -2872,7 +3451,11 @@ impl FilesStruct {
                 | OpenFileDescriptionRef::Pidfd0
                 | OpenFileDescriptionRef::PipeRead0 => {}
                 OpenFileDescriptionRef::PipeWrite0 => {
-                    if self.pipe_reader_available() && self.pipe0_buffer.len() < PIPE_BUFFER_SIZE {
+                    let state = self
+                        .pipe_ref
+                        .and_then(shared_pipe_state)
+                        .ok_or(FileError::BadFd)?;
+                    if state.readers != 0 && state.len < PIPE_BUFFER_SIZE {
                         ready |= FILE_POLLOUT | FILE_POLLWRNORM;
                     }
                 }
@@ -2910,6 +3493,44 @@ impl FilesStruct {
         self.fd_table
             .lookup(fd)
             .is_ok_and(|entry| entry.readable && entry.ofd == OpenFileDescriptionRef::PipeRead0)
+    }
+
+    pub(crate) fn register_pipe_read_wait(
+        &self,
+        fd: usize,
+        task_ref: TaskRef,
+        cpu_ref: CpuRef,
+        target_hartid: usize,
+        reservation: InboxReservation,
+    ) -> Result<PipeReadWaitRegistration, (FileError, InboxReservation)> {
+        if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
+            return Err((FileError::NotReady, reservation));
+        }
+        let entry = match self.fd_table.lookup(fd) {
+            Ok(entry) => entry,
+            Err(error) => return Err((error, reservation)),
+        };
+        if !entry.readable || entry.ofd != OpenFileDescriptionRef::PipeRead0 {
+            return Err((FileError::NotReadable, reservation));
+        }
+        let Some(pipe_ref) = self.pipe_ref else {
+            return Err((FileError::BadFd, reservation));
+        };
+        SHARED_PIPE_REGISTRY.lock().register_read_wait(
+            pipe_ref,
+            PipeReadWaiter {
+                task_ref,
+                cpu_ref,
+                target_hartid,
+                reservation,
+            },
+        )
+    }
+
+    pub(crate) fn cancel_pipe_read_wait(&self, task_ref: TaskRef) -> Option<InboxReservation> {
+        SHARED_PIPE_REGISTRY
+            .lock()
+            .cancel_read_wait(self.pipe_ref?, task_ref)
     }
 
     pub fn getdents64_fd(
@@ -2996,11 +3617,26 @@ impl FilesStruct {
         if matches!(
             entry.ofd,
             OpenFileDescriptionRef::PipeRead0 | OpenFileDescriptionRef::PipeWrite0
-        ) && !self.pipe_read_end_open()
-            && !self.pipe_write_end_open()
-            && self.parent_fd_snapshot_live.load(Ordering::Acquire) == 0
-        {
-            self.pipe0_buffer.reset();
+        ) {
+            let pipe_ref = self.pipe_ref.expect("open pipe fd requires SharedPipeRef");
+            let (readers, writers) = match entry.ofd {
+                OpenFileDescriptionRef::PipeRead0 => (1, 0),
+                OpenFileDescriptionRef::PipeWrite0 => (0, 1),
+                _ => unreachable!(),
+            };
+            assert!(release_shared_pipe(
+                pipe_ref,
+                readers,
+                writers,
+                PipeReleaseReason::DescriptorClose,
+                fd,
+            ));
+            if !self.pipe_read_end_open()
+                && !self.pipe_write_end_open()
+                && self.parent_fd_snapshot_live.load(Ordering::Acquire) == 0
+            {
+                self.pipe_ref = None;
+            }
         }
         if matches!(fd, STDIN_FD | STDOUT_FD | STDERR_FD) {
             self.stdio_fd_closed.fetch_add(1, Ordering::AcqRel);
@@ -3062,8 +3698,17 @@ impl FilesStruct {
             return Err(FileError::NotReady);
         }
 
+        let entries = self.fd_table.snapshot_entries()?;
+        let (pipe_read_refs, pipe_write_refs) = self.pipe_endpoint_counts();
+        let pipe_ref = self.pipe_ref;
+        if pipe_read_refs != 0 || pipe_write_refs != 0 {
+            let pipe_ref = pipe_ref.ok_or(FileError::BadFd)?;
+            if !acquire_shared_pipe(pipe_ref, pipe_read_refs, pipe_write_refs) {
+                return Err(FileError::BadFd);
+            }
+        }
         let snapshot = FilesStructSnapshot {
-            entries: self.fd_table.snapshot_entries()?,
+            entries,
             regular0_len: self.regular0_len,
             regular0_offset: self.regular0_offset,
             regular0_path: self.regular0_path,
@@ -3076,15 +3721,16 @@ impl FilesStruct {
             pidfd_child_pid: self.pidfd_child_pid,
             pidfd_exit_status: self.pidfd_exit_status,
             socket0_fd: self.socket0_fd,
-            pipe_read_end_open: self.pipe_read_end_open(),
-            pipe_write_end_open: self.pipe_write_end_open(),
+            pipe_ref,
+            pipe_read_refs,
+            pipe_write_refs,
         };
         self.parent_fd_snapshot_live.fetch_add(1, Ordering::AcqRel);
-        if snapshot.pipe_read_end_open {
+        if snapshot.pipe_read_refs != 0 {
             self.parent_pipe_read_snapshot_live
                 .fetch_add(1, Ordering::AcqRel);
         }
-        if snapshot.pipe_write_end_open {
+        if snapshot.pipe_write_refs != 0 {
             self.parent_pipe_write_snapshot_live
                 .fetch_add(1, Ordering::AcqRel);
         }
@@ -3093,11 +3739,33 @@ impl FilesStruct {
     }
 
     pub fn restore_parent_fd_snapshot(&mut self, snapshot: &FilesStructSnapshot) -> FileResult<()> {
-        if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
+        if self.lifecycle.state() != State::Ready
+            || !self.fd_table_bound
+            || self.parent_fd_snapshot_live.load(Ordering::Acquire) == 0
+        {
             return Err(FileError::NotReady);
         }
 
+        if (snapshot.pipe_read_refs != 0 || snapshot.pipe_write_refs != 0)
+            && snapshot.pipe_ref.and_then(shared_pipe_state).is_none()
+        {
+            return Err(FileError::BadFd);
+        }
+        let (current_readers, current_writers) = self.pipe_endpoint_counts();
+        if current_readers != 0 || current_writers != 0 {
+            let pipe_ref = self.pipe_ref.ok_or(FileError::BadFd)?;
+            if !release_shared_pipe(
+                pipe_ref,
+                current_readers,
+                current_writers,
+                PipeReleaseReason::SnapshotRestoreCurrent,
+                usize::MAX,
+            ) {
+                return Err(FileError::BadFd);
+            }
+        }
         self.fd_table.restore_entries(snapshot.entries)?;
+        self.pipe_ref = snapshot.pipe_ref;
         self.regular0_len = snapshot.regular0_len;
         self.regular0_offset = snapshot.regular0_offset;
         self.regular0_path = snapshot.regular0_path;
@@ -3110,13 +3778,13 @@ impl FilesStruct {
         self.pidfd_child_pid = snapshot.pidfd_child_pid;
         self.pidfd_exit_status = snapshot.pidfd_exit_status;
         self.socket0_fd = snapshot.socket0_fd;
-        if snapshot.pipe_read_end_open
+        if snapshot.pipe_read_refs != 0
             && self.parent_pipe_read_snapshot_live.load(Ordering::Acquire) != 0
         {
             self.parent_pipe_read_snapshot_live
                 .fetch_sub(1, Ordering::AcqRel);
         }
-        if snapshot.pipe_write_end_open
+        if snapshot.pipe_write_refs != 0
             && self.parent_pipe_write_snapshot_live.load(Ordering::Acquire) != 0
         {
             self.parent_pipe_write_snapshot_live
@@ -3131,13 +3799,27 @@ impl FilesStruct {
     }
 
     pub fn discard_parent_fd_snapshot(&self, snapshot: &FilesStructSnapshot) {
-        if snapshot.pipe_read_end_open
+        if self.parent_fd_snapshot_live.load(Ordering::Acquire) == 0 {
+            return;
+        }
+        if let Some(pipe_ref) = snapshot.pipe_ref {
+            assert!(release_shared_pipe(
+                pipe_ref,
+                snapshot.pipe_read_refs,
+                snapshot.pipe_write_refs,
+                PipeReleaseReason::SnapshotDiscard,
+                usize::MAX,
+            ));
+        } else {
+            assert!(snapshot.pipe_read_refs == 0 && snapshot.pipe_write_refs == 0);
+        }
+        if snapshot.pipe_read_refs != 0
             && self.parent_pipe_read_snapshot_live.load(Ordering::Acquire) != 0
         {
             self.parent_pipe_read_snapshot_live
                 .fetch_sub(1, Ordering::AcqRel);
         }
-        if snapshot.pipe_write_end_open
+        if snapshot.pipe_write_refs != 0
             && self.parent_pipe_write_snapshot_live.load(Ordering::Acquire) != 0
         {
             self.parent_pipe_write_snapshot_live
@@ -3196,7 +3878,17 @@ impl FilesStruct {
             return Err(FileError::NotReady);
         }
 
-        self.fd_table.dup_fd(fd, min_fd, close_on_exec)
+        let source = self.fd_table.lookup(fd)?;
+        let acquired_pipe = self.acquire_pipe_entry(source)?;
+        match self.fd_table.dup_fd(fd, min_fd, close_on_exec) {
+            Ok(newfd) => Ok(newfd),
+            Err(error) => {
+                if acquired_pipe {
+                    assert!(self.release_pipe_entry(source));
+                }
+                Err(error)
+            }
+        }
     }
 
     pub fn dup3_fd(
@@ -3209,7 +3901,17 @@ impl FilesStruct {
             return Err(FileError::NotReady);
         }
 
-        let (fd, replaced) = self.fd_table.dup3_fd(oldfd, newfd, close_on_exec)?;
+        let source = self.fd_table.lookup(oldfd)?;
+        let acquired_pipe = self.acquire_pipe_entry(source)?;
+        let (fd, replaced) = match self.fd_table.dup3_fd(oldfd, newfd, close_on_exec) {
+            Ok(result) => result,
+            Err(error) => {
+                if acquired_pipe {
+                    assert!(self.release_pipe_entry(source));
+                }
+                return Err(error);
+            }
+        };
         if let Some(entry) = replaced {
             self.finish_closed_entry(fd, entry);
         }
@@ -3466,7 +4168,12 @@ impl FilesStruct {
             }
             OpenFileDescriptionRef::UnixSocket0 => FileStat::socket(0),
             OpenFileDescriptionRef::PipeRead0 | OpenFileDescriptionRef::PipeWrite0 => {
-                FileStat::fifo(self.pipe0_buffer.len())
+                FileStat::fifo(
+                    self.pipe_ref
+                        .and_then(shared_pipe_state)
+                        .ok_or(FileError::BadFd)?
+                        .len,
+                )
             }
             OpenFileDescriptionRef::Stdin
             | OpenFileDescriptionRef::Stdout
@@ -3509,10 +4216,7 @@ impl FilesStruct {
             OpenFileDescriptionRef::UnixSocket0 => Err(FileError::Unsupported),
             OpenFileDescriptionRef::PipeRead0 => Err(FileError::NotWritable),
             OpenFileDescriptionRef::PipeWrite0 => {
-                if !self.pipe_reader_available() {
-                    return Err(FileError::BrokenPipe);
-                }
-                self.pipe0_buffer.write(bytes)
+                write_shared_pipe(self.pipe_ref.ok_or(FileError::BadFd)?, bytes)
             }
         }
     }

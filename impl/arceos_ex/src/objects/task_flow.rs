@@ -402,7 +402,10 @@ impl TaskFlow {
     }
 
     pub(crate) fn cleanup_owned(&mut self, owner_ref: TaskRef) -> EventResult {
-        if self.lifecycle.state() != State::Online || self.owner != owner_ref {
+        if self.owner != owner_ref
+            || (self.lifecycle.state() != State::Online
+                && !(self.lifecycle.state() == State::Offline && self.disabled))
+        {
             return failed_condition(
                 LifecycleEvent::Disable,
                 self.lifecycle.state(),
@@ -410,9 +413,14 @@ impl TaskFlow {
                 State::Offline,
             );
         }
-        self.disabled = true;
-        self.lifecycle
-            .adopt_transition(LifecycleEvent::Disable, State::Online, State::Offline)?;
+        if self.lifecycle.state() == State::Online {
+            self.disabled = true;
+            self.lifecycle.adopt_transition(
+                LifecycleEvent::Disable,
+                State::Online,
+                State::Offline,
+            )?;
+        }
         self.cleaned = true;
         self.declared = false;
         self.lifecycle

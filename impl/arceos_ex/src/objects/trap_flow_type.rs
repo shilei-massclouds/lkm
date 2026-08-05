@@ -582,7 +582,7 @@ impl TrapExecutionRecord {
                 child == self.interrupt.flow_ref()
                     && matches!(
                         self.interrupt.state(),
-                        State::Prepared | State::Ready | State::Online
+                        State::Prepared | State::Ready | State::Online | State::Offline
                     )
             }
             TrapChildKind::Exception => {
@@ -599,7 +599,12 @@ impl TrapExecutionRecord {
         if leaf.generation() != generation {
             return false;
         }
-        let alive = |state| matches!(state, State::Prepared | State::Ready | State::Online);
+        let alive = |state| {
+            matches!(
+                state,
+                State::Prepared | State::Ready | State::Online | State::Offline
+            )
+        };
         match leaf.kind() {
             super::exception_flow_type::ExceptionChildKind::PageFault => {
                 leaf == self.page_fault.flow_ref() && alive(self.page_fault.state())

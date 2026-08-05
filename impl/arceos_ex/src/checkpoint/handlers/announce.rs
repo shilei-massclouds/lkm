@@ -1,4 +1,4 @@
-use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use core::sync::atomic::{AtomicU8, Ordering};
 
 use crate::{
     checkpoint::Checkpoint,
@@ -13,27 +13,6 @@ const ANNOUNCE_MODE_EARLY_BYTE: u8 = 0;
 const ANNOUNCE_MODE_NAMED_STRING: u8 = 1;
 
 static ANNOUNCE_MODE: AtomicU8 = AtomicU8::new(ANNOUNCE_MODE_EARLY_BYTE);
-static ANNOUNCE_LINE_LOCK: AtomicBool = AtomicBool::new(false);
-
-struct AnnounceLineGuard;
-
-impl AnnounceLineGuard {
-    fn acquire() -> Self {
-        while ANNOUNCE_LINE_LOCK
-            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_err()
-        {
-            core::hint::spin_loop();
-        }
-        Self
-    }
-}
-
-impl Drop for AnnounceLineGuard {
-    fn drop(&mut self) {
-        ANNOUNCE_LINE_LOCK.store(false, Ordering::Release);
-    }
-}
 
 pub const HANDLER: Handler = Handler {
     name: "announce",
@@ -77,49 +56,24 @@ pub fn emit_with_ap_idle_task(checkpoint: Checkpoint, logical_id: usize) {
 }
 
 pub fn announce_name(checkpoint: Checkpoint) {
-    let _guard = AnnounceLineGuard::acquire();
-    crate::arch::riscv64::sbi::putstr("checkpoint: ");
-    crate::arch::riscv64::sbi::putstr(checkpoint.name());
-    crate::arch::riscv64::sbi::putchar(b'\n');
+    crate::arch::riscv64::sbi::write_record(format_args!("checkpoint: {}\n", checkpoint.name()));
 }
 
 pub fn announce_name_with_context(checkpoint: Checkpoint, ctx: &Context) {
-    let _guard = AnnounceLineGuard::acquire();
-    crate::arch::riscv64::sbi::putstr("checkpoint: ");
-    crate::arch::riscv64::sbi::putstr(checkpoint.name());
-    crate::arch::riscv64::sbi::putstr(" task=");
-    crate::arch::riscv64::sbi::putstr(
+    crate::arch::riscv64::sbi::write_record(format_args!(
+        "checkpoint: {} task={}\n",
+        checkpoint.name(),
         ctx.current_task_ref()
-            .map_or("None", crate::objects::task::TaskRef::name),
-    );
-    crate::arch::riscv64::sbi::putchar(b'\n');
+            .map_or("None", crate::objects::task::TaskRef::name)
+    ));
 }
 
 pub fn announce_name_with_ap_idle_task(checkpoint: Checkpoint, logical_id: usize) {
-    let _guard = AnnounceLineGuard::acquire();
-    crate::arch::riscv64::sbi::putstr("checkpoint: ");
-    crate::arch::riscv64::sbi::putstr(checkpoint.name());
-    crate::arch::riscv64::sbi::putstr(" task=ApIdleTask[");
-    put_usize_decimal(logical_id);
-    crate::arch::riscv64::sbi::putstr("]\n");
-}
-
-fn put_usize_decimal(mut value: usize) {
-    let mut digits = [0u8; 20];
-    let mut index = digits.len();
-
-    if value == 0 {
-        crate::arch::riscv64::sbi::putchar(b'0');
-        return;
-    }
-
-    while value != 0 && index != 0 {
-        index -= 1;
-        digits[index] = b'0' + (value % 10) as u8;
-        value /= 10;
-    }
-
-    crate::arch::riscv64::sbi::putstr(core::str::from_utf8(&digits[index..]).unwrap_or("?"));
+    crate::arch::riscv64::sbi::write_record(format_args!(
+        "checkpoint: {} task=ApIdleTask[{}]\n",
+        checkpoint.name(),
+        logical_id
+    ));
 }
 
 fn run(checkpoint: Checkpoint, ctx: &Context, _sink: &mut dyn Sink) -> CheckpointOutcome {

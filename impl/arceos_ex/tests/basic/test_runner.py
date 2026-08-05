@@ -342,7 +342,11 @@ class BasicRunnerConfigTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     scripted["expect"]["forbidden_markers"],
-                    ["Function not implemented", "arceos_ex panic"],
+                    [
+                        "Function not implemented",
+                        "arceos_ex panic",
+                        "ext2 block read failure",
+                    ],
                 )
 
     def test_scripted_shell_ok_assertion_requires_a_standalone_output_line(self) -> None:

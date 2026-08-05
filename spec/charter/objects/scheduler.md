@@ -27,12 +27,32 @@ Scheduler 随 boot CPU 的可调度交接进入 Online；其它 CPU 的 Schedule
 Scheduler 的当前任务和候选队列都只属于 owner CPU。跨 CPU 的 root/sched domain、负载协调和其它
 全局资源是独立的共享对象，不属于某一个 Scheduler 的私有队列，也不复制 CPU 或 Scheduler 本体。
 
-每个 Scheduler 还拥有一个有界的 CPU-local inbound mailbox。其它 CPU 只能向 mailbox 发布目标明确的
-activation/wake 消息，不能直接取得目标 runqueue 或改写目标 Scheduler。消息携带稳定 TaskRef 及其
+每个 Scheduler 还拥有一个容量覆盖全部可投递 Task（至少 32 个用户 Task 加已有内核 Task）的 CPU-local
+inbound inbox。其它 CPU 只能向 inbox 发布目标明确的 activation/wake 消息，不能直接取得目标 runqueue
+或改写目标 Scheduler。消息携带稳定 TaskRef 及其
 generation、目标 CpuRef 和单调 ordinal；发布者先以 release 顺序提交完整消息，再请求目标 CPU 的
-reschedule IPI。目标 CPU 以 acquire 顺序精确一次消费，验证 generation、目标与 ordinal 后，才在持有
+reschedule IPI。每个 live TaskRef 最多占有一个 pending activation/wake reservation；重复通知合并，
+不能占用第二项。目标 CPU 以 acquire 顺序精确一次消费，验证 generation、目标与 ordinal 后，才在持有
 本地 runqueue lock 的提交点完成入队或唤醒。stale generation、错误目标、重复 ordinal 或重复消费必须在
-runqueue 修改前拒绝。重复 IPI 可以合并为同一个 `need_resched`，但不能制造第二次 mailbox 消费。
+runqueue 修改前拒绝。重复 IPI 可以合并为同一个 `need_resched`，但不能制造第二次 inbox 消费。
+
+blocked wake 的消费存在两个合法提交点。若 owner CPU 消费 wake 时目标 Task 仍是 current，且已经声明
+本次 Scheduler sleep，则把该消息提交为与该 sleep 匹配的一次 pending wake；随后 `PreparePrev` 消费它并
+保持 Task runnable。若目标 Task 已完成 Suspend 并成为不在 runqueue 的 blocked Online Task，则在本地
+runqueue lock 下恢复其运行资格并入队。发布者不直接写目标 Task 或 runqueue；owner CPU 必须在 idle 或
+用户返回安全边界消费可见 inbox，因而 wake 位于 sleep 声明与实际下 CPU 之间也不会丢失。已经 runnable、
+已在队列或不再匹配该 sleep 的通知只能按合并/过期规则无副作用消费，不能形成第二次入队。
+
+由用户态进入的阻塞 syscall 在睡眠或 `wfi` 之前，必须把可见的 CPU-local inbox 和
+`need_resched` 视为本 CPU 的可调度工作，不得以此工作是否属于当前进程的直接子进程作为
+是否调度的条件。该 handoff 保留当前未释放的 syscall leaf，且非 identity 交换返回后必须
+完成同一 leaf 的 A→B→A 重验，才能继续 syscall 或进入睡眠。
+
+用户 Task 采用 CPU-local round-robin。每次用户 dispatch 由 [`SchedulerClockevent`](scheduler-clockevent.md)
+开始 10 ms slice；到期只设置 `need_resched`，并在用户返回安全点选择下一 runnable Task。同一 CPU 没有
+其它 runnable Task 时消费 pending 并续订 slice，不发生交换。Scheduler 在切换不同用户进程时提交
+next 的 SATP 并执行本地 `sfence.vma`；本轮每个 mm 只在一个固定 CPU 执行，因此没有 ASID 或远程
+shootdown。
 
 ## 调度与交换
 
@@ -47,6 +67,12 @@ runqueue 修改前拒绝。重复 IPI 可以合并为同一个 `need_resched`，
 1. 保存当前任务离开 CPU 时的执行位置，使当前任务暂停；
 2. 恢复候选任务上次保存或首次准备好的执行位置；
 3. 完成当前任务身份的交接，使候选任务成为该 CPU 唯一的当前任务并继续执行。
+
+非 identity 交换从当前 Task 开始丢失 `OnCpu` 执行权之前起必须保持 owner CPU 本地中断关闭，
+直到候选 Task 的架构 context、`CurrentTask`/`CurrentStack`、`rq->curr`、Task `OnCpu` 状态和
+trap-entry owner 全部提交且互相一致后才可恢复。任何本地 IRQ 都不得观察到“hardware current 仍是
+prev，但 prev 已非 `OnCpu`”或“hardware current 已是 next，但 next/trap-entry owner 尚未提交”的中间状态。
+首次派发和恢复派发遵守同一个中断交接边界。
 
 被换出的任务如果仍具备运行资格，可以继续留在或重新进入该 CPU 的候选集合；若它已经 blocked，则在
 被唤醒前不能再次被选中。它未来再次成为当前任务时，会从原来的调度请求之后继续，而不是重新执行该
@@ -81,8 +107,9 @@ Scheduler 接受请求前必须完成所有可能拒绝该请求的检查。交�
 任务之后属于哪个 CPU 的候选集合，但不改变每次任务交换必须在目标 Scheduler 所属 CPU 上完成这一
 边界。
 
-首轮远程放置只接受调用者显式给出的 online CpuRef。普通内核 Task 首次发布后固定在该 CPU；运行中
-迁移、负载均衡、跨 CPU 候选选择和 GlobalArbiter 仍不属于本轮。
+普通用户 fork 的远程放置由冻结 online CpuRef 序列和 PID 公式确定；普通内核 Task 仍接受调用者显式
+online CpuRef。两者首次发布后都固定在目标 CPU；运行中迁移、负载均衡、动态跨 CPU 候选选择和
+GlobalArbiter 仍不属于本轮。
 
 ## Mapping
 

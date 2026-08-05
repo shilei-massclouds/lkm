@@ -43,6 +43,11 @@ OnCpu --Disable(terminal)--> Offline --Cleanup--> Destroyed
 blocked 与 lifecycle 正交：Online Task 可以 runnable，也可以因阻塞而
 不在 class queue。`OnCpu` 表示该 Task 是某 CPU 唯一 current/执行权 carrier；它是 Task 专属状态。
 
+Task 对一次阻塞交接保存 owner-CPU 可写的 sleep declaration 与至多一个匹配 pending wake。声明 sleep
+不会提前改变 lifecycle；Scheduler 的 `PreparePrev` 原子判定：若 matching wake 已被 owner CPU 消费，
+则精确一次清除二者并保持 runnable；否则才把 Task 从候选集合移除并执行 Suspend。Task 已成为 blocked
+Online 后的 wake 由 owner Scheduler 恢复运行资格。远程 CPU 只发布 inbox 消息，不直接改写这些字段。
+
 Task 还保存两组正交状态：
 
 - `TaskExecutionAuthority::{None, Reserved, Live}`：普通 Online Task 为 None，OnCpu Task 为 Live；
@@ -187,7 +192,9 @@ OnCpu/Live 且尚无 terminal reason 的 Task 可以提交一次。该原因沿�
 传递，wait word 低 signal bits 为 11。首片不构造用户 signal frame或调用 handler；terminal handoff
 释放 faulting Task 的 mm 一次，reap 不得重复释放。
 
-用户地址空间、files、credentials、signal 和 exec transaction 属于稳定 Task/Runtime 资源。每个用户型
+用户地址空间、files、credentials、signal 和 exec transaction 属于稳定 Task/Runtime 资源。全部用户
+Task aggregate 由 [`UserProcessRegistry`](user-process-registry.md) 的 32 个 generation-checked 条目拥有；
+每个用户型
 TaskFlow 最多创建一个终身稳定、不可共享的被动 `UserAppRuntime` owned child；Runtime 的 `Online`
 覆盖应用 continuation 正在执行、runnable/待调度、阻塞挂起和被 trap overlay 覆盖，不另设
 Running/Paused/Trapped lifecycle。exec 只替换 Runtime 内的 ApplicationInstance，fork 才创建新的
@@ -195,7 +202,7 @@ Task/Flow/Runtime。terminal 路径依次 quiesce 并 Disable/Cleanup Runtime、
 
 ## 当前能力边界
 
-本轮在单 CPU `yields`/schedule-return 基础上关闭显式目标 CPU 的普通内核 Task activation/wake、AP
-idle/scheduler continuation 与 reschedule IPI。完整 SMP GlobalArbiter、自动负载选择、运行中迁移仲裁、
-用户任务 AP 执行、时钟抢占与 schedule replay 保持延期；Task/Flow 固定关系不得为这些未来能力重新
-引入兼容字段或双写路径。
+本轮在既有 per-CPU Scheduler 上关闭用户 Task 的固定跨 CPU 放置、每核 round-robin 与 10 ms 用户态
+抢占。PID 1 固定 CPU0，普通 fork 依 frozen online CPU 序列和 PID 选择终身 CpuRef，vfork/CLONE_VM
+保持父核。GlobalArbiter、自动负载选择、运行中迁移、内核态立即抢占与 schedule replay 保持延期；
+Task/Flow 固定关系不得为这些未来能力重新引入兼容字段或双写路径。

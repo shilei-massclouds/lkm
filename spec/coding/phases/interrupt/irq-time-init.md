@@ -361,4 +361,6 @@ workers, RCU GP kthreads or secondary CPU execution to Online.
 RiscvTimerProvider.setup() must expose enough action surface for two
 smoke checks after InterruptType.enable(): a monotonic time read
 check and a one-shot clockevent callback check through the timer IRQ
-route. These checks do not imply full periodic tick service.
+route. The later SMP runtime phase extends this same provider into a per-CPU
+deadline mux and adds a 10 ms scheduler deadline without changing the CPU0
+one-shot callback contract; no second hardware timer owner may be introduced here.

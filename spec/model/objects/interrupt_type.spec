@@ -70,7 +70,23 @@ type InterruptType: ResourceObject {
                 interrupt_reschedule_ipi_does_not_switch_in_handler(self);
                 interrupt_duplicate_reschedule_ipi_coalesced(self);
                 interrupt_reschedule_ipi_uses_formal_overlay(self);
-                interrupt_reschedule_ipi_does_not_consume_mailbox(self);
+                interrupt_reschedule_ipi_does_not_consume_inbox(self);
+            }
+        }
+
+        Action::HandleTimerInterrupt(clockevent: SchedulerClockevent) {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Online;
+                clockevent.state == State::Ready;
+            }
+            drives { clockevent.Action::HandleTimerInterrupt; }
+            ensures {
+                interrupt_timer_event_acknowledged_cpu_local(self);
+                interrupt_timer_clockevent_rearmed(self, clockevent);
+                interrupt_timer_need_resched_coalesced_cpu_local(self);
+                interrupt_timer_does_not_schedule_in_hardirq(self);
+                interrupt_timer_preserves_kernel_pending_until_user_return(self);
             }
         }
     }
@@ -144,4 +160,9 @@ predicate interrupt_need_resched_recorded_cpu_local<I: InterruptType>(interrupt:
 predicate interrupt_reschedule_ipi_does_not_switch_in_handler<I: InterruptType>(interrupt: I) -> bool;
 predicate interrupt_duplicate_reschedule_ipi_coalesced<I: InterruptType>(interrupt: I) -> bool;
 predicate interrupt_reschedule_ipi_uses_formal_overlay<I: InterruptType>(interrupt: I) -> bool;
-predicate interrupt_reschedule_ipi_does_not_consume_mailbox<I: InterruptType>(interrupt: I) -> bool;
+predicate interrupt_reschedule_ipi_does_not_consume_inbox<I: InterruptType>(interrupt: I) -> bool;
+predicate interrupt_timer_event_acknowledged_cpu_local<I: InterruptType>(interrupt: I) -> bool;
+predicate interrupt_timer_clockevent_rearmed<I: InterruptType, C: SchedulerClockevent>(interrupt: I, clockevent: C) -> bool;
+predicate interrupt_timer_need_resched_coalesced_cpu_local<I: InterruptType>(interrupt: I) -> bool;
+predicate interrupt_timer_does_not_schedule_in_hardirq<I: InterruptType>(interrupt: I) -> bool;
+predicate interrupt_timer_preserves_kernel_pending_until_user_return<I: InterruptType>(interrupt: I) -> bool;
