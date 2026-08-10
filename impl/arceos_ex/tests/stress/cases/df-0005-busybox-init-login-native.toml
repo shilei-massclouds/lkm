@@ -1,0 +1,16 @@
+schema_version = 2
+name = "df-0005-busybox-init-login-native"
+description = "Repeat the canonical BusyBox init/login native acceptance to capture its intermittent post-login timeout."
+mode = "stress"
+test = "busybox-init-login-native"
+runs = 100
+classifier = "../classifiers/df-0005-busybox-init-login-native.toml"
+
+[metadata]
+defect = "DF-0005"
+observation_mode = "busybox-init-login-native-timeout-forensics"
+ordinary_path_required = true
+default_suite = true
+rootfs_profile = "canonical"
+payload = "canonical BusyBox init login -> non-root /bin/ls -> shell exit -> wrapper sync and poweroff"
+scope_note = "Capture intermittent timeouts from the frozen basic identity; successful samples do not establish a root cause."

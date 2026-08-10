@@ -10,6 +10,10 @@
  * entries in this slice; device file operations stay with the owning device
  * subsystems. The only block-backed filesystem path currently admitted is a
  * read-only ext2 mount whose lookup/read operations dispatch to Ext2FileSystem.
+ * A transient namespace overlay may attach memory-backed directory or regular
+ * file entries below an ext2 directory without modifying the ext2 backend.
+ * Such an entry is visible to ordinary VFS lookup and can be removed
+ * atomically; the underlying block image remains read-only.
  * FsStruct carries the task-visible root and pwd dentry references. The
  * current path-walk slice supports absolute paths from FsStruct.root, the
  * first cwd-relative AT_FDCWD subset from FsStruct.pwd for ".", single
@@ -88,6 +92,34 @@ predicate vfs_path_read_start_checkpoint<T, P>(core: T, path: P) -> bool;
 predicate vfs_path_read_resolved_checkpoint<T, D>(core: T, dentry: D) -> bool;
 predicate vfs_path_read_failed_checkpoint_defined<T>(core: T) -> bool;
 predicate vfs_path_read_error_classification_contract_ready<T>(core: T) -> bool;
+predicate vfs_transient_directory_overlay_supported<T>(core: T) -> bool;
+predicate vfs_transient_regular_file_overlay_supported<T>(core: T) -> bool;
+predicate vfs_transient_create_failure_atomic<T>(core: T) -> bool;
+predicate vfs_transient_exclusive_create_checks_live_and_ext2<T>(core: T) -> bool;
+predicate vfs_transient_regular_create_metadata_bound<T>(core: T) -> bool;
+predicate vfs_transient_file_truncate_zero_fills<T, F>(core: T, file: F) -> bool;
+predicate vfs_transient_file_truncate_preserves_position<T, F>(core: T, file: F) -> bool;
+predicate vfs_transient_file_truncate_failure_atomic<T, F>(core: T, file: F) -> bool;
+predicate vfs_transient_file_truncate_capacity_bound<T>(core: T) -> bool;
+predicate vfs_transient_file_range_read_preserves_position<T, F>(core: T, file: F) -> bool;
+predicate vfs_transient_file_range_read_zero_fills_tail<T, F>(core: T, file: F) -> bool;
+predicate vfs_transient_file_range_read_failure_has_no_side_effect<T, F>(core: T, file: F) -> bool;
+predicate vfs_transient_remove_path_type_checked<T>(core: T) -> bool;
+predicate vfs_transient_remove_path_failure_atomic<T>(core: T) -> bool;
+predicate vfs_transient_remove_path_rejects_read_only_backing<T>(core: T) -> bool;
+predicate vfs_transient_remove_preserves_open_file_storage<T, F>(core: T, file: F) -> bool;
+predicate vfs_transient_inode_ownership_bound<T>(core: T) -> bool;
+predicate vfs_chown_path_preserves_all_ones_ids<T>(core: T) -> bool;
+predicate vfs_chown_path_failure_has_no_side_effect<T>(core: T) -> bool;
+predicate vfs_inode_mode_metadata_bound<T>(core: T) -> bool;
+predicate vfs_chmod_path_preserves_inode_type<T>(core: T) -> bool;
+predicate vfs_chmod_path_visible_to_stat<T>(core: T) -> bool;
+predicate vfs_chmod_path_failure_has_no_side_effect<T>(core: T) -> bool;
+predicate vfs_statfs_path_resolves_superblock<T, D, S>(core: T, dentry: D, superblock: S) -> bool;
+predicate vfs_statfs_ext2_reports_bound_metadata<T, F>(core: T, fs: F) -> bool;
+predicate vfs_statfs_unmodeled_accounting_zero<T>(core: T) -> bool;
+predicate vfs_transient_allocation_failure_reports_no_space<T>(core: T) -> bool;
+predicate inode_transient_memory_backed<T>(inode: T) -> bool;
 
 predicate fs_struct_allocated<T>(fs: T) -> bool;
 predicate fs_struct_initial_root_bound<T, D>(fs: T, dentry: D) -> bool;
@@ -208,6 +240,12 @@ object VfsCore: ResourceObject {
                     vfs_core_mount_namespace_deferred(VfsCore);
                     vfs_path_read_failed_checkpoint_defined(VfsCore);
                     vfs_path_read_error_classification_contract_ready(VfsCore);
+                    vfs_transient_directory_overlay_supported(VfsCore);
+                    vfs_transient_regular_file_overlay_supported(VfsCore);
+                    vfs_transient_create_failure_atomic(VfsCore);
+                    vfs_transient_exclusive_create_checks_live_and_ext2(VfsCore);
+                    vfs_transient_regular_create_metadata_bound(VfsCore);
+                    vfs_transient_allocation_failure_reports_no_space(VfsCore);
                 }
             }
         }
@@ -225,6 +263,12 @@ object VfsCore: ResourceObject {
             vfs_path_walk_symlink_budget_matches_linux_6_12(VfsCore);
             vfs_path_read_failed_checkpoint_defined(VfsCore);
             vfs_path_read_error_classification_contract_ready(VfsCore);
+            vfs_transient_directory_overlay_supported(VfsCore);
+            vfs_transient_regular_file_overlay_supported(VfsCore);
+            vfs_transient_create_failure_atomic(VfsCore);
+            vfs_transient_exclusive_create_checks_live_and_ext2(VfsCore);
+            vfs_transient_regular_create_metadata_bound(VfsCore);
+            vfs_transient_allocation_failure_reports_no_space(VfsCore);
         }
 
         actions {
@@ -523,6 +567,7 @@ object VfsCore: ResourceObject {
             Action::CreateDirectory {
                 state_effect: StateEffect::None;
                 depends_on {
+                    VfsCore.state == State::Ready;
                     dentry_positive(Dentry);
                     inode_kind_is(Inode, VfsInodeKind::Directory);
                 }
@@ -533,13 +578,120 @@ object VfsCore: ResourceObject {
                 ensures {
                     inode_kind_is(Inode, VfsInodeKind::Directory);
                     inode_directory_children_ready(Inode);
+                    inode_transient_memory_backed(Inode);
                     dentry_child_inserted(Dentry, Dentry);
+                    vfs_transient_create_failure_atomic(VfsCore);
+                    vfs_transient_allocation_failure_reports_no_space(VfsCore);
+                    vfs_transient_inode_ownership_bound(VfsCore);
+                }
+            }
+
+            Action::ChownPath {
+                state_effect: StateEffect::None;
+                depends_on {
+                    VfsCore.state == State::Ready;
+                    dentry_positive(Dentry);
+                    inode_transient_memory_backed(Inode);
+                }
+                ensures {
+                    vfs_transient_inode_ownership_bound(VfsCore);
+                    vfs_chown_path_preserves_all_ones_ids(VfsCore);
+                    vfs_chown_path_failure_has_no_side_effect(VfsCore);
+                }
+            }
+
+            Action::ChmodPath {
+                state_effect: StateEffect::None;
+                depends_on {
+                    VfsCore.state == State::Ready;
+                    dentry_positive(Dentry);
+                    inode_transient_memory_backed(Inode);
+                }
+                ensures {
+                    vfs_inode_mode_metadata_bound(VfsCore);
+                    vfs_chmod_path_preserves_inode_type(VfsCore);
+                    vfs_chmod_path_visible_to_stat(VfsCore);
+                    vfs_chmod_path_failure_has_no_side_effect(VfsCore);
+                }
+            }
+
+            Action::TruncateFile(file: File) {
+                state_effect: StateEffect::None;
+                depends_on {
+                    VfsCore.state == State::Ready;
+                    file_allocated(file);
+                    file_inode_bound(file, Inode);
+                    inode_kind_is(Inode, VfsInodeKind::RegularFile);
+                    inode_transient_memory_backed(Inode);
+                }
+                ensures {
+                    inode_size_updated(Inode);
+                    vfs_transient_file_truncate_zero_fills(VfsCore, file);
+                    vfs_transient_file_truncate_preserves_position(VfsCore, file);
+                    vfs_transient_file_truncate_failure_atomic(VfsCore, file);
+                    vfs_transient_file_truncate_capacity_bound(VfsCore);
+                }
+            }
+
+            Action::ReadFileRange(file: File) {
+                state_effect: StateEffect::None;
+                depends_on {
+                    VfsCore.state == State::Ready;
+                    file_allocated(file);
+                    file_inode_bound(file, Inode);
+                    inode_kind_is(Inode, VfsInodeKind::RegularFile);
+                    inode_transient_memory_backed(Inode);
+                }
+                ensures {
+                    vfs_transient_file_range_read_preserves_position(VfsCore, file);
+                    vfs_transient_file_range_read_zero_fills_tail(VfsCore, file);
+                    vfs_transient_file_range_read_failure_has_no_side_effect(VfsCore, file);
+                }
+            }
+
+            Action::RemovePath(path: Path, fs: FsStruct) {
+                state_effect: StateEffect::None;
+                depends_on {
+                    VfsCore.state == State::Ready;
+                    FsStruct.state == State::Ready;
+                    vfs_path_components_bound(path);
+                    dentry_positive(Dentry);
+                    inode_transient_memory_backed(Inode);
+                }
+                drives {
+                    VfsCore.Action::Remove;
+                }
+                ensures {
+                    dentry_child_removed(Dentry, Dentry);
+                    vfs_transient_remove_path_type_checked(VfsCore);
+                    vfs_transient_remove_path_failure_atomic(VfsCore);
+                    vfs_transient_remove_path_rejects_read_only_backing(VfsCore);
+                    vfs_transient_remove_preserves_open_file_storage(VfsCore, File);
+                }
+            }
+
+            Action::StatFsPath {
+                state_effect: StateEffect::None;
+                depends_on {
+                    VfsCore.state == State::Ready;
+                    Ext2FileSystem.state == State::Online;
+                    dentry_positive(Dentry);
+                    mount_ext2_type_bound(Mount);
+                }
+                drives {
+                    VfsCore.Action::WalkPath(Path, FsStruct);
+                }
+                ensures {
+                    vfs_statfs_path_resolves_superblock(VfsCore, Dentry, SuperBlock);
+                    vfs_statfs_ext2_reports_bound_metadata(VfsCore, Ext2FileSystem);
+                    vfs_statfs_unmodeled_accounting_zero(VfsCore);
                 }
             }
 
             Action::CreateFile {
                 state_effect: StateEffect::None;
                 depends_on {
+                    VfsCore.state == State::Ready;
                     dentry_positive(Dentry);
                     inode_kind_is(Inode, VfsInodeKind::Directory);
                 }
@@ -550,7 +702,13 @@ object VfsCore: ResourceObject {
                 ensures {
                     inode_kind_is(Inode, VfsInodeKind::RegularFile);
                     inode_file_data_ready(Inode);
+                    inode_transient_memory_backed(Inode);
                     dentry_child_inserted(Dentry, Dentry);
+                    vfs_transient_regular_file_overlay_supported(VfsCore);
+                    vfs_transient_exclusive_create_checks_live_and_ext2(VfsCore);
+                    vfs_transient_regular_create_metadata_bound(VfsCore);
+                    vfs_transient_create_failure_atomic(VfsCore);
+                    vfs_transient_allocation_failure_reports_no_space(VfsCore);
                 }
             }
 
@@ -726,6 +884,8 @@ object VfsCore: ResourceObject {
                 }
                 ensures {
                     dentry_child_removed(Dentry, Dentry);
+                    vfs_transient_remove_path_failure_atomic(VfsCore);
+                    vfs_transient_remove_preserves_open_file_storage(VfsCore, File);
                 }
             }
         }

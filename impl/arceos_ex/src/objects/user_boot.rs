@@ -5,7 +5,7 @@ use core::{
     sync::atomic::{AtomicU8, Ordering},
 };
 
-#[cfg(app_user_boot)]
+#[cfg(any(app_user_boot, checkpoint_handler_user_syscall_error))]
 use core::sync::atomic::AtomicUsize;
 
 use crate::arch::riscv64::csr;
@@ -26,8 +26,9 @@ pub use super::elf_object::{
     USER_INTERPRETER_LOAD_BIAS, USER_MAIN_PIE_LOAD_BIAS, contains_bytes,
 };
 use super::{
+    cpu::CpuRef,
     exception_type::{ExceptionType, SyscallTable},
-    files::{FilesStruct, FilesStructSnapshot},
+    files::{FileError, FilesStruct, FilesStructSnapshot},
     kernel_image::KernelImage,
     mm_core::{
         GfpFlags, KernelGlobalAllocator, PageAllocator, PageMetadataMap, PageRef, UserFrameRef,
@@ -254,6 +255,9 @@ pub enum UserProcessGroupUpdate {
 pub enum UserMmapError {
     Invalid,
     NoMemory,
+    BadFd,
+    AccessDenied,
+    NoDevice,
 }
 
 fn pid_t_arg(value: usize) -> i32 {
@@ -320,6 +324,98 @@ impl UserCompletedChildRecord {
 
 const USER_TASK_KERNEL_STACK_WORDS: usize = 4096;
 
+#[derive(Clone, Copy)]
+struct UserCredentials {
+    uid: usize,
+    gid: usize,
+    euid: usize,
+    egid: usize,
+    suid: usize,
+    sgid: usize,
+    fsuid: usize,
+    fsgid: usize,
+    supplementary_group_count: usize,
+    supplementary_groups: [usize; USER_SUPPLEMENTARY_GROUP_MAX],
+}
+
+impl UserCredentials {
+    const fn root() -> Self {
+        Self {
+            uid: 0,
+            gid: 0,
+            euid: 0,
+            egid: 0,
+            suid: 0,
+            sgid: 0,
+            fsuid: 0,
+            fsgid: 0,
+            supplementary_group_count: 0,
+            supplementary_groups: [0; USER_SUPPLEMENTARY_GROUP_MAX],
+        }
+    }
+
+    fn from_pid1(state: &KernelInitTaskUserState) -> Option<Self> {
+        state.credentials_syscall_ready().then_some(Self {
+            uid: state.uid,
+            gid: state.gid,
+            euid: state.euid,
+            egid: state.egid,
+            suid: state.suid,
+            sgid: state.sgid,
+            fsuid: state.fsuid,
+            fsgid: state.fsgid,
+            supplementary_group_count: state.supplementary_group_count,
+            supplementary_groups: state.supplementary_groups,
+        })
+    }
+
+    fn set_uid_root_slice(&mut self, uid: usize) -> bool {
+        if self.euid != 0 || uid > u32::MAX as usize {
+            return false;
+        }
+        self.uid = uid;
+        self.euid = uid;
+        self.suid = uid;
+        self.fsuid = uid;
+        true
+    }
+
+    fn set_gid_root_slice(&mut self, gid: usize) -> bool {
+        if self.euid != 0 || gid > u32::MAX as usize {
+            return false;
+        }
+        self.gid = gid;
+        self.egid = gid;
+        self.sgid = gid;
+        self.fsgid = gid;
+        true
+    }
+
+    fn set_supplementary_groups_root_slice(
+        &mut self,
+        size: usize,
+        first_gid: Option<usize>,
+    ) -> bool {
+        if self.euid != 0 || size > USER_SUPPLEMENTARY_GROUP_MAX {
+            return false;
+        }
+        let gid = if size == 1 {
+            let Some(gid) = first_gid else {
+                return false;
+            };
+            gid
+        } else {
+            0
+        };
+        self.supplementary_groups = [0; USER_SUPPLEMENTARY_GROUP_MAX];
+        self.supplementary_group_count = size;
+        if size == 1 {
+            self.supplementary_groups[0] = gid;
+        }
+        true
+    }
+}
+
 #[repr(C, align(16))]
 struct UserTaskKernelStack {
     words: [usize; USER_TASK_KERNEL_STACK_WORDS],
@@ -341,6 +437,8 @@ struct UserTaskStorageSlot {
     files_struct: MaybeUninit<FilesStruct>,
     fs_struct: MaybeUninit<FsStruct>,
     process_resources_present: bool,
+    credentials: UserCredentials,
+    credentials_present: bool,
     mm_present: bool,
     shared_mm_owner_ref: TaskRef,
     vfork_parent_ref: TaskRef,
@@ -414,6 +512,8 @@ impl UserTaskStorageCell {
             core::ptr::addr_of_mut!((*slot).files_struct).write(MaybeUninit::uninit());
             core::ptr::addr_of_mut!((*slot).fs_struct).write(MaybeUninit::uninit());
             core::ptr::addr_of_mut!((*slot).process_resources_present).write(false);
+            core::ptr::addr_of_mut!((*slot).credentials).write(UserCredentials::root());
+            core::ptr::addr_of_mut!((*slot).credentials_present).write(false);
             core::ptr::addr_of_mut!((*slot).mm_present).write(false);
             core::ptr::addr_of_mut!((*slot).shared_mm_owner_ref).write(TaskRef::NONE);
             core::ptr::addr_of_mut!((*slot).vfork_parent_ref).write(TaskRef::NONE);
@@ -456,6 +556,8 @@ static USER_MEMORY_STATE_LOCK: super::irq_spinlock::IrqSpinLock<()> =
     super::irq_spinlock::IrqSpinLock::new(());
 static USER_FILES_STATE_LOCK: super::irq_spinlock::IrqSpinLock<()> =
     super::irq_spinlock::IrqSpinLock::new(());
+static USER_CREDENTIALS_STATE_LOCK: super::irq_spinlock::IrqSpinLock<()> =
+    super::irq_spinlock::IrqSpinLock::new(());
 
 pub(crate) fn lock_user_memory_state() -> super::irq_spinlock::IrqSpinLockGuard<'static, ()> {
     USER_MEMORY_STATE_LOCK.lock()
@@ -463,6 +565,10 @@ pub(crate) fn lock_user_memory_state() -> super::irq_spinlock::IrqSpinLockGuard<
 
 pub(crate) fn lock_user_files_state() -> super::irq_spinlock::IrqSpinLockGuard<'static, ()> {
     USER_FILES_STATE_LOCK.lock()
+}
+
+pub(crate) fn lock_user_credentials_state() -> super::irq_spinlock::IrqSpinLockGuard<'static, ()> {
+    USER_CREDENTIALS_STATE_LOCK.lock()
 }
 
 struct UserTaskStorageHandle;
@@ -550,6 +656,69 @@ pub(crate) fn smp_task_mut_by_ref_on_cpu(
     // SAFETY: the registry fixes this slot to logical_id for its full live
     // occurrence, making that CPU the sole post-publication mutable owner.
     Some(&mut USER_TASK_STORAGE[index].get_mut()?.task)
+}
+
+pub(crate) fn smp_terminal_task_ready(task_ref: TaskRef, cpu_ref: CpuRef) -> bool {
+    let Some(index) = task_ref.user_slot() else {
+        return false;
+    };
+    let Some(slot) = USER_TASK_STORAGE
+        .get(index)
+        .and_then(UserTaskStorageCell::get)
+    else {
+        return false;
+    };
+    global_registry().slot_state(task_ref) == Some(UserProcessSlotState::Zombie)
+        && global_registry().cpu_ref(task_ref) == Some(cpu_ref)
+        && slot.occupied
+        && slot.task_ref().same_identity(task_ref)
+        && slot.task.flow_cpu_ref() == Some(cpu_ref)
+        && slot.runtime.state() == State::Destroyed
+        && slot.task.flow_state() == State::Destroyed
+        && slot.task.state() == State::OnCpu
+        && slot.task.on_cpu()
+}
+
+pub(crate) fn cleanup_smp_terminal_task_after_switch(
+    task_ref: TaskRef,
+    cpu_ref: CpuRef,
+) -> EventResult {
+    let Some(index) = task_ref.user_slot() else {
+        return failed_condition(
+            LifecycleEvent::Cleanup,
+            State::Destroyed,
+            State::Offline,
+            State::Destroyed,
+        );
+    };
+    let Some(slot) = USER_TASK_STORAGE[index].get_mut() else {
+        return failed_condition(
+            LifecycleEvent::Cleanup,
+            State::Destroyed,
+            State::Offline,
+            State::Destroyed,
+        );
+    };
+    if global_registry().slot_state(task_ref) != Some(UserProcessSlotState::Zombie)
+        || global_registry().cpu_ref(task_ref) != Some(cpu_ref)
+        || !slot.occupied
+        || !slot.task_ref().same_identity(task_ref)
+        || slot.task.flow_cpu_ref() != Some(cpu_ref)
+        || slot.runtime.state() != State::Destroyed
+        || slot.task.flow_state() != State::Destroyed
+        || slot.task.state() != State::Offline
+        || slot.task.on_cpu()
+        || slot.task.running()
+        || slot.task.runqueue_published()
+    {
+        return failed_condition(
+            LifecycleEvent::Cleanup,
+            slot.task.state(),
+            State::Offline,
+            State::Destroyed,
+        );
+    }
+    slot.task.cleanup()
 }
 
 #[derive(Clone, Copy)]
@@ -692,6 +861,125 @@ pub(crate) fn current_smp_user_task() -> Option<(TaskRef, super::cpu::CpuRef)> {
     None
 }
 
+fn current_user_credentials_identity() -> Option<(TaskRef, super::cpu::CpuRef)> {
+    if let Some(identity) = current_smp_user_task() {
+        return Some(identity);
+    }
+    let task_ref = crate::context::context_ref().current_task_ref().ok()?;
+    task_ref
+        .same_identity(TaskRef::KERNEL_INIT)
+        .then_some((task_ref, super::cpu::CpuRef::new(0)))
+}
+
+fn with_current_user_credentials<R>(
+    pid1: impl FnOnce(&mut KernelInitTaskUserState) -> Option<R>,
+    dynamic: impl FnOnce(&mut UserCredentials) -> Option<R>,
+) -> Option<R> {
+    let (task_ref, cpu_ref) = current_user_credentials_identity()?;
+    let _lease = global_registry().acquire(task_ref, cpu_ref)?;
+    let _credentials_guard = lock_user_credentials_state();
+    if task_ref.same_identity(TaskRef::KERNEL_INIT) {
+        return pid1(&mut crate::context::context().kernel_init_user_state);
+    }
+    let slot = USER_TASK_STORAGE.get(task_ref.user_slot()?)?.get_mut()?;
+    if !slot.occupied
+        || !slot.credentials_present
+        || !slot.task_ref().same_identity(task_ref)
+        || slot.task.flow_cpu_ref() != Some(cpu_ref)
+    {
+        return None;
+    }
+    dynamic(&mut slot.credentials)
+}
+
+pub(crate) fn current_user_uid() -> Option<usize> {
+    with_current_user_credentials(KernelInitTaskUserState::read_uid, |credentials| {
+        Some(credentials.uid)
+    })
+}
+
+pub(crate) fn current_user_euid() -> Option<usize> {
+    with_current_user_credentials(KernelInitTaskUserState::read_euid, |credentials| {
+        Some(credentials.euid)
+    })
+}
+
+pub(crate) fn current_user_gid() -> Option<usize> {
+    with_current_user_credentials(KernelInitTaskUserState::read_gid, |credentials| {
+        Some(credentials.gid)
+    })
+}
+
+pub(crate) fn current_user_fs_identity() -> Option<(u32, u32)> {
+    with_current_user_credentials(
+        |state| {
+            (state.credentials_syscall_ready()
+                && state.fsuid <= u32::MAX as usize
+                && state.fsgid <= u32::MAX as usize)
+                .then_some((state.fsuid as u32, state.fsgid as u32))
+        },
+        |credentials| {
+            (credentials.fsuid <= u32::MAX as usize && credentials.fsgid <= u32::MAX as usize)
+                .then_some((credentials.fsuid as u32, credentials.fsgid as u32))
+        },
+    )
+}
+
+pub(crate) fn current_user_egid() -> Option<usize> {
+    with_current_user_credentials(KernelInitTaskUserState::read_egid, |credentials| {
+        Some(credentials.egid)
+    })
+}
+
+pub(crate) fn current_user_resuid() -> Option<(usize, usize, usize)> {
+    with_current_user_credentials(KernelInitTaskUserState::read_resuid, |credentials| {
+        Some((credentials.uid, credentials.euid, credentials.suid))
+    })
+}
+
+pub(crate) fn current_user_resgid() -> Option<(usize, usize, usize)> {
+    with_current_user_credentials(KernelInitTaskUserState::read_resgid, |credentials| {
+        Some((credentials.gid, credentials.egid, credentials.sgid))
+    })
+}
+
+pub(crate) fn current_user_supplementary_groups()
+-> Option<(usize, [usize; USER_SUPPLEMENTARY_GROUP_MAX])> {
+    with_current_user_credentials(
+        KernelInitTaskUserState::read_supplementary_groups,
+        |credentials| {
+            Some((
+                credentials.supplementary_group_count,
+                credentials.supplementary_groups,
+            ))
+        },
+    )
+}
+
+pub(crate) fn current_user_set_uid_root_slice(uid: usize) -> bool {
+    with_current_user_credentials(
+        |state| Some(state.set_uid_root_slice(uid)),
+        |credentials| Some(credentials.set_uid_root_slice(uid)),
+    ) == Some(true)
+}
+
+pub(crate) fn current_user_set_gid_root_slice(gid: usize) -> bool {
+    with_current_user_credentials(
+        |state| Some(state.set_gid_root_slice(gid)),
+        |credentials| Some(credentials.set_gid_root_slice(gid)),
+    ) == Some(true)
+}
+
+pub(crate) fn current_user_set_supplementary_groups_root_slice(
+    size: usize,
+    first_gid: Option<usize>,
+) -> bool {
+    with_current_user_credentials(
+        |state| Some(state.set_supplementary_groups_root_slice(size, first_gid)),
+        |credentials| Some(credentials.set_supplementary_groups_root_slice(size, first_gid)),
+    ) == Some(true)
+}
+
 pub(crate) fn current_smp_user_mm_task() -> Option<(TaskRef, super::cpu::CpuRef)> {
     let binding = current_smp_effective_mm_binding()?;
     Some((binding.current_ref, binding.cpu_ref))
@@ -739,6 +1027,34 @@ fn prepare_reserved_process_resources(
     parent_files: &FilesStruct,
     parent_fs: &FsStruct,
 ) -> bool {
+    let Some(parent_ref) = global_registry().reserved_parent_task_ref(task_ref) else {
+        return false;
+    };
+    let Some(parent_cpu) = global_registry().cpu_ref(parent_ref) else {
+        return false;
+    };
+    let Some(_parent_lease) = global_registry().acquire(parent_ref, parent_cpu) else {
+        return false;
+    };
+    let parent_credentials = {
+        let _credentials_guard = lock_user_credentials_state();
+        if parent_ref.same_identity(TaskRef::KERNEL_INIT) {
+            UserCredentials::from_pid1(&crate::context::context_ref().kernel_init_user_state)
+        } else {
+            parent_ref.user_slot().and_then(|index| {
+                USER_TASK_STORAGE.get(index)?.get().and_then(|parent| {
+                    (parent.occupied
+                        && parent.credentials_present
+                        && parent.task_ref().same_identity(parent_ref)
+                        && parent.task.flow_cpu_ref() == Some(parent_cpu))
+                    .then_some(parent.credentials)
+                })
+            })
+        }
+    };
+    let Some(parent_credentials) = parent_credentials else {
+        return false;
+    };
     let Some(slot) = task_ref
         .user_slot()
         .and_then(|index| USER_TASK_STORAGE[index].get_mut())
@@ -748,6 +1064,7 @@ fn prepare_reserved_process_resources(
     if !slot.reserved
         || slot.occupied
         || slot.process_resources_present
+        || slot.credentials_present
         || !slot.task_ref().same_identity(task_ref)
         || parent_files.state() != State::Ready
         || parent_fs.state() != State::Ready
@@ -767,6 +1084,8 @@ fn prepare_reserved_process_resources(
     if !unsafe { slot.files_struct.assume_init_mut() }.fork_acquire_shared_resources() {
         return false;
     }
+    slot.credentials = parent_credentials;
+    slot.credentials_present = true;
     slot.process_resources_present = true;
     true
 }
@@ -777,7 +1096,11 @@ fn release_slot_process_shared_resources(slot: &mut UserTaskStorageSlot) -> bool
     }
     // SAFETY: process_resources_present is set only after the in-place copy
     // and shared-resource acquisition both complete.
-    unsafe { slot.files_struct.assume_init_mut() }.release_shared_resources()
+    let released = unsafe { slot.files_struct.assume_init_mut() }.release_shared_resources();
+    if released {
+        slot.process_resources_present = false;
+    }
+    released
 }
 
 fn clear_slot_process_resources(slot: &mut UserTaskStorageSlot) -> bool {
@@ -785,6 +1108,8 @@ fn clear_slot_process_resources(slot: &mut UserTaskStorageSlot) -> bool {
         return false;
     }
     slot.process_resources_present = false;
+    slot.credentials = UserCredentials::root();
+    slot.credentials_present = false;
     true
 }
 
@@ -824,6 +1149,7 @@ fn reserve_current_smp_fork_task(
     if slot.reserved
         || slot.occupied
         || slot.mm_present
+        || slot.credentials_present
         || slot.shared_mm_owner_ref.is_valid()
         || slot.vfork_parent_ref.is_valid()
         || slot.vfork_parent_wake_reservation.is_some()
@@ -842,6 +1168,8 @@ fn reserve_current_smp_fork_task(
     slot.exec_interpreter = ElfObject::new();
     slot.exec_trap_frame = UserTrapFrame::new();
     slot.process_resources_present = false;
+    slot.credentials = UserCredentials::root();
+    slot.credentials_present = false;
     slot.shared_mm_owner_ref = TaskRef::NONE;
     slot.vfork_parent_ref = TaskRef::NONE;
     slot.vfork_parent_wake_reservation = None;
@@ -1000,6 +1328,7 @@ fn current_smp_fork_publish_ready(
         && slot.runtime.state() == State::Base
         && mm_ready
         && slot.process_resources_present
+        && slot.credentials_present
         && slot.inbox_reservation.is_some()
         && global_registry().slot_state(task_ref) == Some(UserProcessSlotState::Reserved)
         && global_registry().cpu_ref(task_ref) == candidate.task.flow_cpu_ref()
@@ -1082,6 +1411,7 @@ pub(crate) fn fork_current_smp_user(
                     .flow_ref()
                     .same_identity(parent.task.flow_ref())
                 || !parent.process_resources_present
+                || !parent.credentials_present
             {
                 trace_current_smp_fork_parent_failure("task_runtime_state");
                 return Err(CurrentSmpForkError::InvalidParent);
@@ -1487,6 +1817,7 @@ pub(crate) fn vfork_current_smp_user(
             || parent.runtime.state() != State::Online
             || !parent.runtime.task_ref_owner().same_identity(parent_ref)
             || !parent.process_resources_present
+            || !parent.credentials_present
         {
             if let Some(fd) = pidfd_fd {
                 let _ = unsafe { parent.files_struct.assume_init_mut() }.close_fd(fd);
@@ -1927,6 +2258,53 @@ pub(crate) fn smp_user_mmap(
     Some(unsafe { (&mut *address_space).user_mmap(addr, len, prot, flags, fd, offset) })
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn current_user_mmap_shared_regular(
+    addr: usize,
+    len: usize,
+    prot: usize,
+    flags: usize,
+    fd: usize,
+    offset: usize,
+) -> Result<usize, UserMmapError> {
+    let _memory_guard = lock_user_memory_state();
+    let address_space = if let Some(binding) = current_smp_effective_mm_binding() {
+        smp_effective_mm_resource_ptrs(binding)
+            .map(|(address_space, _)| address_space)
+            .ok_or(UserMmapError::NoMemory)?
+    } else {
+        &mut crate::context::context().user_address_space as *mut UserAddressSpace
+    };
+    let _files_guard = lock_user_files_state();
+    let files_struct = current_user_files_struct();
+    let mut file_bytes = [0u8; USER_PAGE_SIZE];
+    let ctx = crate::context::context();
+    files_struct
+        .read_shared_mmap_fd(fd, prot & 0x2 != 0, offset, &mut file_bytes, &ctx.vfs_core)
+        .map_err(|error| match error {
+            FileError::BadFd => UserMmapError::BadFd,
+            FileError::PermissionDenied | FileError::NotReadable | FileError::NotWritable => {
+                UserMmapError::AccessDenied
+            }
+            FileError::InvalidArgument => UserMmapError::Invalid,
+            _ => UserMmapError::NoDevice,
+        })?;
+    // SAFETY: the memory lock owns the generation/CPU-checked current mm;
+    // the files lock keeps its fd/VFS seed stable until publication.
+    unsafe {
+        (&mut *address_space).user_mmap_shared_regular(
+            addr,
+            len,
+            prot,
+            flags,
+            offset,
+            &file_bytes,
+            &mut ctx.page_allocator,
+            &ctx.page_metadata_map,
+        )
+    }
+}
+
 pub(crate) fn smp_user_mprotect(task_ref: TaskRef, addr: usize, len: usize) -> Option<bool> {
     let binding = current_smp_effective_mm_binding()?;
     if !binding.current_ref.same_identity(task_ref) {
@@ -1953,6 +2331,33 @@ pub(crate) fn smp_user_munmap(task_ref: TaskRef, addr: usize, len: usize) -> Opt
     Some(unsafe { (&mut *address_space).user_munmap(addr, len, page_allocator, page_metadata_map) })
 }
 
+fn cleanup_current_smp_user_runtime_and_flow_for_exit(task_ref: TaskRef) -> bool {
+    let Some(index) = task_ref.user_slot() else {
+        return false;
+    };
+    let Some(slot) = USER_TASK_STORAGE[index].get_mut() else {
+        return false;
+    };
+    if !slot.occupied
+        || !slot.task_ref().same_identity(task_ref)
+        || slot.task.state() != State::OnCpu
+        || slot.runtime.state() != State::Online
+        || slot.task.flow_state() != State::Online
+    {
+        return false;
+    }
+    if slot
+        .runtime
+        .cleanup_dynamic(&slot.task, slot.task.embedded_flow())
+        .is_err()
+        || slot.task.disable_embedded_flow_for_exit().is_err()
+        || slot.task.cleanup_embedded_flow().is_err()
+    {
+        return false;
+    }
+    slot.runtime.state() == State::Destroyed && slot.task.flow_state() == State::Destroyed
+}
+
 pub(crate) fn exit_current_smp_user_task(exit_status: usize) -> ! {
     let Some((task_ref, cpu_ref)) = current_smp_user_task() else {
         user_boot_panic("SMP user exit identity failed\n");
@@ -1966,11 +2371,25 @@ pub(crate) fn exit_current_smp_user_task(exit_status: usize) -> ! {
     }) else {
         user_boot_panic("SMP user wait status encoding failed\n");
     };
-    if crate::context::disable_smp_task_flow_for_exit(cpu_ref.logical_id(), task_ref).is_err()
-        || crate::context::declare_smp_task_sleep(cpu_ref.logical_id(), task_ref).is_err()
-    {
-        user_boot_panic("SMP user terminal state failed\n");
+    print_user_process_lifecycle_diagnostic("exit-entry", task_ref, cpu_ref, wait_status);
+    if !cleanup_current_smp_user_runtime_and_flow_for_exit(task_ref) {
+        user_boot_panic("SMP user terminal Runtime/Flow cleanup failed\n");
     }
+    print_user_process_lifecycle_diagnostic(
+        "runtime-flow-destroyed",
+        task_ref,
+        cpu_ref,
+        wait_status,
+    );
+    if crate::context::declare_smp_task_sleep(cpu_ref.logical_id(), task_ref).is_err() {
+        user_boot_panic("SMP user terminal sleep state failed\n");
+    }
+    print_user_process_lifecycle_diagnostic(
+        "terminal-sleep-declared",
+        task_ref,
+        cpu_ref,
+        wait_status,
+    );
     {
         let _files_guard = lock_user_files_state();
         let Some(index) = task_ref.user_slot() else {
@@ -1984,6 +2403,12 @@ pub(crate) fn exit_current_smp_user_task(exit_status: usize) -> ! {
             user_boot_panic("SMP user shared files release failed\n");
         }
     }
+    print_user_process_lifecycle_diagnostic(
+        "shared-resources-released",
+        task_ref,
+        cpu_ref,
+        wait_status,
+    );
     let swapper_satp = crate::context::context_ref().vm.swapper_vm().satp();
     if swapper_satp == 0 {
         user_boot_panic("SMP user SwapperVm SATP missing\n");
@@ -1993,12 +2418,11 @@ pub(crate) fn exit_current_smp_user_task(exit_status: usize) -> ! {
     if crate::arch::riscv64::csr::read_satp() != swapper_satp {
         user_boot_panic("SMP user SwapperVm SATP handoff failed\n");
     }
-    let Some(parent_cpu_ref) = global_registry().parent_cpu_ref(task_ref) else {
-        user_boot_panic("SMP user parent CPU lookup failed\n");
-    };
+    print_user_process_lifecycle_diagnostic("swapper-active", task_ref, cpu_ref, wait_status);
     if !global_registry().publish_zombie(task_ref, wait_status) {
         user_boot_panic("SMP user zombie publication failed\n");
     }
+    print_user_process_lifecycle_diagnostic("zombie-published", task_ref, cpu_ref, wait_status);
     let parent_ref = global_registry()
         .parent_task_ref(task_ref)
         .unwrap_or_else(|| user_boot_panic("SMP user parent identity lookup failed\n"));
@@ -2014,21 +2438,162 @@ pub(crate) fn exit_current_smp_user_task(exit_status: usize) -> ! {
             );
         }
     }
-    let vfork_parent_woken = publish_current_smp_vfork_parent_wake(false)
+    let _vfork_parent_woken = publish_current_smp_vfork_parent_wake(false)
         .unwrap_or_else(|_| user_boot_panic("SMP vfork exit parent wake failed\n"));
-    if !vfork_parent_woken {
-        let Some(parent_hartid) = global_registry().hartid_for_cpu(parent_cpu_ref) else {
-            user_boot_panic("SMP user parent hart lookup failed\n");
-        };
-        if crate::arch::riscv64::sbi::send_ipi(parent_hartid).is_err() {
-            user_boot_panic("SMP user parent wake failed\n");
-        }
-    }
-    if let Err(error) = crate::context::schedule_smp_current(cpu_ref.logical_id(), task_ref) {
+    print_user_process_lifecycle_diagnostic(
+        "terminal-schedule-enter",
+        task_ref,
+        cpu_ref,
+        wait_status,
+    );
+    if let Err(error) = crate::context::schedule_smp_terminal(cpu_ref.logical_id(), task_ref) {
         crate::phases::print_event_error(error);
         user_boot_panic("SMP user terminal schedule failed\n");
     }
     user_boot_panic("SMP user terminal schedule returned\n")
+}
+
+#[cfg(checkpoint_handler_user_syscall_error)]
+pub(crate) fn print_user_process_lifecycle_diagnostic(
+    stage: &str,
+    task_ref: TaskRef,
+    cpu_ref: CpuRef,
+    wait_status: usize,
+) {
+    let registry = global_registry();
+    let pid = registry.pid(task_ref).unwrap_or(0);
+    let parent_task_ref = registry.parent_task_ref(task_ref).unwrap_or(TaskRef::NONE);
+    let parent_pid = registry.parent_pid(task_ref).unwrap_or(0);
+    let state = match registry.slot_state(task_ref) {
+        Some(UserProcessSlotState::Reserved) => "reserved",
+        Some(UserProcessSlotState::Published) => "published",
+        Some(UserProcessSlotState::Zombie) => "zombie",
+        Some(UserProcessSlotState::Reaping) => "reaping",
+        Some(UserProcessSlotState::Empty) | None => "empty",
+    };
+    crate::arch::riscv64::sbi::write_record(format_args!(
+        "user process lifecycle stage={} task_slot={} task_generation={} pid={} cpu={} parent_slot={} parent_generation={} parent_pid={} registry_state={} wait_status={}\n",
+        stage,
+        task_ref.slot(),
+        task_ref.generation(),
+        pid,
+        cpu_ref.logical_id(),
+        parent_task_ref.slot(),
+        parent_task_ref.generation(),
+        parent_pid,
+        state,
+        wait_status,
+    ));
+}
+
+#[cfg(not(checkpoint_handler_user_syscall_error))]
+pub(crate) fn print_user_process_lifecycle_diagnostic(
+    _stage: &str,
+    _task_ref: TaskRef,
+    _cpu_ref: CpuRef,
+    _wait_status: usize,
+) {
+}
+
+#[allow(dead_code)]
+struct UserProcessReapDiagnostic {
+    occupied: bool,
+    identity_matches: bool,
+    registry_is_zombie: bool,
+    runtime_state: State,
+    task_state: State,
+    flow_state: State,
+    task_running: bool,
+    runqueue_published: bool,
+}
+
+#[allow(dead_code)]
+struct UserProcessReapPostMmDiagnostic {
+    inactive_address_space_state: State,
+    inactive_stack_state: State,
+    shared_mm_owner_valid: bool,
+    vfork_parent_valid: bool,
+    vfork_parent_wake_reserved: bool,
+    process_resources_present: bool,
+    process_shared_resources_released: bool,
+}
+
+#[cfg(checkpoint_handler_user_syscall_error)]
+static USER_PROCESS_REAP_REJECTION_GENERATIONS: [AtomicUsize; USER_TASK_SLOT_COUNT] =
+    [const { AtomicUsize::new(0) }; USER_TASK_SLOT_COUNT];
+
+#[cfg(checkpoint_handler_user_syscall_error)]
+fn print_user_process_reap_rejection_diagnostic(
+    stage: &str,
+    task_ref: TaskRef,
+    diagnostic: UserProcessReapDiagnostic,
+) {
+    let Some(index) = task_ref.user_slot() else {
+        return;
+    };
+    if USER_PROCESS_REAP_REJECTION_GENERATIONS[index]
+        .swap(task_ref.generation() as usize, Ordering::AcqRel)
+        == task_ref.generation() as usize
+    {
+        return;
+    }
+    crate::arch::riscv64::sbi::write_record(format_args!(
+        "user process reap rejected stage={} task_slot={} task_generation={} occupied={} identity_matches={} registry_is_zombie={} runtime_state={} task_state={} flow_state={} running={} runqueue_published={}\n",
+        stage,
+        task_ref.slot(),
+        task_ref.generation(),
+        diagnostic.occupied,
+        diagnostic.identity_matches,
+        diagnostic.registry_is_zombie,
+        diagnostic.runtime_state as u8,
+        diagnostic.task_state as u8,
+        diagnostic.flow_state as u8,
+        diagnostic.task_running,
+        diagnostic.runqueue_published,
+    ));
+}
+
+#[cfg(checkpoint_handler_user_syscall_error)]
+fn print_user_process_reap_post_mm_rejection_diagnostic(
+    task_ref: TaskRef,
+    diagnostic: UserProcessReapPostMmDiagnostic,
+) {
+    let Some(index) = task_ref.user_slot() else {
+        return;
+    };
+    if USER_PROCESS_REAP_REJECTION_GENERATIONS[index]
+        .swap(task_ref.generation() as usize, Ordering::AcqRel)
+        == task_ref.generation() as usize
+    {
+        return;
+    }
+    crate::arch::riscv64::sbi::write_record(format_args!(
+        "user process reap rejected stage=post-mm task_slot={} task_generation={} inactive_address_space_state={} inactive_stack_state={} shared_mm_owner_valid={} vfork_parent_valid={} vfork_parent_wake_reserved={} process_resources_present={} process_shared_resources_released={}\n",
+        task_ref.slot(),
+        task_ref.generation(),
+        diagnostic.inactive_address_space_state as u8,
+        diagnostic.inactive_stack_state as u8,
+        diagnostic.shared_mm_owner_valid,
+        diagnostic.vfork_parent_valid,
+        diagnostic.vfork_parent_wake_reserved,
+        diagnostic.process_resources_present,
+        diagnostic.process_shared_resources_released,
+    ));
+}
+
+#[cfg(not(checkpoint_handler_user_syscall_error))]
+fn print_user_process_reap_post_mm_rejection_diagnostic(
+    _task_ref: TaskRef,
+    _diagnostic: UserProcessReapPostMmDiagnostic,
+) {
+}
+
+#[cfg(not(checkpoint_handler_user_syscall_error))]
+fn print_user_process_reap_rejection_diagnostic(
+    _stage: &str,
+    _task_ref: TaskRef,
+    _diagnostic: UserProcessReapDiagnostic,
+) {
 }
 
 extern "C" fn user_task_entry() -> ! {
@@ -2472,6 +3037,7 @@ pub enum UserMappingKind {
     Stack,
     Heap,
     AnonymousPrivate,
+    FileShared,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -2961,6 +3527,26 @@ impl UserMapping {
         self.user_accessible = true;
         self.bss_zero_bytes = memsz;
         self.bss_bytes_zeroed = memsz;
+        self.page_table_entry_bound = true;
+    }
+
+    fn init_file_shared(
+        &mut self,
+        vaddr: usize,
+        memsz: usize,
+        readable: bool,
+        writable: bool,
+        executable: bool,
+    ) {
+        self.reset_empty();
+        self.kind = UserMappingKind::FileShared;
+        self.vaddr = vaddr;
+        self.memsz = memsz;
+        self.filesz = memsz;
+        self.readable = readable;
+        self.writable = writable;
+        self.executable = executable;
+        self.user_accessible = true;
         self.page_table_entry_bound = true;
     }
 
@@ -4016,6 +4602,93 @@ impl UserAddressSpace {
         Ok(base)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn user_mmap_shared_regular(
+        &mut self,
+        addr: usize,
+        len: usize,
+        prot: usize,
+        flags: usize,
+        offset: usize,
+        file_bytes: &[u8],
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) -> Result<usize, UserMmapError> {
+        const PROT_READ: usize = 0x1;
+        const PROT_WRITE: usize = 0x2;
+        const MAP_SHARED: usize = 0x01;
+        if self.lifecycle.state() != State::Online
+            || !self.heap_mapped
+            || len != USER_PAGE_SIZE
+            || file_bytes.len() != USER_PAGE_SIZE
+            || prot != PROT_READ | PROT_WRITE
+            || flags != MAP_SHARED
+            || !offset.is_multiple_of(USER_PAGE_SIZE)
+        {
+            return Err(UserMmapError::Invalid);
+        }
+
+        let mmap_start = self.heap_base + self.heap_size / 2;
+        let heap_end = self.heap_base + self.heap_size;
+        let base = if addr == 0 {
+            self.first_available_mmap_range(mmap_start, heap_end, len)
+                .ok_or(UserMmapError::NoMemory)?
+        } else {
+            align_down(addr, USER_PAGE_SIZE)
+        };
+        let end = base.checked_add(len).ok_or(UserMmapError::NoMemory)?;
+        if base < mmap_start || end > heap_end || self.vma_overlaps(base, end) {
+            return Err(UserMmapError::NoMemory);
+        }
+        let mapping_index = self
+            .first_empty_mapping_slot()
+            .or_else(|| (self.mapping_count < MAX_USER_MAPPINGS).then_some(self.mapping_count))
+            .ok_or(UserMmapError::NoMemory)?;
+
+        let frame = page_allocator
+            .alloc_user_frame(GfpFlags::kernel(), page_metadata_map)
+            .ok_or(UserMmapError::NoMemory)?;
+        let page = frame.page();
+        let Some(linear) = page_metadata_map.page_address(page) else {
+            assert!(frame.release(page_allocator, page_metadata_map));
+            return Err(UserMmapError::NoMemory);
+        };
+        unsafe {
+            core::ptr::write_bytes(linear as *mut u8, 0, USER_PAGE_SIZE);
+            core::ptr::copy_nonoverlapping(file_bytes.as_ptr(), linear as *mut u8, USER_PAGE_SIZE);
+        }
+
+        let old_l0_count = self.page_table_l0_count;
+        if !self.install_user_leaf_pte(
+            base,
+            page.phys().value(),
+            true,
+            true,
+            false,
+            page_allocator,
+            page_metadata_map,
+        ) {
+            self.rollback_l0_tables(old_l0_count, page_allocator, page_metadata_map);
+            assert!(frame.release(page_allocator, page_metadata_map));
+            return Err(UserMmapError::NoMemory);
+        }
+
+        let mapping = &mut self.mappings[mapping_index];
+        mapping.init_file_shared(base, len, true, true, false);
+        mapping.backing_pages[0] = Some(frame);
+        mapping.backing_vaddrs[0] = base;
+        mapping.backing_page_count = 1;
+        mapping.file_bytes_copied = USER_PAGE_SIZE;
+        if mapping_index == self.mapping_count {
+            self.mapping_count += 1;
+        }
+        if addr == 0 {
+            self.mmap_next = end;
+        }
+        crate::arch::riscv64::csr::sfence_vma_addr(base);
+        Ok(base)
+    }
+
     pub fn user_mprotect(&self, addr: usize, len: usize) -> bool {
         self.user_range_mapped(addr, len)
     }
@@ -4042,8 +4715,10 @@ impl UserAddressSpace {
         let mut mapping_index = 0usize;
         while mapping_index < self.mapping_count {
             let mapping = &self.mappings[mapping_index];
-            if mapping.kind() == UserMappingKind::AnonymousPrivate
-                && mapping.mapped_start() == Some(addr)
+            if matches!(
+                mapping.kind(),
+                UserMappingKind::AnonymousPrivate | UserMappingKind::FileShared
+            ) && mapping.mapped_start() == Some(addr)
                 && mapping.mapped_end() == Some(end)
             {
                 break;
@@ -5241,7 +5916,7 @@ impl UserAddressSpace {
             let Some(virt) = self.mappings[mapping_index].backing_page_vaddr(page_index) else {
                 return false;
             };
-            let cow = cow_fork && writable;
+            let cow = cow_fork && writable && kind != UserMappingKind::FileShared;
             if !self.install_user_leaf_pte_flags(
                 virt,
                 page.phys().value(),
@@ -5388,6 +6063,8 @@ impl UserAddressSpace {
                         return false;
                     };
                     if user_leaf_pte_phys(pte) != Some(page.phys().value())
+                        || (mapping.kind() == UserMappingKind::FileShared
+                            && (!user_leaf_pte_is_writable(pte) || user_leaf_pte_is_cow(pte)))
                         || (mapping.writable()
                             && !user_leaf_pte_is_writable(pte)
                             && !user_leaf_pte_is_cow(pte))
@@ -5430,7 +6107,7 @@ impl UserAddressSpace {
             let readable = self.mappings[mapping_index].readable();
             let executable = self.mappings[mapping_index].executable();
             let backing_page_count = self.mappings[mapping_index].backing_page_count();
-            if kind != UserMappingKind::Stack && writable {
+            if kind != UserMappingKind::Stack && kind != UserMappingKind::FileShared && writable {
                 let mut page_index = 0usize;
                 while page_index < backing_page_count {
                     let page = self.mappings[mapping_index]
@@ -6562,6 +7239,15 @@ impl BuiltinGrandchildContinuation {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct MarkEnqueuedFailure {
+    pub first_failed: &'static str,
+    pub state_snapshot: State,
+    pub pid: usize,
+    pub active_task_record_available: bool,
+    pub active_task_ref: TaskRef,
+}
+
 pub struct UserTaskSet {
     set_lifecycle: Lifecycle,
     task_slots: UserTaskStorageHandle,
@@ -7456,6 +8142,7 @@ impl UserTaskSet {
         if slot.reserved
             || slot.occupied
             || slot.mm_present
+            || slot.credentials_present
             || slot.inactive_address_space.state() != State::Base
             || slot.inactive_stack.state() != State::Base
         {
@@ -7470,6 +8157,8 @@ impl UserTaskSet {
         slot.exec_interpreter = ElfObject::new();
         slot.exec_trap_frame = UserTrapFrame::new();
         slot.process_resources_present = false;
+        slot.credentials = UserCredentials::root();
+        slot.credentials_present = false;
         slot.initial_trap_frame = None;
         let reservation = match super::kernel_task::reserve_inbound(
             task_ref,
@@ -7605,6 +8294,7 @@ impl UserTaskSet {
             && slot.runtime.state() == State::Base
             && slot.mm_present
             && slot.process_resources_present
+            && slot.credentials_present
             && slot.inbox_reservation.is_some()
             && candidate.task.task_ref().same_identity(task_ref)
             && global_registry().slot_state(task_ref) == Some(UserProcessSlotState::Reserved)
@@ -7621,8 +8311,21 @@ impl UserTaskSet {
         parent_ref: TaskRef,
         same_cpu: bool,
         initial_trap_frame: TrapFrame,
+        parent_files: &FilesStruct,
+        parent_fs: &FsStruct,
     ) -> Option<TaskRef> {
         let task_ref = self.reserve_user_task(pid, parent_ref, same_cpu)?;
+        if !prepare_reserved_process_resources(task_ref, parent_files, parent_fs) {
+            let index = task_ref.user_slot()?;
+            let slot = &mut self.task_slots[index];
+            if let Some(reservation) = slot.inbox_reservation.take() {
+                assert!(super::kernel_task::rollback_reserved(reservation));
+            }
+            slot.reserved = false;
+            slot.pid = 0;
+            assert!(global_registry().rollback(task_ref));
+            return None;
+        }
         let candidate = match self.prepare_reserved_user_task_snapshot(task_ref) {
             Some(candidate) => candidate,
             None => {
@@ -7631,6 +8334,7 @@ impl UserTaskSet {
                 if let Some(reservation) = slot.inbox_reservation.take() {
                     assert!(super::kernel_task::rollback_reserved(reservation));
                 }
+                assert!(clear_slot_process_resources(slot));
                 slot.reserved = false;
                 slot.pid = 0;
                 assert!(global_registry().rollback(task_ref));
@@ -7713,6 +8417,16 @@ impl UserTaskSet {
             );
         }
         if self.last_exited_task_ref.same_identity(task_ref) {
+            if slot.runtime.state() != State::Destroyed
+                || slot.task.flow_state() != State::Destroyed
+            {
+                return failed_condition(
+                    LifecycleEvent::Cleanup,
+                    slot.task.state(),
+                    State::OnCpu,
+                    State::Destroyed,
+                );
+            }
             slot.task.disable()?;
             slot.task.cleanup()?;
         } else {
@@ -7803,7 +8517,9 @@ impl UserTaskSet {
         match global_registry().slot_state(task_ref) {
             Some(UserProcessSlotState::Published) => {
                 if !global_registry().publish_zombie(task_ref, 0)
-                    || !global_registry().publish_scheduler_quiesced(task_ref, cpu_ref)
+                    || global_registry()
+                        .publish_scheduler_quiesced(task_ref, cpu_ref)
+                        .is_none()
                     || !global_registry().reap(task_ref)
                 {
                     return false;
@@ -7847,23 +8563,37 @@ impl UserTaskSet {
             return false;
         };
         let slot = &mut self.task_slots[index];
+        let identity_matches = slot.task_ref().same_identity(task_ref);
+        let registry_is_zombie =
+            global_registry().slot_state(task_ref) == Some(UserProcessSlotState::Zombie);
+        let runtime_state = slot.runtime.state();
+        let task_state = slot.task.state();
+        let flow_state = slot.task.flow_state();
+        let task_running = slot.task.running();
+        let runqueue_published = slot.task.runqueue_published();
         if !slot.occupied
-            || !slot.task_ref().same_identity(task_ref)
-            || global_registry().slot_state(task_ref) != Some(UserProcessSlotState::Zombie)
-            || slot.task.state() != State::Online
-            || slot.task.flow_state() != State::Offline
-            || slot.task.running()
-            || slot.task.runqueue_published()
+            || !identity_matches
+            || !registry_is_zombie
+            || runtime_state != State::Destroyed
+            || task_state != State::Destroyed
+            || flow_state != State::Destroyed
+            || task_running
+            || runqueue_published
         {
-            return false;
-        }
-        if slot
-            .runtime
-            .cleanup_dynamic(&slot.task, slot.task.embedded_flow())
-            .is_err()
-            || slot.task.cleanup_embedded_flow().is_err()
-            || slot.task.cleanup_suspended_terminal().is_err()
-        {
+            print_user_process_reap_rejection_diagnostic(
+                "precondition",
+                task_ref,
+                UserProcessReapDiagnostic {
+                    occupied: slot.occupied,
+                    identity_matches,
+                    registry_is_zombie,
+                    runtime_state,
+                    task_state,
+                    flow_state,
+                    task_running,
+                    runqueue_published,
+                },
+            );
             return false;
         }
         {
@@ -7876,14 +8606,41 @@ impl UserTaskSet {
                 slot.mm_present = false;
             }
         }
-        if slot.inactive_address_space.state() != State::Base
-            || slot.inactive_stack.state() != State::Base
-            || slot.shared_mm_owner_ref.is_valid()
-            || slot.vfork_parent_ref.is_valid()
-            || slot.vfork_parent_wake_reservation.is_some()
-            || !release_slot_process_shared_resources(slot)
-            || !global_registry().reap(task_ref)
-        {
+        let inactive_address_space_state = slot.inactive_address_space.state();
+        let inactive_stack_state = slot.inactive_stack.state();
+        let shared_mm_owner_valid = slot.shared_mm_owner_ref.is_valid();
+        let vfork_parent_valid = slot.vfork_parent_ref.is_valid();
+        let vfork_parent_wake_reserved = slot.vfork_parent_wake_reservation.is_some();
+        let process_resources_present = slot.process_resources_present;
+        let ownership_state_clear = inactive_address_space_state == State::Base
+            && inactive_stack_state == State::Base
+            && !shared_mm_owner_valid
+            && !vfork_parent_valid
+            && !vfork_parent_wake_reserved;
+        let process_shared_resources_released =
+            ownership_state_clear && release_slot_process_shared_resources(slot);
+        if !ownership_state_clear || !process_shared_resources_released {
+            print_user_process_reap_post_mm_rejection_diagnostic(
+                task_ref,
+                UserProcessReapPostMmDiagnostic {
+                    inactive_address_space_state,
+                    inactive_stack_state,
+                    shared_mm_owner_valid,
+                    vfork_parent_valid,
+                    vfork_parent_wake_reserved,
+                    process_resources_present,
+                    process_shared_resources_released,
+                },
+            );
+            return false;
+        }
+        print_user_process_lifecycle_diagnostic(
+            "reap-enter",
+            task_ref,
+            slot.task.flow_cpu_ref().unwrap_or(CpuRef::invalid()),
+            global_registry().wait_status(task_ref).unwrap_or(0),
+        );
+        if !global_registry().reap(task_ref) {
             return false;
         }
         slot.occupied = false;
@@ -7949,7 +8706,11 @@ impl UserTaskSet {
     }
 
     #[cfg(app_smoke)]
-    pub fn smoke_task_slot_generation_contract(&mut self) -> Result<(), &'static str> {
+    pub fn smoke_task_slot_generation_contract(
+        &mut self,
+        parent_files: &FilesStruct,
+        parent_fs: &FsStruct,
+    ) -> Result<(), &'static str> {
         if self.free_task_slot_count() != USER_TASK_SLOT_COUNT
             || self.active_task_ref.is_valid()
             || !self.active_task_record_available
@@ -7967,6 +8728,8 @@ impl UserTaskSet {
                 TaskRef::KERNEL_INIT,
                 false,
                 TrapFrame::zeroed(),
+                parent_files,
+                parent_fs,
             ) else {
                 return Err("allocate all user task slots");
             };
@@ -7983,6 +8746,8 @@ impl UserTaskSet {
                     TaskRef::KERNEL_INIT,
                     false,
                     TrapFrame::zeroed(),
+                    parent_files,
+                    parent_fs,
                 )
                 .is_some()
             || self.next_child_pid != next_pid_before
@@ -8052,9 +8817,14 @@ impl UserTaskSet {
             return Err("stale task and flow refs invalidated");
         }
 
-        let Some(recycled_ref) =
-            self.allocate_user_task(20_000, TaskRef::KERNEL_INIT, false, TrapFrame::zeroed())
-        else {
+        let Some(recycled_ref) = self.allocate_user_task(
+            20_000,
+            TaskRef::KERNEL_INIT,
+            false,
+            TrapFrame::zeroed(),
+            parent_files,
+            parent_fs,
+        ) else {
             return Err("allocate recycled task slot");
         };
         let recycled_flow_ref = self
@@ -9137,8 +9907,14 @@ impl UserTaskSet {
         )?;
 
         let child_pid = self.next_child_pid;
-        let child_ref =
-            self.allocate_user_task(child_pid, TaskRef::KERNEL_INIT, true, child_frame)?;
+        let child_ref = self.allocate_user_task(
+            child_pid,
+            TaskRef::KERNEL_INIT,
+            true,
+            child_frame,
+            files_struct,
+            fs_struct,
+        )?;
         self.ordinary_independent_mm = false;
         if !address_space.rebind_owner_after_exec(child_ref) {
             return None;
@@ -9312,7 +10088,14 @@ impl UserTaskSet {
             &mut self.parent_wait_writable_page_checksums,
         )?;
 
-        let child_ref = self.allocate_user_task(child_pid, parent_task_ref, true, child_frame)?;
+        let child_ref = self.allocate_user_task(
+            child_pid,
+            parent_task_ref,
+            true,
+            child_frame,
+            files_struct,
+            fs_struct,
+        )?;
         self.ordinary_independent_mm = false;
         if !address_space.rebind_owner_after_exec(child_ref) {
             return None;
@@ -9562,15 +10345,32 @@ impl UserTaskSet {
         Some(child_pid)
     }
 
-    pub fn mark_enqueued(&mut self) -> bool {
-        if (self.active_task_state() != State::Online && self.active_task_state() != State::OnCpu)
-            || self.pid == 0
-            || self.active_task_record_available
-        {
-            return false;
+    pub fn mark_enqueued_diagnosed(&mut self) -> Result<(), MarkEnqueuedFailure> {
+        let state_snapshot = self.active_task_state();
+        let first_failed = if state_snapshot != State::Online && state_snapshot != State::OnCpu {
+            Some("active-task-state-online-or-oncpu")
+        } else if self.pid == 0 {
+            Some("pid-nonzero")
+        } else if self.active_task_record_available {
+            Some("active-record-unavailable")
+        } else {
+            None
+        };
+        if let Some(first_failed) = first_failed {
+            return Err(MarkEnqueuedFailure {
+                first_failed,
+                state_snapshot,
+                pid: self.pid,
+                active_task_record_available: self.active_task_record_available,
+                active_task_ref: self.active_task_ref,
+            });
         }
         self.enqueued = true;
-        true
+        Ok(())
+    }
+
+    pub fn mark_enqueued(&mut self) -> bool {
+        self.mark_enqueued_diagnosed().is_ok()
     }
 
     // This handoff records the complete specified parent wait and child continuation boundary.
@@ -11135,6 +11935,7 @@ fn user_mapping_kind_index(kind: UserMappingKind) -> usize {
         UserMappingKind::Stack => 2,
         UserMappingKind::Heap => 3,
         UserMappingKind::AnonymousPrivate => 4,
+        UserMappingKind::FileShared => 5,
     }
 }
 

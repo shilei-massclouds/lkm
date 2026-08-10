@@ -1,0 +1,30 @@
+[[rules]]
+id = "panic"
+result = "failure"
+contains = ["arceos_ex panic"]
+description = "Kernel panic was printed."
+
+[[rules]]
+id = "df-0013-first-read-child-return-timeout"
+result = "failure"
+timed_out = true
+contains = [
+  "R1=",
+  "#!/",
+  "qemu-system-riscv64: terminating on signal 15",
+]
+description = "The first inherited-fd child returned the expected bytes but the parent shell never reached the next prompt before timeout."
+
+[[rules]]
+id = "df-0013-fork-ofd-offset-success"
+result = "success"
+contains = [
+  "R1=",
+  "#!/",
+  "R2=",
+  "bin",
+  "R3=",
+  "/sh",
+  "lkm-fork-ofd-offset: complete",
+]
+description = "All three inherited-fd children completed and observed the Linux shared-OFD byte sequence."

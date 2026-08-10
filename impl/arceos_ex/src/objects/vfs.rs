@@ -28,11 +28,91 @@ pub enum VfsInodeKind {
 pub struct VfsNodeStat {
     size: usize,
     kind: VfsInodeKind,
+    mode: u32,
+    uid: u32,
+    gid: u32,
+}
+
+#[derive(Clone, Copy)]
+pub struct VfsStatFs {
+    fs_type: u64,
+    block_size: u64,
+    blocks: u64,
+    blocks_free: u64,
+    blocks_available: u64,
+    files: u64,
+    files_free: u64,
+    name_len: u64,
+    fragment_size: u64,
+    flags: u64,
+}
+
+impl VfsStatFs {
+    const fn ext2(fs: &Ext2FileSystem) -> Self {
+        Self {
+            fs_type: super::ext2::EXT2_SUPER_MAGIC as u64,
+            block_size: fs.block_size() as u64,
+            blocks: fs.blocks_count() as u64,
+            blocks_free: 0,
+            blocks_available: 0,
+            files: fs.inodes_count() as u64,
+            files_free: 0,
+            name_len: VFS_NAME_MAX as u64,
+            fragment_size: fs.block_size() as u64,
+            flags: 0x20,
+        }
+    }
+
+    pub const fn fs_type(&self) -> u64 {
+        self.fs_type
+    }
+
+    pub const fn block_size(&self) -> u64 {
+        self.block_size
+    }
+
+    pub const fn blocks(&self) -> u64 {
+        self.blocks
+    }
+
+    pub const fn blocks_free(&self) -> u64 {
+        self.blocks_free
+    }
+
+    pub const fn blocks_available(&self) -> u64 {
+        self.blocks_available
+    }
+
+    pub const fn files(&self) -> u64 {
+        self.files
+    }
+
+    pub const fn files_free(&self) -> u64 {
+        self.files_free
+    }
+
+    pub const fn name_len(&self) -> u64 {
+        self.name_len
+    }
+
+    pub const fn fragment_size(&self) -> u64 {
+        self.fragment_size
+    }
+
+    pub const fn flags(&self) -> u64 {
+        self.flags
+    }
 }
 
 impl VfsNodeStat {
-    const fn new(size: usize, kind: VfsInodeKind) -> Self {
-        Self { size, kind }
+    const fn new(size: usize, kind: VfsInodeKind, mode: u32, uid: u32, gid: u32) -> Self {
+        Self {
+            size,
+            kind,
+            mode,
+            uid,
+            gid,
+        }
     }
 
     pub const fn size(&self) -> usize {
@@ -41,6 +121,18 @@ impl VfsNodeStat {
 
     pub const fn kind(&self) -> VfsInodeKind {
         self.kind
+    }
+
+    pub const fn mode(&self) -> u32 {
+        self.mode
+    }
+
+    pub const fn uid(&self) -> u32 {
+        self.uid
+    }
+
+    pub const fn gid(&self) -> u32 {
+        self.gid
     }
 }
 
@@ -132,11 +224,13 @@ pub enum VfsError {
     InvalidName,
     NameTooLong,
     NotDirectory,
+    IsDirectory,
     NotFile,
     AlreadyExists,
     NotFound,
     DirectoryNotEmpty,
     ReadOnly,
+    NoSpace,
     ShortBuffer,
     Backend,
     UnsupportedPath,
@@ -597,6 +691,9 @@ pub struct Inode {
     superblock_ref: SuperBlockRef,
     kind: VfsInodeKind,
     size: usize,
+    mode: u32,
+    uid: u32,
+    gid: u32,
     children: Vec<DentryRef>,
     data: Vec<u8>,
     ext2_binding: Option<Ext2InodeBinding>,
@@ -612,6 +709,9 @@ impl Inode {
             superblock_ref,
             kind,
             size: 0,
+            mode: default_inode_mode(kind),
+            uid: 0,
+            gid: 0,
             children: Vec::new(),
             data: Vec::new(),
             ext2_binding: None,
@@ -634,6 +734,18 @@ impl Inode {
 
     pub const fn size(&self) -> usize {
         self.size
+    }
+
+    pub const fn mode(&self) -> u32 {
+        self.mode
+    }
+
+    pub const fn uid(&self) -> u32 {
+        self.uid
+    }
+
+    pub const fn gid(&self) -> u32 {
+        self.gid
     }
 
     pub const fn removed(&self) -> bool {
@@ -668,6 +780,16 @@ impl Inode {
         self.ext2_binding = Some(Ext2InodeBinding::new(inode.ino()));
         self.read_only_backed = true;
         self.size = inode.size() as usize;
+        self.mode = inode.mode() as u32;
+    }
+}
+
+const fn default_inode_mode(kind: VfsInodeKind) -> u32 {
+    match kind {
+        VfsInodeKind::Directory => 0o040755,
+        VfsInodeKind::RegularFile => 0o100644,
+        VfsInodeKind::DeviceNode => 0o020600,
+        VfsInodeKind::Symlink => 0o120777,
     }
 }
 
@@ -1439,6 +1561,24 @@ impl VfsCore {
         self.create_child(parent_ref, name, VfsInodeKind::RegularFile)
     }
 
+    fn create_file_with_metadata(
+        &mut self,
+        parent_ref: DentryRef,
+        name: &[u8],
+        mode: u32,
+        uid: u32,
+        gid: u32,
+    ) -> Result<DentryRef, VfsError> {
+        self.create_child_with_metadata(
+            parent_ref,
+            name,
+            VfsInodeKind::RegularFile,
+            0o100000 | (mode & 0o7777),
+            uid,
+            gid,
+        )
+    }
+
     pub fn create_device_node(
         &mut self,
         parent_ref: DentryRef,
@@ -1701,7 +1841,42 @@ impl VfsCore {
         if inode.removed() {
             return Err(VfsError::NotFound);
         }
-        Ok(VfsNodeStat::new(inode.size(), inode.kind()))
+        Ok(VfsNodeStat::new(
+            inode.size(),
+            inode.kind(),
+            inode.mode(),
+            inode.uid(),
+            inode.gid(),
+        ))
+    }
+
+    pub fn statfs_path<P: BlockDeviceProvider>(
+        &mut self,
+        fs_struct: &FsStruct,
+        fs: &mut Ext2FileSystem,
+        registry: &mut BlockDeviceRegistry,
+        provider: &mut P,
+        path: &[u8],
+    ) -> Result<VfsStatFs, VfsError> {
+        let dentry_ref = self.walk_path(fs_struct, fs, registry, provider, path)?;
+        let dentry = self.positive_dentry(dentry_ref)?;
+        let inode = self.inode(dentry.inode_ref()).ok_or(VfsError::InvalidRef)?;
+        if inode.removed() {
+            return Err(VfsError::NotFound);
+        }
+        if inode.superblock_ref() != dentry.superblock_ref() {
+            return Err(VfsError::InvalidRef);
+        }
+        let superblock = self
+            .superblock(inode.superblock_ref())
+            .ok_or(VfsError::InvalidRef)?;
+        if superblock.fs_kind() != FileSystemKind::Ext2 || !superblock.ext2_private_bound() {
+            return Err(VfsError::UnsupportedPath);
+        }
+        if fs.state() != State::Online || !fs.ready() || fs.block_size() == 0 {
+            return Err(VfsError::FsTypeNotReady);
+        }
+        Ok(VfsStatFs::ext2(fs))
     }
 
     pub fn lookup_path_kind<P: BlockDeviceProvider>(
@@ -1719,6 +1894,137 @@ impl VfsCore {
             return Err(VfsError::NotFound);
         }
         Ok(inode.kind())
+    }
+
+    pub fn create_directory_path<P: BlockDeviceProvider>(
+        &mut self,
+        fs_struct: &FsStruct,
+        fs: &mut Ext2FileSystem,
+        registry: &mut BlockDeviceRegistry,
+        provider: &mut P,
+        path: &[u8],
+    ) -> Result<DentryRef, VfsError> {
+        let path_final = self.walk_path_parent(fs_struct, fs, registry, provider, path)?;
+        let name = &path_final.name[..path_final.name_len];
+        match self.lookup_component(fs, registry, provider, path_final.parent, name) {
+            Ok(_) => return Err(VfsError::AlreadyExists),
+            Err(VfsError::NotFound) => {}
+            Err(error) => return Err(error),
+        }
+        self.create_dir(path_final.parent, name)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_regular_file_path<P: BlockDeviceProvider>(
+        &mut self,
+        fs_struct: &FsStruct,
+        fs: &mut Ext2FileSystem,
+        registry: &mut BlockDeviceRegistry,
+        provider: &mut P,
+        path: &[u8],
+        mode: u32,
+        uid: u32,
+        gid: u32,
+    ) -> Result<FileRef, VfsError> {
+        let path_final = self.walk_path_parent(fs_struct, fs, registry, provider, path)?;
+        let name = &path_final.name[..path_final.name_len];
+        match self.lookup_component(fs, registry, provider, path_final.parent, name) {
+            Ok(_) => return Err(VfsError::AlreadyExists),
+            Err(VfsError::NotFound) => {}
+            Err(error) => return Err(error),
+        }
+
+        self.files.try_reserve(1).map_err(|_| VfsError::NoSpace)?;
+        let dentry_ref = self.create_file_with_metadata(path_final.parent, name, mode, uid, gid)?;
+        self.open_file(dentry_ref)
+    }
+
+    pub fn remove_path<P: BlockDeviceProvider>(
+        &mut self,
+        fs_struct: &FsStruct,
+        fs: &mut Ext2FileSystem,
+        registry: &mut BlockDeviceRegistry,
+        provider: &mut P,
+        path: &[u8],
+        remove_directory: bool,
+    ) -> Result<DentryRef, VfsError> {
+        let path_final = self.walk_path_parent(fs_struct, fs, registry, provider, path)?;
+        let name = &path_final.name[..path_final.name_len];
+        let child_ref = self.lookup_component(fs, registry, provider, path_final.parent, name)?;
+        let child_inode_ref = self.positive_dentry(child_ref)?.inode_ref();
+        let child_inode = self.inode(child_inode_ref).ok_or(VfsError::InvalidRef)?;
+        if child_inode.read_only_backed() {
+            return Err(VfsError::ReadOnly);
+        }
+        match (remove_directory, child_inode.kind()) {
+            (false, VfsInodeKind::Directory) => return Err(VfsError::IsDirectory),
+            (false, VfsInodeKind::RegularFile) => {}
+            (false, VfsInodeKind::DeviceNode | VfsInodeKind::Symlink) => {
+                return Err(VfsError::UnsupportedPath);
+            }
+            (true, VfsInodeKind::Directory) => {
+                if self.live_child_count(child_inode_ref)? != 0 {
+                    return Err(VfsError::DirectoryNotEmpty);
+                }
+            }
+            (true, _) => return Err(VfsError::NotDirectory),
+        }
+
+        self.remove_child(path_final.parent, name)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn chown_path<P: BlockDeviceProvider>(
+        &mut self,
+        fs_struct: &FsStruct,
+        fs: &mut Ext2FileSystem,
+        registry: &mut BlockDeviceRegistry,
+        provider: &mut P,
+        path: &[u8],
+        nofollow_final_symlink: bool,
+        uid: Option<u32>,
+        gid: Option<u32>,
+    ) -> Result<(), VfsError> {
+        let dentry_ref = if nofollow_final_symlink {
+            self.walk_path_no_follow_final(fs_struct, fs, registry, provider, path)?
+        } else {
+            self.walk_path(fs_struct, fs, registry, provider, path)?
+        };
+        let inode_ref = self.positive_dentry(dentry_ref)?.inode_ref();
+        let inode = self.inode_mut(inode_ref).ok_or(VfsError::InvalidRef)?;
+        if inode.removed() {
+            return Err(VfsError::NotFound);
+        }
+        if inode.read_only_backed() {
+            return Err(VfsError::ReadOnly);
+        }
+        let next_uid = uid.unwrap_or(inode.uid);
+        let next_gid = gid.unwrap_or(inode.gid);
+        inode.uid = next_uid;
+        inode.gid = next_gid;
+        Ok(())
+    }
+
+    pub fn chmod_path<P: BlockDeviceProvider>(
+        &mut self,
+        fs_struct: &FsStruct,
+        fs: &mut Ext2FileSystem,
+        registry: &mut BlockDeviceRegistry,
+        provider: &mut P,
+        path: &[u8],
+        mode: u32,
+    ) -> Result<(), VfsError> {
+        let dentry_ref = self.walk_path(fs_struct, fs, registry, provider, path)?;
+        let inode_ref = self.positive_dentry(dentry_ref)?.inode_ref();
+        let inode = self.inode_mut(inode_ref).ok_or(VfsError::InvalidRef)?;
+        if inode.removed() {
+            return Err(VfsError::NotFound);
+        }
+        if inode.read_only_backed() {
+            return Err(VfsError::ReadOnly);
+        }
+        inode.mode = (inode.mode & 0o170000) | (mode & 0o7777);
+        Ok(())
     }
 
     fn walk_path_no_follow_final<P: BlockDeviceProvider>(
@@ -1782,10 +2088,62 @@ impl VfsCore {
     pub fn file_stat(&self, file_ref: FileRef) -> Result<VfsNodeStat, VfsError> {
         let file = self.file(file_ref).ok_or(VfsError::InvalidRef)?;
         let inode = self.inode(file.inode_ref()).ok_or(VfsError::InvalidRef)?;
-        if inode.removed() {
-            return Err(VfsError::NotFound);
+        Ok(VfsNodeStat::new(
+            inode.size(),
+            inode.kind(),
+            inode.mode(),
+            inode.uid(),
+            inode.gid(),
+        ))
+    }
+
+    pub fn truncate_file(&mut self, file_ref: FileRef, length: usize) -> Result<(), VfsError> {
+        let inode_ref = self.file(file_ref).ok_or(VfsError::InvalidRef)?.inode_ref();
+        let inode = self.inode(inode_ref).ok_or(VfsError::InvalidRef)?;
+        if !inode.is_file() {
+            return Err(VfsError::NotFile);
         }
-        Ok(VfsNodeStat::new(inode.size(), inode.kind()))
+        if inode.read_only_backed() {
+            return Err(VfsError::ReadOnly);
+        }
+
+        let additional = length.saturating_sub(inode.data.len());
+        if additional != 0 {
+            self.inode_mut(inode_ref)
+                .ok_or(VfsError::InvalidRef)?
+                .data
+                .try_reserve_exact(additional)
+                .map_err(|_| VfsError::NoSpace)?;
+        }
+
+        let inode = self.inode_mut(inode_ref).ok_or(VfsError::InvalidRef)?;
+        inode.data.resize(length, 0);
+        inode.size = length;
+        Ok(())
+    }
+
+    pub fn read_file_range(
+        &self,
+        file_ref: FileRef,
+        offset: usize,
+        buffer: &mut [u8],
+    ) -> Result<usize, VfsError> {
+        let inode_ref = self.file(file_ref).ok_or(VfsError::InvalidRef)?.inode_ref();
+        let inode = self.inode(inode_ref).ok_or(VfsError::InvalidRef)?;
+        if !inode.is_file() {
+            return Err(VfsError::NotFile);
+        }
+        if inode.read_only_backed() {
+            return Err(VfsError::ReadOnly);
+        }
+
+        buffer.fill(0);
+        if offset >= inode.data.len() {
+            return Ok(0);
+        }
+        let copied = core::cmp::min(buffer.len(), inode.data.len() - offset);
+        buffer[..copied].copy_from_slice(&inode.data[offset..offset + copied]);
+        Ok(copied)
     }
 
     pub fn write_file(
@@ -1800,7 +2158,7 @@ impl VfsCore {
         if inode.read_only_backed() {
             return Err(VfsError::ReadOnly);
         }
-        if !inode.is_file() || inode.removed() {
+        if !inode.is_file() {
             return Err(VfsError::NotFile);
         }
         if inode.data.len() < end {
@@ -1826,7 +2184,7 @@ impl VfsCore {
     ) -> Result<usize, VfsError> {
         let inode_ref = self.file(file_ref).ok_or(VfsError::InvalidRef)?.inode_ref();
         let inode = self.inode(inode_ref).ok_or(VfsError::InvalidRef)?;
-        if !inode.is_file() || inode.removed() {
+        if !inode.is_file() {
             return Err(VfsError::NotFile);
         }
         if offset >= inode.data.len() {
@@ -1951,10 +2309,16 @@ impl VfsCore {
             .dentry(child_ref)
             .ok_or(VfsError::InvalidRef)?
             .inode_ref();
-        let child_is_nonempty_dir = {
+        let (child_is_read_only, child_is_nonempty_dir) = {
             let child_inode = self.inode(child_inode_ref).ok_or(VfsError::InvalidRef)?;
-            child_inode.is_directory() && self.live_child_count(child_inode_ref)? != 0
+            (
+                child_inode.read_only_backed(),
+                child_inode.is_directory() && self.live_child_count(child_inode_ref)? != 0,
+            )
         };
+        if child_is_read_only {
+            return Err(VfsError::ReadOnly);
+        }
         if child_is_nonempty_dir {
             return Err(VfsError::DirectoryNotEmpty);
         }
@@ -1982,6 +2346,18 @@ impl VfsCore {
         name: &[u8],
         kind: VfsInodeKind,
     ) -> Result<DentryRef, VfsError> {
+        self.create_child_with_metadata(parent_ref, name, kind, default_inode_mode(kind), 0, 0)
+    }
+
+    fn create_child_with_metadata(
+        &mut self,
+        parent_ref: DentryRef,
+        name: &[u8],
+        kind: VfsInodeKind,
+        mode: u32,
+        uid: u32,
+        gid: u32,
+    ) -> Result<DentryRef, VfsError> {
         let (name_buf, name_len) = copy_name(name)?;
         let parent_ref = self.follow_mount(parent_ref)?;
         if self.find_child(parent_ref, name).is_ok() {
@@ -1999,9 +2375,25 @@ impl VfsCore {
             return Err(VfsError::NotDirectory);
         }
 
+        if self.inodes.try_reserve(1).is_err() || self.dentries.try_reserve(1).is_err() {
+            return Err(VfsError::NoSpace);
+        }
+        if self
+            .inode_mut(parent_inode_ref)
+            .ok_or(VfsError::InvalidRef)?
+            .children
+            .try_reserve(1)
+            .is_err()
+        {
+            return Err(VfsError::NoSpace);
+        }
+
         let inode_ref = InodeRef::new(self.inodes.len());
-        self.inodes
-            .push(Inode::new(inode_ref, superblock_ref, kind));
+        let mut inode = Inode::new(inode_ref, superblock_ref, kind);
+        inode.mode = mode;
+        inode.uid = uid;
+        inode.gid = gid;
+        self.inodes.push(inode);
 
         let dentry_ref = DentryRef::new(self.dentries.len());
         self.dentries.push(Dentry::new(
@@ -2094,7 +2486,7 @@ impl VfsCore {
         let superblock = self
             .superblock(parent.superblock_ref())
             .ok_or(VfsError::InvalidRef)?;
-        if superblock.fs_kind() == FileSystemKind::Ext2 {
+        if superblock.fs_kind() == FileSystemKind::Ext2 && parent_inode.read_only_backed() {
             return self.lookup_ext2_child(fs, registry, provider, parent_ref, name);
         }
         self.lookup_child(parent_ref, name)

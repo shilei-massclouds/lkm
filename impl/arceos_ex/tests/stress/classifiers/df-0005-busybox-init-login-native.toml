@@ -1,0 +1,42 @@
+[[rules]]
+id = "panic"
+result = "failure"
+contains = ["arceos_ex panic"]
+description = "Kernel panic was printed."
+
+[[rules]]
+id = "allocation-error"
+result = "failure"
+contains = ["memory allocation of"]
+description = "The stable no_std allocation failure message was printed."
+
+[[rules]]
+id = "unsupported-visible"
+result = "failure"
+contains = ["Function not implemented"]
+description = "A visible unsupported syscall or command path blocked login shell completion."
+
+[[rules]]
+id = "user-nonzero-exit"
+result = "failure"
+regex = ["user exit status=(?:-[0-9]+|[1-9][0-9]*)"]
+description = "User-mode payload exited with a nonzero status."
+
+[[rules]]
+id = "pending-child-setpgid-not-visible"
+result = "failure"
+contains = ["syscall setpgid detail", "reason=pid_not_visible"]
+description = "The login shell could not resolve its pending plain-fork child for parent-side setpgid."
+
+[[rules]]
+id = "df-0005-busybox-init-login-success"
+result = "success"
+contains = [
+  "Welcome to Alpine!",
+  "syscall trace nr=158 name=getgroups ret=1",
+  "syscall trace nr=154 name=setpgid ret=0",
+  "syscall trace nr=29 name=ioctl ret=0",
+  "lost+found",
+  "syscall trace nr=81 name=sync ret=0",
+]
+description = "BusyBox init login met the canonical basic acceptance contract and its wrapper synced before guest shutdown."

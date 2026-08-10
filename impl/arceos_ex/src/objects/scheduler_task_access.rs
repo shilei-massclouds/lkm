@@ -229,6 +229,30 @@ impl<'a> SchedulerTaskAccess<'a> {
             && candidate.flow.cpu_ref() == Some(cpu_ref)
     }
 
+    pub fn terminal_schedule_sender_matches(&self, task_ref: TaskRef, cpu_ref: CpuRef) -> bool {
+        task_ref.is_user()
+            && cpu_ref.logical_id() == self.owner_cpu
+            && super::user_boot::smp_terminal_task_ready(task_ref, cpu_ref)
+    }
+
+    pub fn disable_terminal(&mut self, task_ref: TaskRef) -> Option<EventResult> {
+        if !task_ref.is_user()
+            || !super::user_boot::smp_terminal_task_ready(task_ref, CpuRef::new(self.owner_cpu))
+        {
+            return None;
+        }
+        Some(self.user_task_mut(task_ref)?.disable())
+    }
+
+    pub fn cleanup_terminal_after_switch(&mut self, task_ref: TaskRef) -> Option<EventResult> {
+        task_ref.is_user().then(|| {
+            super::user_boot::cleanup_smp_terminal_task_after_switch(
+                task_ref,
+                CpuRef::new(self.owner_cpu),
+            )
+        })
+    }
+
     pub(crate) fn current_task_candidate(
         &self,
         task_ref: TaskRef,
@@ -442,16 +466,49 @@ impl<'a> SchedulerTaskAccess<'a> {
         task_ref: TaskRef,
         cpu_ref: CpuRef,
     ) -> Option<NextDispatch> {
-        let candidate = self.current_task_candidate(task_ref)?;
+        self.preflight_next_dispatch_diagnostic(task_ref, cpu_ref)
+            .ok()
+    }
+
+    fn preflight_next_dispatch_diagnostic(
+        &self,
+        task_ref: TaskRef,
+        cpu_ref: CpuRef,
+    ) -> Result<NextDispatch, &'static str> {
+        let candidate = self
+            .current_task_candidate(task_ref)
+            .ok_or("next-candidate-resolves")?;
         let task = candidate.task;
         let flow = candidate.flow;
-        let common = self.switch_in_ready(task_ref)
-            && flow.flow_ref().is_valid()
-            && task.owns_flow(flow.flow_ref())
-            && flow.declared()
-            && flow.owner().same_identity(task_ref);
-        if !common {
-            return None;
+        if task.state() != State::Online {
+            return Err("next-task-state-online");
+        }
+        if task.on_cpu() {
+            return Err("next-task-not-on-cpu");
+        }
+        if task.execution_authority() != TaskExecutionAuthority::None {
+            return Err("next-task-execution-authority-none");
+        }
+        if task.breakpoint_state() != super::task::TaskBreakpointState::Valid {
+            return Err("next-task-breakpoint-valid");
+        }
+        if !task.thread_context().core_register_set() {
+            return Err("next-task-core-register-set");
+        }
+        if !flow.flow_ref().is_valid() {
+            return Err("next-flow-ref-valid");
+        }
+        if !task.owns_flow(flow.flow_ref()) {
+            return Err("next-task-owns-candidate-flow");
+        }
+        if !flow.declared() {
+            return Err("next-flow-declared");
+        }
+        if !flow.owner().same_identity(task_ref) {
+            return Err("next-flow-owner-matches-task");
+        }
+        if !self.switch_in_ready(task_ref) {
+            return Err("next-task-switch-in-ready-consistency");
         }
 
         let flow_ref = task.flow();
@@ -467,38 +524,55 @@ impl<'a> SchedulerTaskAccess<'a> {
                 cpu_ref,
                 context_epoch,
             );
-        (task.state() == State::Online
-            && flow_ref.is_valid()
-            && flow_ref.same_identity(flow.flow_ref())
-            && task.breakpoint_matches(flow_ref)
-            && flow.state() == State::Online
-            && cpu_matches
-            && root_matches)
-            .then_some(NextDispatch::new(
-                task_ref,
-                flow_ref,
-                cpu_ref,
-                context_epoch,
-                root_ref,
-                (task.kernel_stack_base(), task.kernel_stack_top()),
-                DispatchStackBinding::TaskOwned,
-            ))
+        if !flow_ref.is_valid() {
+            return Err("next-task-flow-ref-valid");
+        }
+        if !flow_ref.same_identity(flow.flow_ref()) {
+            return Err("next-task-flow-matches-candidate-flow");
+        }
+        if !task.breakpoint_matches(flow_ref) {
+            return Err("next-task-breakpoint-matches-flow");
+        }
+        if flow.state() != State::Online {
+            return Err("next-flow-state-online");
+        }
+        if !cpu_matches {
+            return Err("next-flow-cpu-matches-dispatch-cpu");
+        }
+        if !root_matches {
+            return Err("next-root-trap-flow-preflight");
+        }
+        Ok(NextDispatch::new(
+            task_ref,
+            flow_ref,
+            cpu_ref,
+            context_epoch,
+            root_ref,
+            (task.kernel_stack_base(), task.kernel_stack_top()),
+            DispatchStackBinding::TaskOwned,
+        ))
     }
 
-    pub fn preflight_next_dispatch_on_user_carrier(
+    pub fn preflight_next_dispatch_on_user_carrier_diagnostic(
         &self,
         task_ref: TaskRef,
         cpu_ref: CpuRef,
-    ) -> Option<NextDispatch> {
+    ) -> Result<NextDispatch, &'static str> {
         if !task_ref.is_user() && !task_ref.same_identity(TaskRef::KERNEL_INIT) {
-            return None;
+            return Err("next-user-carrier-task-kind");
         }
-        let (stack_base, stack_top) = self.user_task_set.as_deref()?.carrier_stack_bounds()?;
+        let user_task_set = self
+            .user_task_set
+            .as_deref()
+            .ok_or("next-user-carrier-task-set-present")?;
+        let (stack_base, stack_top) = user_task_set
+            .carrier_stack_bounds()
+            .ok_or("next-user-carrier-stack-bounds-ready")?;
         let live_sp = crate::arch::riscv64::csr::read_sp();
         if live_sp < stack_base || live_sp > stack_top {
-            return None;
+            return Err("live-sp-in-user-carrier-stack");
         }
-        self.preflight_next_dispatch(task_ref, cpu_ref)
+        self.preflight_next_dispatch_diagnostic(task_ref, cpu_ref)
             .map(|dispatch| dispatch.with_simulated_user_carrier(stack_base, stack_top))
     }
 

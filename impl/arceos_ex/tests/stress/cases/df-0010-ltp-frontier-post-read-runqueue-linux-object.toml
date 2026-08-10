@@ -1,0 +1,17 @@
+schema_version = 2
+name = "df-0010-ltp-frontier-post-read-runqueue-linux-object"
+description = "Repeat the exact interactive child history, linux-object LTP frontier, and second stock-script read that first exposed the child runqueue-publication failure."
+mode = "stress"
+test = "ltp-frontier-post-read-lo"
+runs = 50
+classifier = "../classifiers/df-0010-ltp-frontier-post-read-runqueue-linux-object.toml"
+
+[metadata]
+defect = "DF-0010"
+observation_mode = "ltp-frontier-post-read-runqueue-publication"
+ordinary_path_required = true
+default_suite = true
+rootfs_profile = "canonical"
+payload = "length check, failed sha256 child, interrupted partial tail command, host-matching sha256 and sh -n, exact frontier selector, then a second sha256 child"
+first_observation = "impl/arceos_ex/tests/basic/out/20260805T194115.149428Z-shell-lo-595228"
+scope_note = "Preserve the runqueue-publication termination independently from the preceding stock-harness parse error and unsupported-syscall/TWARN boundaries; successful samples do not erase the first failure."

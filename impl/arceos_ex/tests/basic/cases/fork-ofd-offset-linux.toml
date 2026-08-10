@@ -1,0 +1,31 @@
+schema_version = 2
+name = "fork-ofd-offset-linux"
+purpose = "diagnostic"
+timeout_seconds = 120
+
+[kernel]
+target = "linux"
+
+[disk]
+mode = "private-copy"
+profile = "canonical"
+
+[qemu]
+memory_mb = 128
+smp = 8
+kernel_cmdline = "earlycon=sbi root=/dev/vda rw console=ttyS0 init=/bin/sh"
+rng = true
+exit_policy = "marker"
+exit_marker = "lkm-fork-ofd-offset: complete"
+interaction = "scripted"
+stdin_steps = [
+  { ready_marker = "~ #", payload = "exec 9</opt/ltp/run-syscalls.sh\n" },
+  { ready_marker = "~ #", payload = "printf R1=;dd bs=3 count=1 <&9 2>/dev/null;echo\n" },
+  { ready_marker = "~ #", payload = "printf R2=;dd bs=3 count=1 <&9 2>/dev/null;echo\n" },
+  { ready_marker = "~ #", payload = "printf R3=;dd bs=3 count=1 <&9 2>/dev/null;echo\n" },
+  { ready_marker = "~ #", payload = "echo lkm-fork-ofd-offset: complete\n" },
+]
+
+[expect]
+markers = ["lkm-fork-ofd-offset: complete"]
+forbidden_markers = ["arceos_ex panic", "Kernel panic"]

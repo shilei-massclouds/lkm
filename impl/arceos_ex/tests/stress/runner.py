@@ -20,12 +20,30 @@ from typing import Any
 
 
 SCHEMA_VERSION = 2
+MAX_DIFFTEST_RUNS = 10
 STRESS_DIR = Path(__file__).resolve().parent
 DEFAULT_SUITE = (
     STRESS_DIR / "cases" / "df-0001-user-boot.toml",
     STRESS_DIR / "cases" / "df-0002-smoke-initcall.toml",
     STRESS_DIR / "cases" / "df-0003-distro-sh-ls.toml",
     STRESS_DIR / "cases" / "rc-local-native-timeout-focused.toml",
+    STRESS_DIR / "cases" / "df-0005-busybox-init-login-native.toml",
+    STRESS_DIR / "cases" / "df-0006-user-smoke-preempt-native.toml",
+    STRESS_DIR / "cases" / "df-0007-ltp-frontier-child-wait-native.toml",
+    STRESS_DIR / "cases" / "df-0008-user-smoke-fork-enqueue-linux-object.toml",
+    STRESS_DIR / "cases" / "df-0009-user-smoke-preempt-linux-object.toml",
+    STRESS_DIR
+    / "cases"
+    / "df-0010-ltp-frontier-post-read-runqueue-linux-object.toml",
+    STRESS_DIR
+    / "cases"
+    / "df-0011-user-smoke-preempt-finalize-linux-object.toml",
+    STRESS_DIR / "cases" / "df-0012-rc-local-direct-setup-native.toml",
+    STRESS_DIR / "cases" / "df-0013-fork-ofd-offset-child-return-native.toml",
+    STRESS_DIR / "cases" / "df-0014-checkpoint-cross-cpu-reentry-native.toml",
+    STRESS_DIR
+    / "cases"
+    / "df-0015-ltp-frontier-console-record-interleave-native.toml",
 )
 DEFAULT_OUT_ROOT = STRESS_DIR / "out"
 BASIC_DIR = STRESS_DIR.parent / "basic"
@@ -105,6 +123,8 @@ def main(argv: list[str] | None = None) -> int:
                 raise CompositeConfigError("--baseline requires exactly one stress case")
             _validate_baseline(args.baseline, cases[0])
         effective_runs = [0 if args.dry_run else _case_runs(case, args.runs) for case in cases]
+        for case, runs in zip(cases, effective_runs):
+            _validate_effective_runs(case, runs)
         if any(runs > 0 for runs in effective_runs):
             _prepare_canonical_disk(repo_root)
         out_root = args.out_dir.resolve() if args.out_dir else DEFAULT_OUT_ROOT
@@ -161,6 +181,7 @@ def _load_case(path: Path, repo_root: Path) -> dict[str, Any]:
             "schema_version", "name", "description", "mode", "runs",
             "left_test", "left_label", "right_test", "right_label",
             "checkpoint_scope", "checkpoint_scope_max_counts", "checkpoint_coverage",
+            "observable_scope", "observable_patterns",
             "metadata",
         }
     else:
@@ -177,6 +198,10 @@ def _load_case(path: Path, repo_root: Path) -> dict[str, Any]:
     runs = raw.get("runs")
     if not isinstance(runs, int) or isinstance(runs, bool) or runs < 0:
         raise CompositeConfigError(f"{path}: runs must be a non-negative integer")
+    if mode == "difftest" and runs > MAX_DIFFTEST_RUNS:
+        raise CompositeConfigError(
+            f"{path}: difftest runs must not exceed {MAX_DIFFTEST_RUNS}"
+        )
     metadata = raw.get("metadata", {})
     if not isinstance(metadata, dict):
         raise CompositeConfigError(f"{path}: metadata must be a table")
@@ -202,9 +227,24 @@ def _load_case(path: Path, repo_root: Path) -> dict[str, Any]:
             rules=_classifier_rules(classifier),
         )
     else:
-        scope = _string_list(raw.get("checkpoint_scope"), "checkpoint_scope")
-        if not scope:
-            raise CompositeConfigError(f"{path}: checkpoint_scope must not be empty")
+        scope = _string_list(raw.get("checkpoint_scope", []), "checkpoint_scope")
+        observable_scope = _string_list(raw.get("observable_scope", []), "observable_scope")
+        if not scope and not observable_scope:
+            raise CompositeConfigError(
+                f"{path}: checkpoint_scope or observable_scope must not be empty"
+            )
+        if len(observable_scope) != len(set(observable_scope)):
+            raise CompositeConfigError(f"{path}: observable_scope must not contain duplicates")
+        observable_patterns = _regex_string_map(
+            raw.get("observable_patterns", {}), "observable_patterns"
+        )
+        missing_patterns = [name for name in observable_scope if name not in observable_patterns]
+        extra_patterns = sorted(set(observable_patterns) - set(observable_scope))
+        if missing_patterns or extra_patterns:
+            raise CompositeConfigError(
+                f"{path}: observable_patterns must match observable_scope exactly; "
+                f"missing={missing_patterns} extra={extra_patterns}"
+            )
         left_test = _required_string(raw, "left_test", str(path))
         right_test = _required_string(raw, "right_test", str(path))
         left_label = _required_string(raw, "left_label", str(path))
@@ -227,6 +267,8 @@ def _load_case(path: Path, repo_root: Path) -> dict[str, Any]:
             checkpoint_scope=scope,
             checkpoint_scope_max_counts=max_counts,
             checkpoint_coverage=coverage,
+            observable_scope=observable_scope,
+            observable_patterns=observable_patterns,
         )
     config["config_fingerprint"] = _config_fingerprint(config)
     return config
@@ -274,6 +316,13 @@ def _basic_runner_module() -> Any:
 
 def _case_runs(case: dict[str, Any], override: int | None) -> int:
     return int(case["runs"] if override is None else override)
+
+
+def _validate_effective_runs(case: dict[str, Any], runs: int) -> None:
+    if case["mode"] == "difftest" and runs > MAX_DIFFTEST_RUNS:
+        raise CompositeConfigError(
+            f"{case['name']}: difftest runs must not exceed {MAX_DIFFTEST_RUNS}"
+        )
 
 
 def _prepare_canonical_disk(repo_root: Path) -> None:
@@ -459,6 +508,17 @@ def _execute_difftest_run(
         left_label=case["left_label"],
         right_label=case["right_label"],
     )
+    observable_diff = _paired_observable_diff(
+        left_text,
+        right_text,
+        case["observable_scope"],
+        case["observable_patterns"],
+        left_label=case["left_label"],
+        right_label=case["right_label"],
+    )
+    diff["checkpoint_enabled"] = bool(case["checkpoint_scope"])
+    diff["observable"] = observable_diff
+    diff["passed"] = diff["passed"] and observable_diff["passed"]
     if case["checkpoint_coverage"] is not None:
         diff["checkpoint_coverage"] = _checkpoint_coverage_report(case["checkpoint_coverage"])
     left_ok, left_failure = _basic_gate(left)
@@ -466,7 +526,9 @@ def _execute_difftest_run(
     passed = left_ok and right_ok and diff["passed"]
     tokens = [
         *(f"{case['left_label']}:{_event_token(event)}" for event in left_events),
+        *(f"{case['left_label']}:observable:{token}" for token in observable_diff["left_sequence"]),
         *(f"{case['right_label']}:{_event_token(event)}" for event in right_events),
+        *(f"{case['right_label']}:observable:{token}" for token in observable_diff["right_sequence"]),
     ]
     ended = datetime.now(timezone.utc)
     return {
@@ -546,6 +608,8 @@ def _manifest(
         manifest["right"] = {"label": case["right_label"], **case["right_basic"]}
         manifest["checkpoint_scope"] = case["checkpoint_scope"]
         manifest["checkpoint_scope_max_counts"] = case["checkpoint_scope_max_counts"]
+        manifest["observable_scope"] = case["observable_scope"]
+        manifest["observable_patterns"] = case["observable_patterns"]
         if case["checkpoint_coverage"] is not None:
             manifest["checkpoint_coverage"] = _checkpoint_coverage_report(case["checkpoint_coverage"])
     return manifest
@@ -568,6 +632,8 @@ def _config_fingerprint(case: dict[str, Any]) -> str:
             "right": case["right_basic"]["config_sha256"],
             "scope": case["checkpoint_scope"],
             "max_counts": case["checkpoint_scope_max_counts"],
+            "observable_scope": case["observable_scope"],
+            "observable_patterns": case["observable_patterns"],
             "metadata": case["metadata"],
         }
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
@@ -815,7 +881,9 @@ def _classifier_rules(data: dict[str, Any]) -> list[dict[str, Any]]:
     for index, rule in enumerate(raw):
         if not isinstance(rule, dict):
             raise CompositeConfigError(f"classifier rule {index} must be a table")
-        unknown_rule = sorted(set(rule) - {"id", "result", "contains", "regex", "description"})
+        unknown_rule = sorted(
+            set(rule) - {"id", "result", "contains", "regex", "timed_out", "description"}
+        )
         if unknown_rule:
             raise CompositeConfigError(f"classifier rule {index} unknown field(s): {', '.join(unknown_rule)}")
         rule_id = _required_string(rule, "id", f"classifier rule {index}")
@@ -824,32 +892,56 @@ def _classifier_rules(data: dict[str, Any]) -> list[dict[str, Any]]:
             raise CompositeConfigError(f"classifier rule {rule_id} result must be success or failure")
         contains = _string_list(rule.get("contains", []), f"classifier rule {rule_id}.contains")
         regex = _string_list(rule.get("regex", []), f"classifier rule {rule_id}.regex")
+        timed_out_condition = rule.get("timed_out")
+        if timed_out_condition is not None and not isinstance(timed_out_condition, bool):
+            raise CompositeConfigError(
+                f"classifier rule {rule_id}.timed_out must be a boolean"
+            )
         for expression in regex:
             try:
                 re.compile(expression)
             except re.error as error:
                 raise CompositeConfigError(f"classifier rule {rule_id} invalid regex: {error}") from error
-        rules.append({**rule, "id": rule_id, "result": result, "contains": contains, "regex": regex})
+        rules.append(
+            {
+                **rule,
+                "id": rule_id,
+                "result": result,
+                "contains": contains,
+                "regex": regex,
+                "timed_out": timed_out_condition,
+            }
+        )
     return rules
 
 
 def _classify(text: str, returncode: int | None, timed_out: bool, rules: list[dict[str, Any]]) -> dict[str, str]:
-    if timed_out:
-        return {"id": "timeout", "result": "failure", "description": "basic test timed out"}
     normalized = _normalize_text(text)
+    if timed_out:
+        for rule in rules:
+            if rule["result"] == "failure" and _rule_matches(
+                rule, normalized, timed_out
+            ):
+                return {"id": rule["id"], "result": "failure", "description": str(rule.get("description", ""))}
+        return {"id": "timeout", "result": "failure", "description": "basic test timed out"}
     for rule in rules:
-        if rule["result"] == "failure" and _rule_matches(rule, normalized):
+        if rule["result"] == "failure" and _rule_matches(rule, normalized, timed_out):
             return {"id": rule["id"], "result": "failure", "description": str(rule.get("description", ""))}
     if returncode not in (0, None):
         return {"id": "nonzero-exit", "result": "failure", "description": f"basic test returned {returncode}"}
     for rule in rules:
-        if rule["result"] == "success" and _rule_matches(rule, normalized):
+        if rule["result"] == "success" and _rule_matches(rule, normalized, timed_out):
             return {"id": rule["id"], "result": "success", "description": str(rule.get("description", ""))}
     return {"id": "unknown-failure", "result": "failure", "description": "no success rule matched"}
 
 
-def _rule_matches(rule: dict[str, Any], text: str) -> bool:
-    return all(item in text for item in rule["contains"]) and all(re.search(item, text) for item in rule["regex"])
+def _rule_matches(rule: dict[str, Any], text: str, timed_out: bool) -> bool:
+    timed_out_condition = rule.get("timed_out")
+    return (
+        (timed_out_condition is None or timed_out_condition == timed_out)
+        and all(item in text for item in rule["contains"])
+        and all(re.search(item, text) for item in rule["regex"])
+    )
 
 
 def _record_sequence(sequences: dict[tuple[str, str, str], dict[str, Any]], run: dict[str, Any]) -> None:
@@ -1056,6 +1148,63 @@ def _paired_checkpoint_diff(
     }
 
 
+def _observable_sequence(
+    text: str, scope: list[str], patterns: dict[str, str]
+) -> list[str]:
+    normalized = _normalize_text(text)
+    matches: list[tuple[int, int, str]] = []
+    for token in scope:
+        for match in re.finditer(patterns[token], normalized):
+            matches.append((match.start(), match.end(), token))
+    matches.sort(key=lambda item: (item[0], item[1], scope.index(item[2])))
+    return [token for _, _, token in matches]
+
+
+def _paired_observable_diff(
+    left_text: str,
+    right_text: str,
+    observable_scope: list[str],
+    observable_patterns: dict[str, str],
+    *,
+    left_label: str = "left",
+    right_label: str = "right",
+) -> dict[str, Any]:
+    left = _observable_sequence(left_text, observable_scope, observable_patterns)
+    right = _observable_sequence(right_text, observable_scope, observable_patterns)
+    missing_left = _ordered_missing(observable_scope, left)
+    missing_right = _ordered_missing(observable_scope, right)
+    extra_left = _ordered_missing(left, right)
+    extra_right = _ordered_missing(right, left)
+    divergence = _first_divergence(left, right)
+    passed = (
+        not missing_left
+        and not missing_right
+        and not extra_left
+        and not extra_right
+        and divergence is None
+    )
+    return {
+        "enabled": bool(observable_scope),
+        "left_label": left_label,
+        "right_label": right_label,
+        "observable_scope": observable_scope,
+        "observable_patterns": observable_patterns,
+        "left_sequence": left,
+        "right_sequence": right,
+        f"missing_from_{left_label}": missing_left,
+        f"missing_from_{right_label}": missing_right,
+        f"extra_in_{left_label}": extra_left,
+        f"extra_in_{right_label}": extra_right,
+        "order_mismatch": divergence is not None
+        and not missing_left
+        and not missing_right
+        and not extra_left
+        and not extra_right,
+        "first_divergence": divergence,
+        "passed": passed,
+    }
+
+
 def _checkpoint_coverage_config(raw: object, repo_root: Path, scope: list[str]) -> dict[str, Any] | None:
     if raw is None:
         return None
@@ -1165,6 +1314,17 @@ def _write_report(path: Path, case_name: str, summary: dict[str, Any]) -> None:
         for index, diff in enumerate(summary["paired_checkpoint_diff"], 1):
             lines.append(f"- run {index}: {'passed' if diff['passed'] else 'failed'}")
             lines.append(f"  - first_divergence: {diff['first_divergence']}")
+            observable = diff.get("observable", {})
+            if observable.get("enabled"):
+                lines.append(
+                    f"  - observable_first_divergence: {observable.get('first_divergence')}"
+                )
+                lines.append(
+                    f"  - {observable['left_label']}_observable: {observable['left_sequence']}"
+                )
+                lines.append(
+                    f"  - {observable['right_label']}_observable: {observable['right_sequence']}"
+                )
     if "historical_baseline" in summary:
         baseline = summary["historical_baseline"]
         lines.extend(["", "## Historical Baseline", ""])
@@ -1214,6 +1374,21 @@ def _string_list(value: object, name: str) -> list[str]:
     if not isinstance(value, list) or any(not isinstance(item, str) or not item for item in value):
         raise CompositeConfigError(f"{name} must be an array of non-empty strings")
     return list(value)
+
+
+def _regex_string_map(value: object, name: str) -> dict[str, str]:
+    if not isinstance(value, dict):
+        raise CompositeConfigError(f"{name} must be a table")
+    result: dict[str, str] = {}
+    for key, expression in value.items():
+        if not isinstance(key, str) or not key or not isinstance(expression, str) or not expression:
+            raise CompositeConfigError(f"{name} must map non-empty strings to non-empty regexes")
+        try:
+            re.compile(expression)
+        except re.error as error:
+            raise CompositeConfigError(f"{name}.{key} invalid regex: {error}") from error
+        result[key] = expression
+    return result
 
 
 def _positive_integer_map(value: object, name: str) -> dict[str, int]:

@@ -1,0 +1,17 @@
+schema_version = 2
+name = "df-0015-ltp-frontier-console-record-interleave-native"
+description = "Repeat the canonical native LTP frontier identity and require each stock-harness PASS marker to remain a standalone console record under concurrent wait4 diagnostics."
+mode = "stress"
+test = "ltp-frontier"
+runs = 50
+classifier = "../classifiers/df-0015-ltp-frontier-console-record-interleave-native.toml"
+
+[metadata]
+defect = "DF-0015"
+observation_mode = "ltp-frontier-console-record-atomicity"
+ordinary_path_required = true
+default_suite = true
+rootfs_profile = "canonical"
+payload = "stock LTP four-entry frontier through the unchanged run-syscalls.sh harness on the native provider"
+first_observation = "impl/arceos_ex/tests/stress/out/20260810T045830.218212Z-df0007-ltp-supported-difftest"
+scope_note = "Preserve the exact standalone PASS-line contract and the historical wait4 diagnostic collision without changing the LTP list, harness, provider, SMP count, timeout, or marker."

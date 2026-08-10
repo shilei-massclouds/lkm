@@ -24,7 +24,8 @@ pub use self::handlers::CheckpointOutcome;
 use crate::context::Context;
 
 static POST_VM_CHECKPOINTS_ENABLED: AtomicBool = AtomicBool::new(false);
-static CHECKPOINT_HANDLER_ACTIVE: AtomicBool = AtomicBool::new(false);
+static CHECKPOINT_HANDLER_ACTIVE: [AtomicBool; crate::objects::cpu::MAX_CPUS] =
+    [const { AtomicBool::new(false) }; crate::objects::cpu::MAX_CPUS];
 
 pub fn enable_post_vm_checkpoints() {
     #[cfg(checkpoint_handler_announce)]
@@ -71,7 +72,14 @@ fn dispatch_inner(checkpoint: Checkpoint, ctx: &Context, include_announce: bool)
         return;
     }
 
-    if CHECKPOINT_HANDLER_ACTIVE.swap(true, Ordering::AcqRel) {
+    let logical_id = ctx
+        .current_cpu()
+        .unwrap_or_else(|_| checkpoint_context_shutdown())
+        .logical_id();
+    let Some(active) = CHECKPOINT_HANDLER_ACTIVE.get(logical_id) else {
+        checkpoint_context_shutdown();
+    };
+    if active.swap(true, Ordering::AcqRel) {
         checkpoint_reentry_shutdown();
     }
 
@@ -80,7 +88,7 @@ fn dispatch_inner(checkpoint: Checkpoint, ctx: &Context, include_announce: bool)
     } else {
         handlers::dispatch_without_announce(checkpoint, ctx)
     };
-    CHECKPOINT_HANDLER_ACTIVE.store(false, Ordering::Release);
+    active.store(false, Ordering::Release);
     apply_outcome(checkpoint, outcome);
 }
 
@@ -105,6 +113,11 @@ fn apply_outcome(checkpoint: Checkpoint, outcome: CheckpointOutcome) {
 
 fn checkpoint_reentry_shutdown() -> ! {
     crate::arch::riscv64::sbi::putstr("checkpoint reentry\n");
+    crate::arch::riscv64::sbi::system_shutdown()
+}
+
+fn checkpoint_context_shutdown() -> ! {
+    crate::arch::riscv64::sbi::putstr("checkpoint current CPU unavailable\n");
     crate::arch::riscv64::sbi::system_shutdown()
 }
 

@@ -30,6 +30,72 @@ registry guard. During the temporary CPU0 serial vfork handoff, a successful leg
 mirrored to that exact generation-checked registry occurrence before it can reserve a descendant; the legacy
 snapshot must not stand in for a different published registry occurrence.
 
+Credential syscalls resolve the exact current TaskRef and fixed CpuRef, acquire a `UserProcessLease`, then take
+the dedicated aggregate-credentials IRQ-safe lock before reading or mutating ids or supplementary groups. A
+dynamic slot owns its credential value. While the child remains private in `Reserved`, a preparer-only registry
+query may resolve that reservation's exact parent TaskRef after checking the child generation and `Reserved` state;
+ordinary TaskRef/FlowRef lookup must still reject the child. The preparer acquires a lease on the published parent,
+then copies its credentials before the child becomes visible. PID 1 follows the same lease/lock route to its stable
+aggregate; no current child may read
+or mutate `Context.kernel_init_user_state` as a global credential carrier. UID/GID getters, res-id getters,
+`getgroups`, and the bounded root-euid setters all use this route.
+
+`fchownat(AT_FDCWD, path, uid, gid, flags)` first performs checked path usercopy, validates the bounded flags and
+relative-dirfd slice, then snapshots the current aggregate credentials through that lease/lock route. Only the
+root-euid proxy may mutate ownership. Under the files/fs guard it resolves the path and updates the transient
+writable inode atomically; `u32::MAX` preserves the corresponding id. Failure leaves both ids unchanged. Unknown
+flags return `EINVAL`; bad relative dirfd, empty/overlong/faulting paths, lookup failures, read-only backing and
+authorization failure retain distinct errno classes. Directory-fd traversal and `AT_EMPTY_PATH` remain deferred.
+
+Legacy `fchmodat(AT_FDCWD, path, mode)` syscall 53 applies the same checked path, current-credential lease and
+files/fs guard order. Absolute paths ignore dirfd; a relative path with any other dirfd returns `EBADF`. The VFS
+operation follows the final symlink, rejects read-only backing, and commits `(old_mode & S_IFMT) |
+(mode & 07777)` in one mutation so both path stat and opened-file stat observe the new permissions without losing
+the inode type. EFAULT, ENOENT, ENAMETOOLONG, ENOTDIR, ELOOP, EROFS and EPERM remain distinct; all failures retain
+the old mode. The current authorization slice admits the exact current root-euid aggregate only.
+
+Native RISC-V `statfs(path, buf)` syscall 43 performs checked pathname import and, under the files/fs lock,
+follows the path through `VfsCore` to its actual superblock before examining `buf`. The first supported slice is
+an ext2-bound path, including a transient overlay inode whose superblock is ext2. Its 120-byte little-endian
+native layout contains 64-bit words at Linux asm-generic offsets, reports `EXT2_SUPER_MAGIC`, the parsed ext2
+block size and total block/inode counts, `VFS_NAME_MAX`, equal fragment/block sizes, and `ST_VALID`; free-space,
+free-inode and fsid fields remain zero because this VFS does not maintain those accounting facts. Missing,
+overlong, non-directory, symlink-loop and backend path failures retain their distinct errno mapping. Path
+resolution precedes output-pointer validation as in Linux 6.12 `user_statfs()`/`do_statfs_native()`. The complete
+result is staged in kernel memory and copied only after successful resolution, so `EFAULT` never publishes a
+partially constructed result. Other filesystem kinds and live ext2 free-space accounting remain unsupported.
+
+For an ordinary pathname, the first writable `openat` slice accepts only
+`AT_FDCWD` plus `O_CREAT|O_EXCL|O_RDWR`, with optional `O_LARGEFILE` and
+`O_CLOEXEC`, and a mode whose low `07777` bits are stored on the new inode.
+After checked pathname import it snapshots fsuid/fsgid through the current
+generation/CPU-checked process lease and aggregate credential lock, then takes
+the files/fs/VFS guard. `FilesStruct` owns a bounded pool of two independent
+regular-file OFDs. It must select an OFD with no live fd-table references and
+reserve the lowest free fd slot before calling the VFS exclusive-create
+transaction. The existing `/opt/ltp/runtest/syscalls` input may therefore
+remain inherited on fd 0 while the LTP IPC file receives a distinct OFD. Only
+exhaustion of both OFDs or the fd table maps to `EMFILE`; the implementation
+must not close, overwrite or reuse a still-referenced OFD. Both a transient existing name and an ext2-backed existing
+name map to `EEXIST`; VFS allocation exhaustion maps to `ENOSPC`, fd exhaustion
+maps to `EMFILE`, and failures before fd installation leave no new pathname.
+The installed fd is readable and writable according to `O_RDWR`, even though
+general regular-file write/truncate persistence remains outside this slice.
+The bounded current umask is zero; general umask, `O_CREAT` without `O_EXCL`,
+ordinary-path `O_TRUNC` and other create flag combinations remain deferred.
+
+RISC-V syscall 46 (`ftruncate`) first interprets the length as signed `off_t`:
+a negative value returns `EINVAL` before fd lookup. The current aggregate's
+files/VFS resource guard then resolves the fd. A missing fd returns `EBADF`; a
+non-regular or non-writable entry returns `EINVAL`. Only a transient
+memory-backed Regular0/Regular1 file is mutable in this slice. Lengths through
+the fixed 64 KiB regular-file capacity resize the VFS inode atomically,
+zero-fill extension, discard a shrunken suffix, preserve every shared OFD file
+position and update the selected `FilesStruct` cache length. A larger length
+returns `EFBIG`; reserve failure returns `ENOSPC`; neither failure changes inode
+size, bytes or cached length. There is no user pointer and therefore no
+`EFAULT` path for this syscall.
+
 For the single first-slice console TTY, the same registry guard protects the TTY session ID and foreground
 process-group ID. `TIOCSCTTY` validates that the generation-checked current process is a session leader without a
 controlling TTY, then binds the TTY to that process's session and initial foreground pgrp. `TIOCSPGRP` accepts only
@@ -53,6 +119,13 @@ target-inbox reservation. It commits the
 child directly as `Online/Online/Online`; it must not call Task, Flow, or Runtime Preset/Setup/Enable. No child
 shares any of these identities or storage with its parent or siblings.
 
+After publication, the target CPU may consume the reserved activation and move the child between `Online` and
+`OnCpu` while the publishing CPU completes legacy compatibility bookkeeping. A compatibility enqueue mark accepts
+either state, but its eligibility predicate must read the child lifecycle exactly once and test that one snapshot;
+it must not combine repeated unlocked reads across a concurrent `OnCpu -> Online` or `Online -> OnCpu`
+transition. PID and active-record checks follow the same captured lifecycle decision before the compatibility
+`enqueued` bit is published.
+
 The constructor accepts only a current `OnCpu/Live` parent whose Flow and Runtime are Online. The parent remains
 `OnCpu/Online/Online`; the child is published `Online/Online/Online`, with return register 0 while the parent gets
 the child PID. The child's context contains a fresh FlowRef/generation and rebuilt post-fork continuation, but no
@@ -60,6 +133,11 @@ parent TrapFlowRef, YieldToken, CurrentTask binding, CPU execution authority, or
 any stage returns `EAGAIN` for PID/slot/inbox exhaustion or `ENOMEM` for aggregate/mm/frame allocation failure,
 releases the staged Task slot, PID, page tables, frame references and inbox reservation, and leaves parent PTEs,
 counters, runqueues and all public registries unchanged.
+
+For the CPU0 compatibility publication path, runqueue selection and enqueue use the child PID and TaskRef returned
+by that completed snapshot. The caller must not mutate Scheduler selection from `next_child_pid()` before the
+snapshot chooses its actual registry occurrence. A remote child remains owned by its reserved inbox path and does
+not leave a speculative CPU0 selection record behind.
 
 Plain-fork parent resolution starts from the generation-checked current Task occurrence and then resolves that
 occurrence's effective current-mm binding. An ordinary aggregate resolves its own stable address-space field; a
@@ -104,6 +182,22 @@ last writer is released, and writes return `EPIPE` only after the last reader is
 parent-fd snapshot may preserve its table bookkeeping, but it neither owns pipe storage nor substitutes for these
 cross-process references.
 
+Each live Regular0/Regular1 fd-table entry likewise owns one reference to a generation-checked shared regular
+OpenFileDescription slot. The bounded static registry stores the authoritative file position and a total reference
+count; the aggregate keeps only the slot reference plus its private fd table and bounded content/path cache. A new
+open allocates a fresh slot even when another open names the same inode. `dup` acquires one reference for the new
+entry, ordinary fork acquires one reference for every copied entry, and close, CLOEXEC and process teardown release
+exactly the entries they remove. A saved parent-fd table acquires its own references; restore transfers those held
+references into the restored table without restoring or rewinding the shared position, while discard releases them.
+All multi-reference acquisition paths roll back earlier acquisitions on failure before publication. A slot is
+reusable only after its count reaches zero and its nonzero generation advances on the next allocation.
+
+Regular-file read and lseek, and directory getdents/lseek, resolve the exact shared slot while holding the existing
+files/fs resource lock, then serialize position validation and update under the shared-OFD registry lock. Read
+reserves and advances only the bytes it actually returns; EOF does not advance. Invalid/stale references are
+`EBADF`-class failures and failed seek validation leaves the position unchanged. No code path may use a copied
+`FilesStruct.regular*_offset` or `directory0_offset` as the authoritative post-fork position.
+
 Each shared pipe slot also contains a bounded waiter array sized for all 32 user Tasks. A waiter owns a
 generation-checked `{TaskRef, CpuRef}` and a pre-reserved `Wake` inbox record. Registration occurs under the pipe
 lock only after a second empty-buffer/live-writer check. A read that finds data or EOF during that check cancels
@@ -121,6 +215,9 @@ mask an exact matching registry child, and an exact selector with no matching ch
 the parent has other children. Registry reap clears only the selected zombie's slot, scheduler and resource
 references. It must not reset the current parent's compatibility identity, PID, continuation or active-record
 fields merely because both occurrences share the bounded task-storage manager.
+The selected child's UserAppRuntime, fixed TaskFlow and Task lifecycle are already Destroyed by terminal exit
+before scheduler quiescence grants reap. Wait4 validates those terminal states and releases the aggregate record;
+it must not repeat Runtime, Flow or Task Disable/Cleanup.
 
 After registration the current owner CPU declares Task scheduler sleep and calls its local Scheduler. Inbox
 consumption at user-return/idle safe points distinguishes the race sides: a wake for the current sleep-declared
@@ -128,6 +225,32 @@ Task becomes its one pending wake signal, while a wake for an already blocked On
 eligibility. PreparePrev consumes a matching pending signal instead of blocking. An already runnable/enqueued or
 generation-stale wake is consumed without a second enqueue. No Scheduler call occurs while the files or pipe lock
 is held.
+
+`mkdirat` in the first transient-writable-namespace slice accepts only
+`AT_FDCWD` and imports the pathname through mapping- and permission-checked
+usercopy. The importer must distinguish an inaccessible address (`EFAULT`), an
+empty pathname (`ENOENT`) and a pathname with no terminator inside the fixed
+buffer (`ENAMETOOLONG`). After import, syscall dispatch resolves the current
+generation/CPU-checked aggregate, acquires the shared files/fs/VFS IRQ-safe
+resource lock, and routes its `FsStruct` plus the global `VfsCore` to the
+transient directory create operation specified by `vfs.md`. It may ignore mode
+and umask only as the explicitly deferred metadata/permission part of this
+slice; it must not return success unless a lookup-visible directory was
+actually published. Other dirfd shapes remain unsupported.
+
+`unlinkat` syscall 35 uses the same checked pathname importer, current
+generation/CPU-checked aggregate resolution and files/fs/VFS lock as
+`mkdirat`. The first slice accepts `AT_FDCWD` and exactly either flags zero or
+`AT_REMOVEDIR`. Unknown flag bits return `EINVAL`; other dirfds remain outside
+the slice. It routes flags zero to transient regular-file removal and
+`AT_REMOVEDIR` to transient empty-directory removal. The VFS operation must
+finish target type, read-only-backing and directory-emptiness validation before
+detaching the name. Usercopy and lookup failures map distinctly to `EFAULT`,
+`ENOENT`, `ENAMETOOLONG`, `ENOTDIR`, `ELOOP` or `EROFS`; mismatched types map to
+`EISDIR`/`ENOTDIR`, and a nonempty directory maps to `ENOTEMPTY`. No error may
+change the namespace. Success returns only after the dentry is unreachable by
+path; it must not invalidate an existing open description or the independent
+frame already owned by a shared mapping.
 
 Before runqueue or Task publication, ordinary fork also creates a fresh `UserAddressSpace`, root page table,
 SATP and `UserStack`. Resident private pages are shared through checked `UserFrameRef`s while holes remain holes.
@@ -149,13 +272,41 @@ restore writable-page, stack-byte or whole-address-space snapshots.
 
 Exec stages replacement contents against the leased address-space object. A successful commit releases the
 retired image once while preserving object identity; a failed commit leaves the Task-owned mm untouched. Exit
-first installs `SwapperVm` SATP on the exiting CPU and performs a local `sfence.vma`, then publishes the zombie
-status and SIGCHLD with release ordering and queues a wake record to the parent's fixed CPU. Zombie publication
-alone is not a reap grant. After the physical switch, code running on the selected next Task's stack
-release-publishes the terminal Task's scheduler-quiesced acknowledgement; only that acknowledgement proves that
-the old mm, CurrentTask binding and kernel stack are no longer live on the owner CPU. Wait4 acquire-observes both
-completion and this acknowledgement and is the only reap owner. A caller-supplied boolean must not substitute for
-the acknowledgement. Repeated terminal, acknowledgement or reap operations are rejected.
+first quiesces and cleans up the current UserAppRuntime, then disables and cleans up the fixed TaskFlow. It installs
+`SwapperVm` SATP on the exiting CPU and performs a local `sfence.vma`, then publishes the zombie status and SIGCHLD
+with release ordering. A vfork child may consume and publish its separately reserved immediate-parent completion
+wake at this point. The ordinary wait/reap wake is not emitted yet: the exit leaf first enters a one-way
+terminal Scheduler handoff using the exact current TaskRef and owner CpuRef. This handoff is not the fixed Flow's
+ordinary resumable Schedule signal: it requires the registry zombie, Destroyed Runtime and Destroyed fixed Flow,
+keeps the Task breakpoint invalid, and commits `Task.OnCpu -> Task.Offline` without publishing a resumable context.
+The ordinary Flow-sender Schedule entry and all of its sender validation remain unchanged.
+
+Before zombie publication, exit holds the aggregate files-resource lock and releases every live inherited
+open-file-description/pipe endpoint reference exactly once. A successful release must clear the aggregate's
+`process_resources_present` ownership marker in the same critical section, analogous to Linux 6.12 `exit_files()`
+clearing `task_struct.files` before `put_files_struct()`. Wait/reap treats a cleared marker as already released: it
+may reset the destroyed slot carrier and credentials, but must not call the shared-reference decrement path again.
+The slot cannot be reused until that carrier reset and the registry reap claim both complete.
+
+After the physical switch, the selected next Task's stack cleans up the Offline terminal Task by resolving the
+registry zombie identity, never a compatibility active/last-exited carrier. Only after that cleanup does the next
+stack release-publish the terminal Task's scheduler-quiesced acknowledgement. That publication returns the
+parent CpuRef captured under the same registry lock; the next stack then requests the parent CPU's reschedule IPI.
+Thus the ordinary wait/reap wake follows the complete acquire-visible predicate and cannot be consumed between
+zombie publication and quiescence. A parent already running may reap before the redundant IPI arrives, which is
+harmless; slot reuse cannot erase the captured CpuRef. Zombie publication alone is not a
+reap grant; the acknowledgement proves that the old mm, CurrentTask binding and kernel stack are no longer live on
+the owner CPU. Wait4 acquire-observes both completion and this acknowledgement and is the only reap owner. A
+caller-supplied boolean must not substitute for the acknowledgement. Repeated terminal, acknowledgement or reap
+operations are rejected.
+
+The blocking wait4 loop must preserve a wake across its final registry recheck and sleep instruction. On RISC-V,
+the CPU-local SSIE class gate stays open while the loop keeps the global `sstatus.SIE` gate closed across `wfi`;
+an SSIP arriving after the last recheck therefore remains pending and wakes `wfi`. Only after that wake may the
+global gate reopen and allow the handler to clear SSIP, followed by another acquire recheck. Opening the global
+gate before `wfi` is forbidden because the handler could consume the sole pending wake and return directly to the
+sleep instruction. This is the raw-`wfi` lowering of the same prepare/recheck/sleep ordering guaranteed by a
+waitqueue; it is not a timeout or polling substitute.
 
 For a vfork child, exec stages into and commits the child's currently Base address-space and stack fields. It does
 not copy the effective parent mm into the exec transaction's retired fields. After owner rebinding, SATP switch and
@@ -198,6 +349,28 @@ Each sparse non-stack backing slot stores both its virtual page and `UserFrameRe
 allocates and zeroes exactly the requested page, installs one leaf, then executes targeted `sfence.vma`.
 Backing insertion, optional L0 allocation and PTE publication are one transaction: on failure, undo them in
 reverse order without changing the prior VMA, leaf, allocator count, or bytes.
+
+The first file-backed `mmap` slice accepts exactly one page of a live transient
+regular file, a page-aligned offset, `MAP_SHARED` without anonymous/fixed or
+unmodeled flags, and readable `PROT_READ|PROT_WRITE` permissions. Syscall
+dispatch resolves the generation/CPU-checked current process lease and holds
+the user-memory lock before the files/fs/VFS lock. The fd lookup returns
+`EBADF`; missing read access or a writable shared mapping without write access
+returns `EACCES`; a non-regular/unmodeled backend returns `ENODEV`; malformed
+length, offset, protection or flags return `EINVAL`; address-space or page
+allocation exhaustion returns `ENOMEM`.
+
+The VFS range read that seeds this mapping is positioned and must not advance
+the open description. Mapping prepare allocates and zeroes one `UserFrameRef`,
+copies the file range into it, prepares any required L0 table, installs the
+leaf PTE, and only then publishes the VMA; failure releases staged ownership
+and leaves the prior fd, VFS and address space unchanged. The VMA owns the
+frame independently of the fd and pathname, so close or unlink cannot
+invalidate it. Ordinary fork acquires the same frame reference for this VMA
+and installs a writable non-COW leaf in parent and child. Whole-VMA munmap
+clears the leaf and releases exactly that address-space reference. Full page
+cache coherence, partial mappings, offsets beyond EOF and additional mapping
+flag combinations remain deferred.
 
 The first anonymous-private `munmap` slice accepts exactly one complete, page-aligned anonymous VMA. It
 prevalidates every resident leaf against the VMA backing before mutation, clears those leaves, performs a

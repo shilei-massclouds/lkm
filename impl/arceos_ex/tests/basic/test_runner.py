@@ -387,41 +387,46 @@ class BasicRunnerConfigTests(unittest.TestCase):
         qemu_log.write_text(echoed_only.replace('~ # echo "OK"\n', '~ # echo "OK"\nOK\n'))
         self.assertTrue(runner.evaluate_expectations(expected, qemu_log, outcome)["passed"])
 
-    def test_ltp_close_list_cases_are_distinct_dual_provider_scripted_acceptance(self) -> None:
+    def test_ltp_supported_and_frontier_cases_pin_three_distinct_targets(self) -> None:
         repo_root = Path(__file__).resolve().parents[4]
         cases = repo_root / "impl" / "arceos_ex" / "tests" / "basic" / "cases"
-        expected_names = {"native": "ltp", "linux-object": "ltp-lo"}
-        for provider, name in expected_names.items():
+        expected = {
+            "ltp": ("acceptance", "arceos_ex", "native", "supported"),
+            "ltp-lo": ("acceptance", "arceos_ex", "linux-object", "supported"),
+            "ltp-linux": ("acceptance", "linux", None, "supported"),
+            "ltp-frontier": ("diagnostic", "arceos_ex", "native", "frontier"),
+            "ltp-frontier-lo": ("diagnostic", "arceos_ex", "linux-object", "frontier"),
+            "ltp-frontier-linux": ("diagnostic", "linux", None, "frontier"),
+        }
+        for name, (purpose, target, provider, selection) in expected.items():
             with self.subTest(name=name):
                 config = runner.load_config(cases / f"{name}.toml", repo_root)
-                self.assertEqual(config["purpose"], "acceptance")
-                self.assertEqual(config["kernel"]["app"], "user-boot")
-                self.assertEqual(config["kernel"]["provider"], provider)
+                self.assertEqual(config["purpose"], purpose)
+                self.assertEqual(config["kernel"]["target"], target)
+                if provider is not None:
+                    self.assertEqual(config["kernel"]["app"], "user-boot")
+                    self.assertEqual(config["kernel"]["provider"], provider)
                 self.assertEqual(config["disk"], {"mode": "private-copy", "profile": "canonical"})
-                self.assertEqual(config["qemu"]["kernel_cmdline"], "earlycon=sbi init=/bin/sh")
-                self.assertEqual(config["qemu"]["exit_policy"], "guest-shutdown")
+                self.assertEqual(config["qemu"]["smp"], 8)
+                self.assertIn("init=/bin/sh", config["qemu"]["kernel_cmdline"])
+                self.assertEqual(config["qemu"]["exit_policy"], "marker")
                 self.assertEqual(config["qemu"]["interaction"], "scripted")
                 payload = "".join(
                     step["payload"] for step in config["qemu"]["stdin_steps"]
                 )
-                self.assertIn("./run-syscalls.sh --list -- 'close*'", payload)
-                self.assertNotIn("./run-syscalls.sh -- 'close*'", payload)
-                self.assertIn("status=$?", payload)
-                self.assertIn('exit "$status"', payload)
-                self.assertEqual(
-                    [step["ready_marker"] for step in config["qemu"]["stdin_steps"]],
-                    ["~ #", "/opt/ltp #"],
-                )
-                counts = {
-                    item["marker"]: item["exactly"]
-                    for item in config["expect"]["marker_counts"]
-                }
-                self.assertEqual(
-                    counts,
-                    {"close01\tclose01": 1, "close02\tclose02": 1},
-                )
-                self.assertEqual(config["expect"]["guest_exit_status"], 0)
-                self.assertIn("unsupported syscall", config["expect"]["forbidden_markers"])
+                self.assertEqual(payload, f"/opt/lkm/tests/ltp-init.sh {selection}\n")
+                self.assertNotIn(config["qemu"]["exit_marker"], payload)
+
+        supported_counts = {
+            item["marker"]: item["exactly"]
+            for item in runner.load_config(cases / "ltp.toml", repo_root)["expect"]["marker_counts"]
+        }
+        for entry in ("uname01", "uname02", "getuid01", "geteuid01"):
+            self.assertEqual(supported_counts[f"--- {entry}: PASS (exit 0)"], 1)
+        self.assertEqual(
+            supported_counts["Summary: TOTAL=4 PASS=4 FAIL=0 BROK=0 WARN=0 CONF=0"],
+            1,
+        )
 
     def test_default_automation_pins_user_smoke_and_df0001_to_explicit_test_names(self) -> None:
         repo_root = Path(__file__).resolve().parents[4]
@@ -438,8 +443,12 @@ class BasicRunnerConfigTests(unittest.TestCase):
         self.assertIn('run TEST="$scripted_shell_test"', summary)
         self.assertNotIn('distro-sh-$provider', summary)
         self.assertNotIn('run_command_case "distro sh $provider"', summary)
-        self.assertIn('run TEST="ltp"', summary)
-        self.assertIn('run TEST="ltp-lo"', summary)
+        self.assertNotIn('run TEST="ltp"', summary)
+        self.assertNotIn('run TEST="ltp-lo"', summary)
+        makefile = (repo_root / "Makefile").read_text()
+        self.assertIn("test-ltp:", makefile)
+        self.assertIn("test-ltp-stress:", makefile)
+        self.assertIn("$(MAKE) run TEST=ltp-linux", makefile)
 
         df0001_path = (
             repo_root
@@ -607,6 +616,7 @@ class BasicRunnerLifecycleTests(unittest.TestCase):
             #!/usr/bin/env python3
             import os
             import pathlib
+            import select
             import sys
             import time
 
@@ -633,7 +643,18 @@ class BasicRunnerLifecycleTests(unittest.TestCase):
                 )
                 time.sleep(30)
             else:
-                if os.environ.get("FAKE_QEMU_STDIN"):
+                if os.environ.get("FAKE_QEMU_REPEAT_READY"):
+                    print("READY", flush=True)
+                    first = sys.stdin.readline().strip()
+                    time.sleep(0.2)
+                    if select.select([sys.stdin], [], [], 0)[0]:
+                        print("PREMATURE-SECOND-STEP", flush=True)
+                        raise SystemExit(9)
+                    print(f"ACK:{first}", flush=True)
+                    print("READY", flush=True)
+                    second = sys.stdin.readline().strip()
+                    print(f"ACK:{second}", flush=True)
+                elif os.environ.get("FAKE_QEMU_STDIN"):
                     print("READY", flush=True)
                     sys.stdin.readline()
                 print("SUCCESS", flush=True)
@@ -1021,6 +1042,24 @@ class BasicRunnerLifecycleTests(unittest.TestCase):
         self.assertEqual(status, 0)
         self.assertTrue(result["qemu"]["stdin_steps"][0]["sent"])
 
+    def test_repeated_ready_marker_requires_new_output_after_each_step(self) -> None:
+        environment = {**self.environment, "FAKE_QEMU_REPEAT_READY": "1"}
+        path = self.write_case(
+            stdin=(
+                'stdin_steps = ['
+                '{ ready_marker = "READY", payload = "one\\n" }, '
+                '{ ready_marker = "READY", payload = "two\\n" }'
+                ']'
+            )
+        )
+        with mock.patch.dict(os.environ, environment, clear=False):
+            status, output, result = self.run_case(path, "repeat-ready")
+        self.assertEqual(status, 0)
+        self.assertTrue(all(step["sent"] for step in result["qemu"]["stdin_steps"]))
+        log = (output / "qemu.log").read_text()
+        self.assertNotIn("PREMATURE-SECOND-STEP", log)
+        self.assertLess(log.index("ACK:one"), log.index("ACK:two"))
+
     def test_nonterminal_presentation_filters_cursor_query_but_log_keeps_it(self) -> None:
         self.environment["FAKE_QEMU_CURSOR_QUERY"] = "1"
         rendered = bytearray()
@@ -1234,6 +1273,13 @@ class CanonicalRootfsTests(unittest.TestCase):
             (config / "passwd.entry").write_text("test:hash:1000:100:test:/:/bin/sh\n")
             (config / "shadow.entry").write_text("test:hash:0:::::\n")
             (config / "rc-local.sh").write_text("#!/bin/sh\nexit 0\n")
+            (config / "ltp-supported").write_text("uname01\n")
+            (config / "ltp-frontier").write_text("getuid01\n")
+            (config / "ltp-select.sh").write_text("#!/bin/sh\nexit 0\n")
+            (config / "ltp-init.sh").write_text("#!/bin/sh\nexit 0\n")
+            (config / "ltp-proc-meminfo").write_text(
+                "MemAvailable: 65536 kB\nSwapFree: 0 kB\n"
+            )
             configured_inittab = (
                 "tty1::respawn:/bin/sh -c getty-tty1-and-poweroff\n"
                 "ttyS0::respawn:/bin/sh -c getty-ttyS0-and-poweroff\n"
@@ -1248,6 +1294,53 @@ class CanonicalRootfsTests(unittest.TestCase):
             self.assertEqual(sum(line.startswith("test:") for line in (staging / "etc" / "passwd").read_text().splitlines()), 1)
             self.assertEqual(sum(line.startswith("test:") for line in (staging / "etc" / "shadow").read_text().splitlines()), 1)
             self.assertTrue(os.access(destination / "rc-local.sh", os.X_OK))
+            self.assertEqual((destination / "ltp-supported").read_text(), "uname01\n")
+            self.assertEqual((destination / "ltp-frontier").read_text(), "getuid01\n")
+            self.assertTrue(os.access(destination / "ltp-select.sh", os.X_OK))
+            self.assertTrue(os.access(destination / "ltp-init.sh", os.X_OK))
+            self.assertEqual(
+                (staging / "proc" / "meminfo").read_text(),
+                "MemAvailable: 65536 kB\nSwapFree: 0 kB\n",
+            )
+            self.assertEqual(
+                stat.S_IMODE((staging / "proc" / "meminfo").stat().st_mode), 0o444
+            )
+
+    def test_ltp_selection_requires_exact_unique_known_runtest_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            ltp = root / "ltp"
+            config = root / "config"
+            (ltp / "runtest").mkdir(parents=True)
+            config.mkdir()
+            runtest = ltp / "runtest" / "syscalls"
+            runtest.write_text("uname01 uname01\ngetuid01 getuid01\n")
+            supported = config / "ltp-supported"
+            frontier = config / "ltp-frontier"
+            supported.write_text("uname01\n")
+            frontier.write_text("getuid01\n")
+
+            self.assertEqual(
+                rootfs_builder.validate_ltp_selections(ltp, config),
+                {"supported": ["uname01"], "frontier": ["getuid01"]},
+            )
+
+            supported.write_text("uname01\nuname01\n")
+            with self.assertRaisesRegex(ValueError, "duplicate entry"):
+                rootfs_builder.validate_ltp_selections(ltp, config)
+
+            supported.write_text("unknown01\n")
+            with self.assertRaisesRegex(ValueError, "found 0"):
+                rootfs_builder.validate_ltp_selections(ltp, config)
+
+            supported.write_text(" uname01\n")
+            with self.assertRaisesRegex(ValueError, "one exact entry name"):
+                rootfs_builder.validate_ltp_selections(ltp, config)
+
+            supported.write_text("uname01\n")
+            runtest.write_text("uname01 uname01\nuname01 uname01\ngetuid01 getuid01\n")
+            with self.assertRaisesRegex(ValueError, "found 2"):
+                rootfs_builder.validate_ltp_selections(ltp, config)
 
     def test_template_validation_detects_current_and_changed_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1265,7 +1358,17 @@ class CanonicalRootfsTests(unittest.TestCase):
             fixture.write_text("one")
             config = root / "config"
             config.mkdir()
-            for name in ("inittab", "passwd.entry", "shadow.entry", "rc-local.sh"):
+            for name in (
+                "inittab",
+                "passwd.entry",
+                "shadow.entry",
+                "rc-local.sh",
+                "ltp-supported",
+                "ltp-frontier",
+                "ltp-select.sh",
+                "ltp-init.sh",
+                "ltp-proc-meminfo",
+            ):
                 (config / name).write_text(name)
             image = root / "canonical.raw"
             image.write_bytes(b"image")

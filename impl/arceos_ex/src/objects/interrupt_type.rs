@@ -198,6 +198,28 @@ impl InterruptType {
         Ok(())
     }
 
+    pub fn enable_reschedule_ipi_source(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Online {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Online,
+                State::Online,
+            );
+        }
+
+        csr::enable_supervisor_software_interrupt();
+        if !csr::supervisor_software_interrupt_enabled() {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Online,
+                State::Online,
+            );
+        }
+        Ok(())
+    }
+
     pub fn enable_service(&mut self) -> EventResult {
         if self.lifecycle.state() != State::Ready
             || !self.timer_handler_ready

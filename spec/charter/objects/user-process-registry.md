@@ -48,6 +48,11 @@ vfork 在 publish 前完成 child activation 和 parent completion/wake 两个 i
 reader 存活时可写，空 pipe 只在最后一个 writer 关闭后向 reader 返回 EOF。保存/恢复 parent fd table
 snapshot 不得代替普通 fork 的共享 open-file backing，也不得复制 pipe 字节形成私有分叉。
 
+进程 exit 必须在 zombie publication 前恰好一次释放该 aggregate 对 live open-file description、pipe backing
+和 endpoint 的全部引用，并在同一个受保护事务中撤销 files 资源所有权。wait4 取得独占 reap 权后只清理
+已经 Destroyed 且不再拥有 files 资源的 aggregate/Task 载体，不得再次递减这些共享引用。这与 Linux 6.12
+在 `do_exit()` 中执行 `exit_files()`、而 `wait_task_zombie()`/`release_task()` 只回收 task 载体的职责分离一致。
+
 当共享 pipe 为空且仍有 writer 时，阻塞式 read 不得以“不支持”或 EOF 返回。reader 必须先在共享
 backing 下登记 generation-checked `{TaskRef, CpuRef}` wait，再通过 owner Scheduler 放弃运行资格；写入
 首批可读数据或释放最后一个 writer 时合并一次面向该 Task 固定 CPU 的 wake。登记、条件重检与 sleep/wake
@@ -56,7 +61,11 @@ backing 下登记 generation-checked `{TaskRef, CpuRef}` wait，再通过 owner 
 后重新检查共享 backing，再决定复制数据、继续等待或返回 EOF。
 
 exit 在条目内 release 发布 zombie/completion、wait word 和 SIGCHLD，然后向 parent 固定 CPU 合并一次
-wake。wait4 的 PID `-1` 匹配当前 parent 的任一 child，正 PID 只匹配当前 parent 的该 PID child；不属于
+wake。该 wake 不得早于 wait4 实际可消费的完整完成条件；若 Task 的 owner-CPU retirement 是独立的
+后续条件，则 wake 必须在该条件 release 发布后发出，或者以持久 pending 状态覆盖 parent 重检条件到
+实际睡眠的窗口，不能只在较早的 zombie publication 时产生一次可丢失 IPI。vfork completion 是独立的
+parent-blocking handoff，仍按其 immediate-parent reservation 发布，不替代稍后的 wait/reap wake。
+wait4 的 PID `-1` 匹配当前 parent 的任一 child，正 PID 只匹配当前 parent 的该 PID child；不属于
 当前 parent 的同 PID 进程不可成为等待、handoff 或 reap 目标。在匹配集合内，wait4 对一个 zombie 取得
 独占 reap 权；复制 status 失败不得消费 zombie，成功后才清除调度引用并回收条目。exec 保持
 aggregate、Task、TaskFlow、Runtime、CpuRef 和 UserAddressSpace 对象 identity，

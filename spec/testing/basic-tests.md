@@ -23,8 +23,9 @@ kernel image，并拥有一次完整 QEMU 生命周期。测试内容可以是 k
   移除，不得增加 compatibility alias、retired-name 映射或别名 TOML。counterpart 是显式 identity
   对应关系，不得据此复制 QEMU case，
   或把 scripted pipe 与人工 PTY transport 声明为等价。
-- `ltp` 和 `ltp-lo` 是自动 LTP syscall acceptance，分别固定使用 native 与 linux-object
-  provider。旧 `ltp-shell-manual-*` 名称退役且不得保留兼容映射或别名 TOML。
+- `ltp`、`ltp-lo`、`ltp-linux` 是独立 `make test-ltp` 门禁中的 stock LTP syscall acceptance，
+  分别固定到 native、linux-object provider 与 sibling Linux；不进入根 `make test`。对应
+  `ltp-frontier{,-lo,-linux}` 只做下一批诊断。旧 `ltp-shell-manual-*` 名称退役且不得保留兼容映射或别名 TOML。
 - `make disk ROOTFS=<profile>` 独立构造只读 rootfs template；`ROOTFS` 默认且当前只允许 `canonical`，
   因而 `make disk` 等价于 `make disk ROOTFS=canonical`。未知 profile 必须立即失败。
 

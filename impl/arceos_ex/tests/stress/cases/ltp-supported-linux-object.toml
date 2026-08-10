@@ -1,0 +1,6 @@
+schema_version = 2
+name = "ltp-supported-linux-object"
+mode = "stress"
+test = "ltp-lo"
+runs = 30
+classifier = "../classifiers/ltp-supported.toml"

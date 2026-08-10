@@ -188,6 +188,21 @@ type TaskFlow: PhaseObject {
                 task_flow_enter_does_not_select_machine_coordinate(self);
             }
         }
+
+        Action::ObserveCheckpoint {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Online;
+                self.parent.state == State::OnCpu;
+                task_flow_cpu_ref_read_only_while_executing(self);
+            }
+            ensures {
+                checkpoint_consumer_dispatch_bound_to_cpu_context(self);
+                checkpoint_consumer_cross_cpu_overlap_allowed(self);
+                checkpoint_consumer_same_cpu_normal_context_reentry_forbidden(self);
+                checkpoint_consumer_does_not_advance_observed_lifecycle(self);
+            }
+        }
     }
 }
 
@@ -214,6 +229,10 @@ predicate task_flow_published_with_task<F: TaskFlow, T: Task>(flow: F, task: T) 
 predicate task_flow_terminal_runtime_quiesced<F: TaskFlow>(flow: F) -> bool;
 predicate task_flow_no_pending_yield<F: TaskFlow>(flow: F) -> bool;
 predicate task_flow_user_continuation_coordinate_resumed<F: TaskFlow>(flow: F) -> bool;
+predicate checkpoint_consumer_dispatch_bound_to_cpu_context<F: TaskFlow>(flow: F) -> bool;
+predicate checkpoint_consumer_cross_cpu_overlap_allowed<F: TaskFlow>(flow: F) -> bool;
+predicate checkpoint_consumer_same_cpu_normal_context_reentry_forbidden<F: TaskFlow>(flow: F) -> bool;
+predicate checkpoint_consumer_does_not_advance_observed_lifecycle<F: TaskFlow>(flow: F) -> bool;
 
 predicate current_task_bind_scheduler_commit_boundary_valid<F: TaskFlow, R: TaskRef, D: TaskFlow>(flow: F, task_ref: R, dispatch_flow: D) -> bool;
 predicate scheduler_preflight_dispatch_flow_is<R: TaskRef, F: TaskFlow>(task_ref: R, flow: F) -> bool;

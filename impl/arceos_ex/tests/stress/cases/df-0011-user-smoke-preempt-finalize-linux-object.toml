@@ -1,0 +1,17 @@
+schema_version = 2
+name = "df-0011-user-smoke-preempt-finalize-linux-object"
+description = "Repeat canonical linux-object user-smoke to preserve the intermittent timeout after pipe collection, child reap, and A-B-A validation but before preempt-case finalization."
+mode = "stress"
+test = "user-smoke-linux-object"
+runs = 100
+classifier = "../classifiers/df-0011-user-smoke-preempt-finalize-linux-object.toml"
+
+[metadata]
+defect = "DF-0011"
+observation_mode = "user-smoke-preempt-post-validation-timeout-forensics"
+ordinary_path_required = true
+default_suite = true
+rootfs_profile = "canonical"
+payload = "canonical linux-object user-smoke preempt case through pipe collection, child reap, A-B-A validation, case finalization, and guest exit"
+first_observation = "impl/arceos_ex/tests/basic/out/20260805T202757.172058Z-user-smoke-linux-object-609270"
+scope_note = "Preserve the late timeout after the round-robin success marker independently from DF-0009, which stops before bytes-collected; successful samples do not close either defect."

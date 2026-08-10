@@ -778,6 +778,7 @@ def _run_qemu(
     stress_mem: dict[str, Any] | None = None
     reaped = True
     pipe_open = True
+    ready_search_offset = 0
     try:
         with log_path.open("wb") as log:
             while pipe_open or process.poll() is None:
@@ -803,12 +804,14 @@ def _run_qemu(
                 for step in steps:
                     if step["sent"]:
                         continue
-                    if step["ready_marker"] in visible:
+                    ready_visible = captured[ready_search_offset:].decode(errors="replace")
+                    if step["ready_marker"] in ready_visible:
                         if process.stdin is None:
                             raise RuntimeError("stdin step configured without QEMU stdin")
                         process.stdin.write(step["payload"].encode())
                         process.stdin.flush()
                         step["sent"] = True
+                        ready_search_offset = len(captured)
                     break
                 if manifest["qemu"]["exit_policy"] == "marker" and not terminated_after_marker:
                     marker = manifest["qemu"]["exit_marker"]

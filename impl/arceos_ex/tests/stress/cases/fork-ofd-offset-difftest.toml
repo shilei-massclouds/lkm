@@ -1,0 +1,23 @@
+schema_version = 2
+name = "fork-ofd-offset-difftest"
+description = "Pair sibling Linux with native arceos_ex for the exact three-child shared-OFD byte sequence and child-return boundary."
+mode = "difftest"
+runs = 10
+left_test = "fork-ofd-offset-linux"
+left_label = "linux"
+right_test = "fork-ofd-offset"
+right_label = "arceos_ex"
+observable_scope = ["r1-shbang", "r2-bin", "r3-slash-sh"]
+
+[observable_patterns]
+r1-shbang = "(?m)^R1=#!/$"
+r2-bin = "(?m)^R2=bin$"
+r3-slash-sh = "(?m)^R3=/sh$"
+
+[metadata]
+observation_mode = "paired-user-visible-fork-ofd-offset"
+defect = "DF-0013"
+default_difftest = false
+rootfs_profile = "canonical"
+sample_policy = "Use at most 10 pairs for horizontal Linux/arceos_ex semantic comparison; rare concurrency reproduction belongs to the provider stress identities."
+scope_note = "Command echo is deliberately excluded: only exact output lines from the three external dd children enter the observable sequence."

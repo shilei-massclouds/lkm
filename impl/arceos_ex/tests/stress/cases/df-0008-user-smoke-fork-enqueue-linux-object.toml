@@ -1,0 +1,17 @@
+schema_version = 2
+name = "df-0008-user-smoke-fork-enqueue-linux-object"
+description = "Repeat the canonical linux-object user smoke acceptance to capture its intermittent plain-fork child enqueue publication failure."
+mode = "stress"
+test = "user-smoke-linux-object"
+runs = 100
+classifier = "../classifiers/df-0008-user-smoke-fork-enqueue-linux-object.toml"
+
+[metadata]
+defect = "DF-0008"
+observation_mode = "user-smoke-plain-fork-enqueue-forensics"
+ordinary_path_required = true
+default_suite = true
+rootfs_profile = "canonical"
+payload = "canonical linux-object user-smoke fork_mm case with repeated plain-fork COW child creation"
+first_observation = "20260805T190512.009583Z-user-smoke-linux-object-579156"
+scope_note = "Capture the intermittent mark_enqueued boundary without changing the user-smoke payload, provider, CPU count, rootfs, timeout, or acceptance markers; successful samples do not close the defect."

@@ -1,0 +1,40 @@
+[[rules]]
+id = "panic"
+result = "failure"
+contains = ["arceos_ex panic"]
+description = "Kernel panic was printed."
+
+[[rules]]
+id = "stress-mem-overflow"
+result = "failure"
+contains = ["overflow=1"]
+description = "The checkpoint stress-memory recorder overflowed."
+
+[[rules]]
+id = "df-0014-checkpoint-cross-cpu-reentry"
+result = "failure"
+contains = [
+  "checkpoint reentry",
+  "lkm-rc-local: begin",
+]
+description = "The shared basic identity reached runtime and reproduced the separate DF-0014 cross-CPU observer failure."
+
+[[rules]]
+id = "df-0012-boot-direct-setup-after-dma-cache-policy"
+result = "failure"
+contains = [
+  "checkpoint: DmaCachePolicy.Ready task=BootTask",
+  "arceos_ex boot init direct setup failed",
+  "error=C event=S actual=P expected=P target=R",
+]
+description = "Boot shut down through the generic direct-setup condition failure immediately after DmaCachePolicy.Ready."
+
+[[rules]]
+id = "df-0012-rc-local-success"
+result = "success"
+contains = [
+  "lkm-rc-local: begin",
+  "lost+found",
+  "lkm-rc-local: end status=0",
+]
+description = "The same canonical native rc.local identity completed /bin/ls and powered off cleanly."

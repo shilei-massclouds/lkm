@@ -1,0 +1,17 @@
+schema_version = 2
+name = "df-0014-checkpoint-cross-cpu-reentry-native"
+description = "Repeat canonical native rc.local to preserve the rare cross-CPU checkpoint consumer overlap formerly rejected by the system-global reentry guard."
+mode = "stress"
+test = "rc-local-native"
+runs = 500
+classifier = "../classifiers/df-0014-checkpoint-cross-cpu-reentry-native.toml"
+
+[metadata]
+defect = "DF-0014"
+observation_mode = "checkpoint-consumer-cross-cpu-overlap-forensics"
+ordinary_path_required = true
+default_suite = true
+rootfs_profile = "canonical"
+payload = "canonical native rc.local acceptance with announce and stress-mem on two CPUs"
+first_observation = "impl/arceos_ex/tests/stress/out/20260806T040602.535104Z-df-0012-rc-local-direct-setup-native/runs/run-0448"
+scope_note = "Preserve checkpoint reentry after Kernel.Online and rc.local begin independently from DF-0012's early direct-setup shutdown and DF-0004's timeout; successful samples do not erase the frozen failure."

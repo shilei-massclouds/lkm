@@ -3606,10 +3606,11 @@ test；例如 DF-0001 固定引用非 probe 的 `user-smoke-native` acceptance�
 `qemu.log`，不得再叠加第二套输入或 QEMU 生命周期。
 
 默认 stress suite 必须持续采样已指定为长期观察项、且已经具备 canonical basic identity 与冻结诊断
-artifact 的未闭环间歇性缺陷。DF-0004 的 `rc-local-native` timeout 属于该范围，因此默认 suite 必须
-包含其 focused composite case，并与其它默认 case 一样接受顶层 `STRESS_RUNS` 的统一轮次覆盖；case
-自带的 100 轮仍用于未覆盖时的专项深采样。加入默认 suite 不等于加入根 `make test`，连续成功也只表示
-本批未复现，不能关闭缺陷或替代 timeout 时的 QMP 现场分析。
+artifact 的未闭环间歇性缺陷。DF-0004 的 `rc-local-native` timeout 和 DF-0005 的
+`busybox-init-login-native` post-login timeout 属于该范围，因此默认 suite 必须包含各自的 focused
+composite case，并与其它默认 case 一样接受顶层 `STRESS_RUNS` 的统一轮次覆盖；case 自带的 100 轮仍
+用于未覆盖时的专项深采样。加入默认 suite 不等于加入根 `make test`，连续成功也只表示本批未复现，
+不能关闭缺陷或替代 timeout 时的 QMP 现场分析。
 
 每次 stress 执行必须记录整体时间统计，用于比较不同观察模式是否显著扰动复现时序。runner 应在 case 开始和结束时记录 UTC wall-clock 时间，并使用单调时钟计算总耗时；summary/report 至少应包含开始时间、结束时间、总耗时、已完成 run 数和按已完成 run 计算的平均单轮耗时。每个独立 run 仍应记录自身开始时间、结束时间和耗时；整体平均值应从这些 run 记录计算，避免只依赖外部日志或人工估算。比较 `stress-mem` 与普通路径时，应优先在构建已就绪的条件下使用同等 run 数、同一 case 和同一超时配置，避免把首次编译或外部准备工作误判为观察模式本身的开销。
 
@@ -3697,6 +3698,14 @@ checkpoint 注册真实 handler、stress-mem recorder handler、announce handler
 dummy handler 的效果等价于空函数，用于保持 checkpoint 调用点和控制流形态稳定。默认构建不得启用重型 handler；
 显式 probe/stress 配置才允许打开会记录或输出事件的 handler。handler 读取和记录事实时不得推进被观察对象生命周期，
 不得把测试专用状态写入普通对象 API，也不得为了观测方便改变 Linux 或 arceos_ex 的正式行为。
+
+checkpoint consumer 的重入保护必须属于当前 CPU/执行上下文，不得使用全系统单一
+active 位把不同 CPU 的合法并行观测误判为递归。SMP 并发开放后，不同 CPU 可以同时消费
+checkpoint；每个 handler 仍必须只读，输出/recorder sink 必须自行提供所需的并发安全。同一 CPU
+的同一普通执行上下文不得在 handler 未返回时再次进入 consumer dispatch；这个本地重入失败与
+另一 CPU 的并行 dispatch 是两种不同事件。该边界对齐 Linux tracing 把 recursion 状态绑定到
+current 并按 normal/IRQ/softirq/NMI context 区分的原则；当前首片先保留同 CPU 普通上下文的严格
+fail-stop，若后续需要观测中断嵌套，必须先把上下文分位语义闭合到 Model/Coding，不得用全局锁或全局布尔位代替。
 
 handler 过滤应作为 handler 配置能力设计，而不是通过删除 checkpoint 调用点实现。当前明确的过滤条件至少包括两类：
 

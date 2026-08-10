@@ -72,6 +72,17 @@ installs the full tree at `/opt/ltp` after Alpine extraction and repository fixt
 Alpine `/etc`. Missing/malformed LTP is a specific failure. The configured image size must accommodate it and
 all LTP input content participates in the manifest.
 
+Canonical also installs the repository-owned exact-name `supported` and `frontier` lists plus a selector and
+completion wrapper below `/opt/lkm/tests`. Construction rejects empty, whitespace-bearing, duplicate or unknown
+names and requires every selected name to occur exactly once in the staged `runtest/syscalls`. The selector may
+only form quoted argv and exec the unchanged stock `run-syscalls.sh`; result classification remains owned by the
+LTP harness and host acceptance expectations.
+
+Canonical installs a read-only `/proc/meminfo` stock-harness fixture because the LTP new API reads
+`MemAvailable` unconditionally even when a test declares no minimum-memory requirement. All three targets see
+the same deterministic admission input. This fixture is not a procfs object and does not establish `/proc`,
+`/proc/self`, or `/proc/sys` capability.
+
 ## Kernel command line separation
 
 Basic-test `kernel_cmdline` is frozen in TOML and passed as one QEMU append value. `init=` selects a normal

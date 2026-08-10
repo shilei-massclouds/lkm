@@ -1,0 +1,18 @@
+schema_version = 2
+name = "df-0007-ltp-frontier-child-wait-linux-object"
+description = "Repeat the canonical linux-object LTP frontier identity at the same SMP wait/reap legacy-carrier routing boundary as native DF-0007."
+mode = "stress"
+test = "ltp-frontier-lo"
+runs = 50
+classifier = "../classifiers/df-0007-ltp-frontier-child-wait-native.toml"
+
+[metadata]
+defect = "DF-0007"
+observation_mode = "ltp-frontier-child-wait-dispatch-preflight-forensics"
+ordinary_path_required = true
+default_suite = false
+rootfs_profile = "canonical"
+provider = "linux-object"
+payload = "stock LTP frontier list through the unchanged run-syscalls.sh harness on the linux-object provider"
+first_observation = "20260805T183242.824997Z-ltp-frontier-lo-565852"
+scope_note = "This is the second-provider side of DF-0007, not a separate defect or a default-suite expansion."

@@ -57,3 +57,22 @@ start-kernel/EFI 与 setup-arch-tail 的 deferred/trimmed facts 归属 BootInitF
 配置下 `init_vmlinux_build_id()` 与 `page_address_init()` 都是 trimmed 空调用，私有 bitset 必须以
 trimmed 命名保存二者的位置事实；EFI、boot alternatives、RT signal 和 user ISA 的真实调用保持
 deferred。实现不得为这些事实建立 wrapper state 或 checkpoint。
+
+## `setup_arch()` 返回失败诊断
+
+`setup_arch()` 返回边界的 acceptance 必须保持与 readiness 判定相同的短路顺序，并在失败时通过通用
+`FailureDiagnostic` 报告第一个失败谓词。诊断固定使用
+`phase=BootInitFlow step=setup_arch_return object=BootInitFlow check=setup_arch_return_ready`；
+`first_failed` 使用稳定的对象事实名，至少逐项区分 Flow/stack guard、BootCPU 与 CPU-local interrupt、
+VM/kernel address space、EarlyDtb/command line/early params、MemBlock、正式 DeviceTree/内存拓扑、
+resource lock/tree、CpuGroup SMP gate、cache/hwcap/DMA policy 和 start-kernel trimmed facts。
+
+诊断函数不得先采集全部快照再重新组合布尔表达式，也不得为了输出而重复读取同一个判定；它必须按原
+acceptance 顺序读取并在首个 false 处返回。这样既不改变 System Exclusive 边界的行为，又能在概率性
+失败中唯一冻结第一个可观察差异。成功路径不得打印该诊断。
+
+若首个失败谓词是已安装保护字的只读完整性检查，失败路径还必须在任何后续输出前只读冻结一次通用
+栈保护观测，并输出稳定的 `stack_guard_diagnostic` 记录。记录至少包含 TaskRef slot/generation、当前
+CPU logical id、记录的 stack base/top、观测时 live SP、固定 expected word 与该地址的 actual word；
+若记录范围自身无效，则 actual 明确记为 unavailable，且不得为诊断解引用无效地址。该记录只定位
+Task 栈边界或其它写入造成的破坏，不得修复保护字、推进 lifecycle 或按测试名改变行为。

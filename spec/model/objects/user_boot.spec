@@ -194,6 +194,11 @@ predicate user_address_space_runtime_ready<T>(space: T) -> bool;
 predicate user_address_space_brk_window_bound<T>(space: T) -> bool;
 predicate user_address_space_mmap_anonymous_window_bound<T>(space: T) -> bool;
 predicate user_address_space_mmap_fixed_heap_base_compat_bound<T>(space: T) -> bool;
+predicate user_address_space_mmap_shared_regular_one_page_bound<T>(space: T) -> bool;
+predicate user_address_space_mmap_shared_regular_frame_eager<T>(space: T) -> bool;
+predicate user_address_space_mmap_shared_regular_survives_fd_close_and_unlink<T>(space: T) -> bool;
+predicate user_address_space_mmap_shared_regular_fork_shares_writable_frame<T>(space: T) -> bool;
+predicate user_address_space_mmap_shared_regular_failure_atomic<T>(space: T) -> bool;
 predicate user_address_space_mprotect_accepts_mapped_user_range<T>(space: T) -> bool;
 predicate user_address_space_munmap_accepts_mapped_user_range<T>(space: T) -> bool;
 predicate user_address_space_munmap_anonymous_private_whole_vma<T>(space: T) -> bool;
@@ -255,6 +260,11 @@ predicate syscall_table_bound_to_exception<T, E>(table: T, exception: E) -> bool
 predicate syscall_table_write_supported<T>(table: T) -> bool;
 predicate syscall_table_writev_supported<T>(table: T) -> bool;
 predicate syscall_table_openat_supported<T>(table: T) -> bool;
+predicate syscall_table_mkdirat_supported<T>(table: T) -> bool;
+predicate syscall_table_unlinkat_supported<T>(table: T) -> bool;
+predicate syscall_table_fchmodat_supported<T>(table: T) -> bool;
+predicate syscall_table_fchownat_supported<T>(table: T) -> bool;
+predicate syscall_table_statfs_supported<T>(table: T) -> bool;
 predicate syscall_table_chdir_supported<T>(table: T) -> bool;
 predicate syscall_table_read_supported<T>(table: T) -> bool;
 predicate syscall_table_ppoll_supported<T>(table: T) -> bool;
@@ -307,6 +317,27 @@ predicate syscall_stat_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_write_routes_to_console<T>(table: T) -> bool;
 predicate syscall_writev_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_openat_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
+predicate syscall_openat_create_exclusive_first_slice<T, F, V>(table: T, files: F, vfs: V) -> bool;
+predicate syscall_openat_create_preflights_fd_capacity<T, F>(table: T, files: F) -> bool;
+predicate syscall_openat_create_failure_has_no_namespace_side_effect<T>(table: T) -> bool;
+predicate syscall_openat_create_selects_free_regular_description<T, F>(table: T, files: F) -> bool;
+predicate files_struct_two_regular_open_descriptions_bound<T>(files: T) -> bool;
+predicate syscall_mkdirat_routes_to_process_fs_and_vfs<T, F, V>(table: T, fs: F, vfs: V) -> bool;
+predicate syscall_mkdirat_at_fdcwd_first_slice<T>(table: T) -> bool;
+predicate syscall_mkdirat_transient_overlay_first_slice<T>(table: T) -> bool;
+predicate syscall_mkdirat_permissions_umask_deferred<T>(table: T) -> bool;
+predicate syscall_unlinkat_routes_to_process_fs_and_vfs<T, F, V>(table: T, fs: F, vfs: V) -> bool;
+predicate syscall_unlinkat_at_fdcwd_first_slice<T>(table: T) -> bool;
+predicate syscall_unlinkat_file_and_empty_directory_first_slice<T>(table: T) -> bool;
+predicate syscall_unlinkat_linux_6_12_errno_bound<T>(table: T) -> bool;
+predicate syscall_unlinkat_failure_has_no_namespace_side_effect<T>(table: T) -> bool;
+predicate syscall_unlinkat_open_file_and_mapping_survive<T>(table: T) -> bool;
+predicate syscall_fchmodat_linux_6_12_path_mode_bound<T>(table: T) -> bool;
+predicate syscall_fchmodat_errno_and_failure_atomic_bound<T>(table: T) -> bool;
+predicate syscall_statfs_riscv64_native_layout_bound<T>(table: T) -> bool;
+predicate syscall_statfs_ext2_first_slice_bound<T, V>(table: T, vfs: V) -> bool;
+predicate syscall_statfs_path_error_precedes_output_copy<T>(table: T) -> bool;
+predicate syscall_statfs_failure_has_no_partial_copyout<T>(table: T) -> bool;
 predicate syscall_openat_builtin_grandchild_dev_null_redirect_bound<T, F>(table: T, files: F) -> bool;
 predicate syscall_getcwd_builtin_grandchild_absolute_pwd_bound<T, F, V>(table: T, fs: F, vfs: V) -> bool;
 predicate files_struct_ltp_runtest_syscalls_read_capacity_bound<T>(files: T) -> bool;
@@ -347,6 +378,10 @@ predicate syscall_pipe2_atomic_fd_and_usercopy_rollback<T>(table: T) -> bool;
 predicate syscall_pipe2_full_linux_model_deferred<T>(table: T) -> bool;
 predicate syscall_fchown_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_fchmod_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
+predicate syscall_ftruncate_routes_to_files_struct_and_vfs<T, F, V>(table: T, files: F, vfs: V) -> bool;
+predicate syscall_ftruncate_linux_6_12_validation_bound<T>(table: T) -> bool;
+predicate syscall_ftruncate_bounded_regular_file_first_slice<T>(table: T) -> bool;
+predicate syscall_ftruncate_failure_has_no_side_effect<T>(table: T) -> bool;
 predicate syscall_fchown_fchmod_fd_local_first_slice<T>(table: T) -> bool;
 predicate syscall_fchown_fchmod_full_linux_model_deferred<T>(table: T) -> bool;
 predicate syscall_unsupported_socket_diagnostic_first_slice<T>(table: T) -> bool;
@@ -421,6 +456,9 @@ predicate syscall_time_full_linux_model_deferred<T>(table: T) -> bool;
 predicate syscall_brk_routes_to_user_address_space<T, A>(table: T, space: A) -> bool;
 predicate syscall_mmap_routes_to_user_address_space<T, A>(table: T, space: A) -> bool;
 predicate syscall_mmap_fixed_anonymous_prot_none_first_slice<T>(table: T) -> bool;
+predicate syscall_mmap_shared_regular_routes_to_current_files_and_vfs<T, F, V>(table: T, files: F, vfs: V) -> bool;
+predicate syscall_mmap_shared_regular_linux_6_12_validation_bound<T>(table: T) -> bool;
+predicate syscall_mmap_shared_regular_preserves_file_position<T>(table: T) -> bool;
 predicate syscall_mmap_full_vma_model_deferred<T>(table: T) -> bool;
 predicate syscall_mprotect_routes_to_user_address_space<T, A>(table: T, space: A) -> bool;
 predicate syscall_munmap_routes_to_user_address_space<T, A>(table: T, space: A) -> bool;
@@ -477,6 +515,7 @@ predicate syscall_wait4_options_zero_first_slice<T>(table: T) -> bool;
 predicate syscall_wait4_wnohang_no_waitable_child_first_slice<T>(table: T) -> bool;
 predicate syscall_wait4_completed_child_record_reap_first_slice<T>(table: T) -> bool;
 predicate syscall_wait4_parent_wait_chldexit_boundary<T>(table: T) -> bool;
+predicate user_process_registry_parent_wait_wake_after_reap_eligibility_release<R, C: Task>(registry: R, child: C) -> bool;
 predicate syscall_wait4_current_parent_task_bound<T, P: Task, C: Task>(table: T, parent: P, child: C) -> bool;
 predicate syscall_wait4_owner_scheduler_bound<T, P: Task, S: Scheduler>(table: T, parent: P, scheduler: S) -> bool;
 predicate syscall_wait4_yields_to_user_child_continuation<T, P>(table: T, process: P) -> bool;
@@ -484,6 +523,7 @@ predicate syscall_wait4_child_exit_status_copyout_first_slice<T>(table: T) -> bo
 predicate syscall_wait4_observed_child_reap_first_slice<T>(table: T) -> bool;
 predicate syscall_wait4_no_child_echild_first_slice<T>(table: T) -> bool;
 predicate syscall_wait4_blocking_sleep_deferred<T>(table: T) -> bool;
+predicate syscall_wait4_recheck_to_sleep_preserves_pending_wake<T, I: InterruptType>(table: T, interrupt: I) -> bool;
 predicate syscall_read_builtin_grandchild_pipe_block_handoff<T, C>(table: T, child: C) -> bool;
 predicate syscall_wait4_builtin_grandchild_completed_reap<T, C>(table: T, child: C) -> bool;
 predicate syscall_sync_rootfs_barrier_first_slice<T>(table: T) -> bool;
@@ -513,6 +553,10 @@ predicate user_kernel_trap_stack_irq_stack_switch_deferred<T>(frame: T) -> bool;
 predicate syscall_table_write_observed<T>(table: T) -> bool;
 predicate syscall_table_writev_observed<T>(table: T) -> bool;
 predicate syscall_table_openat_observed<T>(table: T) -> bool;
+predicate syscall_table_mkdirat_observed<T>(table: T) -> bool;
+predicate syscall_table_unlinkat_observed<T>(table: T) -> bool;
+predicate syscall_table_fchmodat_observed<T>(table: T) -> bool;
+predicate syscall_table_statfs_observed<T>(table: T) -> bool;
 predicate syscall_table_chdir_observed<T>(table: T) -> bool;
 predicate syscall_table_read_observed<T>(table: T) -> bool;
 predicate syscall_read_trace_probe_observes_result_without_side_effect<T>(table: T) -> bool;
@@ -524,6 +568,7 @@ predicate syscall_table_readlinkat_observed<T>(table: T) -> bool;
 predicate syscall_table_dup3_observed<T>(table: T) -> bool;
 predicate syscall_table_pipe2_observed<T>(table: T) -> bool;
 predicate syscall_table_fchown_observed<T>(table: T) -> bool;
+predicate syscall_table_fchownat_observed<T>(table: T) -> bool;
 predicate syscall_table_fchmod_observed<T>(table: T) -> bool;
 predicate syscall_table_fcntl_observed<T>(table: T) -> bool;
 predicate syscall_table_ioctl_observed<T>(table: T) -> bool;
@@ -563,6 +608,9 @@ predicate user_task_files_struct_inherited<T, F>(process: T, files: F) -> bool;
 predicate user_task_trap_frame_bound<T, R>(process: T, frame: R) -> bool;
 predicate user_task_syscall_context_bound<T, E, S>(process: T, exception: E, table: S) -> bool;
 predicate user_task_credentials_inherited<T, K>(process: T, task: K) -> bool;
+predicate user_process_current_credentials_lease_checked<T, R>(process: T, registry: R) -> bool;
+predicate user_process_current_credentials_resource_locked<T>(process: T) -> bool;
+predicate user_process_credentials_fork_snapshot_copied<T, P>(process: T, parent: P) -> bool;
 predicate user_task_root_credentials_bound<T>(process: T) -> bool;
 predicate user_task_supplementary_groups_bound<T>(process: T) -> bool;
 predicate user_task_supplementary_groups_read_observed<T>(process: T) -> bool;
@@ -626,6 +674,8 @@ predicate user_child_process_dup_mm_failure_atomic<T, P>(process: T, parent: P) 
 predicate user_child_process_mm_published_after_copy<T>(process: T) -> bool;
 predicate user_child_process_task_mm_switched<T, P>(process: T, parent: P) -> bool;
 predicate user_child_process_exit_mm_released_once<T>(process: T) -> bool;
+predicate user_child_process_exit_files_shared_references_released_once<T, F>(process: T, files: F) -> bool;
+predicate user_child_process_wait_reap_does_not_release_files_again<T, F>(process: T, files: F) -> bool;
 predicate user_child_process_parent_mm_resumed_without_byte_restore<T, P>(process: T, parent: P) -> bool;
 predicate user_child_process_trap_frame_copied<T, R>(process: T, frame: R) -> bool;
 predicate user_child_process_trap_frame_child_return_zero<T>(process: T) -> bool;
@@ -1153,6 +1203,11 @@ object UserAddressSpace: ResourceObject {
                     user_address_space_heap_arena_mapped(self);
                     user_address_space_mmap_anonymous_window_bound(self);
                     user_address_space_mmap_fixed_heap_base_compat_bound(self);
+                    user_address_space_mmap_shared_regular_one_page_bound(self);
+                    user_address_space_mmap_shared_regular_frame_eager(self);
+                    user_address_space_mmap_shared_regular_survives_fd_close_and_unlink(self);
+                    user_address_space_mmap_shared_regular_fork_shares_writable_frame(self);
+                    user_address_space_mmap_shared_regular_failure_atomic(self);
                 }
             }
 
@@ -1279,6 +1334,11 @@ object SyscallTable: ResourceObject {
                     syscall_table_write_supported(self);
                     syscall_table_writev_supported(self);
                     syscall_table_openat_supported(self);
+                    syscall_table_mkdirat_supported(self);
+                    syscall_table_unlinkat_supported(self);
+                    syscall_table_fchmodat_supported(self);
+                    syscall_table_fchownat_supported(self);
+                    syscall_table_statfs_supported(self);
                     syscall_table_chdir_supported(self);
                     syscall_table_read_supported(self);
                     syscall_table_ppoll_supported(self);
@@ -1464,6 +1524,11 @@ object SyscallTable: ResourceObject {
             syscall_table_write_supported(self);
             syscall_table_writev_supported(self);
             syscall_table_openat_supported(self);
+            syscall_table_mkdirat_supported(self);
+            syscall_table_unlinkat_supported(self);
+            syscall_table_fchmodat_supported(self);
+            syscall_table_fchownat_supported(self);
+            syscall_table_statfs_supported(self);
             syscall_table_chdir_supported(self);
             syscall_table_read_supported(self);
             syscall_table_ppoll_supported(self);
@@ -1558,6 +1623,86 @@ object SyscallTable: ResourceObject {
         }
 
         actions {
+            on Action::MkdirAt {
+                /*
+                 * Linux 6.12 fs/namei.c::do_mkdirat() copies the pathname,
+                 * resolves its parent, rejects an existing final component,
+                 * and publishes the new directory only after allocation and
+                 * VFS checks succeed. This first slice accepts AT_FDCWD and
+                 * the already-modeled absolute/cwd-relative pathname shapes.
+                 * It publishes a real memory-backed VFS directory dentry in
+                 * the live namespace, including below a read-only ext2 parent,
+                 * while leaving the ext2 block backend unchanged. Invalid user
+                 * memory is EFAULT, an empty name is ENOENT, an overlong
+                 * component is ENAMETOOLONG, an existing name is EEXIST, and
+                 * allocation failure before publication is ENOSPC. Relative
+                 * dirfds, persistent ext2 mutation, umask/mode persistence,
+                 * permission checks, LSM hooks and mount namespaces remain
+                 * deferred rather than receiving a fabricated success.
+                 */
+                depends_on {
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
+                    FsStruct.state == State::Ready;
+                    VfsCore.state == State::Ready;
+                    syscall_path_usercopy_ready(self);
+                }
+
+                drives {
+                    VfsCore.Action::CreateDirectory;
+                }
+
+                ensures {
+                    syscall_mkdirat_routes_to_process_fs_and_vfs(self, FsStruct, VfsCore);
+                    syscall_mkdirat_at_fdcwd_first_slice(self);
+                    syscall_mkdirat_transient_overlay_first_slice(self);
+                    syscall_mkdirat_permissions_umask_deferred(self);
+                    vfs_transient_directory_overlay_supported(VfsCore);
+                    vfs_transient_create_failure_atomic(VfsCore);
+                    syscall_table_mkdirat_observed(self);
+                }
+            }
+
+            on Action::UnlinkAt {
+                /*
+                 * Linux 6.12 do_unlinkat()/do_rmdir() resolve the pathname
+                 * before removing its final directory entry. Unknown flag
+                 * bits are EINVAL; flags zero reject a directory with EISDIR;
+                 * AT_REMOVEDIR rejects a non-directory with ENOTDIR and a
+                 * nonempty directory with ENOTEMPTY. This first slice accepts
+                 * AT_FDCWD and the existing absolute/cwd-relative pathname
+                 * shapes, and removes only transient memory-backed overlay
+                 * nodes. An ext2-backed target is EROFS. Bad user memory,
+                 * empty/overlong paths and lookup failures keep their Linux
+                 * errno classes. Validation failure leaves the namespace
+                 * unchanged. Successful removal detaches the name while open
+                 * file descriptions and an already established shared mmap
+                 * retain their storage ownership.
+                 */
+                depends_on {
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
+                    FsStruct.state == State::Ready;
+                    VfsCore.state == State::Ready;
+                    syscall_path_usercopy_ready(self);
+                }
+
+                drives {
+                    VfsCore.Action::RemovePath(Path, FsStruct);
+                }
+
+                ensures {
+                    syscall_unlinkat_routes_to_process_fs_and_vfs(self, FsStruct, VfsCore);
+                    syscall_unlinkat_at_fdcwd_first_slice(self);
+                    syscall_unlinkat_file_and_empty_directory_first_slice(self);
+                    syscall_unlinkat_linux_6_12_errno_bound(self);
+                    syscall_unlinkat_failure_has_no_namespace_side_effect(self);
+                    syscall_unlinkat_open_file_and_mapping_survive(self);
+                    vfs_transient_remove_path_type_checked(VfsCore);
+                    vfs_transient_remove_path_failure_atomic(VfsCore);
+                    vfs_transient_remove_path_rejects_read_only_backing(VfsCore);
+                    syscall_table_unlinkat_observed(self);
+                }
+            }
+
             on Action::Write {
                 depends_on {
                     CurrentCPU.trap.exception.syscall.state == State::Online;
@@ -1627,13 +1772,30 @@ object SyscallTable: ResourceObject {
                  * install a Null OFD in the lowest free fd slot and preserve
                  * status flags plus close-on-exec. The LTP builtin-grandchild
                  * stderr redirect additionally accepts exactly the observed
-                 * O_WRONLY|O_CREAT|O_TRUNC|O_LARGEFILE shape for /dev/null;
-                 * create/truncate remain rejected for every other path. If
+                 * O_WRONLY|O_CREAT|O_TRUNC|O_LARGEFILE shape for /dev/null.
+                 * The first ordinary-path create slice accepts
+                 * O_CREAT|O_EXCL|O_RDWR with optional O_LARGEFILE/O_CLOEXEC,
+                 * resolves the parent through the current FsStruct, checks
+                 * both transient and ext2-backed names, and publishes a
+                 * memory-backed regular inode carrying the requested low
+                 * 07777 mode bits and current fsuid/fsgid. Existing names
+                 * return EEXIST. The bounded fd slice owns two independent
+                 * regular-file open descriptions so an inherited runtest
+                 * input file and the LTP IPC file may coexist. Create selects
+                 * an unreferenced regular description and the lowest free fd
+                 * slot; only exhaustion of both descriptions or the fd table
+                 * is EMFILE. File-description/fd capacity and every VFS
+                 * allocation are validated or reserved before namespace
+                 * publication, so EMFILE/ENOSPC and other failures do not
+                 * leave a created pathname. The current process umask is zero
+                 * in this bounded slice; the general umask model remains
+                 * deferred. O_CREAT without O_EXCL, O_TRUNC on ordinary paths,
+                 * and other create shapes remain rejected. If
                  * O_DIRECTORY is present and the resolved non-TTY target is
                  * not a directory, including /dev/null, the syscall must fail
                  * with ENOTDIR. O_NONBLOCK is consumed only by accepted TTY and
                  * /dev/null opens in this slice; regular and directory opens do
-                 * not gain nonblocking read/write semantics. Write/create modes,
+                 * not gain nonblocking read/write semantics. General writable regular-file data,
                  * O_PATH, O_TMPFILE, nofollow, permissions, LSM hooks, mount
                  * namespaces, real VT/devtmpfs, a generic char-device registry
                  * and full errno detail remain trimmed.
@@ -1651,18 +1813,25 @@ object SyscallTable: ResourceObject {
                     FilesStruct.Action::OpenPath;
                     FilesStruct.Action::OpenNullPath;
                     FileDescriptorTable.Action::Install(FdRef::Regular0);
+                    FileDescriptorTable.Action::Install(FdRef::Regular1);
                 }
 
                 ensures {
                     syscall_openat_routes_to_files_struct(self, FilesStruct);
+                    syscall_openat_create_exclusive_first_slice(self, FilesStruct, VfsCore);
+                    syscall_openat_create_preflights_fd_capacity(self, FilesStruct);
+                    syscall_openat_create_failure_has_no_namespace_side_effect(self);
+                    syscall_openat_create_selects_free_regular_description(self, FilesStruct);
                     syscall_openat_builtin_grandchild_dev_null_redirect_bound(self, FilesStruct);
                     files_struct_ltp_runtest_syscalls_read_capacity_bound(FilesStruct);
+                    files_struct_two_regular_open_descriptions_bound(FilesStruct);
                     files_struct_open_path_routes_to_vfs(FilesStruct, VfsCore);
                     files_struct_regular_fd_installed(FilesStruct) ||
                         files_struct_directory_fd_installed(FilesStruct) ||
                         files_struct_tty_alias_fd_installed(FilesStruct) ||
                         files_struct_null_fd_installed(FilesStruct);
                     fd_table_fd_installed(FileDescriptorTable, FdRef::Regular0, OpenFileDescription);
+                    fd_table_fd_installed(FileDescriptorTable, FdRef::Regular1, OpenFileDescription);
                     syscall_table_openat_observed(self);
                 }
             }
@@ -2015,6 +2184,118 @@ object SyscallTable: ResourceObject {
                 }
             }
 
+            on Action::FchownAt {
+                /*
+                 * Linux 6.12 RISC-V exposes fchownat as syscall 54. The
+                 * stock LTP tmpdir harness reaches
+                 * fchownat(AT_FDCWD, path, (uid_t)-1, 0, 0) through musl
+                 * chown(). The current slice resolves the checked path from
+                 * the caller's fs_struct, requires the current aggregate's
+                 * effective uid to authorize ownership mutation, preserves
+                 * either id for the u32 all-ones sentinel, and commits the
+                 * resulting uid/gid to the transient writable inode. Invalid
+                 * flags, bad relative dirfd, empty/overlong/faulting paths,
+                 * lookup errors, read-only backing and permission failure
+                 * retain their Linux errno classes. Directory-fd traversal,
+                 * idmapped mounts, capabilities beyond the root-euid proxy,
+                 * user namespaces and LSM hooks remain deferred.
+                 */
+                depends_on {
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
+                    UserProcessRegistry.state == State::Ready;
+                    FsStruct.state == State::Ready;
+                    VfsCore.state == State::Ready;
+                    syscall_path_usercopy_ready(self);
+                }
+
+                drives {
+                    VfsCore.Action::ChownPath;
+                }
+
+                ensures {
+                    user_process_current_credentials_lease_checked(self, UserProcessRegistry);
+                    user_process_current_credentials_resource_locked(self);
+                    syscall_table_fchownat_observed(self);
+                }
+            }
+
+            on Action::FchmodAt {
+                /*
+                 * Linux 6.12 RISC-V exposes legacy fchmodat as syscall 53.
+                 * The stock LTP tmpdir harness reaches
+                 * fchmodat(AT_FDCWD, path, 0777) through musl chmod() after
+                 * creating and chowning its transient directory. The bounded
+                 * path follows the final symlink, resolves from the caller's
+                 * fs_struct, authorizes through the exact current aggregate
+                 * credentials, and atomically replaces only permission,
+                 * set-id and sticky bits while preserving inode type. Bad
+                 * relative dirfd, empty/overlong/faulting paths, lookup
+                 * errors, read-only backing and authorization failure retain
+                 * their Linux errno classes. Directory-fd traversal,
+                 * idmapped mounts, non-root owner/capability policy, ACLs,
+                 * namespaces, LSM hooks and ctime remain deferred.
+                 */
+                depends_on {
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
+                    UserProcessRegistry.state == State::Ready;
+                    FsStruct.state == State::Ready;
+                    VfsCore.state == State::Ready;
+                    syscall_path_usercopy_ready(self);
+                }
+
+                drives {
+                    VfsCore.Action::ChmodPath;
+                }
+
+                ensures {
+                    user_process_current_credentials_lease_checked(self, UserProcessRegistry);
+                    user_process_current_credentials_resource_locked(self);
+                    syscall_fchmodat_linux_6_12_path_mode_bound(self);
+                    syscall_fchmodat_errno_and_failure_atomic_bound(self);
+                    syscall_table_fchmodat_observed(self);
+                }
+            }
+
+            on Action::StatFs {
+                /*
+                 * Linux 6.12 RISC-V exposes native statfs as syscall 43.
+                 * user_statfs() first follows the pathname to a mounted
+                 * superblock, vfs_statfs() obtains that filesystem's values,
+                 * and do_statfs_native() copies the complete native struct to
+                 * user memory. The current bounded slice supports paths on
+                 * the mounted ext2 root, including transient dentries whose
+                 * inode remains bound to that ext2 superblock. It returns the
+                 * real ext2 magic, parsed block size, total block/inode counts
+                 * and the VFS-supported name limit. Accounting not currently
+                 * maintained by the read-only ext2 plus transient-overlay
+                 * model remains zero instead of claiming invented free space.
+                 * Path errors take precedence over a bad output pointer, and
+                 * validation/copy failure does not publish a partial result.
+                 * Ramfs/devfs statfs and live ext2 free-space accounting remain
+                 * outside this first slice rather than receiving fake values.
+                 */
+                depends_on {
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
+                    FsStruct.state == State::Ready;
+                    VfsCore.state == State::Ready;
+                    Ext2FileSystem.state == State::Online;
+                    syscall_path_usercopy_ready(self);
+                    syscall_stat_usercopy_ready(self);
+                }
+
+                drives {
+                    VfsCore.Action::StatFsPath;
+                }
+
+                ensures {
+                    syscall_statfs_riscv64_native_layout_bound(self);
+                    syscall_statfs_ext2_first_slice_bound(self, VfsCore);
+                    syscall_statfs_path_error_precedes_output_copy(self);
+                    syscall_statfs_failure_has_no_partial_copyout(self);
+                    syscall_table_statfs_observed(self);
+                }
+            }
+
             on Action::Fchmod {
                 /*
                  * Linux asm-generic/RISC-V exposes fchmod as __NR_fchmod=52.
@@ -2045,6 +2326,38 @@ object SyscallTable: ResourceObject {
                     files_struct_fd_mode_override_recorded(FilesStruct);
                     files_struct_fchmod_mode_visible_to_fstat(FilesStruct);
                     syscall_table_fchmod_observed(self);
+                }
+            }
+
+            on Action::Ftruncate {
+                /*
+                 * Linux 6.12 RISC-V exposes ftruncate as syscall 46.
+                 * do_sys_ftruncate rejects a negative length, resolves the fd,
+                 * and do_ftruncate requires a writable regular file before
+                 * changing inode size without changing the open-file position.
+                 * This bounded slice admits transient memory-backed regular
+                 * files up to 64 KiB. Extension zero-fills, shrinking discards
+                 * the suffix, duplicate fds sharing the OFD observe the same
+                 * inode size, and failures publish no size/data change.
+                 */
+                depends_on {
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                    VfsCore.state == State::Ready;
+                }
+
+                drives {
+                    FilesStruct.Action::FtruncateFd(FdRef::Regular0);
+                    FilesStruct.Action::FtruncateFd(FdRef::Regular1);
+                    VfsCore.Action::TruncateFile(File);
+                }
+
+                ensures {
+                    syscall_ftruncate_routes_to_files_struct_and_vfs(self, FilesStruct, VfsCore);
+                    syscall_ftruncate_linux_6_12_validation_bound(self);
+                    syscall_ftruncate_bounded_regular_file_first_slice(self);
+                    syscall_ftruncate_failure_has_no_side_effect(self);
                 }
             }
 
@@ -2108,7 +2421,7 @@ object SyscallTable: ResourceObject {
                  */
                 depends_on {
                     CurrentCPU.trap.exception.syscall.state == State::Online;
-                    child.state == State::Online;
+                    child.state == State::Destroyed;
                     user_process_registry_contains(UserProcessRegistry, child);
                     FilesStruct.state == State::Ready;
                     FileDescriptorTable.state == State::Ready;
@@ -2195,17 +2508,13 @@ object SyscallTable: ResourceObject {
                  */
                 depends_on {
                     CurrentCPU.trap.exception.syscall.state == State::Online;
-                    KernelInitTask.state == State::OnCpu;
-                    task_execution_authority_is(
-                        KernelInitTask,
-                        TaskExecutionAuthority::Live
-                    );
+                    UserProcessRegistry.state == State::Ready;
                 }
 
 
                 ensures {
-                    syscall_getuid_routes_to_user_task(self, KernelInitTask);
-                    user_task_uid_read_observed(KernelInitTask);
+                    user_process_current_credentials_lease_checked(self, UserProcessRegistry);
+                    user_process_current_credentials_resource_locked(self);
                     syscall_table_getuid_observed(self);
                 }
             }
@@ -2218,13 +2527,13 @@ object SyscallTable: ResourceObject {
                  */
                 depends_on {
                     CurrentCPU.trap.exception.syscall.state == State::Online;
-                    KernelInitTask.state == State::Online;
+                    UserProcessRegistry.state == State::Ready;
                 }
 
 
                 ensures {
-                    syscall_getgid_routes_to_user_task(self, KernelInitTask);
-                    user_task_gid_read_observed(KernelInitTask);
+                    user_process_current_credentials_lease_checked(self, UserProcessRegistry);
+                    user_process_current_credentials_resource_locked(self);
                     syscall_table_getgid_observed(self);
                 }
             }
@@ -2336,7 +2645,7 @@ object SyscallTable: ResourceObject {
                 depends_on {
                     CurrentCPU.trap.exception.syscall.state == State::Online;
                     KernelInitTask.state == State::Online;
-                    child.state == State::Online;
+                    child.state == State::Destroyed;
                     user_process_registry_contains(UserProcessRegistry, child);
                 }
 
@@ -2370,7 +2679,7 @@ object SyscallTable: ResourceObject {
                 depends_on {
                     CurrentCPU.trap.exception.syscall.state == State::Online;
                     KernelInitTask.state == State::Online;
-                    child.state == State::Online;
+                    child.state == State::Destroyed;
                     user_process_registry_contains(UserProcessRegistry, child);
                 }
 
@@ -2388,18 +2697,18 @@ object SyscallTable: ResourceObject {
             on Action::GetEuid {
                 /*
                  * Linux 6.12 kernel/sys.c::sys_geteuid() reads current_euid().
-                 * The first slice routes it to the current KernelInitTask
-                 * root credentials substate.
+                 * The value comes from the generation/CPU-checked current
+                 * process aggregate; PID 1 uses its own stable aggregate.
                  */
                 depends_on {
                     CurrentCPU.trap.exception.syscall.state == State::Online;
-                    KernelInitTask.state == State::Online;
+                    UserProcessRegistry.state == State::Ready;
                 }
 
 
                 ensures {
-                    syscall_geteuid_routes_to_user_task(self, KernelInitTask);
-                    user_task_euid_read_observed(KernelInitTask);
+                    user_process_current_credentials_lease_checked(self, UserProcessRegistry);
+                    user_process_current_credentials_resource_locked(self);
                     syscall_table_geteuid_observed(self);
                 }
             }
@@ -2407,18 +2716,18 @@ object SyscallTable: ResourceObject {
             on Action::GetEgid {
                 /*
                  * Linux 6.12 kernel/sys.c::sys_getegid() reads current_egid().
-                 * The first slice routes it to the current KernelInitTask
-                 * root credentials substate.
+                 * The value comes from the generation/CPU-checked current
+                 * process aggregate; PID 1 uses its own stable aggregate.
                  */
                 depends_on {
                     CurrentCPU.trap.exception.syscall.state == State::Online;
-                    KernelInitTask.state == State::Online;
+                    UserProcessRegistry.state == State::Ready;
                 }
 
 
                 ensures {
-                    syscall_getegid_routes_to_user_task(self, KernelInitTask);
-                    user_task_egid_read_observed(KernelInitTask);
+                    user_process_current_credentials_lease_checked(self, UserProcessRegistry);
+                    user_process_current_credentials_resource_locked(self);
                     syscall_table_getegid_observed(self);
                 }
             }
@@ -2428,20 +2737,20 @@ object SyscallTable: ResourceObject {
                  * Linux 6.12 kernel/sys.c::sys_getresuid() snapshots real,
                  * effective and saved uid from current_cred(), then writes the
                  * three uid_t values to user memory in order. User pointer
-                 * failure returns EFAULT. The first slice keeps all three root
-                 * ids on KernelInitTask and writes riscv64 uid_t-sized
-                 * values.
+                 * failure returns EFAULT. The first slice snapshots all three
+                 * ids from the generation/CPU-checked current aggregate and
+                 * writes riscv64 uid_t-sized values.
                  */
                 depends_on {
                     CurrentCPU.trap.exception.syscall.state == State::Online;
-                    KernelInitTask.state == State::Online;
+                    UserProcessRegistry.state == State::Ready;
                     syscall_credentials_usercopy_ready(self);
                 }
 
 
                 ensures {
-                    syscall_getresuid_routes_to_user_task(self, KernelInitTask);
-                    user_task_resuid_read_observed(KernelInitTask);
+                    user_process_current_credentials_lease_checked(self, UserProcessRegistry);
+                    user_process_current_credentials_resource_locked(self);
                     syscall_table_getresuid_observed(self);
                 }
             }
@@ -2450,18 +2759,18 @@ object SyscallTable: ResourceObject {
                 /*
                  * Linux 6.12 kernel/sys.c::sys_getresgid() mirrors getresuid
                  * for real/effective/saved gid. The current slice writes the
-                 * three root gid_t values from KernelInitTask.
+                 * three gid_t values from the current aggregate snapshot.
                  */
                 depends_on {
                     CurrentCPU.trap.exception.syscall.state == State::Online;
-                    KernelInitTask.state == State::Online;
+                    UserProcessRegistry.state == State::Ready;
                     syscall_credentials_usercopy_ready(self);
                 }
 
 
                 ensures {
-                    syscall_getresgid_routes_to_user_task(self, KernelInitTask);
-                    user_task_resgid_read_observed(KernelInitTask);
+                    user_process_current_credentials_lease_checked(self, UserProcessRegistry);
+                    user_process_current_credentials_resource_locked(self);
                     syscall_table_getresgid_observed(self);
                 }
             }
@@ -2477,7 +2786,7 @@ object SyscallTable: ResourceObject {
                  * otherwise. The current BusyBox init login-shell evidence reaches
                  * getgroups(32, <user gid_t *>) after login has dropped to
                  * uid=1000/gid=100 and after setgroups(1, {100}) populated the
-                 * bounded KernelInitTask supplementary group view. This first
+                 * bounded current-aggregate supplementary group view. This first
                  * slice only reads back that fixed-capacity view; it does not
                  * allocate or sort Linux group_info, expand NGROUPS_MAX, or
                  * connect group membership to permission, inode or TTY
@@ -2485,17 +2794,16 @@ object SyscallTable: ResourceObject {
                  */
                 depends_on {
                     CurrentCPU.trap.exception.syscall.state == State::Online;
-                    KernelInitTask.state == State::Online;
+                    UserProcessRegistry.state == State::Ready;
                     syscall_credentials_usercopy_ready(self);
                 }
 
 
                 ensures {
-                    syscall_getgroups_routes_to_user_task(self, KernelInitTask);
+                    user_process_current_credentials_lease_checked(self, UserProcessRegistry);
+                    user_process_current_credentials_resource_locked(self);
                     syscall_getgroups_bounded_supplementary_groups_first_slice(self);
                     syscall_credentials_full_linux_model_deferred(self);
-                    user_task_supplementary_groups_bound(KernelInitTask);
-                    user_task_supplementary_groups_read_observed(KernelInitTask);
                     syscall_table_getgroups_observed(self);
                 }
             }
@@ -2556,7 +2864,7 @@ object SyscallTable: ResourceObject {
                 /*
                  * Linux 6.12 kernel/sys.c::__sys_setuid() prepares and commits
                  * new credentials for current. The current first slice keeps a
-                 * bounded PID1 credential view on KernelInitTask. Following
+                 * bounded credential view on the current aggregate. Following
                  * focused BusyBox-init evidence, it treats euid==0 as the temporary
                  * CAP_SETUID proxy and accepts 32-bit uid targets, syncing
                  * uid/euid/suid/fsuid. Namespaces, full capability checks, LSM
@@ -2570,14 +2878,14 @@ object SyscallTable: ResourceObject {
                  */
                 depends_on {
                     CurrentCPU.trap.exception.syscall.state == State::Online;
-                    KernelInitTask.state == State::Online;
+                    UserProcessRegistry.state == State::Ready;
                 }
 
 
                 ensures {
-                    syscall_setuid_routes_to_user_task(self, KernelInitTask);
+                    user_process_current_credentials_lease_checked(self, UserProcessRegistry);
+                    user_process_current_credentials_resource_locked(self);
                     syscall_credentials_full_linux_model_deferred(self);
-                    user_task_uid_set_observed(KernelInitTask);
                     syscall_table_setuid_observed(self);
                 }
             }
@@ -2588,21 +2896,21 @@ object SyscallTable: ResourceObject {
                  * group credentials. The current first slice treats
                  * effective uid 0 as the bounded CAP_SETGID proxy and accepts
                  * the observed gid=100 transition, synchronizing only
-                 * KernelInitTask gid/egid/sgid/fsgid. Full capabilities,
+                 * current-aggregate gid/egid/sgid/fsgid. Full capabilities,
                  * user namespaces, LSM hooks and credential COW/RCU remain
                  * deferred. The post-SetGid focused rerun records the
                  * setuid(146) uid=1000 boundary that the SetUid slice closes.
                  */
                 depends_on {
                     CurrentCPU.trap.exception.syscall.state == State::Online;
-                    KernelInitTask.state == State::Online;
+                    UserProcessRegistry.state == State::Ready;
                 }
 
 
                 ensures {
-                    syscall_setgid_routes_to_user_task(self, KernelInitTask);
+                    user_process_current_credentials_lease_checked(self, UserProcessRegistry);
+                    user_process_current_credentials_resource_locked(self);
                     syscall_credentials_full_linux_model_deferred(self);
-                    user_task_gid_set_observed(KernelInitTask);
                     syscall_table_setgid_observed(self);
                 }
             }
@@ -2618,7 +2926,7 @@ object SyscallTable: ResourceObject {
                  * evidence reaches setgroups(gidsetsize=1, grouplist=<user
                  * gid_t *>) immediately after the /var/run/nscd/socket
                  * connect(203) ENOENT fallback. This first slice keeps only a
-                 * bounded supplementary group view on KernelInitTask: root
+                 * bounded supplementary group view on the current aggregate: root
                  * effective uid may clear the list with size 0 or copy one
                  * 32-bit gid_t from userspace with size 1; copy fault returns
                  * EFAULT, non-root returns EPERM, and size > 1 remains an
@@ -2634,18 +2942,17 @@ object SyscallTable: ResourceObject {
                  */
                 depends_on {
                     CurrentCPU.trap.exception.syscall.state == State::Online;
-                    KernelInitTask.state == State::Online;
+                    UserProcessRegistry.state == State::Ready;
                     syscall_credentials_usercopy_ready(self);
                 }
 
 
                 ensures {
-                    syscall_setgroups_routes_to_user_task(self, KernelInitTask);
+                    user_process_current_credentials_lease_checked(self, UserProcessRegistry);
+                    user_process_current_credentials_resource_locked(self);
                     syscall_setgroups_root_first_slice(self);
                     syscall_setgroups_bounded_supplementary_groups_first_slice(self);
                     syscall_credentials_full_linux_model_deferred(self);
-                    user_task_supplementary_groups_bound(KernelInitTask);
-                    user_task_setgroups_observed(KernelInitTask);
                     syscall_table_setgroups_observed(self);
                 }
             }
@@ -2908,16 +3215,28 @@ object SyscallTable: ResourceObject {
                 depends_on {
                     CurrentCPU.trap.exception.syscall.state == State::Online;
                     UserAddressSpace.state == State::Online;
+                    FilesStruct.state == State::Ready;
+                    VfsCore.state == State::Ready;
                 }
 
                 drives {
                     UserAddressSpace.Action::Mmap;
+                    FilesStruct.Action::LookupFd(FdRef::Regular0);
+                    FilesStruct.Action::LookupFd(FdRef::Regular1);
+                    VfsCore.Action::ReadFileRange(file: File);
                 }
 
                 ensures {
                     syscall_table_mmap_supported(self);
                     syscall_mmap_routes_to_user_address_space(self, UserAddressSpace);
                     syscall_mmap_fixed_anonymous_prot_none_first_slice(self);
+                    syscall_mmap_shared_regular_routes_to_current_files_and_vfs(
+                        self,
+                        FilesStruct,
+                        VfsCore
+                    );
+                    syscall_mmap_shared_regular_linux_6_12_validation_bound(self);
+                    syscall_mmap_shared_regular_preserves_file_position(self);
                     syscall_mmap_full_vma_model_deferred(self);
                 }
             }
@@ -3036,6 +3355,7 @@ object SyscallTable: ResourceObject {
                         materialize child_aggregate of UserProcessAggregate;
                         materialize child_generation of UserProcessGeneration;
                         UserProcessRegistry.Action::ReserveFork(
+                            parent: KernelInitTask,
                             task: child,
                             aggregate: child_aggregate,
                             generation: child_generation
@@ -3085,6 +3405,11 @@ object SyscallTable: ResourceObject {
                     user_process_registry_contains(UserProcessRegistry, child);
                     user_process_registry_stores_ref(UserProcessRegistry, child_ref);
                     user_process_registry_ref_targets_member(UserProcessRegistry, child_ref, child);
+                    user_process_registry_reserved_parent_identity_available_to_preparer(
+                        UserProcessRegistry,
+                        KernelInitTask,
+                        child
+                    );
                     user_process_registry_aggregate_owns_process_resources(UserProcessRegistry, child_aggregate);
                     user_process_registry_fork_failure_has_no_residue(UserProcessRegistry);
                     user_clone_plain_fork_pid_mod_cpu_placement(UserCloneDeferredBoundaries);
@@ -3212,7 +3537,7 @@ object SyscallTable: ResourceObject {
                 depends_on {
                     CurrentCPU.trap.exception.syscall.state == State::Online;
                     parent.state == State::OnCpu;
-                    child.state == State::Online;
+                    child.state == State::Destroyed;
                     scheduler.state == State::Online;
                     user_process_registry_contains(UserProcessRegistry, parent);
                     user_process_registry_contains(UserProcessRegistry, child);
@@ -3249,8 +3574,13 @@ object SyscallTable: ResourceObject {
                     user_address_space_fault_mapping_diagnostic_bound(UserAddressSpace);
                     syscall_wait4_child_exit_status_copyout_first_slice(self);
                     syscall_wait4_observed_child_reap_first_slice(self);
+                    user_child_process_wait_reap_does_not_release_files_again(child, FilesStruct);
                     syscall_wait4_no_child_echild_first_slice(self);
                     syscall_wait4_blocking_sleep_deferred(self);
+                    syscall_wait4_recheck_to_sleep_preserves_pending_wake(
+                        self,
+                        CurrentCPU.trap.interrupt
+                    );
                     syscall_read_builtin_grandchild_pipe_block_handoff(self, child);
                     syscall_wait4_builtin_grandchild_completed_reap(self, child);
                     user_child_process_completed_record_reaped(child);
@@ -3348,12 +3678,14 @@ object SyscallTable: ResourceObject {
                     user_child_process_parent_wait_resumed(child);
                     user_child_process_parent_wait_resume_checkpoint_bound(child);
                     user_child_process_exit_mm_released_once(child);
+                    user_child_process_exit_files_shared_references_released_once(child, FilesStruct);
                     user_child_process_parent_mm_resumed_without_byte_restore(child, KernelInitTask);
                     user_child_process_parent_fd_snapshot_restored(child, FilesStruct);
                     files_struct_parent_fd_snapshot_restored(FilesStruct, child);
                     user_child_process_completed_record_archived(child);
                     user_process_registry_exit_status_published_release(UserProcessRegistry, child);
                     user_process_registry_parent_wake_target_cpu_fixed(UserProcessRegistry, child);
+                    user_process_registry_parent_wait_wake_after_reap_eligibility_release(UserProcessRegistry, child);
                     runtime.state == State::Destroyed;
                     current_flow.state == State::Destroyed;
                     child.state == State::Destroyed;

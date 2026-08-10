@@ -59,12 +59,23 @@ static int smoke_directory_fileio(void)
 	errno = 0;
 	int second_dir_fd = syscall(SYS_openat, AT_FDCWD, "/",
 				    O_RDONLY | O_DIRECTORY, 0);
-	if (second_dir_fd >= 0) {
-		close(second_dir_fd);
+	if (second_dir_fd < 0) {
 		return 89;
 	}
-	if (errno != EMFILE) {
+	errno = 0;
+	int third_dir_fd = syscall(SYS_openat, AT_FDCWD, "/",
+				   O_RDONLY | O_DIRECTORY, 0);
+	if (third_dir_fd >= 0) {
+		close(third_dir_fd);
+		close(second_dir_fd);
 		return 90;
+	}
+	if (errno != EMFILE) {
+		close(second_dir_fd);
+		return 111;
+	}
+	if (close(second_dir_fd) < 0) {
+		return 112;
 	}
 
 	if (fstatat(AT_FDCWD, "/", &st, 0) < 0) {
@@ -380,12 +391,26 @@ int smoke_fileio(void)
 	}
 	errno = 0;
 	int second_fd = open(path, O_RDONLY);
-	if (second_fd >= 0) {
-		close(second_fd);
+	if (second_fd < 0) {
 		return 91;
 	}
-	if (errno != EMFILE) {
+	if (read(second_fd, read_buf, 1) != 1 || read_buf[0] != '3') {
+		close(second_fd);
 		return 92;
+	}
+	errno = 0;
+	int third_fd = open(path, O_RDONLY);
+	if (third_fd >= 0) {
+		close(third_fd);
+		close(second_fd);
+		return 113;
+	}
+	if (errno != EMFILE) {
+		close(second_fd);
+		return 114;
+	}
+	if (close(second_fd) < 0) {
+		return 115;
 	}
 
 	ssize_t read_len = read(fd, read_buf, sizeof(read_buf));

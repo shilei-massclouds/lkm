@@ -1,0 +1,18 @@
+schema_version = 2
+name = "df-0013-fork-ofd-offset-child-return-native"
+description = "Repeat the native fork-shared-OFD diagnostic to preserve the intermittent child-return timeout after the first inherited-fd read."
+mode = "stress"
+test = "fork-ofd-offset"
+runs = 50
+classifier = "../classifiers/df-0013-fork-ofd-offset-child-return.toml"
+
+[metadata]
+defect = "DF-0013"
+observation_mode = "fork-shared-ofd-first-read-child-return-timeout-forensics"
+ordinary_path_required = true
+default_suite = true
+rootfs_profile = "canonical"
+payload = "open run-syscalls.sh once in the parent shell, then run three child dd reads whose inherited descriptor must share and advance one OFD position"
+first_observation = "impl/arceos_ex/tests/basic/out/20260805T211850.171911Z-fork-ofd-offset-625733"
+linux_object_observation = "impl/arceos_ex/tests/basic/out/20260805T212142.846566Z-fork-ofd-offset-lo-626109"
+scope_note = "Preserve the timeout after the first child prints the expected three bytes independently from OFD-position correctness and from the LTP frontier; successful samples do not close the defect."

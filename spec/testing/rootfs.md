@@ -134,9 +134,59 @@ Acceptance requires the Alpine greeting, login/password/prompt steps, non-root c
 successful `setpgid` of the exact published child, foreground-pgrp handling, `lost+found`, the deterministic
 wrapper reaching successful `sync` before poweroff, a clean QEMU guest-shutdown exit, and no panic, unsupported,
 init child exec failure or `reason=pid_not_visible` marker. A child `exit_group` must return through wait/reap to
-the wrapper; it is not a PID1 `user exit status` shutdown boundary. Both providers enter default `make test`. The focused stress
-case repeats this basic-test entry; it does not build an account overlay. This bounded closure does not claim a
+the wrapper; it is not a PID1 `user exit status` shutdown boundary. Both providers enter default `make test`.
+The DF-0005 default stress case repeats the frozen native basic-test entry and preserves timeout/QMP artifacts;
+the older focused identity remains an explicit selector. Neither builds an account overlay. This bounded closure does not claim a
 general task graph, multiple pending children, post-exec parent setpgid, job-control signals or full pgrp lookup.
+
+The DF-0006 default stress case separately repeats `user-smoke-native` for the intermittent preemption pipe-read
+timeout first frozen after both compute children printed their write-complete markers but before the coordinator
+printed bytes-collected. It preserves the unchanged 8-CPU basic identity and timeout/QMP artifacts; the historical
+DF-0001 classifier for ELF-read failure does not subsume this scheduler/pipe observation.
+
+The DF-0007 default stress case separately repeats the unchanged native `ltp-frontier` basic identity for the
+child wait/reap routing failure first observed after `uname01` printed both TPASS records; an explicit non-default
+case repeats `ltp-frontier-lo` for the independently observed linux-object side. Each provider identity has a
+routine sample of 50 runs; 100/200/300/500-run expansion is reserved for an unresolved probabilistic investigation.
+The stock LTP harness, exact list, 8-CPU topology, canonical rootfs, provider
+and completion marker remain owned by the referenced basic cases; stress classification may preserve the failure
+but may not alter those inputs.
+
+The DF-0015 default stress case independently repeats that native `ltp-frontier` identity to preserve the
+console-record boundary first observed when a stock runner PASS line was inserted into a fragmented `wait4
+registry` diagnostic. Its routine sample is 50 runs. Classification requires each of the four exact PASS records
+and the clean four-entry summary to occupy standalone lines; it cannot infer success from LTP-internal TPASS text.
+The 100/200/300/500-run staircase is only for an unresolved probabilistic recurrence, while a Linux/native
+horizontal comparison remains capped at ten runs.
+
+The DF-0008 default stress case separately repeats the unchanged `user-smoke-linux-object` basic identity for
+the intermittent plain-fork child enqueue failure observed during the repeated COW fork cycle. Its case-local
+sample is 100 runs. The linux-object provider, 8-CPU topology, canonical rootfs, 120-second timeout, payload and
+acceptance markers remain owned by the referenced basic case; this is distinct from the native DF-0006 pipe-read
+timeout and must retain its own artifacts and classification.
+
+The DF-0009 default stress case separately repeats the unchanged `user-smoke-linux-object` basic identity for
+the intermittent preemption pipe-read timeout first frozen after both compute children printed their
+write-complete markers but before the coordinator printed bytes-collected. Its case-local sample is 100 runs.
+The linux-object provider, 8-CPU topology, canonical rootfs, 120-second timeout, payload and acceptance markers
+remain owned by the referenced basic case. This observation has the same terminal marker shape as native
+DF-0006 but retains an independent provider-specific entry, and it does not replace the distinct DF-0008
+plain-fork enqueue failure.
+
+The DF-0010 default stress case repeats `ltp-frontier-post-read-lo`: the initial shell reproduces the first
+observation's complete child history (length check, failed multi-operand hash child, interrupted partial command,
+then the successful stock-script hash and `sh -n`), invokes the ordinary frontier selector unchanged, and finally
+launches a second hash child from that same shell. This diagnostic identity preserves the post-frontier
+runqueue-publication failure independently from the stock harness parse error and cleanup/unsupported-syscall
+boundaries. It must retain the canonical rootfs, eight CPUs, linux-object provider, exact frontier selection,
+command order, completion marker, and full basic artifacts; it is not an LTP acceptance identity.
+
+The DF-0011 default stress case separately repeats the unchanged `user-smoke-linux-object` basic identity for
+the intermittent timeout after pipe bytes were collected, both compute children were reaped, and the A-B-A
+round-robin check passed, but before the preempt case and guest finalized. Its case-local sample is 100 runs.
+The linux-object provider, eight CPUs, canonical rootfs, 120-second timeout, payload and acceptance markers remain
+owned by the referenced basic case. This later terminal boundary is independent from DF-0009's pre-collection
+timeout and must retain its own artifacts and classification.
 
 `busybox-init-checkpoints` and `busybox-init-checkpoints-linux` are standalone diagnostic basic tests for the
 same `/sbin/init` profile. Each side must independently complete, satisfy its expectations, emit a complete
@@ -147,51 +197,51 @@ BusyBox init waiting/reaping, not OpenRC behavior. The arceos_ex side captures t
 the bounded checkpoint buffer. Its declared recorder capacity is 524288 bytes, which must retain the complete
 session without overflow rather than truncating the sequence at the comparison boundary.
 
-## LTP syscall list acceptance
+## Stock LTP syscall batch acceptance
 
 Rule IDs (MUST):
 
-- `arceos_ex_must_ltp_close_list_be_dual_provider_scripted_acceptance`
-- `arceos_ex_must_ltp_close_list_exact_entries`
-- `arceos_ex_must_ltp_close_list_exit_with_list_status`
-- `arceos_ex_must_ltp_list_command_substitution_preserve_outer_wait_mm`
-- `arceos_ex_must_ltp_list_grandchild_smoke_use_independent_scenario_stack`
+- `arceos_ex_must_ltp_supported_batch_run_stock_harness_on_three_targets`
+- `arceos_ex_must_ltp_frontier_remain_diagnostic_until_promotion`
+- `arceos_ex_must_ltp_selection_use_exact_unique_known_entry_names`
+- `arceos_ex_must_ltp_acceptance_require_exact_clean_summary_and_per_entry_pass`
+- `arceos_ex_must_ltp_marker_not_be_triggered_by_command_echo`
 
-`ltp` and `ltp-lo` are scripted acceptance identities for the native and linux-object providers,
-respectively. The retired `ltp-shell-manual-native` and `ltp-shell-manual-linux-object` names have no
-compatibility entry. Both use `init=/bin/sh`, a writable private copy of the canonical template and guest
-shutdown, and both enter the default root `make test` gate.
+`ltp`, `ltp-lo` and `ltp-linux` are scripted acceptance identities for arceos_ex native, arceos_ex
+linux-object and sibling Linux, respectively. `linux-object` remains an arceos_ex provider; only the `-linux`
+identity selects the sibling kernel. All three attach private copies of the same canonical rootfs, use eight
+vCPUs, consume the same `supported` exact-name list and stop through the same marker protocol. They are invoked
+only by the independent `make test-ltp` gate and never by root `make test`.
 
-After the first shell prompt, the scripted payload changes to `/opt/ltp` and runs exactly
-`./run-syscalls.sh --list -- 'close*'`. The shell captures that command's status and exits with the same
-status. The list must contain exactly one entry each for `close01` and `close02`, with their matching
-commands; other entries selected by the `close*` pattern are outside the marker contract. Acceptance requires guest status 0 and no unsupported syscall,
-ENOSYS/Function-not-implemented, panic or LTP non-pass marker. The payload must not invoke
-`./run-syscalls.sh -- 'close*'` or directly execute either selected binary. This list-only gate proves LTP
-discovery and the bounded shell/list integration path; it does not claim that `close(57)`, `close01`,
-`close02`, the LTP runtime harness, or any other LTP syscall test executes successfully.
+`ltp-frontier`, `ltp-frontier-lo` and `ltp-frontier-linux` are diagnostic identities with the same three target
+mapping. They consume only the `frontier` list and never enter an acceptance or stress gate. A frontier batch may
+move into the cumulative supported list only after its stock LTP run passes on all three targets and both
+arceos_ex providers satisfy the required stress count.
 
-The list command's BusyBox command substitution is covered by the bounded two-level plain-fork slice: the
-PID1-originated script child may create one builtin-only grandchild for `cd`/`pwd`, pipe/stdio and exit. Tests
-must cover distinct outer/inner Task-owned mm identities, blocking parent-read handoff, child-write/parent-read
-pipe data, two-level wait/exit mm switch and release, sequential pid monotonicity, illegal clone arguments, a second pending child, deeper nesting,
-builtin-grandchild `cd`/absolute `pwd`, `/dev/null` stderr redirection, and the canonical 33,110-byte runtest list
-read. A separate builtin-grandchild-exec smoke scenario must cover an unchanged parked outer mm while each child
-exec releases its own retired image, two consecutive execs preserving the same Task/mm ownership boundary,
-child-view-only close-on-exec, wait4 and pipe-read resume, script exit restoring PID1, and atomic rollback for
-argument/staging/ELF/address-space failures without page or fd-reference leaks. Non-builtin sources, deeper clone,
-and a second pending child remain rejected. Fork/exec failure injection must leave the current executable,
-live SATP, all published Task-owned mm values, pending identity and fd views unchanged. Each successful exec must
-observe live SATP equal to the replacement Task-owned mm before its retired address space is released. Child exit
-must observe the exiting Task-owned SATP, activate and fence the shared SwapperVm SATP, and only then release the
-exiting mm and dispatch the parent. CPU0 continuation exit coverage must additionally observe registry
-`Published -> Zombie` only after SwapperVm activation, scheduler quiescence published by the terminal switch on
-the selected parent stack, and exclusive EFAULT/retry/reap ownership by any co-published transitional completed
-record until that legacy record path is removed. The object-smoke two-level
-plain-fork coverage is a separate smoke scenario, so its bounded Task/mm call chain does not inherit the
-large canonical-ELF scenario frame or cross the specified 32 KiB kernel-init stack boundary. It runs before the
-separate legacy child-lifecycle scenario, whose observed-plain-fork coverage intentionally finishes with a
-second child pending from the current shell continuation rather than an idle reusable top-level slot.
+The two arceos_ex frontier identities enable the error-only syscall probe. Full per-syscall tracing is excluded:
+the stock runner scans its runtest file through byte-oriented reads, so tracing every successful read perturbs
+the diagnostic run enough to hide the first semantic boundary it is intended to locate.
+
+Canonical construction validates every line in both lists as one nonempty exact runtest entry name, rejects
+duplicates within either list, and requires the name to occur exactly once in sibling LTP's `runtest/syscalls`.
+The installed selector performs only the conversion from those lines to
+`/opt/ltp/run-syscalls.sh -- <exact names...>` argv: it must not edit output, replace a test binary, glob a
+broader set, change the stock runner, or suppress a harness result.
+
+All three identities also see the same read-only canonical `/proc/meminfo` harness fixture. It exists only
+because the stock LTP new API consults `MemAvailable` before these tests even when their declared minimum is
+zero; using the fixture is not acceptance of procfs, `/proc/self`, or `/proc/sys` behavior.
+
+For a supported list of size `N`, acceptance requires exactly one
+`Summary: TOTAL=N PASS=N FAIL=0 BROK=0 WARN=0 CONF=0`, exactly one stock runner
+`--- <entry>: PASS (exit 0)` record for every selected entry, and a zero-status completion record. Unsupported
+syscall/ENOSYS, TFAIL, TBROK, TWARN, TCONF, non-pass runner records and either kernel's panic marker are forbidden.
+The fixed completion marker is emitted only after the runner and status record; the scripted stdin payload must
+not contain that marker, so shell command echo cannot terminate QEMU early.
+
+`make test-ltp-stress LTP_STRESS_RUNS=30` repeats the supported acceptance independently for native and
+linux-object. Thirty clean runs per provider are the default promotion threshold; a batch involving scheduling,
+blocking or timeouts uses fifty. Sibling Linux must complete at least one matching full batch before promotion.
 
 ## Composite and observation policy
 

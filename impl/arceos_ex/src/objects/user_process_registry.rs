@@ -29,6 +29,23 @@ pub enum UserProcessChildSelector {
     ExactPid(usize),
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+#[cfg(checkpoint_handler_user_syscall_error)]
+pub(crate) struct UserProcessWaitDiagnostic {
+    pub(crate) live_slot_count: usize,
+    pub(crate) exact_child_count: usize,
+    pub(crate) same_parent_ref_count: usize,
+    pub(crate) same_parent_pid_count: usize,
+    pub(crate) selector_candidate_count: usize,
+    pub(crate) related_task_ref: TaskRef,
+    pub(crate) related_pid: usize,
+    pub(crate) related_parent_task_ref: TaskRef,
+    pub(crate) related_parent_pid: usize,
+    pub(crate) related_cpu_ref: CpuRef,
+    pub(crate) related_state: UserProcessSlotState,
+    pub(crate) related_scheduler_quiesced: bool,
+}
+
 impl UserProcessChildSelector {
     pub const fn matches(self, pid: usize) -> bool {
         match self {
@@ -328,29 +345,6 @@ impl UserProcessRegistry {
             .then_some(slot.cpu_ref)
     }
 
-    pub fn parent_cpu_ref(&self, task_ref: TaskRef) -> Option<CpuRef> {
-        let inner = self.inner.lock();
-        let child_index = registry_slot_for_ref(task_ref)?;
-        let child = &inner.slots[child_index];
-        if child.task_ref != task_ref
-            || !matches!(
-                child.state,
-                UserProcessSlotState::Published | UserProcessSlotState::Zombie
-            )
-        {
-            return None;
-        }
-        let parent_index = registry_slot_for_ref(child.parent_task_ref)?;
-        let parent = &inner.slots[parent_index];
-        (parent.task_ref.same_identity(child.parent_task_ref)
-            && parent.pid == child.parent_pid
-            && matches!(
-                parent.state,
-                UserProcessSlotState::Published | UserProcessSlotState::Zombie
-            ))
-        .then_some(parent.cpu_ref)
-    }
-
     pub fn pid(&self, task_ref: TaskRef) -> Option<usize> {
         let inner = self.inner.lock();
         let index = registry_slot_for_ref(task_ref)?;
@@ -381,6 +375,39 @@ impl UserProcessRegistry {
                 UserProcessSlotState::Published | UserProcessSlotState::Zombie
             ))
         .then_some(slot.parent_task_ref)
+    }
+
+    pub(crate) fn wait_status(&self, task_ref: TaskRef) -> Option<usize> {
+        let inner = self.inner.lock();
+        let index = registry_slot_for_ref(task_ref)?;
+        let slot = &inner.slots[index];
+        (slot.task_ref.same_identity(task_ref) && slot.state == UserProcessSlotState::Zombie)
+            .then_some(slot.wait_status)
+    }
+
+    /// Resolve the parent recorded by a private fork reservation.
+    ///
+    /// This is deliberately narrower than normal process lookup: the child
+    /// must still be `Reserved`, while its exact parent occurrence must
+    /// already be published (or await reap as a zombie).  Callers use the
+    /// returned identity only to acquire a parent lease and prepare the
+    /// child's unpublished aggregate.
+    pub fn reserved_parent_task_ref(&self, task_ref: TaskRef) -> Option<TaskRef> {
+        let inner = self.inner.lock();
+        let child_index = registry_slot_for_ref(task_ref)?;
+        let child = &inner.slots[child_index];
+        if child.task_ref != task_ref || child.state != UserProcessSlotState::Reserved {
+            return None;
+        }
+        let parent_index = registry_slot_for_ref(child.parent_task_ref)?;
+        let parent = &inner.slots[parent_index];
+        (parent.task_ref == child.parent_task_ref
+            && parent.pid == child.parent_pid
+            && matches!(
+                parent.state,
+                UserProcessSlotState::Published | UserProcessSlotState::Zombie
+            ))
+        .then_some(parent.task_ref)
     }
 
     pub fn process_group(&self, current_task_ref: TaskRef, pid_arg: usize) -> Option<usize> {
@@ -714,19 +741,31 @@ impl UserProcessRegistry {
     /// Task's stack. A zombie may be observed before this point, but it cannot
     /// be reclaimed while the old SATP, CurrentTask binding, or kernel stack
     /// may still be live on its owner CPU.
-    pub fn publish_scheduler_quiesced(&self, task_ref: TaskRef, cpu_ref: CpuRef) -> bool {
+    pub fn publish_scheduler_quiesced(&self, task_ref: TaskRef, cpu_ref: CpuRef) -> Option<CpuRef> {
         let mut inner = self.inner.lock();
-        let Some(slot) = slot_mut(&mut inner, task_ref) else {
-            return false;
-        };
-        if slot.state != UserProcessSlotState::Zombie
-            || slot.cpu_ref != cpu_ref
-            || slot.scheduler_quiesced
+        let child_index = registry_slot_for_ref(task_ref)?;
+        let child = &inner.slots[child_index];
+        if child.task_ref != task_ref
+            || child.state != UserProcessSlotState::Zombie
+            || child.cpu_ref != cpu_ref
+            || child.scheduler_quiesced
         {
-            return false;
+            return None;
         }
-        slot.scheduler_quiesced = true;
-        true
+        let parent_index = registry_slot_for_ref(child.parent_task_ref)?;
+        let parent = &inner.slots[parent_index];
+        if !parent.task_ref.same_identity(child.parent_task_ref)
+            || parent.pid != child.parent_pid
+            || !matches!(
+                parent.state,
+                UserProcessSlotState::Published | UserProcessSlotState::Zombie
+            )
+        {
+            return None;
+        };
+        let parent_cpu_ref = parent.cpu_ref;
+        inner.slots[child_index].scheduler_quiesced = true;
+        Some(parent_cpu_ref)
     }
 
     #[allow(dead_code)]
@@ -741,6 +780,7 @@ impl UserProcessRegistry {
             .iter()
             .find(|slot| {
                 slot.state == UserProcessSlotState::Zombie
+                    && slot.scheduler_quiesced
                     && slot.parent_task_ref.same_identity(parent_task_ref)
                     && slot.parent_pid == parent_pid
                     && selector.matches(slot.pid)
@@ -761,6 +801,57 @@ impl UserProcessRegistry {
                 && slot.parent_pid == parent_pid
                 && selector.matches(slot.pid)
         })
+    }
+
+    #[cfg(checkpoint_handler_user_syscall_error)]
+    pub(crate) fn wait_diagnostic(
+        &self,
+        parent_task_ref: TaskRef,
+        parent_pid: usize,
+        selector: UserProcessChildSelector,
+    ) -> UserProcessWaitDiagnostic {
+        let inner = self.inner.lock();
+        let mut diagnostic = UserProcessWaitDiagnostic {
+            live_slot_count: 0,
+            exact_child_count: 0,
+            same_parent_ref_count: 0,
+            same_parent_pid_count: 0,
+            selector_candidate_count: 0,
+            related_task_ref: TaskRef::NONE,
+            related_pid: 0,
+            related_parent_task_ref: TaskRef::NONE,
+            related_parent_pid: 0,
+            related_cpu_ref: CpuRef::invalid(),
+            related_state: UserProcessSlotState::Empty,
+            related_scheduler_quiesced: false,
+        };
+        for slot in &inner.slots[1..] {
+            if slot.state == UserProcessSlotState::Empty {
+                continue;
+            }
+            diagnostic.live_slot_count += 1;
+            let same_parent_ref = slot.parent_task_ref.same_identity(parent_task_ref);
+            let same_parent_pid = slot.parent_pid == parent_pid;
+            let selector_matches = selector.matches(slot.pid);
+            diagnostic.same_parent_ref_count += usize::from(same_parent_ref);
+            diagnostic.same_parent_pid_count += usize::from(same_parent_pid);
+            diagnostic.selector_candidate_count += usize::from(selector_matches);
+            diagnostic.exact_child_count +=
+                usize::from(same_parent_ref && same_parent_pid && selector_matches);
+            if !diagnostic.related_task_ref.is_valid()
+                && selector_matches
+                && (same_parent_ref || same_parent_pid)
+            {
+                diagnostic.related_task_ref = slot.task_ref;
+                diagnostic.related_pid = slot.pid;
+                diagnostic.related_parent_task_ref = slot.parent_task_ref;
+                diagnostic.related_parent_pid = slot.parent_pid;
+                diagnostic.related_cpu_ref = slot.cpu_ref;
+                diagnostic.related_state = slot.state;
+                diagnostic.related_scheduler_quiesced = slot.scheduler_quiesced;
+            }
+        }
+        diagnostic
     }
 
     pub fn first_published_child_on_cpu(

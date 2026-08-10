@@ -267,6 +267,10 @@ pub fn enable_supervisor_software_interrupt() {
     set_sie_bits(SIE_SSIE);
 }
 
+pub fn supervisor_software_interrupt_enabled() -> bool {
+    read_sie() & SIE_SSIE != 0
+}
+
 pub fn clear_supervisor_software_interrupt() {
     unsafe {
         core::arch::asm!("csrrc zero, sip, {mask}", mask = in(reg) SIE_SSIE, options(nostack, nomem));

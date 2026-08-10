@@ -1,0 +1,33 @@
+[[rules]]
+id = "panic"
+result = "failure"
+contains = ["arceos_ex panic"]
+description = "Kernel panic was printed."
+
+[[rules]]
+id = "allocation-error"
+result = "failure"
+contains = ["memory allocation of"]
+description = "The stable no_std allocation failure message was printed."
+
+[[rules]]
+id = "df-0008-plain-fork-child-enqueue"
+result = "failure"
+contains = [
+  "clone_kind=plain_fork clone_plain stage=mark_enqueued",
+  "declared child enqueue invariant failed",
+]
+description = "The repeated fork_mm child was published but its reserved activation could not be marked enqueued."
+
+[[rules]]
+id = "df-0008-user-smoke-fork-enqueue-success"
+result = "success"
+contains = [
+  "user fork child private mm ok",
+  "user fork parent COW unique fast path ok",
+  "user fork COW reuse stress ok",
+  "user-smoke: case fork_mm: end status=0",
+  "user-smoke: end status=0",
+  "user exit status=0",
+]
+description = "The frozen linux-object user-smoke identity completed its repeated COW fork cycle and exited normally."

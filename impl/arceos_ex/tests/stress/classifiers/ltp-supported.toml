@@ -1,0 +1,11 @@
+[[rules]]
+id = "ltp-non-pass"
+result = "failure"
+regex = ["(TFAIL|TBROK|TWARN|TCONF|unsupported syscall|Function not implemented|arceos_ex panic|Kernel panic)"]
+description = "The stock LTP run or kernel emitted a forbidden result."
+
+[[rules]]
+id = "ltp-supported-pass"
+result = "success"
+contains = ["Summary: TOTAL=4 PASS=4 FAIL=0 BROK=0 WARN=0 CONF=0", "lkm-ltp: selection=supported status=0"]
+description = "The complete supported batch passed the stock harness."

@@ -18,6 +18,9 @@ from typing import Any, Iterable
 
 
 SCHEMA_VERSION = 2
+LTP_SELECTION_FILES = ("ltp-supported", "ltp-frontier")
+LTP_HELPER_FILES = ("ltp-select.sh", "ltp-init.sh")
+LTP_PROC_MEMINFO_FILE = "ltp-proc-meminfo"
 FIXTURES = (
     ("user-smoke", "user_smoke", "musl", "dynamic"),
     ("init-hello", "init_hello", "gnu", "static"),
@@ -76,8 +79,8 @@ def build_canonical_rootfs(args: argparse.Namespace) -> None:
     metadata_path = Path(f"{image}.inputs.json")
 
     _ensure_tarball(tarball, args.url, args.wget)
-    _validate_ltp(ltp_dir)
     _validate_config(config_dir)
+    _validate_ltp(ltp_dir, config_dir)
     manifest = input_manifest(
         repo_root=repo_root,
         tarball=tarball,
@@ -320,7 +323,56 @@ def _ensure_tarball(tarball: Path, url: str, wget: str) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def _validate_ltp(ltp_dir: Path) -> None:
+def parse_ltp_selection(path: Path) -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for line_number, raw_line in enumerate(path.read_text().splitlines(), 1):
+        name = raw_line.strip()
+        if not name or name != raw_line or any(character.isspace() for character in name):
+            raise ValueError(
+                f"LTP selection {path} line {line_number} must be one exact entry name"
+            )
+        if name in seen:
+            raise ValueError(f"LTP selection {path} contains duplicate entry: {name}")
+        seen.add(name)
+        names.append(name)
+    if not names:
+        raise ValueError(f"LTP selection {path} must not be empty")
+    return names
+
+
+def _runtest_entry_counts(path: Path) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for raw_line in path.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        name = line.split(None, 1)[0]
+        counts[name] = counts.get(name, 0) + 1
+    return counts
+
+
+def validate_ltp_selections(ltp_root: Path, config_dir: Path) -> dict[str, list[str]]:
+    runtest = ltp_root / "runtest" / "syscalls"
+    if not runtest.is_file():
+        raise ValueError(f"LTP rootfs staging is invalid: missing {runtest}")
+    counts = _runtest_entry_counts(runtest)
+    selections: dict[str, list[str]] = {}
+    for filename in LTP_SELECTION_FILES:
+        path = config_dir / filename
+        names = parse_ltp_selection(path)
+        for name in names:
+            count = counts.get(name, 0)
+            if count != 1:
+                raise ValueError(
+                    f"LTP selection entry {name!r} from {path} must occur exactly once "
+                    f"in {runtest}; found {count}"
+                )
+        selections[filename.removeprefix("ltp-")] = names
+    return selections
+
+
+def _validate_ltp(ltp_dir: Path, config_dir: Path) -> None:
     runner = ltp_dir / "opt" / "ltp" / "run-syscalls.sh"
     if not ltp_dir.is_dir():
         raise ValueError(f"LTP rootfs staging directory not found: {ltp_dir}")
@@ -328,10 +380,19 @@ def _validate_ltp(ltp_dir: Path) -> None:
         raise ValueError(f"LTP rootfs staging is invalid: missing {runner}")
     if not os.access(runner, os.X_OK):
         raise ValueError(f"LTP rootfs staging is invalid: not executable: {runner}")
+    validate_ltp_selections(runner.parent, config_dir)
 
 
 def _validate_config(config_dir: Path) -> None:
-    for name in ("inittab", "passwd.entry", "shadow.entry", "rc-local.sh"):
+    for name in (
+        "inittab",
+        "passwd.entry",
+        "shadow.entry",
+        "rc-local.sh",
+        *LTP_SELECTION_FILES,
+        *LTP_HELPER_FILES,
+        LTP_PROC_MEMINFO_FILE,
+    ):
         path = config_dir / name
         if not path.is_file():
             raise ValueError(f"canonical configuration is missing: {path}")
@@ -367,6 +428,20 @@ def _configure_canonical(staging: Path, config_dir: Path, destination: Path) -> 
     rc_local = destination / "rc-local.sh"
     shutil.copy2(config_dir / "rc-local.sh", rc_local)
     rc_local.chmod(0o755)
+    for name in LTP_SELECTION_FILES:
+        target = destination / name
+        shutil.copy2(config_dir / name, target)
+        target.chmod(0o644)
+    for name in LTP_HELPER_FILES:
+        target = destination / name
+        shutil.copy2(config_dir / name, target)
+        target.chmod(0o755)
+
+    proc = staging / "proc"
+    proc.mkdir(parents=True, exist_ok=True)
+    proc_meminfo = proc / "meminfo"
+    shutil.copy2(config_dir / LTP_PROC_MEMINFO_FILE, proc_meminfo)
+    proc_meminfo.chmod(0o444)
 
 
 def _merge_account_entry(path: Path, entry: str) -> None:

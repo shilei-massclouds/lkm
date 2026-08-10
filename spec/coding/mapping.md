@@ -379,6 +379,21 @@ trace backends or observer handlers, but it is not ordinary logging,
 does not advance object state by itself, and must not become a
 dependency of the transition whose boundary it observes.
 
+#### Checkpoint dispatch concurrency
+
+Rule ID: `coding_must_checkpoint_reentry_guard_be_cpu_local` (MUST).
+
+Post-VM checkpoint consumer dispatch must resolve the current, generation-checked
+TaskFlow/CPU binding before entering a handler. Its active guard is indexed by the
+resolved logical CPU and uses acquire-release atomic publication. A handler active
+on CPU A must not reject, stop, or serialize a handler on CPU B merely because both
+consume checkpoints at the same time. Re-entering consumer dispatch on the same CPU
+normal context before the first dispatch releases its guard remains terminal. The
+guard is observation-framework state, must not be stored in an ordinary lifecycle
+object, and must be released before applying a handler outcome. This first slice does
+not invent Linux's IRQ/softirq/NMI context bits; adding nested-context observation
+requires a later Charter/Model closure.
+
 #### Observation facts
 
 Rule ID: `coding_must_observation_facts_live_on_objects_or_providers` (MUST).

@@ -559,6 +559,10 @@ impl Task {
         self.execution_authority
     }
 
+    pub const fn on_cpu(&self) -> bool {
+        self.on_cpu
+    }
+
     pub const fn breakpoint_state(&self) -> TaskBreakpointState {
         self.thread_context.breakpoint_state()
     }
@@ -871,11 +875,20 @@ impl Task {
     }
 
     pub fn stack_guard_intact(&self) -> bool {
+        self.stack_guard_installed
+            && self.stack_guard_observed_value() == Some(TASK_STACK_GUARD_VALUE)
+    }
+
+    /// Freeze the current stack-end word only when the recorded Task stack
+    /// range makes that read valid. This query is diagnostic and never repairs
+    /// the guard or changes its installation fact.
+    pub fn stack_guard_observed_value(&self) -> Option<usize> {
         let base = self.kernel_stack_base();
         let top = self.kernel_stack_top();
-        self.stack_guard_installed
-            && self.stack_guard_range_valid(base, top)
-            && unsafe { core::ptr::read_volatile(base as *const usize) == TASK_STACK_GUARD_VALUE }
+        if !self.stack_guard_range_valid(base, top) {
+            return None;
+        }
+        Some(unsafe { core::ptr::read_volatile(base as *const usize) })
     }
 
     pub fn enable_stack_guard(&mut self, base: usize, top: usize) -> EventResult {
@@ -1482,30 +1495,6 @@ impl Task {
                 State::Destroyed,
             );
         }
-        self.lifecycle
-            .adopt_transition(LifecycleEvent::Cleanup, State::Offline, State::Destroyed)
-    }
-
-    /// Final cleanup for an exited Task after its owning CPU has saved the
-    /// switch context and removed every current/runqueue reference.
-    pub(crate) fn cleanup_suspended_terminal(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Online
-            || self.on_cpu
-            || self.execution_authority != TaskExecutionAuthority::None
-            || self.core_save_pending_suspend
-            || self.running
-            || self.runqueue_published
-            || self.flow.state() != State::Destroyed
-        {
-            return failed_condition(
-                LifecycleEvent::Cleanup,
-                self.lifecycle.state(),
-                State::Online,
-                State::Destroyed,
-            );
-        }
-        self.lifecycle
-            .adopt_transition(LifecycleEvent::Disable, State::Online, State::Offline)?;
         self.lifecycle
             .adopt_transition(LifecycleEvent::Cleanup, State::Offline, State::Destroyed)
     }

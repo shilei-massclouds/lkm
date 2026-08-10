@@ -3,7 +3,7 @@ use crate::{
     context::Context,
     objects::{
         earlycon, printk,
-        state::{EventResult, LifecycleEvent, State, failed_condition},
+        state::{EventResult, FailureDiagnostic, LifecycleEvent, State, failed_condition},
         task_flow::task_flow_execution_guard_satisfied,
     },
 };
@@ -247,59 +247,205 @@ fn direct_setup_objects(ctx: &mut Context) -> EventResult {
 }
 
 fn setup_arch_return_ready(ctx: &Context) -> EventResult {
-    let ready = super::is_prepared()
-        && ctx.init_stack.state() == State::Ready
-        && ctx.boot_task.task().stack_guard_installed()
-        && ctx.boot_task.task().stack_guard_intact()
-        && ctx.cpu_group.boot_cpu_state() == State::Online
-        && ctx
-            .cpu_group
-            .boot_cpu_local_interrupt()
-            .map(|control| control.state() == State::Ready && control.disabled())
-            .unwrap_or(false)
-        && ctx.boot_cpu_interrupt().state() == State::Ready
-        && ctx.boot_cpu_interrupt().early_boot_irqs_disabled()
-        && ctx.vm.state() == State::Online
-        && ctx.kernel_addr_space.state() == State::Online
-        && ctx.kernel_addr_space.final_swapper_mappings_published()
-        && ctx
-            .cpu_group
-            .boot_cpu()
-            .is_some_and(|cpu| ctx.vm.boot_init_setup_ready_for(cpu))
-        && printk::is_prepared()
-        && ctx.early_dtb.state() == State::Destroyed
-        && ctx.command_line.state() == State::Prepared
-        && ctx.kernel_cmdline.state() == State::Ready
-        && ctx.init_mm.state() == State::Ready
-        && ctx.early_ioremap.state() == State::Ready
-        && ctx.sbi.state() == State::Ready
-        && ctx.params.state() == State::Prepared
-        && ctx.early_param.state() == State::Ready
-        && earlycon::is_online()
-        && ctx.memblock.state() == State::Online
-        && ctx.memblock.boot_init_setup_facts_ready()
-        && ctx.device_tree.state() == State::Ready
-        && ctx.zones.state() == State::Ready
-        && ctx.page_metadata_map.state() == State::Ready
-        && ctx.resource_lock.state() == State::Ready
-        && ctx.resource_lock.ready()
-        && ctx.resource_lock.boot_init_task_write_guard_completed()
-        && ctx.resource_tree.state() == State::Ready
-        && ctx.resource_tree.write_lock_guard_used()
-        && ctx
-            .resource_tree
-            .resource_lock_write_guard_used_by(&ctx.resource_lock)
-        && ctx.cpu_group.state() == State::Ready
-        && !ctx.cpu_group.smp_concurrency_open()
-        && ctx.cache_block_info.state() == State::Ready
-        && ctx.cpu_capabilities.state() == State::Ready
-        && ctx.dma_cache_policy.state() == State::Ready
-        && start_kernel_facts_ready();
-    if ready {
-        Ok(())
-    } else {
-        direct_setup_failure(ctx)
+    let Some(first_failed) = setup_arch_return_first_failed(ctx) else {
+        return Ok(());
+    };
+    if first_failed == "boot_task.stack_guard_intact" {
+        print_boot_task_stack_guard_diagnostic(ctx);
     }
+    direct_setup_failure(ctx).map_err(|error| {
+        error.with_diagnostic_if_absent(FailureDiagnostic::new(
+            "BootInitFlow",
+            "setup_arch_return",
+            "BootInitFlow",
+            "setup_arch_return_ready",
+            first_failed,
+        ))
+    })
+}
+
+fn print_boot_task_stack_guard_diagnostic(ctx: &Context) {
+    let task = ctx.boot_task.task();
+    let task_ref = task.task_ref();
+    let base = task.kernel_stack_base();
+    let top = task.kernel_stack_top();
+    let live_sp = crate::arch::riscv64::csr::read_sp();
+    let actual = task.stack_guard_observed_value();
+    let cpu = ctx
+        .current_cpu()
+        .map_or(usize::MAX, |current| current.logical_id());
+
+    crate::arch::riscv64::sbi::putstr("stack_guard_diagnostic task_slot=");
+    put_hex(task_ref.slot());
+    crate::arch::riscv64::sbi::putstr(" generation=");
+    put_hex(task_ref.generation() as usize);
+    crate::arch::riscv64::sbi::putstr(" cpu=");
+    put_hex(cpu);
+    crate::arch::riscv64::sbi::putstr(" base=");
+    put_hex(base);
+    crate::arch::riscv64::sbi::putstr(" top=");
+    put_hex(top);
+    crate::arch::riscv64::sbi::putstr(" live_sp=");
+    put_hex(live_sp);
+    crate::arch::riscv64::sbi::putstr(" expected=");
+    put_hex(crate::objects::task::TASK_STACK_GUARD_VALUE);
+    crate::arch::riscv64::sbi::putstr(" actual=");
+    if let Some(actual) = actual {
+        put_hex(actual);
+    } else {
+        crate::arch::riscv64::sbi::putstr("unavailable");
+    }
+    crate::arch::riscv64::sbi::putchar(b'\n');
+}
+
+fn put_hex(value: usize) {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    crate::arch::riscv64::sbi::putstr("0x");
+    let mut shift = usize::BITS - 4;
+    loop {
+        crate::arch::riscv64::sbi::putchar(HEX[(value >> shift) & 0xf]);
+        if shift == 0 {
+            break;
+        }
+        shift -= 4;
+    }
+}
+
+fn setup_arch_return_first_failed(ctx: &Context) -> Option<&'static str> {
+    macro_rules! require {
+        ($condition:expr, $name:literal) => {
+            if !$condition {
+                return Some($name);
+            }
+        };
+    }
+
+    require!(super::is_prepared(), "boot_init_flow.prepared");
+    require!(ctx.init_stack.state() == State::Ready, "init_stack.ready");
+    require!(
+        ctx.boot_task.task().stack_guard_installed(),
+        "boot_task.stack_guard_installed"
+    );
+    require!(
+        ctx.boot_task.task().stack_guard_intact(),
+        "boot_task.stack_guard_intact"
+    );
+    require!(
+        ctx.cpu_group.boot_cpu_state() == State::Online,
+        "boot_cpu.online"
+    );
+    let Some(local_interrupt) = ctx.cpu_group.boot_cpu_local_interrupt() else {
+        return Some("boot_cpu.local_interrupt_present");
+    };
+    require!(
+        local_interrupt.state() == State::Ready,
+        "boot_cpu.local_interrupt_ready"
+    );
+    require!(
+        local_interrupt.disabled(),
+        "boot_cpu.local_interrupt_disabled"
+    );
+    require!(
+        ctx.boot_cpu_interrupt().state() == State::Ready,
+        "boot_cpu.interrupt_type_ready"
+    );
+    require!(
+        ctx.boot_cpu_interrupt().early_boot_irqs_disabled(),
+        "boot_cpu.early_boot_irqs_disabled"
+    );
+    require!(ctx.vm.state() == State::Online, "vm.online");
+    require!(
+        ctx.kernel_addr_space.state() == State::Online,
+        "kernel_addr_space.online"
+    );
+    require!(
+        ctx.kernel_addr_space.final_swapper_mappings_published(),
+        "kernel_addr_space.final_swapper_mappings_published"
+    );
+    let Some(boot_cpu) = ctx.cpu_group.boot_cpu() else {
+        return Some("boot_cpu.present");
+    };
+    require!(
+        ctx.vm.boot_init_setup_ready_for(boot_cpu),
+        "vm.boot_init_setup_ready_for_boot_cpu"
+    );
+    require!(printk::is_prepared(), "printk.prepared");
+    require!(
+        ctx.early_dtb.state() == State::Destroyed,
+        "early_dtb.destroyed"
+    );
+    require!(
+        ctx.command_line.state() == State::Prepared,
+        "command_line.prepared"
+    );
+    require!(
+        ctx.kernel_cmdline.state() == State::Ready,
+        "kernel_cmdline.ready"
+    );
+    require!(ctx.init_mm.state() == State::Ready, "init_mm.ready");
+    require!(
+        ctx.early_ioremap.state() == State::Ready,
+        "early_ioremap.ready"
+    );
+    require!(ctx.sbi.state() == State::Ready, "sbi.ready");
+    require!(ctx.params.state() == State::Prepared, "params.prepared");
+    require!(ctx.early_param.state() == State::Ready, "early_param.ready");
+    require!(earlycon::is_online(), "earlycon.online");
+    require!(ctx.memblock.state() == State::Online, "memblock.online");
+    require!(
+        ctx.memblock.boot_init_setup_facts_ready(),
+        "memblock.boot_init_setup_facts_ready"
+    );
+    require!(ctx.device_tree.state() == State::Ready, "device_tree.ready");
+    require!(ctx.zones.state() == State::Ready, "zones.ready");
+    require!(
+        ctx.page_metadata_map.state() == State::Ready,
+        "page_metadata_map.ready"
+    );
+    require!(
+        ctx.resource_lock.state() == State::Ready,
+        "resource_lock.ready_state"
+    );
+    require!(ctx.resource_lock.ready(), "resource_lock.ready_fact");
+    require!(
+        ctx.resource_lock.boot_init_task_write_guard_completed(),
+        "resource_lock.boot_init_task_write_guard_completed"
+    );
+    require!(
+        ctx.resource_tree.state() == State::Ready,
+        "resource_tree.ready"
+    );
+    require!(
+        ctx.resource_tree.write_lock_guard_used(),
+        "resource_tree.write_lock_guard_used"
+    );
+    require!(
+        ctx.resource_tree
+            .resource_lock_write_guard_used_by(&ctx.resource_lock),
+        "resource_tree.resource_lock_write_guard_used"
+    );
+    require!(ctx.cpu_group.state() == State::Ready, "cpu_group.ready");
+    require!(
+        !ctx.cpu_group.smp_concurrency_open(),
+        "cpu_group.smp_concurrency_closed"
+    );
+    require!(
+        ctx.cache_block_info.state() == State::Ready,
+        "cache_block_info.ready"
+    );
+    require!(
+        ctx.cpu_capabilities.state() == State::Ready,
+        "cpu_capabilities.ready"
+    );
+    require!(
+        ctx.dma_cache_policy.state() == State::Ready,
+        "dma_cache_policy.ready"
+    );
+    require!(
+        start_kernel_facts_ready(),
+        "start_kernel.trimmed_facts_ready"
+    );
+    None
 }
 
 fn direct_setup_failure(ctx: &Context) -> EventResult {

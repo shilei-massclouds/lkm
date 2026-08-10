@@ -1,0 +1,18 @@
+schema_version = 2
+name = "df-0012-rc-local-direct-setup-native"
+description = "Repeat canonical native rc.local to preserve the intermittent boot direct-setup failure immediately after DmaCachePolicy.Ready."
+mode = "stress"
+test = "rc-local-native"
+runs = 500
+classifier = "../classifiers/df-0012-rc-local-direct-setup-native.toml"
+
+[metadata]
+defect = "DF-0012"
+observation_mode = "boot-direct-setup-after-dma-cache-policy-forensics"
+ordinary_path_required = true
+default_suite = true
+rootfs_profile = "canonical"
+payload = "canonical native rc.local acceptance from boot direct setup through /bin/ls and poweroff"
+first_observation = "impl/arceos_ex/tests/basic/out/20260805T205802.609110Z-rc-local-native-617138"
+second_observation = "impl/arceos_ex/tests/basic/out/20260805T211030.587299Z-rc-local-native-620758"
+scope_note = "Preserve the non-timeout early shutdown after DmaCachePolicy.Ready independently from DF-0004's 180-second rc.local timeout; after hardware-watchpoint localization and in-place Cpu construction, retain 500 focused runs as a long-term regression."

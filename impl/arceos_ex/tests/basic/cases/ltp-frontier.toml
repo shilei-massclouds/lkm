@@ -1,0 +1,29 @@
+schema_version = 2
+name = "ltp-frontier"
+purpose = "diagnostic"
+timeout_seconds = 300
+
+[kernel]
+app = "user-boot"
+provider = "native"
+probe = ["user-syscall-error"]
+profile = "release"
+
+[disk]
+mode = "private-copy"
+profile = "canonical"
+
+[qemu]
+memory_mb = 128
+smp = 8
+kernel_cmdline = "earlycon=sbi init=/bin/sh"
+rng = true
+exit_policy = "marker"
+exit_marker = "lkm-ltp: complete"
+interaction = "scripted"
+stdin_steps = [
+  { ready_marker = "~ #", payload = "/opt/lkm/tests/ltp-init.sh frontier\n" },
+]
+
+[expect]
+markers = ["lkm-ltp: complete"]

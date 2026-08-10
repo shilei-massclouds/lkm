@@ -1,0 +1,32 @@
+[[rules]]
+id = "panic"
+result = "failure"
+contains = ["arceos_ex panic"]
+description = "Kernel panic was printed."
+
+[[rules]]
+id = "allocation-error"
+result = "failure"
+contains = ["memory allocation of"]
+description = "The stable no_std allocation failure message was printed."
+
+[[rules]]
+id = "preempt-case-reported-failure"
+result = "failure"
+contains = ["user-smoke: case preempt: end status=1"]
+description = "The preemption case completed with an explicit failed status."
+
+[[rules]]
+id = "df-0006-user-smoke-preempt-success"
+result = "success"
+contains = [
+  "user preempt coordinator begin",
+  "user preempt children published",
+  "user preempt child A writes complete",
+  "user preempt child B writes complete",
+  "user preempt bytes collected order=",
+  "user preempt children reaped",
+  "user-smoke: case preempt: end status=0",
+  "user exit status=0",
+]
+description = "The frozen native user-smoke identity collected the pipe bytes, reaped both children, and completed normally."

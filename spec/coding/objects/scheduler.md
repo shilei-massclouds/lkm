@@ -53,6 +53,12 @@ not discard such a still-published per-Task record. The slot state supplies exac
 consumed ordinal is diagnostic only. Reservation cancellation is side-effect free. Duplicate IPIs only coalesce
 `need_resched`.
 
+A compatibility enqueue wrapper that also records a numeric task ID must take that ID from the same completed
+fork snapshot as the TaskRef it enqueues. It may record selection only after allocation has returned the actual
+child PID/TaskRef pair; it must not preselect from a legacy `next_child_pid` or any other preview that can diverge
+from the registry occurrence. Selection, TaskRef and enqueue ID therefore name one child generation even when
+the registry allocator and a compatibility carrier have advanced by different amounts.
+
 Each scheduler-class queue is also statically sized to cover every TaskRef that can simultaneously target one
 CPU; fixed placement cannot rely on other CPUs having spare queue entries. In the current representation the
 shared fair-queue bound is `31 dynamic user Tasks + PID 1 + kthreadd + 8 dynamic kernel Tasks = 41`. Consequently

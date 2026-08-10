@@ -4,6 +4,143 @@
 
 ## 待解决
 
+### DF-0015: wait4 分片诊断与 stock LTP PASS 记录间歇拼接
+
+- 状态：2026-08-10 已用冻结的 10 组 Linux/native 差分精确复现并修正，保留独立 native 长期 stress。修复前 native 的 LTP 语义结果和汇总均通过，但第 2、4、7 组的 `uname02` standalone PASS 记录被插入 `wait4 registry` 分片诊断，横向结果为 7/10；这不是 syscall、harness 或 DF-0007 child-wait 语义失败。
+- 首次差分报告：`impl/arceos_ex/tests/stress/out/20260810T045830.218212Z-df0007-ltp-supported-difftest/report.md`。失败行的精确形状为 `wait4 registry ... related_quiesced=--- uname02: PASS (exit 0)`，后续诊断字段另起一段，证明边界是并发 console writer 间的 record 原子性。
+- 规格闭合：锁定的 computer Charter reviewed, no change；Model 已要求 runtime diagnostics 与用户 console 共享 TX queue 且 batch 连续；Coding 已要求诊断先格式化一个有界 record，再通过同一 locked batch path 发出。Impl 中该 wait4 诊断原先仍用多次 `putstr`/`putchar` 输出，违反既有约束；现已改为单次 `sbi::write_record`，未改变 LTP 结果或 wait4 行为。
+- Linux 6.12 对照：`vprintk_store()` 以 reserve/fill/commit 保存一个 printk record，TTY write 由 `atomic_write_lock`/`tty_write_lock` 串行化；本修正只闭合相同的 record 边界，不引入测试名特判。
+- 修正后证据：直接根 `make test` 为 186/186；同一四项名单的 Linux/native 差分报告 `impl/arceos_ex/tests/stress/out/20260810T051033.584619Z-df0007-ltp-supported-difftest/report.md` 为 10/10，四条 PASS 均保持 standalone；长期 stress 报告 `impl/arceos_ex/tests/stress/out/20260810T051928.385442Z-df-0015-ltp-frontier-console-record-interleave-native/report.md` 为 50/50。日常专项轮次固定为 50；100/200/300/500 只用于尚未定位或同 class 再次复发的概率问题，不能作为修复后的机械门禁。
+
+### DF-0014: 跨 CPU checkpoint consumer 并行被全局 reentry guard 间歇误杀
+
+- 状态：2026-08-06 在 DF-0012 的最终 500 轮扩样中复现 1 次，已定位为 checkpoint 观察框架的跨 CPU 并发误判，正按 Linux per-current/per-context recursion 边界修正并加入独立长期 stress。
+- 首次记录日期：2026-08-06。
+- 失败 artifact：`impl/arceos_ex/tests/stress/out/20260806T040602.535104Z-df-0012-rc-local-direct-setup-native/runs/run-0448/`。整批报告为 499/500；唯一失败轮次 QEMU 正常关机、非 timeout，两次 `Kernel.Online` 已完成，`lkm-rc-local: begin` 已输出，但 `/bin/ls` 的 `lost+found` 和 rc.local end 缺失。
+- 首个精确内部边界：AP 调度流已输出 `Scheduler.SwitchTo prev=ApIdleTask next=UserTask`、`Scheduler.Schedule task=ApIdleTask` 和 `Scheduler.SwitchTo.Exit task=None`，紧接着出现 `ccheckpoint reentry`并进入 stress_mem dump。这个形状晚于 DF-0012 的 direct-setup 关机，也不是 DF-0004 timeout。
+- 根因证据：该构建只启用 `announce + stress-mem`，announce handler 调用链不发出新 checkpoint，因而同 CPU handler 真递归不能解释该样本。实现却使用全系统唯一 `CHECKPOINT_HANDLER_ACTIVE: AtomicBool`，任意两个 CPU 同时 dispatch 都会让后者 fail-stop。Linux 6.12 `include/linux/trace_recursion.h` 把 recursion 位放在 `current->trace_recursion`，并区分 normal/IRQ/softirq/NMI context；`kernel/trace/ftrace.c` 以该本地 guard 包围 callback list，不用全局布尔位排斥其它 CPU。
+- 长期入口：`df-0014-checkpoint-cross-cpu-reentry-native` 原样重复 canonical `rc-local-native`，case-local 深采样 500 轮并进入默认 suite。classifier 必须同时看到 `lkm-rc-local: begin` 和 `checkpoint reentry`；完整成功仍要求 `lost+found` 和 end status 0。
+
+当前修正与验证要求：
+
+- Charter 明确不同 CPU 的 checkpoint consumer 可并行，重入 guard 属于 CPU/执行上下文；锁定的 computer Charter reviewed, no change。Model 将观测 action 绑定到当前 TaskFlow/CPU，Coding 规定 CPU-local acquire/release guard。首片仍对同 CPU normal-context 嵌套 fail-stop，不在未规格化时猜测实现 Linux 全部 context bits。
+- 修复后按 `50 -> 100 -> 200 -> 300 -> 500` 执行该 native identity；任意一档出现 reentry、timeout、panic、overflow 或未分类失败即停止扩样并重新定位。本问题是观察框架内部并发语义，不需要把差分扩到高轮数；若做 Linux/arceos_ex 横向观测对比，仍不得超过 10 轮。
+
+### DF-0013: fork 共享 OFD 首次 child 读取后间歇性回收/继续执行超时
+
+- 状态：2026-08-06 已定位并修正，保留长期 stress 回归。首个超时由 child 退出、父进程 wait/reap 与共享进程资源释放的并发交错触发：child exit 已释放共享 files/OFD 引用，但 aggregate 的 `process_resources_present` 所有权事实仍为真，reap 再次尝试释放并拒绝继续。修复后 native 与 linux-object 的独立 500 轮压力均零失败，Linux/arceos_ex 精确行为差分 50/50 一致。
+- 首次记录日期：2026-08-05。
+- native 失败 artifact：`impl/arceos_ex/tests/basic/out/20260805T211850.171911Z-fork-ofd-offset-625733/`。第一段输出已证明 inherited fd 的读取位置正确；此后没有 `R2=`，`result.json` 记录 timeout 且 QMP snapshot captured，8 个 hart、进程组、私有磁盘和 QMP socket 均完成冻结/清理。
+- linux-object 对照 artifact：`impl/arceos_ex/tests/basic/out/20260805T212142.846566Z-fork-ofd-offset-lo-626109/` 在相同第一段 marker 后超时，因此当前证据不支持把问题归于任一 PLIC provider。
+- sibling Linux 成功 artifact：`impl/arceos_ex/tests/basic/out/20260805T211838.683774Z-fork-ofd-offset-linux-624344/` 依次打印 `R1=#!/`、`R2=bin`、`R3=/sh` 并完成。arceos_ex 两侧在本轮修改前也曾完整执行同一三段命令，构成概率性成功对照，不能用本次 timeout 否定已定位的 OFD 语义边界。
+- 长期入口：`df-0013-fork-ofd-offset-child-return-native` 进入默认 suite；显式 linux-object identity 使用同一 classifier。两者按 50→100→200→300→500 独立扩轮，完整成功必须出现 Linux 相同三段字节及 complete marker；timeout 分类还必须读取结构化 `timed_out=true`，不能把 marker 正常退出时的 host signal-15 文本误判为失败。
+- 成对入口：`fork-ofd-offset-difftest` 每轮先运行 sibling Linux，再运行 native arceos_ex，只比较外部 child 实际输出的 `R1=#!/`、`R2=bin`、`R3=/sh` 有序序列，命令回显不进入序列。2026-08-06 的一次性深证据为 50/50，报告 `impl/arceos_ex/tests/stress/out/20260806T030356.771947Z-fork-ofd-offset-difftest/report.md`；此后按横向比较职责默认且最多执行 10 轮，小概率复现由 provider stress 承担。
+
+当前判断与后续要求：
+
+- 通用生命周期诊断把边界收敛到 child exit 已完成 files/OFD release、reap 仍看到资源存在并二次 release。Linux 6.12 `do_exit()` 经 `exit_files()` 在锁内把 `tsk->files` 置空后只执行一次 put，zombie wait 只认领 zombie 并回收 carrier，不再次执行 `exit_files()`；本实现据此在首次成功 release 时同步清除 aggregate 的资源所有权事实，reap 仅回收 carrier。
+- Charter 的 aggregate 资源一次释放与 reap carrier 边界已闭合；锁定的 computer Charter reviewed, no change。Model、Coding 与 Impl 均要求成功 release 后所有权事实变为 false，禁止 reap 二次释放。最高阶报告分别为 native `impl/arceos_ex/tests/stress/out/20260806T023529.759838Z-df-0013-fork-ofd-offset-child-return-native/report.md` 和 linux-object `impl/arceos_ex/tests/stress/out/20260806T024951.065166Z-df-0013-fork-ofd-offset-child-return-linux-object/report.md`，均为 500/500。
+- DF-0013 与 DF-0007 的结构化 dispatch-preflight 主动终止、DF-0009 的双 writer 完成后 pipe-read timeout、stock LTP parse error 都不是同一终止边界，不得合并 classifier。
+- 不得删除外部 child、用 shell 内建替代 fork、提前 complete、延长 timeout、改变 provider/SMP/rootfs 或把第一段正确字节当作整体成功。后续成功样本不能抵消或关闭 DF-0013。
+
+### DF-0012: native rc.local 在 `DmaCachePolicy.Ready` 后间歇性 direct-setup 失败
+
+- 状态：2026-08-10 已用通用首失败谓词、栈保护观测和 RISC-V 硬件写观察点定位并修正。根因是 `CpuGroup::setup_smp()` 先在 BootTask 栈上构造完整的 secondary `Cpu`，其 Scheduler 和 trap emergency stack 使调用链越过 16 KiB 栈底；随后 checkpoint 格式化写入覆盖 stack guard。改为在唯一权威 `Option<Cpu>` slot 中延迟就地构造后，直接根 `make test` 186/186，冻结 identity 压力 500/500。
+- 首次记录日期：2026-08-05。
+- 首次 artifact：`impl/arceos_ex/tests/basic/out/20260805T205802.609110Z-rc-local-native-617138/`。QEMU 仅运行 0.165 秒并以 0 退出，basic 因 rc.local marker 和两次 `Kernel.Online` 缺失而失败；最后稳定边界为 `checkpoint: DmaCachePolicy.Ready task=BootTask`、`error=C event=S actual=P expected=P target=R`，不是 timeout、panic 或 unsupported syscall。
+- 第二次 artifact：`impl/arceos_ex/tests/basic/out/20260805T211030.587299Z-rc-local-native-620758/`。在 OFD 修正后的下一次直接根回归中以相同三条终止 marker 再现，证明它不是单个 artifact 或一次 host 启动噪声。
+- 长期入口：`df-0012-rc-local-direct-setup-native` 原样重复 canonical `rc-local-native` 并进入默认 suite；专项深采样固定为 500 轮。classifier 精确要求 `DmaCachePolicy.Ready`、direct-setup 失败和结构化 lifecycle error 同时出现，完整成功仍要求 rc.local begin、`lost+found` 与 end status 0。
+- 2026-08-06 的通用诊断将历史样本的首失败唯一收敛为 `boot_task.stack_guard_intact`。为避免诊断本身改变编译器栈布局，在临时重建的诊断前版本上对 stack guard 安装后布置硬件写观察点。首次重放停在 `core::fmt::write` 的 `sd s8, 0x30(sp)`：旧值 `0x57ac6e9d`、新值 `2`，PC `0xffffffff800994c2`，SP `0xffffffff82f75fd0`，比 BootTask stack base `0xffffffff82f76000` 低 48 字节。完整调用链为 `start_kernel -> BootInitFlow::setup::run -> CpuGroup::setup_smp -> Lifecycle::transition -> announce_name_with_context -> sbi::write_record -> core::fmt::write`；继续执行后精确复现原 `DmaCachePolicy.Ready`/direct-setup 失败。
+
+当前判断与后续要求：
+
+- 静态 stack-size 证据与动态写观察点一致：诊断前 `BootInitFlow::setup::run` 栈帧 2144 B、`CpuGroup::setup_smp` 12736 B；再加 trap 预留 256 B 和 `start_kernel` 160 B，仅剩 1088 B 给 checkpoint/格式化嵌套。`Cpu` 大小 8704 B，其中 `TrapType` 4320 B、`Scheduler` 4192 B、trap emergency stack 4096 B。就地构造使 `setup_smp` 栈帧降为 5888 B，不改变对象所有权、发布顺序或 resident resource。
+- Linux 6.12 对照为 `kernel/sched/core.c` 的 `DEFINE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues)` 与 RISC-V traps 的 per-CPU `overflow_stack`；`sched_init()` 通过 `cpu_rq(i)` 初始化目标存储，RISC-V `setup_smp()` 仅建立拓扑/可用 CPU map，不在当前启动栈上构造完整 runqueue 和 trap overflow stack。Charter 与 Model reviewed, no change；Coding 要求在权威 slot 就地构造，Impl 使用 `get_or_insert_with`；Compose reviewed, no change；Testing 保留原 classifier 与 identity。
+- 修正后完整报告为 `impl/arceos_ex/tests/stress/out/20260810T025621.756778Z-df-0012-rc-local-direct-setup-native/report.md`：500/500 成功、0 失败。该结果是对已由写观察点定位之修正的稳定性验证，不是用成功轮次替代根因定位。
+- DF-0012 是约 0.16 秒时的主动早期关机；DF-0004 是 guest 已进入后续启动/rc.local 路径后达到 180 秒的 QEMU timeout。两者共享 basic identity 但终止边界不同，classifier 和 defect 不得合并。
+- 长期回归不得放宽 rc.local marker、删除 `Kernel.Online` 计数、延长 timeout、改变 SMP/provider/rootfs 或跳过 `setup_arch_return_ready()` 提高表面通过率。
+
+### DF-0011: linux-object user-smoke preempt 校验后 finalization 间歇超时
+
+- 状态：2026-08-05 在修正 DF-0010 child selection 后的直接根 `make test` 中，正式 `user-smoke-linux-object` 已完成 pipe bytes 收集、两个 child 回收与 A-B-A round-robin 校验，却未打印 preempt case end 或 guest exit，最终达到原 120 秒 timeout；已建立独立默认 stress 项，根因尚未明确。
+- 首次记录日期：2026-08-05。
+- 首次 artifact：`impl/arceos_ex/tests/basic/out/20260805T202757.172058Z-user-smoke-linux-object-609270/`。日志最后依次为 `user preempt bytes collected order=ABAABBAB`、`user preempt children reaped`、`user timer preemption A-B-A round robin ok`；`result.json` 记录 QEMU 120.015 秒 timeout，QMP snapshot 为 `captured`，私有磁盘、进程组与 QMP socket 均已清理。该轮根回归因此为 185/186，不能作为绿色回归报告。
+- 长期入口：`df-0011-user-smoke-preempt-finalize-linux-object` 原样重复 canonical `user-smoke-linux-object` 100 轮并进入默认 suite。classifier 在 timeout 时用完整的 post-reap/A-B-A/host-termination 终态精确分类；完整成功必须继续出现 preempt `end status=0` 与 `user exit status=0`。
+
+当前判断与后续要求：
+
+- DF-0011 晚于 DF-0009：DF-0009 停在两个 writer complete 之后、bytes-collected 之前；DF-0011 已完成 bytes collection、reap 和 round-robin 校验。现有证据不足以把晚期停顿归因于用户态 case return、exit syscall、Task terminal handoff、Scheduler 或 provider，必须比较 timeout QMP PC/TaskRef/generation/CPU 后再改行为。
+- 不得通过删减 preempt payload、提前 exit marker、缩短 case、延长 timeout 或把 A-B-A marker 当成整体成功来提高通过率。后续成功样本不能抵消或关闭 DF-0011，也不能替代 DF-0009。
+
+### DF-0010: linux-object LTP frontier 后续 child runqueue publication 失败
+
+- 状态：2026-08-05 在保持 guest 交互会话、完成四项 frontier 后再次执行 `sha256sum /opt/ltp/run-syscalls.sh` 时，内核终止于 `declared child runqueue publish invariant failed`；已建立独立 basic diagnostic identity 和默认 stress 项，根因尚未明确。
+- 首次记录日期：2026-08-05。
+- 首次 artifact：`impl/arceos_ex/tests/basic/out/20260805T194115.149428Z-shell-lo-595228/`。同一会话先观察到脚本长度 3606、SHA-256 `c79278919640c1881a0bfe433c00a6e5d06eeec8d16f3dd212c86f363c0a53e7` 与 host/staging 完全一致，且 `/bin/sh -n` 成功；随后四个精确 entry 均打印 TPASS，stock harness 报第 203 行 parse error；父 shell 再启动 hash child 时进入新的 runqueue-publication 终止边界。
+- 长期入口：`ltp-frontier-post-read-lo` 固定首次样本的完整 child 历史：长度检查、带三个不存在参数的失败 `sha256sum` child、由 Ctrl-C 中断的未完成 `tail`、成功 hash、`sh -n`、原 frontier selector 和第二次 hash；`df-0010-ltp-frontier-post-read-runqueue-linux-object` 原样重复该 identity 50 轮并进入默认 stress suite。classifier 优先识别结构化 `Scheduler/Enqueue.Publish/TaskRunqueue` 诊断，再识别旧终止 marker 与独立 harness parse error。
+
+当前判断与后续要求：
+
+- 单个样本证明该路径存在，但旧终止 marker 没有给出 enqueue 的首失败谓词。已先把 Scheduler enqueue 的现有检查拆成长期通用 `FailureDiagnostic`，clone 终止路径改为打印原 `EventError`；该诊断不改变 admission 或生命周期行为。必须先用冻结 identity 复现并取得首失败，再决定最高受影响规格层和行为修正。
+- 加入结构化诊断后的第一次人工精确重放 artifact `impl/arceos_ex/tests/basic/out/20260805T200300.502054Z-shell-lo-601812/` 在 `uname02` 已 TPASS 后停顿，未到达 stock parse error 或第二次 hash；该样本没有产生 enqueue 失败诊断，按独立的调度/pipe timeout 边界保存，不能冒充 DF-0010 的复现，也不能用来删减首次样本的前置历史。
+- DF-0010 发生在父 shell 准备第二个 child 的 runqueue publication，不能与更早的 stock harness parse error、四项 cleanup TWARN、unsupported syscall、DF-0007 wait/reap 或 DF-0008 `mark_enqueued` 合并。不得通过删除第二次读取、放宽 marker、替换 harness/selector、切换 provider/SMP/rootfs 或延长 timeout 提高表面通过率；后续成功样本不能抵消或删除压力项。
+
+### DF-0009: linux-object user-smoke preemption pipe-read 间歇超时
+
+- 状态：2026-08-05 在 DF-0008 的 100 轮定向压力中，第 13 轮正式 `user-smoke-linux-object` 于 preempt case 发生 120 秒 timeout；已作为独立默认 stress 项保留，根因尚未明确。
+- 首次记录日期：2026-08-05。
+- 失败 artifact：`impl/arceos_ex/tests/stress/out/20260805T191932.622566Z-df-0008-user-smoke-fork-enqueue-linux-object/runs/run-0013/`。该轮 `fork_mm` 已完整结束；coordinator 已发布两个 child，A/B 均打印 write-complete，但没有打印 bytes-collected 或 children-reaped。timeout QMP snapshot 状态为 `captured`，捕获前 VM 为 running，8 个 hart 均可查询，进程组和 QMP socket 均完成清理。
+- 长期入口：`df-0009-user-smoke-preempt-linux-object` 原样重复 canonical `user-smoke-linux-object` identity，case-local 深采样 100 轮并进入默认 suite；完整成功必须收集 pipe bytes、回收两个 child、完成整个 user-smoke 并正常 guest exit。
+
+当前判断与后续要求：
+
+- 该终止 marker 形状与 native DF-0006 相同，但当前证据不足以证明二者根因相同，也不足以归因于 linux-object PLIC、pipe wakeup、timer preemption、runqueue 或 Task 生命周期；保留 provider 独立入口与 artifact，先比较 QMP PC/TaskRef/generation/CPU 的首差异。
+- DF-0009 不得替代最初在 fork publication 处终止的 DF-0008。不得通过改变 provider、SMP、rootfs、timeout、payload 或 marker 提高表面通过率；后续成功样本不能抵消或关闭本缺陷。
+
+### DF-0008: linux-object user-smoke plain-fork child enqueue 间歇失败
+
+- 状态：2026-08-05 已用通用 clone-enqueue 首失败诊断定位并修正；直接根 `make test` 186/186 通过，修复后的同一 linux-object identity 定向压力 50/50 通过。该概率性失败及其精确 classifier 继续保留在默认 stress suite，不因本批未复现而删除。
+- 首次记录日期：2026-08-05。
+- 失败 artifact：`impl/arceos_ex/tests/basic/out/20260805T190512.009583Z-user-smoke-linux-object-579156/`。失败前已通过 `user fork child private mm ok` 与 `user fork parent COW unique fast path ok`；结构化 clone 诊断为 `clone_kind=plain_fork clone_plain stage=mark_enqueued`，候选 child PID 6、`active_task_record_state=3`、`child_enqueued=0`，随后立即终止。
+- 长期入口：`df-0008-user-smoke-fork-enqueue-linux-object` 原样重复 canonical `user-smoke-linux-object` identity，case-local 深采样 100 轮并进入默认 suite；classifier 精确匹配 `mark_enqueued` 和 invariant failure，同一 identity 的完整成功仍要求 COW reuse、整个 user-smoke 和 guest exit 全部完成。
+
+定位、修正与验证：
+
+- 在不改变原判定的前提下，`mark_enqueued` 增加了长期通用的逐谓词诊断。修复前报告 `impl/arceos_ex/tests/stress/out/20260805T191932.622566Z-df-0008-user-smoke-fork-enqueue-linux-object/report.md` 为 100 轮中 87 成功、10 次精确 enqueue 失败、3 次独立 timeout。10 个 enqueue 失败样本均报告同一首失败：对允许集合 `Online || OnCpu` 的两次无锁状态读取先得到 `OnCpu`（6）、再得到 `Online`（3）。两者分别合法，却被旧表达式拼成一次伪失败；该重复证据排除了 PID、active-record、inbox 预留和未知生命周期状态作为这 10 次失败的首边界。
+- Charter 与 Model 已允许发布后的 child 在目标 CPU 上并发执行 `Online <-> OnCpu`，均为 reviewed, no change；Coding 增加“兼容 enqueue 判定只读取一次 lifecycle snapshot”的约束。Impl 以同一个状态快照判断两个允许值，保留后续 PID 与 active-record 检查及通用失败诊断。
+- 修复后报告 `impl/arceos_ex/tests/stress/out/20260805T193532.483545Z-df-0008-user-smoke-fork-enqueue-linux-object/report.md` 为 50/50 成功、enqueue failure 0、timeout 0。这个结果验证已定位的竞态，不关闭 DF-0009，也不取消 DF-0008 的默认压力入口。
+- DF-0008 与 native DF-0006 的“两个 child 已写完但 parent 未收集”不是同一边界，不得合并分类。不得通过改变 provider、SMP、rootfs、timeout、payload 或 marker 提高表面通过率；后续成功样本不能抵消或关闭本缺陷。
+
+### DF-0007: LTP frontier 子进程回收时 dispatch preflight 失败
+
+- 状态：2026-08-10 已用冻结 identity、通用逐谓词诊断和单变量负对照定位并修正。旧 wait4 路由会让当前 SMP 父进程的匹配 registry child 被无关的 PID1 legacy completed-child record 遮蔽，随后错误进入 legacy simulated dispatch；当前实现把 SMP wait/reap 严格绑定到 generation/CPU-checked 当前父进程及其 registry child。
+- 首次记录日期：2026-08-05。
+- native 失败 artifact：`impl/arceos_ex/tests/basic/out/20260805T183141.572743Z-ltp-frontier-565601/`。最后对象边界为 `prev=TaskRef(35:3)`、`next=TaskRef(32:1)`、`tp_ref=TaskRef(35:3)`、`rq_curr=TaskRef(2:1)`，`first_failed=simulated-next-dispatch-preflight`，随后打印 `child wait handoff dispatch invariant failed`。
+- linux-object 对照 artifact：`impl/arceos_ex/tests/basic/out/20260805T183242.824997Z-ltp-frontier-lo-565852/`。它在相同测试阶段、相同 TaskRef/generation 形状和相同 preflight 条件失败，因此当前证据不支持把问题归于任一 PLIC provider。
+- 长期入口：`df-0007-ltp-frontier-child-wait-native` 原样重复 canonical native `ltp-frontier` identity 并进入默认 suite；`df-0007-ltp-frontier-child-wait-linux-object` 是同一 defect 的非默认第二 provider 入口。两侧日常 case-local 样本均为 50 轮；100/200/300/500 逐档扩样只用于尚未定位的概率问题，不作为修复后的机械门禁。classifier 固定识别三条现有通用诊断，不改写 LTP 结果或 basic gate。
+
+当前判断与后续要求：
+
+- 历史两侧样本的 `prev=TaskRef(35:3)`、`next=TaskRef(32:1)`、`tp_ref=TaskRef(35:3)`、`rq_curr=TaskRef(2:1)` 已表明 current SMP child 被交给不相关 legacy carrier。2026-08-10 在 `/tmp` 的当前源码副本中只恢复旧 registry/legacy 路由条件，第一次冻结 native 运行即在 `uname01` 两条 TPASS 后恢复相同 TaskRef/generation 形状，新通用诊断把首失败收敛为 `live-sp-in-user-carrier-stack`；未撤回路由修正的工作区同一 identity 先完成 50/50。该负对照证明路由门禁是直接因果修正，而不是以成功轮次猜测根因。
+- Linux 6.12 `kernel/exit.c` 的 `do_wait_thread()` 只遍历当前调用者 `tsk->children`，`eligible_child()` 再按 selector/flags 过滤，`wait_task_zombie()` 认领选中的 zombie；它不回退到全局 active carrier。Charter、Model 与 Coding 已分别要求当前 parent-child identity、`Wait4(parent, child)` registry 绑定和无关 completed record 不得遮蔽匹配 child，均 reviewed, no change；Impl 的 SMP registry-only 路由符合该链，Compose reviewed, no change，Testing 保留双 provider identity。
+- frontier 日志中的 unsupported syscall 与清理 warning 是另行按“首个真实 syscall 边界”推进的 LTP 能力缺口，不能用它们解释或掩盖已经在 TPASS 后发生的 scheduler failure。
+- 后续成功样本不能抵消该失败。不得通过更换名单、顺序、provider、SMP、rootfs、timeout、marker 或 LTP harness 提高表面通过率；若现有 preflight 诊断不足，再先增加长期通用诊断后复现。
+
+### DF-0005: `busybox-init-login-native` 间歇性 post-login timeout
+
+- 状态：2026-08-05 在根 `make test` 的正式 native BusyBox init/login acceptance 中观察到一次 180 秒 timeout；紧接着重跑同一 identity 在 8.12 秒内通过，已作为默认 stress suite 的长期观察项，根因尚未明确。
+- 首次记录日期：2026-08-05。
+- 调查起点：commit `94f6b09b2856` 加当前未提交 LTP 工作区；固定 basic identity 为 `busybox-init-login-native`，canonical rootfs、native provider、8 vCPU 和三段 scripted stdin 均不变。
+- 失败 artifact：`impl/arceos_ex/tests/basic/out/20260805T153931.499906Z-busybox-init-login-native-505717/`。`result.json` 记录三段输入都已发送、QEMU 在 180 秒后 timeout、QMP snapshot 状态为 `captured`，私有磁盘、进程组和 QMP socket 均完成清理。日志已经到达 Alpine greeting、非 root shell 和 `/bin/ls` 的 `lost+found` 输出，随后重复出现 `/dev/ttyS0` open `EINVAL`，但没有到达 wrapper `sync` 和 guest shutdown。
+- 成功对照：`impl/arceos_ex/tests/basic/out/20260805T154428.899858Z-busybox-init-login-native-507417/` 使用同一 test identity，在 8.12 秒内满足所有 acceptance marker 并正常退出。
+- 长期入口：`df-0005-busybox-init-login-native` 只重复冻结的 basic identity，case-local 深采样为 100 轮并进入默认 suite；顶层 `STRESS_RUNS` 仍可统一覆盖。timeout 固定归类为 failure，并保留完整 basic/QMP artifact。
+
+当前判断与后续要求：
+
+- 一次失败与一次成功足以证明概率性回归风险，但不足以把根因归于 tty、signal、调度、PID 生命周期或其它候选；重复 getty 输出只作为首个可复核现象边界。
+- 连续成功不能抵消该失败或关闭缺陷。下一次 timeout 应先比较 QMP hart 寄存器/PC、guest task generation/CPU 与成功路径最后共同事件；若现有诊断仍不能唯一定位，再增加通用长期诊断后复现。
+- 不得通过改变 timeout、stdin、rootfs、provider、QEMU 参数或 acceptance marker 提高表面通过率；修复前后都必须保留该默认压力项。
+
 ### DF-0004: `rc-local-native` 间歇性 QEMU timeout
 
 - 状态：2026-07-27 在正式 `rc-local-native` basic acceptance 中观察到一次 180 秒 timeout；根因尚未明确。已补充 timeout 前 QMP 冻结诊断，并将专项 case 纳入默认 stress suite；累计四批 710 轮均未复现，问题继续保持待解决。

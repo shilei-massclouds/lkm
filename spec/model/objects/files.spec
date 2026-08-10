@@ -69,11 +69,16 @@
  *
  * A published ordinary-fork aggregate owns an independent FilesStruct and fd
  * table. Each inherited live entry aliases the same bounded opened backing as
- * its parent entry; closing or CLOEXEC-removing one table entry does not mutate
- * the other table. The named serial witness may still save and restore its
+ * its parent entry; for a regular file or directory this includes one shared
+ * OpenFileDescription identity and file position. A read, getdents or lseek by
+ * any fork or dup alias therefore observes and advances that same position.
+ * Closing or CLOEXEC-removing one table entry does not mutate the other table,
+ * and the opened identity is released only after every table and saved-table
+ * reference is gone. The named serial witness may still save and restore its
  * bounded parent table, but that rollback is not the ordinary-fork
- * representation and cannot copy pipe bytes. CLONE_FILES, fdtable expansion
- * and general OFD lifetime management remain deferred.
+ * representation, cannot rewind a shared file position and cannot copy pipe
+ * bytes. CLONE_FILES, fdtable expansion and general OFD types outside the
+ * bounded regular-file/directory and pipe slices remain deferred.
  *
  * dup3(2) first slice follows local Linux 6.12 ksys_dup3()/do_dup2() only at
  * fixed fd-table entry granularity: oldfd and newfd must differ, flags may be
@@ -176,6 +181,10 @@ predicate files_struct_pipe_direction_checks_bound<T>(files: T) -> bool;
 predicate files_struct_pipe_writer_close_eof_bound<T>(files: T) -> bool;
 predicate files_struct_pipe_snapshot_preserves_child_data<T>(files: T) -> bool;
 predicate files_struct_fork_fd_table_independent<T>(files: T) -> bool;
+predicate files_struct_fork_regular_ofd_identity_shared<T>(files: T) -> bool;
+predicate files_struct_fork_regular_ofd_offset_shared<T>(files: T) -> bool;
+predicate files_struct_regular_ofd_references_conserved<T>(files: T) -> bool;
+predicate files_struct_saved_table_preserves_regular_ofd_identity<T>(files: T) -> bool;
 predicate files_struct_fork_pipe_backing_shared<T>(files: T) -> bool;
 predicate files_struct_pipe_endpoint_refs_conserved<T>(files: T) -> bool;
 predicate files_struct_pipe_empty_read_wait_registered<T, R: TaskRef, C: CpuRef>(files: T, task_ref: R, cpu_ref: C) -> bool;
@@ -329,6 +338,7 @@ object FilesStruct: ResourceObject {
             files_struct_pipe2_single_live_first_slice(self);
             files_struct_pipe_buffer_bounded(self);
             files_struct_pipe_full_linux_model_deferred(self);
+            files_struct_regular_ofd_references_conserved(self);
         }
 
         actions {
@@ -372,6 +382,23 @@ object FilesStruct: ResourceObject {
                     file_backend_regular_file_read_supported(FileBackend);
                     file_backend_regular_file_stat_supported(FileBackend);
                     fd_table_fd_installed(FileDescriptorTable, FdRef::Regular0, OpenFileDescription);
+                }
+            }
+
+            on Action::ForkAcquireOpenedReferences {
+                depends_on {
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                    files_struct_fd_table_bound(self, FileDescriptorTable);
+                }
+
+                ensures {
+                    files_struct_fork_fd_table_independent(self);
+                    files_struct_fork_regular_ofd_identity_shared(self);
+                    files_struct_fork_regular_ofd_offset_shared(self);
+                    files_struct_regular_ofd_references_conserved(self);
+                    files_struct_fork_pipe_backing_shared(self);
+                    files_struct_pipe_endpoint_refs_conserved(self);
                 }
             }
 
@@ -714,6 +741,8 @@ object FilesStruct: ResourceObject {
                     fd_table_fd_duplicated(FileDescriptorTable, oldfd, newfd);
                     fd_table_dup_alias_keeps_ofd_live_until_last_close(FileDescriptorTable);
                     fd_table_dup3_close_on_exec_bound(FileDescriptorTable, newfd);
+                    files_struct_regular_ofd_references_conserved(self);
+                    files_struct_fork_regular_ofd_offset_shared(self);
                 }
             }
 

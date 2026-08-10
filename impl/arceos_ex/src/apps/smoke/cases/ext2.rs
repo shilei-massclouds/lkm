@@ -9,11 +9,11 @@ use crate::{
             EXT2_ALPINE_BIN_LS_PATH, EXT2_ALPINE_BUSYBOX_FILE_NAME,
             EXT2_ALPINE_INSTALLED_DB_FILE_NAME, EXT2_ALPINE_INSTALLED_DB_MAX_SIZE,
             EXT2_ALPINE_INSTALLED_DB_PATH, EXT2_MAX_BLOCK_SIZE, EXT2_ROOT_INO,
-            EXT2_SINGLE_INDIRECT_READ_MAX, Ext2FileType,
+            EXT2_SINGLE_INDIRECT_READ_MAX, EXT2_SUPER_MAGIC, Ext2FileType,
         },
         rootfs::ROOTFS_REAL_MOUNT_POINT_NAME,
         state::State,
-        vfs::{FileSystemKind, VfsInodeKind},
+        vfs::{FileSystemKind, VFS_NAME_MAX, VfsError, VfsInodeKind},
         virtio_blk,
     },
 };
@@ -195,6 +195,30 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
         assertions.assert("root direct block", root.direct_blocks()[0] != 0);
         assertions.assert("root indirect deferred", root.indirect_blocks_deferred());
 
+        let statfs = ctx.vfs_core.statfs_path(
+            &ctx.fs_struct,
+            &mut ctx.ext2_filesystem,
+            &mut ctx.block_device_registry,
+            &mut provider,
+            b"/",
+        );
+        assertions.assert(
+            "vfs ext2 statfs metadata",
+            statfs
+                .map(|stat| {
+                    stat.fs_type() == u64::from(EXT2_SUPER_MAGIC)
+                        && stat.block_size() == ctx.ext2_filesystem.block_size() as u64
+                        && stat.blocks() == ctx.ext2_filesystem.blocks_count() as u64
+                        && stat.blocks_free() == 0
+                        && stat.blocks_available() == 0
+                        && stat.files() == ctx.ext2_filesystem.inodes_count() as u64
+                        && stat.files_free() == 0
+                        && stat.name_len() == VFS_NAME_MAX as u64
+                        && stat.fragment_size() == ctx.ext2_filesystem.block_size() as u64
+                        && stat.flags() == 0x20
+                })
+                .unwrap_or(false),
+        );
         let buffer = unsafe {
             let ptr = core::ptr::addr_of_mut!(LARGE_READ_BUFFER);
             &mut *ptr
@@ -377,6 +401,19 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
         );
 
         assert_bin_ls_symlink(assertions, &mut provider, buffer);
+        assertions.assert(
+            "vfs ext2 statfs missing path",
+            matches!(
+                ctx.vfs_core.statfs_path(
+                    &ctx.fs_struct,
+                    &mut ctx.ext2_filesystem,
+                    &mut ctx.block_device_registry,
+                    &mut provider,
+                    b"/lkm-statfs-missing",
+                ),
+                Err(VfsError::NotFound)
+            ),
+        );
     }
 
     fn teardown(&mut self, _assertions: &mut SmokeAssertions) {}

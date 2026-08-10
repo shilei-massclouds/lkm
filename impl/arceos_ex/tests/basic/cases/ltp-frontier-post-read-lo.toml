@@ -1,0 +1,41 @@
+schema_version = 2
+name = "ltp-frontier-post-read-lo"
+purpose = "diagnostic"
+timeout_seconds = 300
+
+[kernel]
+app = "user-boot"
+provider = "linux-object"
+probe = ["user-syscall-error"]
+profile = "release"
+
+[disk]
+mode = "private-copy"
+profile = "canonical"
+
+[qemu]
+memory_mb = 128
+smp = 8
+kernel_cmdline = "earlycon=sbi init=/bin/sh"
+rng = true
+exit_policy = "marker"
+exit_marker = "lkm-ltp-post-read: complete"
+interaction = "scripted"
+stdin_steps = [
+  { ready_marker = "~ #", payload = "wc -c /opt/ltp/run-syscalls.sh\n" },
+  { ready_marker = "~ #", payload = "sha256sum /opt/ltp/run-sysci echo sh-status=$?\n" },
+  { ready_marker = "~ #", payload = "tail -n 8 /opt/lt\u0003" },
+  { ready_marker = "~ #", payload = "sha256sum /opt/ltp/run-syscalls.sh\n" },
+  { ready_marker = "~ #", payload = "/bin/sh -n /opt/ltp/run-syscalls.sh\n" },
+  { ready_marker = "~ #", payload = "/opt/lkm/tests/ltp-select.sh frontier\n" },
+  { ready_marker = "~ #", payload = "echo lkm-ltp-post-read: before-second-hash\n" },
+  { ready_marker = "~ #", payload = "sha256sum /opt/ltp/run-syscalls.sh\n" },
+  { ready_marker = "~ #", payload = "echo lkm-ltp-post-read: complete\n" },
+]
+
+[expect]
+markers = ["lkm-ltp-post-read: complete"]
+forbidden_markers = [
+  "declared child runqueue publish invariant failed",
+  "arceos_ex panic",
+]

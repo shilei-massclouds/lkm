@@ -113,6 +113,7 @@ pub fn run() -> SmokeResult {
             .secondary_cpu_online_ack
             .ap_cache_tlb_flush_summary_observed()
         || !ctx.secondary_cpu_online_ack.ap_ipi_enable_observed()
+        || !ctx.secondary_cpu_online_ack.boot_cpu_ipi_enable_observed()
         || !ctx
             .secondary_cpu_online_ack
             .ap_hotplug_thread_mb_pair_deferred()

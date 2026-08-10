@@ -74,6 +74,14 @@ type InterruptType: ResourceObject {
             }
         }
 
+        Action::EnableRescheduleIpiSource {
+            state_effect: StateEffect::None;
+            depends_on { self.state == State::Online; }
+            ensures {
+                interrupt_reschedule_ipi_source_gate_open(self);
+            }
+        }
+
         Action::HandleTimerInterrupt(clockevent: SchedulerClockevent) {
             state_effect: StateEffect::None;
             depends_on {
@@ -155,6 +163,7 @@ predicate interrupt_pending_clear_write_completed<I: InterruptType>(interrupt: I
 predicate interrupt_class_gates_closed_before_pending_clear_write_completed<I: InterruptType>(interrupt: I) -> bool;
 predicate interrupt_handler_bindings_ready<I: InterruptType>(interrupt: I) -> bool;
 predicate interrupt_dispatch_ready<I: InterruptType>(interrupt: I) -> bool;
+predicate interrupt_reschedule_ipi_source_gate_open<I: InterruptType>(interrupt: I) -> bool;
 predicate interrupt_ssip_pending_cleared<I: InterruptType>(interrupt: I) -> bool;
 predicate interrupt_need_resched_recorded_cpu_local<I: InterruptType>(interrupt: I) -> bool;
 predicate interrupt_reschedule_ipi_does_not_switch_in_handler<I: InterruptType>(interrupt: I) -> bool;

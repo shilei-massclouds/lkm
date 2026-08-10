@@ -1,0 +1,40 @@
+[[rules]]
+id = "panic"
+result = "failure"
+contains = ["arceos_ex panic"]
+description = "Kernel panic was printed."
+
+[[rules]]
+id = "allocation-error"
+result = "failure"
+contains = ["memory allocation of"]
+description = "The stable no_std allocation failure message was printed."
+
+[[rules]]
+id = "preempt-case-reported-failure"
+result = "failure"
+contains = ["user-smoke: case preempt: end status=1"]
+description = "The preemption case completed with an explicit failed status."
+
+[[rules]]
+id = "df-0011-preempt-finalize-timeout"
+result = "failure"
+contains = [
+  "user preempt bytes collected order=",
+  "user preempt children reaped",
+  "user timer preemption A-B-A round robin ok",
+  "qemu-system-riscv64: terminating on signal 15",
+]
+description = "The frozen run reached the post-reap A-B-A success marker but timed out before preempt-case finalization and guest exit."
+
+[[rules]]
+id = "df-0011-user-smoke-preempt-finalize-success"
+result = "success"
+contains = [
+  "user preempt bytes collected order=",
+  "user preempt children reaped",
+  "user timer preemption A-B-A round robin ok",
+  "user-smoke: case preempt: end status=0",
+  "user exit status=0",
+]
+description = "The frozen linux-object user-smoke identity completed pipe collection, child reap, validation, case finalization, and guest exit."

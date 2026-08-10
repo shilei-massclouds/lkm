@@ -1,0 +1,6 @@
+schema_version = 2
+name = "ltp-supported-native"
+mode = "stress"
+test = "ltp"
+runs = 30
+classifier = "../classifiers/ltp-supported.toml"

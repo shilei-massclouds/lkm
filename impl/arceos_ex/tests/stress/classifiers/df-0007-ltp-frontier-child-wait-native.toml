@@ -1,0 +1,43 @@
+[[rules]]
+id = "panic"
+result = "failure"
+contains = ["arceos_ex panic"]
+description = "Kernel panic was printed."
+
+[[rules]]
+id = "df-0007-child-wait-dispatch-preflight"
+result = "failure"
+contains = [
+  "first_failed=simulated-next-dispatch-preflight",
+  "child wait handoff dispatch invariant failed",
+  "failure_diagnostic phase=Scheduler step=SwitchTo.Preflight object=TaskPair",
+]
+description = "The uname child reached TPASS, but wait/reap could not preflight the next user carrier dispatch."
+
+[[rules]]
+id = "df-0007-child-wait-dispatch-preflight-detailed"
+result = "failure"
+contains = [
+  "child wait handoff dispatch invariant failed",
+  "failure_diagnostic phase=Scheduler step=SwitchTo.Preflight object=TaskPair",
+]
+regex = ["first_failed=(?:next-|live-sp-in-user-carrier-stack)"]
+description = "The detailed preflight diagnostic identified a first failing next-dispatch condition during the same wait/reap boundary."
+
+[[rules]]
+id = "allocation-error"
+result = "failure"
+contains = ["memory allocation of"]
+description = "The stable no_std allocation failure message was printed."
+
+[[rules]]
+id = "df-0007-ltp-frontier-success"
+result = "success"
+contains = [
+  "--- uname01: PASS (exit 0)",
+  "--- uname02: PASS (exit 0)",
+  "--- getuid01: PASS (exit 0)",
+  "--- geteuid01: PASS (exit 0)",
+  "lkm-ltp: complete",
+]
+description = "The frozen native frontier identity completed all four exact entries and reached its marker."

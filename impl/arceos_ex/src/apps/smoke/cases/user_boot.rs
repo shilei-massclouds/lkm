@@ -908,6 +908,72 @@ impl SmokeScenario for UserBootElfScenario {
             stat.size() >= read_len && stat.mode() != 0,
         );
         assertions.assert("regular close fd", ctx.files_struct.close_fd(fd).is_ok());
+        let created_path = b"/lkm-smoke-exclusive-create";
+        let created_fd = match ctx.files_struct.create_exclusive_regular_path(
+            &ctx.fs_struct,
+            &mut ctx.vfs_core,
+            &mut ctx.ext2_filesystem,
+            &mut ctx.block_device_registry,
+            &ctx.kernel_image,
+            created_path,
+            USER_TEST_O_RDWR | USER_TEST_O_LARGEFILE | USER_TEST_O_CLOEXEC,
+            0o600,
+            0,
+            0,
+        ) {
+            Ok(fd) => fd,
+            Err(_) => {
+                assertions.assert("exclusive regular create", false);
+                return;
+            }
+        };
+        let created_fd_ready = ctx
+            .files_struct
+            .fd_table_entry_diagnostic(created_fd)
+            .is_some_and(|entry| entry.readable && entry.writable && entry.close_on_exec);
+        let created_path_stat = ctx.files_struct.stat_path(
+            &ctx.fs_struct,
+            &mut ctx.vfs_core,
+            &mut ctx.ext2_filesystem,
+            &mut ctx.block_device_registry,
+            &ctx.kernel_image,
+            created_path,
+            false,
+        );
+        let created_fd_stat = ctx.files_struct.fstat_fd(created_fd, &ctx.vfs_core);
+        assertions.assert(
+            "exclusive regular create metadata",
+            created_fd_ready
+                && created_path_stat.is_ok_and(|stat| {
+                    stat.size() == 0
+                        && stat.mode() == 0o100600
+                        && stat.uid() == 0
+                        && stat.gid() == 0
+                })
+                && created_fd_stat.is_ok_and(|stat| stat.mode() == 0o100600),
+        );
+        assertions.assert(
+            "exclusive regular create close",
+            ctx.files_struct.close_fd(created_fd).is_ok(),
+        );
+        assertions.assert(
+            "exclusive regular duplicate rejected",
+            matches!(
+                ctx.files_struct.create_exclusive_regular_path(
+                    &ctx.fs_struct,
+                    &mut ctx.vfs_core,
+                    &mut ctx.ext2_filesystem,
+                    &mut ctx.block_device_registry,
+                    &ctx.kernel_image,
+                    created_path,
+                    USER_TEST_O_RDWR | USER_TEST_O_LARGEFILE,
+                    0o600,
+                    0,
+                    0,
+                ),
+                Err(FileError::AlreadyExists)
+            ),
+        );
         assertions.assert(
             "regular files facts",
             ctx.files_struct.open_path_routes_to_vfs()
@@ -1767,10 +1833,12 @@ impl SmokeScenario for ChildLifecycleScenario {
     }
 
     fn run(&mut self, assertions: &mut SmokeAssertions) {
-        match context()
-            .user_task_set
-            .smoke_task_slot_generation_contract()
-        {
+        let slot_generation_result = {
+            let ctx = context();
+            ctx.user_task_set
+                .smoke_task_slot_generation_contract(&ctx.files_struct, &ctx.fs_struct)
+        };
+        match slot_generation_result {
             Ok(()) => assertions.assert(
                 "user task slots reject ninth live task and invalidate stale generations",
                 true,

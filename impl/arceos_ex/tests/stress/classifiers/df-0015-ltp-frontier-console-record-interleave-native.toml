@@ -1,0 +1,30 @@
+[[rules]]
+id = "panic"
+result = "failure"
+contains = ["arceos_ex panic"]
+description = "Kernel panic was printed."
+
+[[rules]]
+id = "df-0015-wait4-pass-record-interleave"
+result = "failure"
+regex = ["(?m)^wait4 registry stage=[^\\n]*--- (?:uname01|uname02|getuid01|geteuid01): PASS \\(exit 0\\)$"]
+description = "A stock-harness PASS record was inserted into a fragmented wait4 registry diagnostic, reproducing the frozen cross-CPU console collision."
+
+[[rules]]
+id = "allocation-error"
+result = "failure"
+contains = ["memory allocation of"]
+description = "The stable no_std allocation failure message was printed."
+
+[[rules]]
+id = "df-0015-ltp-frontier-records-atomic"
+result = "success"
+contains = ["lkm-ltp: complete"]
+regex = [
+  "(?m)^--- uname01: PASS \\(exit 0\\)$",
+  "(?m)^--- uname02: PASS \\(exit 0\\)$",
+  "(?m)^--- getuid01: PASS \\(exit 0\\)$",
+  "(?m)^--- geteuid01: PASS \\(exit 0\\)$",
+  "(?m)^Summary: TOTAL=4 PASS=4 FAIL=0 BROK=0 WARN=0 CONF=0$",
+]
+description = "All four stock-harness PASS records and the exact aggregate summary remained standalone and the frontier completed."

@@ -149,6 +149,7 @@ predicate user_process_registry_members_fresh_and_independent<S: TaskSet>(regist
 predicate user_process_registry_slot_state_is<S: TaskSet>(registry: S, state: UserProcessSlotState) -> bool;
 predicate user_process_registry_slot_generation_is<S: TaskSet, G: UserProcessGeneration>(registry: S, generation: G) -> bool;
 predicate user_process_registry_reservation_unpublished<S: TaskSet, T: Task>(registry: S, task: T) -> bool;
+predicate user_process_registry_reserved_parent_identity_available_to_preparer<S: TaskSet, P: Task, T: Task>(registry: S, parent: P, task: T) -> bool;
 predicate user_process_registry_fork_resources_complete<S: TaskSet, T: Task>(registry: S, task: T) -> bool;
 predicate user_process_registry_inbox_reservation_complete<S: TaskSet, T: Task>(registry: S, task: T) -> bool;
 predicate user_process_registry_fork_failure_has_no_residue<S: TaskSet>(registry: S) -> bool;
@@ -462,6 +463,7 @@ object UserProcessRegistry: TaskSet {
     }
     actions {
         Action::ReserveFork(
+            parent: Task,
             task: Task,
             aggregate: UserProcessAggregate,
             generation: UserProcessGeneration
@@ -476,6 +478,11 @@ object UserProcessRegistry: TaskSet {
                 user_process_registry_slot_state_is(self, UserProcessSlotState::Reserved);
                 user_process_registry_slot_generation_is(self, generation);
                 user_process_registry_reservation_unpublished(self, task);
+                user_process_registry_reserved_parent_identity_available_to_preparer(
+                    self,
+                    parent,
+                    task
+                );
                 user_process_registry_aggregate_owns_process_resources(self, aggregate);
             }
         }

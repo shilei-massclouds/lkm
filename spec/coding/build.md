@@ -82,7 +82,8 @@ Targets must remain composable:
   `test-verify`, `test-kunit` and `test-smoke` remain independently runnable validation stages.
 - `test-stress` and its `stress-test` alias run the default composite suite. That suite includes the
   DF-0001 user boot, DF-0002 initcall, DF-0003 scripted shell and DF-0004 canonical `rc-local-native`
-  timeout-observation cases; `STRESS_RUNS` uniformly overrides their case-local run counts, while
+  timeout-observation cases, plus the DF-0005 canonical `busybox-init-login-native` post-login
+  timeout-observation case; `STRESS_RUNS` uniformly overrides their case-local run counts, while
   `STRESS_CASES` remains the explicit focused selector. This target is separate from root `make test`.
 - `checkpoints` regenerates tracked checkpoint review artifacts in dependency order: inventory, Linux mapping, Linux mapping coverage and the Linux instrumentation plan.
 - `test-checkpoints` validates those tracked checkpoint review artifacts in read-only check mode and must not rewrite them.
@@ -99,8 +100,8 @@ Targets must remain composable:
   before checkpoint drift checks and real QEMU cases.
 - After all host-only gates and before the first QEMU case, `test` invokes `make disk ROOTFS=canonical`
   exactly once. All basic runtime cases validate and reuse that template; no case calls its constructor.
-- Dual-provider distro ls, scripted shell, rc.local, BusyBox-init login and LTP close list-only acceptance are
-  default runtime stages. The scripted shell stages use the public identities `scripted-shell` and
+- Dual-provider distro ls, scripted shell, rc.local and BusyBox-init login are default runtime stages. Stock LTP
+  acceptance is excluded from root `test` and belongs to the independent three-target `test-ltp` gate. The scripted shell stages use the public identities `scripted-shell` and
   `scripted-shell-lo`; they are the automated counterparts of `shell` and `shell-lo` and do not add a second
   QEMU case per provider. The summary keeps the display label `scripted shell` while explicitly mapping
   native to `scripted-shell` and linux-object to `scripted-shell-lo`; it must not synthesize a `distro-sh-$provider`

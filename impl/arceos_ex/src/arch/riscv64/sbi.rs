@@ -1,6 +1,7 @@
 #[cfg(any(
     checkpoint_handler_announce,
     checkpoint_handler_user_scheduler_trace,
+    checkpoint_handler_user_syscall_error,
     checkpoint_handler_user_syscall_trace
 ))]
 use core::fmt::{self, Write};
@@ -84,6 +85,7 @@ pub fn putstr(message: &str) {
 #[cfg(any(
     checkpoint_handler_announce,
     checkpoint_handler_user_scheduler_trace,
+    checkpoint_handler_user_syscall_error,
     checkpoint_handler_user_syscall_trace
 ))]
 const RUNTIME_DIAGNOSTIC_RECORD_SIZE: usize = 480;
@@ -91,6 +93,7 @@ const RUNTIME_DIAGNOSTIC_RECORD_SIZE: usize = 480;
 #[cfg(any(
     checkpoint_handler_announce,
     checkpoint_handler_user_scheduler_trace,
+    checkpoint_handler_user_syscall_error,
     checkpoint_handler_user_syscall_trace
 ))]
 struct RuntimeDiagnosticRecord {
@@ -101,6 +104,7 @@ struct RuntimeDiagnosticRecord {
 #[cfg(any(
     checkpoint_handler_announce,
     checkpoint_handler_user_scheduler_trace,
+    checkpoint_handler_user_syscall_error,
     checkpoint_handler_user_syscall_trace
 ))]
 impl RuntimeDiagnosticRecord {
@@ -119,6 +123,7 @@ impl RuntimeDiagnosticRecord {
 #[cfg(any(
     checkpoint_handler_announce,
     checkpoint_handler_user_scheduler_trace,
+    checkpoint_handler_user_syscall_error,
     checkpoint_handler_user_syscall_trace
 ))]
 impl Write for RuntimeDiagnosticRecord {
@@ -134,6 +139,7 @@ impl Write for RuntimeDiagnosticRecord {
 #[cfg(any(
     checkpoint_handler_announce,
     checkpoint_handler_user_scheduler_trace,
+    checkpoint_handler_user_syscall_error,
     checkpoint_handler_user_syscall_trace
 ))]
 pub fn write_record(args: fmt::Arguments<'_>) {
@@ -148,6 +154,7 @@ pub fn write_record(args: fmt::Arguments<'_>) {
 #[cfg(any(
     checkpoint_handler_announce,
     checkpoint_handler_user_scheduler_trace,
+    checkpoint_handler_user_syscall_error,
     checkpoint_handler_user_syscall_trace
 ))]
 fn write_record_bytes(bytes: &[u8]) {

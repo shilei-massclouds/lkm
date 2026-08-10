@@ -1078,6 +1078,39 @@ impl Context {
         Ok(())
     }
 
+    fn schedule_terminal_from_ref(
+        &mut self,
+        current_task_ref: TaskRef,
+        current_cpu_ref: crate::objects::cpu::CpuRef,
+    ) -> EventResult {
+        let Self {
+            cpu_group,
+            scheduler_test_tasks,
+            kernel_init_task,
+            kthreadd_task,
+            user_task_set,
+            ..
+        } = self;
+        let Some((scheduler, local_interrupt)) = cpu_group.boot_scheduler_and_local_interrupt_mut()
+        else {
+            return Err(missing_scheduler_error());
+        };
+        let mut task_access = SchedulerTaskAccess::new(
+            kernel_init_task,
+            kthreadd_task,
+            user_task_set,
+            scheduler_test_tasks,
+        );
+        scheduler
+            .schedule_terminal(
+                current_task_ref,
+                current_cpu_ref,
+                &mut task_access,
+                local_interrupt,
+            )
+            .map_err(|error| context_schedule_stage(error, "Scheduler.ScheduleTerminal"))
+    }
+
     #[cfg(app_smoke)]
     pub(crate) fn schedule_from_refs_for_test(
         &mut self,
@@ -1274,6 +1307,11 @@ impl Context {
         print_context_task_ref(identity_ref);
         crate::arch::riscv64::sbi::putstr(" rq_curr=");
         print_context_task_ref(self.scheduler().curr_ref());
+        crate::arch::riscv64::sbi::putstr(" live_sp=");
+        print_context_hex(crate::arch::riscv64::csr::read_sp());
+        print_user_task_stack_diagnostic(&self.user_task_set, " carrier_stack=", None);
+        print_user_task_stack_diagnostic(&self.user_task_set, " prev_stack=", Some(previous));
+        print_user_task_stack_diagnostic(&self.user_task_set, " next_stack=", Some(next));
         if let Some(diagnostic) = error.diagnostic() {
             crate::arch::riscv64::sbi::putstr(" first_failed=");
             crate::arch::riscv64::sbi::putstr(diagnostic.first_failed);
@@ -1566,6 +1604,34 @@ impl Context {
         );
         self.platform_bus
             .platform_driver_register(driver, &mut probe_context)
+    }
+}
+
+fn print_user_task_stack_diagnostic(
+    user_task_set: &crate::objects::user_boot::UserTaskSet,
+    label: &str,
+    task_ref: Option<TaskRef>,
+) {
+    let bounds = match task_ref {
+        Some(task_ref) => user_task_set
+            .current_task_candidate_by_ref(task_ref)
+            .map(|candidate| {
+                (
+                    candidate.task.kernel_stack_base(),
+                    candidate.task.kernel_stack_top(),
+                )
+            }),
+        None => user_task_set.carrier_stack_bounds(),
+    };
+    crate::arch::riscv64::sbi::putstr(label);
+    if let Some((base, top)) = bounds {
+        crate::arch::riscv64::sbi::putchar(b'[');
+        print_context_hex(base);
+        crate::arch::riscv64::sbi::putchar(b',');
+        print_context_hex(top);
+        crate::arch::riscv64::sbi::putchar(b')');
+    } else {
+        crate::arch::riscv64::sbi::putstr("none");
     }
 }
 
@@ -2148,6 +2214,22 @@ pub(crate) fn schedule_smp_current(logical_id: usize, current_task_ref: TaskRef)
     }
 }
 
+pub(crate) fn schedule_smp_terminal(logical_id: usize, current_task_ref: TaskRef) -> EventResult {
+    let cpu_ref = crate::objects::user_process_registry::global_registry()
+        .cpu_ref(current_task_ref)
+        .ok_or_else(missing_scheduler_error)?;
+    if cpu_ref.logical_id() != logical_id {
+        return Err(missing_scheduler_error());
+    }
+    if logical_id == 0 {
+        return context().schedule_terminal_from_ref(current_task_ref, cpu_ref);
+    }
+    let (scheduler, local_interrupt) =
+        secondary_runtime_parts(logical_id).ok_or_else(missing_scheduler_error)?;
+    let mut task_access = SchedulerTaskAccess::new_secondary(logical_id);
+    scheduler.schedule_terminal(current_task_ref, cpu_ref, &mut task_access, local_interrupt)
+}
+
 pub(crate) fn smp_has_runnable_competitor(
     logical_id: usize,
     current_task_ref: TaskRef,
@@ -2228,16 +2310,6 @@ pub(crate) fn disable_secondary_task_flow_for_exit(
     };
     task.ok_or_else(missing_scheduler_error)?
         .disable_embedded_flow_for_exit()
-}
-
-pub(crate) fn disable_smp_task_flow_for_exit(logical_id: usize, task_ref: TaskRef) -> EventResult {
-    if logical_id == 0 {
-        crate::objects::user_boot::smp_task_mut_by_ref_on_cpu(task_ref, logical_id)
-            .ok_or_else(missing_scheduler_error)?
-            .disable_embedded_flow_for_exit()
-    } else {
-        disable_secondary_task_flow_for_exit(logical_id, task_ref)
-    }
 }
 
 #[cfg_attr(not(app_user_boot), allow(dead_code))]

@@ -1,0 +1,17 @@
+schema_version = 2
+name = "df-0006-user-smoke-preempt-native"
+description = "Repeat the canonical native user smoke acceptance to capture its intermittent preemption pipe-read timeout after both children finish writing."
+mode = "stress"
+test = "user-smoke-native"
+runs = 100
+classifier = "../classifiers/df-0006-user-smoke-preempt-native.toml"
+
+[metadata]
+defect = "DF-0006"
+observation_mode = "user-smoke-preempt-pipe-timeout-forensics"
+ordinary_path_required = true
+default_suite = true
+rootfs_profile = "canonical"
+payload = "canonical user-smoke preempt case with coordinator and two compute children sharing the result pipe"
+first_observation = "20260805T180538.491113Z-user-smoke-native-555537"
+scope_note = "Capture the intermittent state where both child write-complete markers are present but the coordinator never prints bytes-collected; successful samples do not close the defect."

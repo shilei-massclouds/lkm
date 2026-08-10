@@ -132,7 +132,8 @@ impl CpuGroup {
             let Some(logic_id) = LogicId::new(logical_id) else {
                 return self.failed_setup();
             };
-            self.cpus[logical_id] = Some(Cpu::secondary(logic_id, secondary_harts.hartids[index]));
+            self.cpus[logical_id]
+                .get_or_insert_with(|| Cpu::secondary(logic_id, secondary_harts.hartids[index]));
             index += 1;
         }
         self.cpu_count = secondary_harts.count + 1;

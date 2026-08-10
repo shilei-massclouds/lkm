@@ -58,7 +58,7 @@
 
 | 优先级 | 状态 | 领域 | 任务 | 剩余责任 | 细节 |
 | --- | --- | --- | --- | --- | --- |
-| `P0` | 长期回归 | validation/trace | ordinary-path nightly/压力缺陷复现 | 默认 suite 持续运行 DF-0001/DF-0002/DF-0003 ordinary cases 与 DF-0004 canonical `rc-local-native`；`stress-mem` 和 DF-0004 100 轮深采样按需显式运行。出现失败类后按稳定序列、source-scoped facts 或 timeout QMP artifact 定位，不以 probe 路径或重试替代 ordinary path。 | [缺陷记录](DEFECTS.md)；[测试规格](../spec/testing/rootfs.md) |
+| `P0` | 长期回归 | validation/trace | ordinary-path nightly/压力缺陷复现 | 默认 suite 持续运行 DF-0001/DF-0002/DF-0003 ordinary cases、DF-0004 canonical `rc-local-native` 与 DF-0005 canonical `busybox-init-login-native`；`stress-mem` 和 timeout case 的 100 轮深采样按需显式运行。出现失败类后按稳定序列、source-scoped facts 或 timeout QMP artifact 定位，不以 probe 路径或重试替代 ordinary path。 | [缺陷记录](DEFECTS.md)；[测试规格](../spec/testing/rootfs.md) |
 | `P0` | 当前 | validation/trace/arceos_ex | 纵向差分定位 DEFECTS 问题 | 用 stress 报告、成功/失败序列、failure diagnostic 和 `stress-mem` 产物定位新失败；没有失败类集合时只记录回归，不增一次性 checkpoint。 | [缺陷记录](DEFECTS.md) |
 | `P0` | 进行中 | trace/arceos_ex | 当前 trace 诊断能力评估与缺口补强 | 只补仍影响定位的最小长期观察点；Linux-like trace 由现有证据不足触发。 | [pyveri DEVELOPMENT](../tools/pyveri/DEVELOPMENT.md#step-c1-收口-trace-输出和注释数据流) |
 | `P0` | 长期回归 | linux/checkpoint/stress | Linux exact-mapped runtime 插桩与横向差分 | 维护 exact marker 与默认 rc.local hard scope；继续处理 `range`/`unmapped` mapping，并在需要时规格化先纵向、后横向的 multi-run 语义。 | [charter](../spec/charter/main.md#linux-runtime-checkpoint-插桩与横向差分)；[测试规格](../spec/testing/rootfs.md#rclocal-and-paired-difftest) |

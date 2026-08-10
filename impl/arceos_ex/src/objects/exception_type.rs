@@ -80,9 +80,15 @@ const SYSCALL_GETCWD: usize = 17;
 const SYSCALL_DUP3: usize = 24;
 const SYSCALL_FCNTL: usize = 25;
 const SYSCALL_IOCTL: usize = 29;
+const SYSCALL_MKDIRAT: usize = 34;
+const SYSCALL_UNLINKAT: usize = 35;
+const SYSCALL_STATFS: usize = 43;
+const SYSCALL_FTRUNCATE: usize = 46;
 const SYSCALL_FACCESSAT: usize = 48;
 const SYSCALL_CHDIR: usize = 49;
 const SYSCALL_FCHMOD: usize = 52;
+const SYSCALL_FCHMODAT: usize = 53;
+const SYSCALL_FCHOWNAT: usize = 54;
 const SYSCALL_FCHOWN: usize = 55;
 const SYSCALL_OPENAT: usize = 56;
 const SYSCALL_CLOSE: usize = 57;
@@ -235,11 +241,13 @@ const EXECVE_FAIL_REASON_FILENAME_COPY: usize = 13;
 #[cfg(app_user_boot)]
 pub(crate) const EXECVE_FAIL_REASON_IMAGE_RETENTION: usize = 14;
 const AT_FDCWD: usize = usize::MAX - 99;
+const AT_REMOVEDIR: usize = 0x200;
 const ACCESS_X_OK: usize = 1;
 const ACCESS_W_OK: usize = 2;
 const ACCESS_R_OK: usize = 4;
 const O_ACCMODE: usize = 0o3;
 const O_CREAT: usize = 0o100;
+const O_EXCL: usize = 0o200;
 const O_TRUNC: usize = 0o1000;
 const O_NONBLOCK: usize = 0o4000;
 const O_LARGEFILE: usize = 0o100000;
@@ -272,6 +280,7 @@ const TIOCGWINSZ: usize = 0x5413;
 const TIOCGSID: usize = 0x5429;
 const WINSIZE_SIZE: usize = 8;
 const STAT_SIZE: usize = 128;
+const STATFS_SIZE: usize = 120;
 const TIMESPEC_SIZE: usize = 16;
 const TIMEVAL_SIZE: usize = 16;
 const TIMEZONE_SIZE: usize = 8;
@@ -310,7 +319,9 @@ const WAIT4_LINUX_VALID_OPTIONS: usize = WAIT4_WNOHANG
     | WAIT4_WALL
     | WAIT4_WCLONE;
 const EPERM: usize = 1;
+const EBADF: usize = 9;
 const EACCES: usize = 13;
+const ENODEV: usize = 19;
 const ESRCH: usize = 3;
 const EFAULT: usize = 14;
 const EINVAL: usize = 22;
@@ -319,6 +330,11 @@ const ENOSYS: usize = 38;
 const ENOMEM: usize = 12;
 const EAGAIN: usize = 11;
 const ENOENT: usize = 2;
+const EEXIST: usize = 17;
+const EFBIG: usize = 27;
+const ENOSPC: usize = 28;
+const EROFS: usize = 30;
+const ENAMETOOLONG: usize = 36;
 #[cfg(app_user_boot)]
 const E2BIG: usize = 7;
 #[cfg(app_user_boot)]
@@ -331,6 +347,8 @@ const ENOTTY: usize = 25;
 const ELOOP: usize = 40;
 const EMFILE: usize = 24;
 const ENOTDIR: usize = 20;
+const EISDIR: usize = 21;
+const ENOTEMPTY: usize = 39;
 const ECHILD: usize = 10;
 const EPIPE: usize = 32;
 const ECONNREFUSED: usize = 111;
@@ -766,6 +784,11 @@ pub struct SyscallTable {
     write_supported: bool,
     writev_supported: bool,
     openat_supported: bool,
+    mkdirat_supported: bool,
+    unlinkat_supported: bool,
+    fchmodat_supported: bool,
+    fchownat_supported: bool,
+    statfs_supported: bool,
     chdir_supported: bool,
     getdents64_supported: bool,
     read_supported: bool,
@@ -803,6 +826,7 @@ pub struct SyscallTable {
     fstat_supported: bool,
     fcntl_supported: bool,
     fchmod_supported: bool,
+    ftruncate_supported: bool,
     fchown_supported: bool,
     socket_supported: bool,
     connect_supported: bool,
@@ -840,6 +864,15 @@ pub struct SyscallTable {
     write_routes_to_console: bool,
     writev_routes_to_files_struct: bool,
     openat_routes_to_files_struct: bool,
+    mkdirat_routes_to_process_fs_and_vfs: bool,
+    mkdirat_at_fdcwd_first_slice: bool,
+    mkdirat_transient_overlay_first_slice: bool,
+    mkdirat_permissions_umask_deferred: bool,
+    unlinkat_routes_to_process_fs_and_vfs: bool,
+    unlinkat_at_fdcwd_first_slice: bool,
+    unlinkat_file_and_empty_directory_first_slice: bool,
+    unlinkat_linux_errno_bound: bool,
+    unlinkat_failure_atomic: bool,
     chdir_routes_to_fs_struct: bool,
     chdir_linux_6_12_path_walk_bound: bool,
     chdir_root_first_slice: bool,
@@ -872,20 +905,20 @@ pub struct SyscallTable {
     setsid_routes_to_kernel_init_user_state: bool,
     setsid_process_group_leader_eperm_first_slice: bool,
     getppid_routes_to_kernel_init_user_state: bool,
-    getuid_routes_to_kernel_init_user_state: bool,
-    geteuid_routes_to_kernel_init_user_state: bool,
-    getgid_routes_to_kernel_init_user_state: bool,
-    getegid_routes_to_kernel_init_user_state: bool,
-    getresuid_routes_to_kernel_init_user_state: bool,
-    getresgid_routes_to_kernel_init_user_state: bool,
+    getuid_routes_to_current_user_credentials: bool,
+    geteuid_routes_to_current_user_credentials: bool,
+    getgid_routes_to_current_user_credentials: bool,
+    getegid_routes_to_current_user_credentials: bool,
+    getresuid_routes_to_current_user_credentials: bool,
+    getresgid_routes_to_current_user_credentials: bool,
     uname_new_utsname_layout_bound: bool,
     uname_static_init_uts_namespace_first_slice: bool,
     uname_full_uts_namespace_deferred: bool,
-    setuid_routes_to_kernel_init_user_state: bool,
-    setgid_routes_to_kernel_init_user_state: bool,
-    getgroups_routes_to_kernel_init_user_state: bool,
+    setuid_routes_to_current_user_credentials: bool,
+    setgid_routes_to_current_user_credentials: bool,
+    getgroups_routes_to_current_user_credentials: bool,
     getgroups_bounded_supplementary_groups_first_slice: bool,
-    setgroups_routes_to_kernel_init_user_state: bool,
+    setgroups_routes_to_current_user_credentials: bool,
     setgroups_root_first_slice: bool,
     setgroups_bounded_supplementary_groups_first_slice: bool,
     credentials_full_linux_model_deferred: bool,
@@ -920,6 +953,8 @@ pub struct SyscallTable {
     fstat_routes_to_files_struct: bool,
     fcntl_routes_to_files_struct: bool,
     fchmod_routes_to_files_struct: bool,
+    ftruncate_routes_to_files_struct_and_vfs: bool,
+    ftruncate_bounded_regular_file_first_slice: bool,
     fchown_routes_to_files_struct: bool,
     fchown_fchmod_fd_local_first_slice: bool,
     fchown_fchmod_full_linux_model_deferred: bool,
@@ -964,6 +999,11 @@ pub struct SyscallTable {
     write_observed: AtomicU8,
     writev_observed: AtomicU8,
     openat_observed: AtomicU8,
+    mkdirat_observed: AtomicU8,
+    unlinkat_observed: AtomicU8,
+    fchmodat_observed: AtomicU8,
+    fchownat_observed: AtomicU8,
+    statfs_observed: AtomicU8,
     chdir_observed: AtomicU8,
     getdents64_observed: AtomicU8,
     read_observed: AtomicU8,
@@ -1001,6 +1041,7 @@ pub struct SyscallTable {
     fstat_observed: AtomicU8,
     fcntl_observed: AtomicU8,
     fchmod_observed: AtomicU8,
+    ftruncate_observed: AtomicU8,
     fchown_observed: AtomicU8,
     socket_observed: AtomicU8,
     ioctl_observed: AtomicU8,
@@ -1023,6 +1064,11 @@ impl SyscallTable {
             write_supported: false,
             writev_supported: false,
             openat_supported: false,
+            mkdirat_supported: false,
+            unlinkat_supported: false,
+            fchmodat_supported: false,
+            fchownat_supported: false,
+            statfs_supported: false,
             chdir_supported: false,
             getdents64_supported: false,
             read_supported: false,
@@ -1060,6 +1106,7 @@ impl SyscallTable {
             fstat_supported: false,
             fcntl_supported: false,
             fchmod_supported: false,
+            ftruncate_supported: false,
             fchown_supported: false,
             socket_supported: false,
             connect_supported: false,
@@ -1097,6 +1144,15 @@ impl SyscallTable {
             write_routes_to_console: false,
             writev_routes_to_files_struct: false,
             openat_routes_to_files_struct: false,
+            mkdirat_routes_to_process_fs_and_vfs: false,
+            mkdirat_at_fdcwd_first_slice: false,
+            mkdirat_transient_overlay_first_slice: false,
+            mkdirat_permissions_umask_deferred: false,
+            unlinkat_routes_to_process_fs_and_vfs: false,
+            unlinkat_at_fdcwd_first_slice: false,
+            unlinkat_file_and_empty_directory_first_slice: false,
+            unlinkat_linux_errno_bound: false,
+            unlinkat_failure_atomic: false,
             chdir_routes_to_fs_struct: false,
             chdir_linux_6_12_path_walk_bound: false,
             chdir_root_first_slice: false,
@@ -1129,20 +1185,20 @@ impl SyscallTable {
             setsid_routes_to_kernel_init_user_state: false,
             setsid_process_group_leader_eperm_first_slice: false,
             getppid_routes_to_kernel_init_user_state: false,
-            getuid_routes_to_kernel_init_user_state: false,
-            geteuid_routes_to_kernel_init_user_state: false,
-            getgid_routes_to_kernel_init_user_state: false,
-            getegid_routes_to_kernel_init_user_state: false,
-            getresuid_routes_to_kernel_init_user_state: false,
-            getresgid_routes_to_kernel_init_user_state: false,
+            getuid_routes_to_current_user_credentials: false,
+            geteuid_routes_to_current_user_credentials: false,
+            getgid_routes_to_current_user_credentials: false,
+            getegid_routes_to_current_user_credentials: false,
+            getresuid_routes_to_current_user_credentials: false,
+            getresgid_routes_to_current_user_credentials: false,
             uname_new_utsname_layout_bound: false,
             uname_static_init_uts_namespace_first_slice: false,
             uname_full_uts_namespace_deferred: false,
-            setuid_routes_to_kernel_init_user_state: false,
-            setgid_routes_to_kernel_init_user_state: false,
-            getgroups_routes_to_kernel_init_user_state: false,
+            setuid_routes_to_current_user_credentials: false,
+            setgid_routes_to_current_user_credentials: false,
+            getgroups_routes_to_current_user_credentials: false,
             getgroups_bounded_supplementary_groups_first_slice: false,
-            setgroups_routes_to_kernel_init_user_state: false,
+            setgroups_routes_to_current_user_credentials: false,
             setgroups_root_first_slice: false,
             setgroups_bounded_supplementary_groups_first_slice: false,
             credentials_full_linux_model_deferred: false,
@@ -1177,6 +1233,8 @@ impl SyscallTable {
             fstat_routes_to_files_struct: false,
             fcntl_routes_to_files_struct: false,
             fchmod_routes_to_files_struct: false,
+            ftruncate_routes_to_files_struct_and_vfs: false,
+            ftruncate_bounded_regular_file_first_slice: false,
             fchown_routes_to_files_struct: false,
             fchown_fchmod_fd_local_first_slice: false,
             fchown_fchmod_full_linux_model_deferred: false,
@@ -1221,6 +1279,11 @@ impl SyscallTable {
             write_observed: AtomicU8::new(0),
             writev_observed: AtomicU8::new(0),
             openat_observed: AtomicU8::new(0),
+            mkdirat_observed: AtomicU8::new(0),
+            unlinkat_observed: AtomicU8::new(0),
+            fchmodat_observed: AtomicU8::new(0),
+            fchownat_observed: AtomicU8::new(0),
+            statfs_observed: AtomicU8::new(0),
             chdir_observed: AtomicU8::new(0),
             getdents64_observed: AtomicU8::new(0),
             read_observed: AtomicU8::new(0),
@@ -1258,6 +1321,7 @@ impl SyscallTable {
             fstat_observed: AtomicU8::new(0),
             fcntl_observed: AtomicU8::new(0),
             fchmod_observed: AtomicU8::new(0),
+            ftruncate_observed: AtomicU8::new(0),
             fchown_observed: AtomicU8::new(0),
             socket_observed: AtomicU8::new(0),
             ioctl_observed: AtomicU8::new(0),
@@ -1429,6 +1493,16 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn fchmod_supported(&self) -> bool {
         self.fchmod_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn fchmodat_supported(&self) -> bool {
+        self.fchmodat_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn statfs_supported(&self) -> bool {
+        self.statfs_supported
     }
 
     #[allow(dead_code)]
@@ -1712,28 +1786,28 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
-    pub const fn getuid_routes_to_kernel_init_user_state(&self) -> bool {
-        self.getuid_routes_to_kernel_init_user_state
+    pub const fn getuid_routes_to_current_user_credentials(&self) -> bool {
+        self.getuid_routes_to_current_user_credentials
     }
 
     #[allow(dead_code)]
-    pub const fn getgid_routes_to_kernel_init_user_state(&self) -> bool {
-        self.getgid_routes_to_kernel_init_user_state
+    pub const fn getgid_routes_to_current_user_credentials(&self) -> bool {
+        self.getgid_routes_to_current_user_credentials
     }
 
     #[allow(dead_code)]
-    pub const fn setuid_routes_to_kernel_init_user_state(&self) -> bool {
-        self.setuid_routes_to_kernel_init_user_state
+    pub const fn setuid_routes_to_current_user_credentials(&self) -> bool {
+        self.setuid_routes_to_current_user_credentials
     }
 
     #[allow(dead_code)]
-    pub const fn setgid_routes_to_kernel_init_user_state(&self) -> bool {
-        self.setgid_routes_to_kernel_init_user_state
+    pub const fn setgid_routes_to_current_user_credentials(&self) -> bool {
+        self.setgid_routes_to_current_user_credentials
     }
 
     #[allow(dead_code)]
-    pub const fn getgroups_routes_to_kernel_init_user_state(&self) -> bool {
-        self.getgroups_routes_to_kernel_init_user_state
+    pub const fn getgroups_routes_to_current_user_credentials(&self) -> bool {
+        self.getgroups_routes_to_current_user_credentials
     }
 
     #[allow(dead_code)]
@@ -1742,8 +1816,8 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
-    pub const fn setgroups_routes_to_kernel_init_user_state(&self) -> bool {
-        self.setgroups_routes_to_kernel_init_user_state
+    pub const fn setgroups_routes_to_current_user_credentials(&self) -> bool {
+        self.setgroups_routes_to_current_user_credentials
     }
 
     #[allow(dead_code)]
@@ -2167,6 +2241,16 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub fn fchmodat_observed(&self) -> bool {
+        self.fchmodat_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
+    pub fn statfs_observed(&self) -> bool {
+        self.statfs_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
     pub fn fchown_observed(&self) -> bool {
         self.fchown_observed.load(Ordering::Acquire) != 0
     }
@@ -2226,6 +2310,11 @@ impl SyscallTable {
         self.write_supported = true;
         self.writev_supported = true;
         self.openat_supported = true;
+        self.mkdirat_supported = true;
+        self.unlinkat_supported = true;
+        self.fchmodat_supported = true;
+        self.fchownat_supported = true;
+        self.statfs_supported = true;
         self.chdir_supported = true;
         self.getdents64_supported = true;
         self.read_supported = true;
@@ -2263,6 +2352,7 @@ impl SyscallTable {
         self.fstat_supported = true;
         self.fcntl_supported = true;
         self.fchmod_supported = true;
+        self.ftruncate_supported = true;
         self.fchown_supported = true;
         self.socket_supported = true;
         self.connect_supported = true;
@@ -2300,6 +2390,15 @@ impl SyscallTable {
         self.write_routes_to_console = true;
         self.writev_routes_to_files_struct = true;
         self.openat_routes_to_files_struct = true;
+        self.mkdirat_routes_to_process_fs_and_vfs = true;
+        self.mkdirat_at_fdcwd_first_slice = true;
+        self.mkdirat_transient_overlay_first_slice = true;
+        self.mkdirat_permissions_umask_deferred = true;
+        self.unlinkat_routes_to_process_fs_and_vfs = true;
+        self.unlinkat_at_fdcwd_first_slice = true;
+        self.unlinkat_file_and_empty_directory_first_slice = true;
+        self.unlinkat_linux_errno_bound = true;
+        self.unlinkat_failure_atomic = true;
         self.chdir_routes_to_fs_struct = true;
         self.chdir_linux_6_12_path_walk_bound = true;
         self.chdir_root_first_slice = true;
@@ -2332,20 +2431,20 @@ impl SyscallTable {
         self.setsid_routes_to_kernel_init_user_state = true;
         self.setsid_process_group_leader_eperm_first_slice = true;
         self.getppid_routes_to_kernel_init_user_state = true;
-        self.getuid_routes_to_kernel_init_user_state = true;
-        self.geteuid_routes_to_kernel_init_user_state = true;
-        self.getgid_routes_to_kernel_init_user_state = true;
-        self.getegid_routes_to_kernel_init_user_state = true;
-        self.getresuid_routes_to_kernel_init_user_state = true;
-        self.getresgid_routes_to_kernel_init_user_state = true;
+        self.getuid_routes_to_current_user_credentials = true;
+        self.geteuid_routes_to_current_user_credentials = true;
+        self.getgid_routes_to_current_user_credentials = true;
+        self.getegid_routes_to_current_user_credentials = true;
+        self.getresuid_routes_to_current_user_credentials = true;
+        self.getresgid_routes_to_current_user_credentials = true;
         self.uname_new_utsname_layout_bound = true;
         self.uname_static_init_uts_namespace_first_slice = true;
         self.uname_full_uts_namespace_deferred = true;
-        self.setuid_routes_to_kernel_init_user_state = true;
-        self.setgid_routes_to_kernel_init_user_state = true;
-        self.getgroups_routes_to_kernel_init_user_state = true;
+        self.setuid_routes_to_current_user_credentials = true;
+        self.setgid_routes_to_current_user_credentials = true;
+        self.getgroups_routes_to_current_user_credentials = true;
         self.getgroups_bounded_supplementary_groups_first_slice = true;
-        self.setgroups_routes_to_kernel_init_user_state = true;
+        self.setgroups_routes_to_current_user_credentials = true;
         self.setgroups_root_first_slice = true;
         self.setgroups_bounded_supplementary_groups_first_slice = true;
         self.credentials_full_linux_model_deferred = true;
@@ -2380,6 +2479,8 @@ impl SyscallTable {
         self.fstat_routes_to_files_struct = true;
         self.fcntl_routes_to_files_struct = true;
         self.fchmod_routes_to_files_struct = true;
+        self.ftruncate_routes_to_files_struct_and_vfs = true;
+        self.ftruncate_bounded_regular_file_first_slice = true;
         self.fchown_routes_to_files_struct = true;
         self.fchown_fchmod_fd_local_first_slice = true;
         self.fchown_fchmod_full_linux_model_deferred = true;
@@ -2437,6 +2538,76 @@ impl SyscallTable {
         }
 
         syscall_table_openat(self, frame);
+    }
+
+    pub fn mkdirat(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.mkdirat_supported
+            || !self.path_usercopy_ready
+            || !self.mkdirat_routes_to_process_fs_and_vfs
+            || !self.mkdirat_at_fdcwd_first_slice
+            || !self.mkdirat_transient_overlay_first_slice
+            || !self.mkdirat_permissions_umask_deferred
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_mkdirat(self, frame);
+    }
+
+    pub fn unlinkat(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.unlinkat_supported
+            || !self.path_usercopy_ready
+            || !self.unlinkat_routes_to_process_fs_and_vfs
+            || !self.unlinkat_at_fdcwd_first_slice
+            || !self.unlinkat_file_and_empty_directory_first_slice
+            || !self.unlinkat_linux_errno_bound
+            || !self.unlinkat_failure_atomic
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_unlinkat(self, frame);
+    }
+
+    pub fn fchownat(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.fchownat_supported
+            || !self.path_usercopy_ready
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_fchownat(self, frame);
+    }
+
+    pub fn fchmodat(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.fchmodat_supported
+            || !self.path_usercopy_ready
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_fchmodat(self, frame);
+    }
+
+    pub fn statfs(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.statfs_supported
+            || !self.path_usercopy_ready
+            || !self.stat_usercopy_ready
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_statfs(self, frame);
     }
 
     pub fn chdir(&self, frame: &mut TrapFrame) {
@@ -2610,6 +2781,19 @@ impl SyscallTable {
         syscall_table_fchmod(self, frame);
     }
 
+    pub fn ftruncate(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.ftruncate_supported
+            || !self.ftruncate_routes_to_files_struct_and_vfs
+            || !self.ftruncate_bounded_regular_file_first_slice
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_ftruncate(self, frame);
+    }
+
     pub fn fchown(&self, frame: &mut TrapFrame) {
         if self.lifecycle.state() != State::Ready
             || !self.fchown_supported
@@ -2756,7 +2940,7 @@ impl SyscallTable {
     pub fn getuid(&self, frame: &mut TrapFrame) {
         if self.lifecycle.state() != State::Ready
             || !self.getuid_supported
-            || !self.getuid_routes_to_kernel_init_user_state
+            || !self.getuid_routes_to_current_user_credentials
         {
             complete_unsupported_syscall(frame);
             return;
@@ -2768,7 +2952,7 @@ impl SyscallTable {
     pub fn geteuid(&self, frame: &mut TrapFrame) {
         if self.lifecycle.state() != State::Ready
             || !self.geteuid_supported
-            || !self.geteuid_routes_to_kernel_init_user_state
+            || !self.geteuid_routes_to_current_user_credentials
         {
             complete_unsupported_syscall(frame);
             return;
@@ -2780,7 +2964,7 @@ impl SyscallTable {
     pub fn getgid(&self, frame: &mut TrapFrame) {
         if self.lifecycle.state() != State::Ready
             || !self.getgid_supported
-            || !self.getgid_routes_to_kernel_init_user_state
+            || !self.getgid_routes_to_current_user_credentials
         {
             complete_unsupported_syscall(frame);
             return;
@@ -2792,7 +2976,7 @@ impl SyscallTable {
     pub fn getegid(&self, frame: &mut TrapFrame) {
         if self.lifecycle.state() != State::Ready
             || !self.getegid_supported
-            || !self.getegid_routes_to_kernel_init_user_state
+            || !self.getegid_routes_to_current_user_credentials
         {
             complete_unsupported_syscall(frame);
             return;
@@ -2805,7 +2989,7 @@ impl SyscallTable {
         if self.lifecycle.state() != State::Ready
             || !self.getresuid_supported
             || !self.credentials_usercopy_ready
-            || !self.getresuid_routes_to_kernel_init_user_state
+            || !self.getresuid_routes_to_current_user_credentials
         {
             complete_unsupported_syscall(frame);
             return;
@@ -2818,7 +3002,7 @@ impl SyscallTable {
         if self.lifecycle.state() != State::Ready
             || !self.getresgid_supported
             || !self.credentials_usercopy_ready
-            || !self.getresgid_routes_to_kernel_init_user_state
+            || !self.getresgid_routes_to_current_user_credentials
         {
             complete_unsupported_syscall(frame);
             return;
@@ -2845,7 +3029,7 @@ impl SyscallTable {
     pub fn setuid(&self, frame: &mut TrapFrame) {
         if self.lifecycle.state() != State::Ready
             || !self.setuid_supported
-            || !self.setuid_routes_to_kernel_init_user_state
+            || !self.setuid_routes_to_current_user_credentials
             || !self.credentials_full_linux_model_deferred
         {
             complete_unsupported_syscall(frame);
@@ -2858,7 +3042,7 @@ impl SyscallTable {
     pub fn setgid(&self, frame: &mut TrapFrame) {
         if self.lifecycle.state() != State::Ready
             || !self.setgid_supported
-            || !self.setgid_routes_to_kernel_init_user_state
+            || !self.setgid_routes_to_current_user_credentials
             || !self.credentials_full_linux_model_deferred
         {
             complete_unsupported_syscall(frame);
@@ -2872,7 +3056,7 @@ impl SyscallTable {
         if self.lifecycle.state() != State::Ready
             || !self.getgroups_supported
             || !self.credentials_usercopy_ready
-            || !self.getgroups_routes_to_kernel_init_user_state
+            || !self.getgroups_routes_to_current_user_credentials
             || !self.getgroups_bounded_supplementary_groups_first_slice
             || !self.credentials_full_linux_model_deferred
         {
@@ -2887,7 +3071,7 @@ impl SyscallTable {
         if self.lifecycle.state() != State::Ready
             || !self.setgroups_supported
             || !self.credentials_usercopy_ready
-            || !self.setgroups_routes_to_kernel_init_user_state
+            || !self.setgroups_routes_to_current_user_credentials
             || !self.setgroups_root_first_slice
             || !self.setgroups_bounded_supplementary_groups_first_slice
             || !self.credentials_full_linux_model_deferred
@@ -3770,9 +3954,15 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
         SYSCALL_DUP3 => table.dup3(frame),
         SYSCALL_FCNTL => table.fcntl(frame),
         SYSCALL_IOCTL => table.ioctl(frame),
+        SYSCALL_MKDIRAT => table.mkdirat(frame),
+        SYSCALL_UNLINKAT => table.unlinkat(frame),
+        SYSCALL_STATFS => table.statfs(frame),
+        SYSCALL_FTRUNCATE => table.ftruncate(frame),
         SYSCALL_FACCESSAT => table.faccessat(frame),
         SYSCALL_CHDIR => table.chdir(frame),
         SYSCALL_FCHMOD => table.fchmod(frame),
+        SYSCALL_FCHMODAT => table.fchmodat(frame),
+        SYSCALL_FCHOWNAT => table.fchownat(frame),
         SYSCALL_FCHOWN => table.fchown(frame),
         SYSCALL_SOCKET => table.socket(frame),
         SYSCALL_CONNECT => table.connect(frame),
@@ -3858,6 +4048,7 @@ fn file_error_to_errno(error: FileError) -> usize {
     match error {
         FileError::BadFd => 9,
         FileError::AlreadyOpen => 24,
+        FileError::AlreadyExists => EEXIST,
         FileError::PathUnavailable => ENOENT,
         FileError::BufferTooSmall => EOVERFLOW,
         FileError::VfsBackendUnavailable => EREMOTEIO,
@@ -3868,6 +4059,11 @@ fn file_error_to_errno(error: FileError) -> usize {
         FileError::TooManySymlinks => ELOOP,
         FileError::TooManyOpenFiles => EMFILE,
         FileError::NotDirectory => ENOTDIR,
+        FileError::NameTooLong => ENAMETOOLONG,
+        FileError::NoSpace => ENOSPC,
+        FileError::FileTooLarge => EFBIG,
+        FileError::NoDevice => ENODEV,
+        FileError::ReadOnly => EROFS,
         FileError::BrokenPipe => EPIPE,
         FileError::NotReady
         | FileError::NotReadable
@@ -3897,12 +4093,345 @@ fn vfs_error_to_chdir_errno(error: super::vfs::VfsError) -> Option<usize> {
     }
 }
 
+fn vfs_error_to_mkdirat_errno(error: super::vfs::VfsError) -> Option<usize> {
+    match error {
+        super::vfs::VfsError::InvalidName | super::vfs::VfsError::NotFound => Some(ENOENT),
+        super::vfs::VfsError::NameTooLong => Some(ENAMETOOLONG),
+        super::vfs::VfsError::NotDirectory => Some(ENOTDIR),
+        super::vfs::VfsError::AlreadyExists => Some(EEXIST),
+        super::vfs::VfsError::NoSpace => Some(ENOSPC),
+        super::vfs::VfsError::ReadOnly => Some(EROFS),
+        super::vfs::VfsError::SymlinkLoop => Some(ELOOP),
+        super::vfs::VfsError::Backend => Some(EIO),
+        _ => None,
+    }
+}
+
+fn syscall_table_mkdirat(table: &SyscallTable, frame: &mut TrapFrame) {
+    let dirfd = frame.reg(10);
+    let path_ptr = frame.reg(11);
+    let _mode = frame.reg(12);
+    if dirfd != AT_FDCWD {
+        complete_unsupported_syscall(frame);
+        return;
+    }
+
+    let mut path = [0u8; USER_PATH_MAX];
+    let path_len = match copy_user_path(path_ptr, &mut path) {
+        Ok(path_len) => path_len,
+        Err(UserPathCopyError::Fault) => {
+            complete_error_syscall(frame, EFAULT);
+            return;
+        }
+        Err(UserPathCopyError::Empty) => {
+            complete_error_syscall(frame, ENOENT);
+            return;
+        }
+        Err(UserPathCopyError::TooLong) => {
+            complete_error_syscall(frame, ENAMETOOLONG);
+            return;
+        }
+    };
+
+    let result = {
+        let _files_guard = super::user_boot::lock_user_files_state();
+        let (_, fs_struct) = super::user_boot::current_user_process_resources();
+        let ctx = crate::context::context();
+        let mut provider = super::virtio_blk::live_provider(&ctx.kernel_image);
+        ctx.vfs_core.create_directory_path(
+            fs_struct,
+            &mut ctx.ext2_filesystem,
+            &mut ctx.block_device_registry,
+            &mut provider,
+            &path[..path_len],
+        )
+    };
+
+    match result {
+        Ok(_) => {
+            table.mkdirat_observed.store(1, Ordering::Release);
+            complete_successful_syscall(frame, 0);
+        }
+        Err(error) => match vfs_error_to_mkdirat_errno(error) {
+            Some(errno) => complete_error_syscall(frame, errno),
+            None => complete_unsupported_syscall(frame),
+        },
+    }
+}
+
+fn vfs_error_to_unlinkat_errno(error: super::vfs::VfsError) -> Option<usize> {
+    match error {
+        super::vfs::VfsError::InvalidName | super::vfs::VfsError::NotFound => Some(ENOENT),
+        super::vfs::VfsError::NameTooLong => Some(ENAMETOOLONG),
+        super::vfs::VfsError::NotDirectory => Some(ENOTDIR),
+        super::vfs::VfsError::IsDirectory => Some(EISDIR),
+        super::vfs::VfsError::DirectoryNotEmpty => Some(ENOTEMPTY),
+        super::vfs::VfsError::ReadOnly => Some(EROFS),
+        super::vfs::VfsError::SymlinkLoop => Some(ELOOP),
+        super::vfs::VfsError::Backend => Some(EIO),
+        _ => None,
+    }
+}
+
+fn syscall_table_unlinkat(table: &SyscallTable, frame: &mut TrapFrame) {
+    let dirfd = frame.reg(10);
+    let path_ptr = frame.reg(11);
+    let flags = frame.reg(12);
+    if dirfd != AT_FDCWD {
+        complete_unsupported_syscall(frame);
+        return;
+    }
+    if flags != 0 && flags != AT_REMOVEDIR {
+        complete_error_syscall(frame, EINVAL);
+        return;
+    }
+
+    let mut path = [0u8; USER_PATH_MAX];
+    let path_len = match copy_user_path(path_ptr, &mut path) {
+        Ok(path_len) => path_len,
+        Err(UserPathCopyError::Fault) => {
+            complete_error_syscall(frame, EFAULT);
+            return;
+        }
+        Err(UserPathCopyError::Empty) => {
+            complete_error_syscall(frame, ENOENT);
+            return;
+        }
+        Err(UserPathCopyError::TooLong) => {
+            complete_error_syscall(frame, ENAMETOOLONG);
+            return;
+        }
+    };
+
+    let result = {
+        let _files_guard = super::user_boot::lock_user_files_state();
+        let (_, fs_struct) = super::user_boot::current_user_process_resources();
+        let ctx = crate::context::context();
+        let mut provider = super::virtio_blk::live_provider(&ctx.kernel_image);
+        ctx.vfs_core.remove_path(
+            fs_struct,
+            &mut ctx.ext2_filesystem,
+            &mut ctx.block_device_registry,
+            &mut provider,
+            &path[..path_len],
+            flags == AT_REMOVEDIR,
+        )
+    };
+
+    match result {
+        Ok(_) => {
+            table.unlinkat_observed.store(1, Ordering::Release);
+            complete_successful_syscall(frame, 0);
+        }
+        Err(error) => match vfs_error_to_unlinkat_errno(error) {
+            Some(errno) => complete_error_syscall(frame, errno),
+            None => complete_unsupported_syscall(frame),
+        },
+    }
+}
+
+fn syscall_table_statfs(table: &SyscallTable, frame: &mut TrapFrame) {
+    let path_ptr = frame.reg(10);
+    let statfs_ptr = frame.reg(11);
+    let mut path = [0u8; USER_PATH_MAX];
+    let path_len = match copy_user_path(path_ptr, &mut path) {
+        Ok(path_len) => path_len,
+        Err(UserPathCopyError::Fault) => {
+            complete_error_syscall(frame, EFAULT);
+            return;
+        }
+        Err(UserPathCopyError::Empty) => {
+            complete_error_syscall(frame, ENOENT);
+            return;
+        }
+        Err(UserPathCopyError::TooLong) => {
+            complete_error_syscall(frame, ENAMETOOLONG);
+            return;
+        }
+    };
+
+    let _files_guard = super::user_boot::lock_user_files_state();
+    let (_, fs_struct) = super::user_boot::current_user_process_resources();
+    let ctx = crate::context::context();
+    let mut provider = super::virtio_blk::live_provider(&ctx.kernel_image);
+    let statfs = match ctx.vfs_core.statfs_path(
+        fs_struct,
+        &mut ctx.ext2_filesystem,
+        &mut ctx.block_device_registry,
+        &mut provider,
+        &path[..path_len],
+    ) {
+        Ok(statfs) => statfs,
+        Err(error) => {
+            match vfs_error_to_fchownat_errno(error) {
+                Some(errno) => complete_error_syscall(frame, errno),
+                None => complete_unsupported_syscall(frame),
+            }
+            return;
+        }
+    };
+    drop(_files_guard);
+
+    let mut statfs_buffer = [0u8; STATFS_SIZE];
+    write_linux_statfs(&mut statfs_buffer, &statfs);
+    if !copy_to_user(statfs_ptr, &statfs_buffer) {
+        complete_error_syscall(frame, EFAULT);
+        return;
+    }
+
+    table.statfs_observed.store(1, Ordering::Release);
+    complete_successful_syscall(frame, 0);
+}
+
+fn vfs_error_to_fchownat_errno(error: super::vfs::VfsError) -> Option<usize> {
+    match error {
+        super::vfs::VfsError::InvalidName | super::vfs::VfsError::NotFound => Some(ENOENT),
+        super::vfs::VfsError::NameTooLong => Some(ENAMETOOLONG),
+        super::vfs::VfsError::NotDirectory => Some(ENOTDIR),
+        super::vfs::VfsError::ReadOnly => Some(EROFS),
+        super::vfs::VfsError::SymlinkLoop => Some(ELOOP),
+        super::vfs::VfsError::Backend => Some(EIO),
+        _ => None,
+    }
+}
+
+fn syscall_table_fchmodat(table: &SyscallTable, frame: &mut TrapFrame) {
+    let dirfd = frame.reg(10);
+    let path_ptr = frame.reg(11);
+    let mode = frame.reg(12) as u32;
+
+    let mut path = [0u8; USER_PATH_MAX];
+    let path_len = match copy_user_path(path_ptr, &mut path) {
+        Ok(path_len) => path_len,
+        Err(UserPathCopyError::Fault) => {
+            complete_error_syscall(frame, EFAULT);
+            return;
+        }
+        Err(UserPathCopyError::Empty) => {
+            complete_error_syscall(frame, ENOENT);
+            return;
+        }
+        Err(UserPathCopyError::TooLong) => {
+            complete_error_syscall(frame, ENAMETOOLONG);
+            return;
+        }
+    };
+    if path[0] != b'/' && dirfd != AT_FDCWD {
+        complete_error_syscall(frame, EBADF);
+        return;
+    }
+    let Some(euid) = super::user_boot::current_user_euid() else {
+        complete_unsupported_syscall(frame);
+        return;
+    };
+    if euid != 0 {
+        complete_error_syscall(frame, EPERM);
+        return;
+    }
+
+    let result = {
+        let _files_guard = super::user_boot::lock_user_files_state();
+        let (_, fs_struct) = super::user_boot::current_user_process_resources();
+        let ctx = crate::context::context();
+        let mut provider = super::virtio_blk::live_provider(&ctx.kernel_image);
+        ctx.vfs_core.chmod_path(
+            fs_struct,
+            &mut ctx.ext2_filesystem,
+            &mut ctx.block_device_registry,
+            &mut provider,
+            &path[..path_len],
+            mode,
+        )
+    };
+    match result {
+        Ok(()) => {
+            table.fchmodat_observed.store(1, Ordering::Release);
+            complete_successful_syscall(frame, 0);
+        }
+        Err(error) => match vfs_error_to_fchownat_errno(error) {
+            Some(errno) => complete_error_syscall(frame, errno),
+            None => complete_unsupported_syscall(frame),
+        },
+    }
+}
+
+fn syscall_table_fchownat(table: &SyscallTable, frame: &mut TrapFrame) {
+    let dirfd = frame.reg(10);
+    let path_ptr = frame.reg(11);
+    let uid_raw = frame.reg(12) as u32;
+    let gid_raw = frame.reg(13) as u32;
+    let flags = frame.reg(14);
+    if flags & !AT_SYMLINK_NOFOLLOW != 0 {
+        complete_error_syscall(frame, EINVAL);
+        return;
+    }
+
+    let mut path = [0u8; USER_PATH_MAX];
+    let path_len = match copy_user_path(path_ptr, &mut path) {
+        Ok(path_len) => path_len,
+        Err(UserPathCopyError::Fault) => {
+            complete_error_syscall(frame, EFAULT);
+            return;
+        }
+        Err(UserPathCopyError::Empty) => {
+            complete_error_syscall(frame, ENOENT);
+            return;
+        }
+        Err(UserPathCopyError::TooLong) => {
+            complete_error_syscall(frame, ENAMETOOLONG);
+            return;
+        }
+    };
+    if path[0] != b'/' && dirfd != AT_FDCWD {
+        complete_error_syscall(frame, EBADF);
+        return;
+    }
+    let Some(euid) = super::user_boot::current_user_euid() else {
+        complete_unsupported_syscall(frame);
+        return;
+    };
+    if euid != 0 {
+        complete_error_syscall(frame, EPERM);
+        return;
+    }
+
+    let uid = (uid_raw != u32::MAX).then_some(uid_raw);
+    let gid = (gid_raw != u32::MAX).then_some(gid_raw);
+    let result = {
+        let _files_guard = super::user_boot::lock_user_files_state();
+        let (_, fs_struct) = super::user_boot::current_user_process_resources();
+        let ctx = crate::context::context();
+        let mut provider = super::virtio_blk::live_provider(&ctx.kernel_image);
+        ctx.vfs_core.chown_path(
+            fs_struct,
+            &mut ctx.ext2_filesystem,
+            &mut ctx.block_device_registry,
+            &mut provider,
+            &path[..path_len],
+            flags & AT_SYMLINK_NOFOLLOW != 0,
+            uid,
+            gid,
+        )
+    };
+    match result {
+        Ok(()) => {
+            table.fchownat_observed.store(1, Ordering::Release);
+            complete_successful_syscall(frame, 0);
+        }
+        Err(error) => match vfs_error_to_fchownat_errno(error) {
+            Some(errno) => complete_error_syscall(frame, errno),
+            None => complete_unsupported_syscall(frame),
+        },
+    }
+}
+
 fn syscall_table_openat(table: &SyscallTable, frame: &mut TrapFrame) {
     let dirfd = frame.reg(10);
     let path_ptr = frame.reg(11);
     let flags = frame.reg(12);
+    let mode = frame.reg(13) as u32;
     let supported_flags =
-        O_NONBLOCK | O_LARGEFILE | O_DIRECTORY | O_CLOEXEC | O_CREAT | O_TRUNC | O_ACCMODE;
+        O_NONBLOCK | O_LARGEFILE | O_DIRECTORY | O_CLOEXEC | O_CREAT | O_EXCL | O_TRUNC | O_ACCMODE;
     if dirfd != AT_FDCWD || flags & !supported_flags != 0 {
         print_openat_reject_detail(dirfd, path_ptr, flags, supported_flags);
         complete_error_syscall(frame, EINVAL);
@@ -3915,6 +4444,20 @@ fn syscall_table_openat(table: &SyscallTable, frame: &mut TrapFrame) {
         return;
     };
 
+    let exclusive_regular_create = flags & O_CREAT != 0
+        && flags & O_EXCL != 0
+        && flags & O_ACCMODE == 2
+        && flags & (O_TRUNC | O_NONBLOCK | O_DIRECTORY) == 0;
+    let create_identity = if exclusive_regular_create {
+        let Some(identity) = super::user_boot::current_user_fs_identity() else {
+            complete_unsupported_syscall(frame);
+            return;
+        };
+        Some(identity)
+    } else {
+        None
+    };
+
     let _files_guard = super::user_boot::lock_user_files_state();
     let (files_struct, fs_struct) = super::user_boot::current_user_process_resources();
     let ctx = crate::context::context();
@@ -3922,7 +4465,20 @@ fn syscall_table_openat(table: &SyscallTable, frame: &mut TrapFrame) {
         files_struct.open_tty_path(&path[..path_len], flags as u32)
     } else if is_null_path(&path[..path_len]) {
         files_struct.open_null_path(&path[..path_len], flags as u32)
-    } else if flags & (O_CREAT | O_TRUNC | O_NONBLOCK) != 0 {
+    } else if let Some((uid, gid)) = create_identity {
+        files_struct.create_exclusive_regular_path(
+            fs_struct,
+            &mut ctx.vfs_core,
+            &mut ctx.ext2_filesystem,
+            &mut ctx.block_device_registry,
+            &ctx.kernel_image,
+            &path[..path_len],
+            flags as u32,
+            mode,
+            uid,
+            gid,
+        )
+    } else if flags & (O_CREAT | O_EXCL | O_TRUNC | O_NONBLOCK) != 0 {
         Err(FileError::InvalidArgument)
     } else if flags & O_ACCMODE != 0 {
         Err(FileError::PermissionDenied)
@@ -4556,7 +5112,13 @@ fn syscall_table_newfstatat(table: &SyscallTable, frame: &mut TrapFrame) {
     drop(_files_guard);
 
     let mut stat_buffer = [0u8; STAT_SIZE];
-    write_linux_stat(&mut stat_buffer, stat.size(), stat.mode());
+    write_linux_stat(
+        &mut stat_buffer,
+        stat.size(),
+        stat.mode(),
+        stat.uid(),
+        stat.gid(),
+    );
     if !copy_to_user(stat_ptr, &stat_buffer) {
         complete_error_syscall(frame, EFAULT);
         return;
@@ -4692,6 +5254,26 @@ fn syscall_table_fchmod(table: &SyscallTable, frame: &mut TrapFrame) {
     }
 
     table.fchmod_observed.store(1, Ordering::Release);
+    complete_successful_syscall(frame, 0);
+}
+
+fn syscall_table_ftruncate(table: &SyscallTable, frame: &mut TrapFrame) {
+    let fd = frame.reg(10);
+    let length = frame.reg(11);
+    if (length as isize) < 0 {
+        complete_error_syscall(frame, EINVAL);
+        return;
+    }
+
+    let _files_guard = super::user_boot::lock_user_files_state();
+    let files_struct = super::user_boot::current_user_files_struct();
+    let ctx = crate::context::context();
+    if let Err(error) = files_struct.ftruncate_fd(fd, length, &mut ctx.vfs_core) {
+        complete_error_syscall(frame, file_error_to_errno(error));
+        return;
+    }
+
+    table.ftruncate_observed.store(1, Ordering::Release);
     complete_successful_syscall(frame, 0);
 }
 
@@ -5171,7 +5753,7 @@ fn syscall_table_getppid(table: &SyscallTable, frame: &mut TrapFrame) {
 }
 
 fn syscall_table_getuid(table: &SyscallTable, frame: &mut TrapFrame) {
-    let Some(uid) = crate::context::context().kernel_init_user_state.read_uid() else {
+    let Some(uid) = super::user_boot::current_user_uid() else {
         complete_unsupported_syscall(frame);
         return;
     };
@@ -5181,7 +5763,7 @@ fn syscall_table_getuid(table: &SyscallTable, frame: &mut TrapFrame) {
 }
 
 fn syscall_table_geteuid(table: &SyscallTable, frame: &mut TrapFrame) {
-    let Some(euid) = crate::context::context().kernel_init_user_state.read_euid() else {
+    let Some(euid) = super::user_boot::current_user_euid() else {
         complete_unsupported_syscall(frame);
         return;
     };
@@ -5191,7 +5773,7 @@ fn syscall_table_geteuid(table: &SyscallTable, frame: &mut TrapFrame) {
 }
 
 fn syscall_table_getgid(table: &SyscallTable, frame: &mut TrapFrame) {
-    let Some(gid) = crate::context::context().kernel_init_user_state.read_gid() else {
+    let Some(gid) = super::user_boot::current_user_gid() else {
         complete_unsupported_syscall(frame);
         return;
     };
@@ -5201,7 +5783,7 @@ fn syscall_table_getgid(table: &SyscallTable, frame: &mut TrapFrame) {
 }
 
 fn syscall_table_getegid(table: &SyscallTable, frame: &mut TrapFrame) {
-    let Some(egid) = crate::context::context().kernel_init_user_state.read_egid() else {
+    let Some(egid) = super::user_boot::current_user_egid() else {
         complete_unsupported_syscall(frame);
         return;
     };
@@ -5214,10 +5796,7 @@ fn syscall_table_getresuid(table: &SyscallTable, frame: &mut TrapFrame) {
     let ruid_ptr = frame.reg(10);
     let euid_ptr = frame.reg(11);
     let suid_ptr = frame.reg(12);
-    let Some((ruid, euid, suid)) = crate::context::context()
-        .kernel_init_user_state
-        .read_resuid()
-    else {
+    let Some((ruid, euid, suid)) = super::user_boot::current_user_resuid() else {
         complete_unsupported_syscall(frame);
         return;
     };
@@ -5238,10 +5817,7 @@ fn syscall_table_getresgid(table: &SyscallTable, frame: &mut TrapFrame) {
     let rgid_ptr = frame.reg(10);
     let egid_ptr = frame.reg(11);
     let sgid_ptr = frame.reg(12);
-    let Some((rgid, egid, sgid)) = crate::context::context()
-        .kernel_init_user_state
-        .read_resgid()
-    else {
+    let Some((rgid, egid, sgid)) = super::user_boot::current_user_resgid() else {
         complete_unsupported_syscall(frame);
         return;
     };
@@ -5284,10 +5860,7 @@ fn syscall_table_uname(table: &SyscallTable, frame: &mut TrapFrame) {
 
 fn syscall_table_setuid(table: &SyscallTable, frame: &mut TrapFrame) {
     let uid = frame.reg(10);
-    if !crate::context::context()
-        .kernel_init_user_state
-        .set_uid_root_slice(uid)
-    {
+    if !super::user_boot::current_user_set_uid_root_slice(uid) {
         complete_error_syscall(frame, EPERM);
         return;
     }
@@ -5298,10 +5871,7 @@ fn syscall_table_setuid(table: &SyscallTable, frame: &mut TrapFrame) {
 
 fn syscall_table_setgid(table: &SyscallTable, frame: &mut TrapFrame) {
     let gid = frame.reg(10);
-    if !crate::context::context()
-        .kernel_init_user_state
-        .set_gid_root_slice(gid)
-    {
+    if !super::user_boot::current_user_set_gid_root_slice(gid) {
         complete_error_syscall(frame, EPERM);
         return;
     }
@@ -5313,10 +5883,7 @@ fn syscall_table_setgid(table: &SyscallTable, frame: &mut TrapFrame) {
 fn syscall_table_getgroups(table: &SyscallTable, frame: &mut TrapFrame) {
     let size = frame.reg(10);
     let list_ptr = frame.reg(11);
-    let Some((count, groups)) = crate::context::context()
-        .kernel_init_user_state
-        .read_supplementary_groups()
-    else {
+    let Some((count, groups)) = super::user_boot::current_user_supplementary_groups() else {
         complete_unsupported_syscall(frame);
         return;
     };
@@ -5355,15 +5922,7 @@ fn syscall_table_getgroups(table: &SyscallTable, frame: &mut TrapFrame) {
 fn syscall_table_setgroups(table: &SyscallTable, frame: &mut TrapFrame) {
     let size = frame.reg(10);
     let list_ptr = frame.reg(11);
-    let euid = {
-        let process = &crate::context::context_ref().kernel_init_user_state;
-        if process.credentials_syscall_ready() {
-            Some(process.euid())
-        } else {
-            None
-        }
-    };
-    let Some(euid) = euid else {
+    let Some(euid) = super::user_boot::current_user_euid() else {
         complete_unsupported_syscall(frame);
         return;
     };
@@ -5389,10 +5948,7 @@ fn syscall_table_setgroups(table: &SyscallTable, frame: &mut TrapFrame) {
         Some(gid as usize)
     };
 
-    if !crate::context::context()
-        .kernel_init_user_state
-        .set_supplementary_groups_root_slice(size, first_gid)
-    {
+    if !super::user_boot::current_user_set_supplementary_groups_root_slice(size, first_gid) {
         complete_unsupported_syscall(frame);
         return;
     }
@@ -5761,7 +6317,13 @@ fn syscall_table_fstat(table: &SyscallTable, frame: &mut TrapFrame) {
     drop(_files_guard);
 
     let mut stat_buffer = [0u8; STAT_SIZE];
-    write_linux_stat(&mut stat_buffer, stat.size(), stat.mode());
+    write_linux_stat(
+        &mut stat_buffer,
+        stat.size(),
+        stat.mode(),
+        stat.uid(),
+        stat.gid(),
+    );
     if !copy_to_user(stat_ptr, &stat_buffer) {
         complete_error_syscall(frame, EFAULT);
         return;
@@ -6222,6 +6784,19 @@ fn syscall_table_mmap(frame: &mut TrapFrame) {
     let flags = frame.reg(13);
     let fd = frame.reg(14);
     let offset = frame.reg(15);
+    const MAP_ANONYMOUS: usize = 0x20;
+    if flags & MAP_ANONYMOUS == 0 {
+        match super::user_boot::current_user_mmap_shared_regular(addr, len, prot, flags, fd, offset)
+        {
+            Ok(mapped) => complete_successful_syscall(frame, mapped),
+            Err(UserMmapError::Invalid) => complete_error_syscall(frame, EINVAL),
+            Err(UserMmapError::NoMemory) => complete_error_syscall(frame, ENOMEM),
+            Err(UserMmapError::BadFd) => complete_error_syscall(frame, EBADF),
+            Err(UserMmapError::AccessDenied) => complete_error_syscall(frame, EACCES),
+            Err(UserMmapError::NoDevice) => complete_error_syscall(frame, ENODEV),
+        }
+        return;
+    }
     let result = if let Some((task_ref, _)) = super::user_boot::current_smp_user_mm_task() {
         let Some(result) =
             super::user_boot::smp_user_mmap(task_ref, addr, len, prot, flags, fd, offset)
@@ -6243,6 +6818,18 @@ fn syscall_table_mmap(frame: &mut TrapFrame) {
         }
         Err(UserMmapError::NoMemory) => {
             complete_error_syscall(frame, ENOMEM);
+            return;
+        }
+        Err(UserMmapError::BadFd) => {
+            complete_error_syscall(frame, EBADF);
+            return;
+        }
+        Err(UserMmapError::AccessDenied) => {
+            complete_error_syscall(frame, EACCES);
+            return;
+        }
+        Err(UserMmapError::NoDevice) => {
+            complete_error_syscall(frame, ENODEV);
             return;
         }
     };
@@ -6559,24 +7146,6 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
         let child_pid = {
             let (files_struct, fs_struct) = super::user_boot::current_user_process_resources();
             let ctx = crate::context::context();
-            let next_child_pid = ctx.user_task_set.next_child_pid();
-            let runqueue_ref = match ctx
-                .scheduler_mut()
-                .select_scheduler_for_task(next_child_pid)
-            {
-                Ok(runqueue_ref) => runqueue_ref,
-                Err(_) => {
-                    complete_unsupported_clone_syscall(frame, "select_runqueue");
-                    return;
-                }
-            };
-            if !ctx
-                .kernel_init_user_state
-                .can_observe_child_process_group_visible(next_child_pid)
-            {
-                complete_unsupported_clone_syscall(frame, "process_group_visible");
-                return;
-            }
             let copy_result = match ctx.task_creation_core.copy_user_process(
                 TaskCopyUserProcessInputs {
                     src_process: &ctx.kernel_init_user_state,
@@ -6633,16 +7202,34 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
             let Some(child_cpu) = ctx.user_task_set.cpu_ref_for_task(child_ref) else {
                 panic_dispatch("declared child CPU placement invariant failed\n");
             };
-            if child_cpu.is_boot_cpu()
-                && ctx
-                    .scheduler_mut()
-                    .enqueue_task_on_scheduler(child_pid, child_ref, runqueue_ref)
-                    .is_err()
-            {
-                panic_dispatch("declared child runqueue publish invariant failed\n");
+            if child_cpu.is_boot_cpu() {
+                let runqueue_ref = match ctx.scheduler_mut().select_scheduler_for_task(child_pid) {
+                    Ok(runqueue_ref) => runqueue_ref,
+                    Err(error) => panic_dispatch_event(
+                        "declared child runqueue selection invariant failed\n",
+                        error,
+                    ),
+                };
+                if let Err(error) = ctx.scheduler_mut().enqueue_task_on_scheduler(
+                    child_pid,
+                    child_ref,
+                    runqueue_ref,
+                ) {
+                    let selected_task_id = ctx.scheduler().selected_runqueue_task_id();
+                    panic_child_runqueue_publish(
+                        frame,
+                        error,
+                        child_pid,
+                        child_ref.slot(),
+                        child_ref.generation() as usize,
+                        child_cpu.logical_id(),
+                        selected_task_id,
+                    );
+                }
             }
-            if !ctx.user_task_set.mark_enqueued() {
+            if let Err(failure) = ctx.user_task_set.mark_enqueued_diagnosed() {
                 print_clone_boundary(frame, "mark_enqueued");
+                print_clone_enqueue_failure(&failure);
                 panic_dispatch("declared child enqueue invariant failed\n");
             }
             if !ctx
@@ -6855,15 +7442,24 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
             };
             let task_pid = ctx.user_task_set.pid();
             let task_ref = ctx.user_task_set.active_task_ref();
-            if ctx
-                .scheduler_mut()
-                .enqueue_task_on_scheduler(task_pid, task_ref, runqueue_ref)
-                .is_err()
+            if let Err(error) =
+                ctx.scheduler_mut()
+                    .enqueue_task_on_scheduler(task_pid, task_ref, runqueue_ref)
             {
-                panic_dispatch("declared child runqueue publish invariant failed\n");
+                let selected_task_id = ctx.scheduler().selected_runqueue_task_id();
+                panic_child_runqueue_publish(
+                    frame,
+                    error,
+                    task_pid,
+                    task_ref.slot(),
+                    task_ref.generation() as usize,
+                    runqueue_ref.logical_id(),
+                    selected_task_id,
+                );
             }
-            if !ctx.user_task_set.mark_enqueued() {
+            if let Err(failure) = ctx.user_task_set.mark_enqueued_diagnosed() {
                 print_clone_boundary(frame, "mark_enqueued");
+                print_clone_enqueue_failure(&failure);
                 panic_dispatch("declared child enqueue invariant failed\n");
             }
         } else if ctx
@@ -7438,8 +8034,9 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
     }
 
     let registry = super::user_process_registry::global_registry();
+    let current_smp_parent = super::user_boot::current_smp_user_task();
     let (registry_parent_ref, registry_parent_pid, registry_parent_cpu) =
-        if let Some((task_ref, cpu_ref)) = super::user_boot::current_smp_user_task() {
+        if let Some((task_ref, cpu_ref)) = current_smp_parent {
             let Some(pid) = registry.pid(task_ref) else {
                 complete_error_syscall(frame, ECHILD);
                 return;
@@ -7460,10 +8057,41 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
         .user_task_set
         .first_unreaped_completed_child_matching(child_selector)
         .is_some();
-    if !completed_child_record_pending
-        && registry.has_child(registry_parent_ref, registry_parent_pid, child_selector)
-    {
+    let registry_child_pending =
+        registry.has_child(registry_parent_ref, registry_parent_pid, child_selector);
+    if registry_child_pending && (current_smp_parent.is_some() || !completed_child_record_pending) {
+        #[cfg(checkpoint_handler_user_syscall_error)]
+        let mut previous_wait_diagnostic = None;
+        #[cfg(checkpoint_handler_user_syscall_error)]
+        let mut wfi_return_count = 0usize;
+        #[cfg(checkpoint_handler_user_syscall_error)]
+        let mut zombie_selected_reported = false;
         loop {
+            // Keep the global gate closed from the registry recheck through
+            // WFI. With SSIE enabled, a remote wake remains pending and wakes
+            // WFI instead of being handled and cleared immediately before the
+            // sleep instruction.
+            crate::arch::riscv64::csr::disable_supervisor_interrupts();
+            #[cfg(checkpoint_handler_user_syscall_error)]
+            {
+                let diagnostic = registry.wait_diagnostic(
+                    registry_parent_ref,
+                    registry_parent_pid,
+                    child_selector,
+                );
+                if previous_wait_diagnostic != Some(diagnostic) {
+                    print_wait4_registry_wait_diagnostic(
+                        "recheck",
+                        registry_parent_ref,
+                        registry_parent_pid,
+                        registry_parent_cpu,
+                        child_selector,
+                        wfi_return_count,
+                        diagnostic,
+                    );
+                    previous_wait_diagnostic = Some(diagnostic);
+                }
+            }
             if let Some((task_ref, child_pid, wait_status)) =
                 super::user_process_registry::global_registry().first_zombie_child(
                     registry_parent_ref,
@@ -7471,6 +8099,23 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
                     child_selector,
                 )
             {
+                #[cfg(checkpoint_handler_user_syscall_error)]
+                if !zombie_selected_reported {
+                    print_wait4_registry_wait_diagnostic(
+                        "zombie-selected",
+                        registry_parent_ref,
+                        registry_parent_pid,
+                        registry_parent_cpu,
+                        child_selector,
+                        wfi_return_count,
+                        registry.wait_diagnostic(
+                            registry_parent_ref,
+                            registry_parent_pid,
+                            child_selector,
+                        ),
+                    );
+                    zombie_selected_reported = true;
+                }
                 if stat_addr != 0 && !write_user_u32(stat_addr, wait_status as u32) {
                     complete_error_syscall(frame, EFAULT);
                     return;
@@ -7553,10 +8198,40 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
                 }
                 continue;
             }
-            crate::arch::riscv64::csr::enable_supervisor_interrupts();
             unsafe { core::arch::asm!("wfi", options(nomem, nostack)) };
-            crate::arch::riscv64::csr::disable_supervisor_interrupts();
+            crate::arch::riscv64::csr::enable_supervisor_interrupts();
+            #[cfg(checkpoint_handler_user_syscall_error)]
+            {
+                wfi_return_count = wfi_return_count.wrapping_add(1);
+                if wfi_return_count <= 2 {
+                    print_wait4_registry_wait_diagnostic(
+                        "wfi-return",
+                        registry_parent_ref,
+                        registry_parent_pid,
+                        registry_parent_cpu,
+                        child_selector,
+                        wfi_return_count,
+                        registry.wait_diagnostic(
+                            registry_parent_ref,
+                            registry_parent_pid,
+                            child_selector,
+                        ),
+                    );
+                }
+            }
         }
+    }
+
+    if current_smp_parent.is_some() {
+        print_wait4_smp_legacy_fallthrough_diagnostic(
+            registry_parent_ref,
+            registry_parent_pid,
+            registry_parent_cpu,
+            completed_child_record_pending,
+            child_selector,
+        );
+        complete_error_syscall(frame, ECHILD);
+        return;
     }
 
     if let Some((child_pid, _exit_status, wait_status, _pidfd_fd)) = crate::context::context_ref()
@@ -8758,24 +9433,47 @@ fn write_uts_field(buffer: &mut [u8; NEW_UTSNAME_SIZE], field: usize, value: &[u
     buffer[start..start + copy_len].copy_from_slice(&value[..copy_len]);
 }
 
-fn copy_cstr_from_user(user_ptr: usize, dst: &mut [u8]) -> Option<usize> {
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum UserPathCopyError {
+    Fault,
+    Empty,
+    TooLong,
+}
+
+fn copy_user_path(user_ptr: usize, dst: &mut [u8]) -> Result<usize, UserPathCopyError> {
     if dst.is_empty() || user_ptr == 0 {
-        return None;
+        return Err(UserPathCopyError::Fault);
     }
 
     let saved = crate::arch::riscv64::csr::save_and_enable_user_memory_access();
     let mut index = 0usize;
     while index < dst.len() {
-        let byte = unsafe { core::ptr::read_volatile((user_ptr + index) as *const u8) };
+        let Some(byte_ptr) = user_ptr.checked_add(index) else {
+            crate::arch::riscv64::csr::restore_user_memory_access(saved);
+            return Err(UserPathCopyError::Fault);
+        };
+        if !user_copy_range_accessible(byte_ptr, 1, UserFaultAccess::Load) {
+            crate::arch::riscv64::csr::restore_user_memory_access(saved);
+            return Err(UserPathCopyError::Fault);
+        }
+        let byte = unsafe { core::ptr::read_volatile(byte_ptr as *const u8) };
         if byte == 0 {
             crate::arch::riscv64::csr::restore_user_memory_access(saved);
-            return (index != 0).then_some(index);
+            return if index == 0 {
+                Err(UserPathCopyError::Empty)
+            } else {
+                Ok(index)
+            };
         }
         dst[index] = byte;
         index += 1;
     }
     crate::arch::riscv64::csr::restore_user_memory_access(saved);
-    None
+    Err(UserPathCopyError::TooLong)
+}
+
+fn copy_cstr_from_user(user_ptr: usize, dst: &mut [u8]) -> Option<usize> {
+    copy_user_path(user_ptr, dst).ok()
 }
 
 fn copy_execve_cstr(user_ptr: usize, dst: &mut [u8]) -> Option<usize> {
@@ -8979,14 +9677,29 @@ fn copy_execve_argument_string(
     Err(ExecveStringCopyError::TooLong)
 }
 
-fn write_linux_stat(buffer: &mut [u8; STAT_SIZE], size: usize, mode: u32) {
+fn write_linux_stat(buffer: &mut [u8; STAT_SIZE], size: usize, mode: u32, uid: u32, gid: u32) {
     write_u64(buffer, 0, 1);
     write_u64(buffer, 8, 1);
     write_u32(buffer, 16, mode);
     write_u32(buffer, 20, 1);
+    write_u32(buffer, 24, uid);
+    write_u32(buffer, 28, gid);
     write_u64(buffer, 48, size as u64);
     write_u32(buffer, 56, 4096);
     write_u64(buffer, 64, size.div_ceil(512) as u64);
+}
+
+fn write_linux_statfs(buffer: &mut [u8; STATFS_SIZE], statfs: &super::vfs::VfsStatFs) {
+    write_u64(buffer, 0, statfs.fs_type());
+    write_u64(buffer, 8, statfs.block_size());
+    write_u64(buffer, 16, statfs.blocks());
+    write_u64(buffer, 24, statfs.blocks_free());
+    write_u64(buffer, 32, statfs.blocks_available());
+    write_u64(buffer, 40, statfs.files());
+    write_u64(buffer, 48, statfs.files_free());
+    write_u64(buffer, 64, statfs.name_len());
+    write_u64(buffer, 72, statfs.fragment_size());
+    write_u64(buffer, 80, statfs.flags());
 }
 
 fn write_u32(buffer: &mut [u8], offset: usize, value: u32) {
@@ -9080,6 +9793,34 @@ fn panic_dispatch_event(message: &str, error: super::state::EventError) -> ! {
     crate::arch::riscv64::sbi::system_shutdown()
 }
 
+fn panic_child_runqueue_publish(
+    frame: &TrapFrame,
+    error: super::state::EventError,
+    requested_task_id: usize,
+    task_slot: usize,
+    task_generation: usize,
+    destination_cpu: usize,
+    selected_task_id: usize,
+) -> ! {
+    crate::arch::riscv64::sbi::putstr("declared child runqueue publish invariant failed\n");
+    crate::arch::riscv64::sbi::putstr("child runqueue publish diagnostic requested_task_id=");
+    print_decimal(requested_task_id);
+    crate::arch::riscv64::sbi::putstr(" selected_task_id=");
+    print_decimal(selected_task_id);
+    crate::arch::riscv64::sbi::putstr(" task_ref=");
+    print_decimal(task_slot);
+    crate::arch::riscv64::sbi::putstr(":");
+    print_decimal(task_generation);
+    crate::arch::riscv64::sbi::putstr(" destination_cpu=");
+    print_decimal(destination_cpu);
+    crate::arch::riscv64::sbi::putstr(" syscall_nr=");
+    print_decimal(frame.reg(17));
+    print_syscall_arg_registers(frame);
+    crate::arch::riscv64::sbi::putstr("\n");
+    crate::phases::print_event_error(error);
+    crate::arch::riscv64::sbi::system_shutdown()
+}
+
 fn panic_dispatch_frame(message: &str, frame: &TrapFrame) -> ! {
     crate::arch::riscv64::sbi::putstr(message);
     crate::arch::riscv64::sbi::putstr(" mode=");
@@ -9130,6 +9871,154 @@ fn print_wait4_child_handoff_trace(frame: &TrapFrame) {
 
 #[cfg(not(checkpoint_handler_user_syscall_trace))]
 fn print_wait4_child_handoff_trace(_frame: &TrapFrame) {}
+
+#[cfg(checkpoint_handler_user_syscall_error)]
+fn print_wait4_smp_legacy_fallthrough_diagnostic(
+    parent_ref: super::task::TaskRef,
+    parent_pid: usize,
+    parent_cpu: super::cpu::CpuRef,
+    completed_child_record_pending: bool,
+    child_selector: super::user_process_registry::UserProcessChildSelector,
+) {
+    let child = &crate::context::context_ref().user_task_set;
+    let registry_diagnostic = super::user_process_registry::global_registry().wait_diagnostic(
+        parent_ref,
+        parent_pid,
+        child_selector,
+    );
+    let active_ref = child.active_task_ref();
+    let legacy_parent_ref = child.parent_task_ref();
+    crate::arch::riscv64::sbi::putstr(
+        "wait4 route diagnostic current=smp registry_child=0 parent_slot=",
+    );
+    print_decimal(parent_ref.slot());
+    crate::arch::riscv64::sbi::putstr(" parent_generation=");
+    print_decimal(parent_ref.generation() as usize);
+    crate::arch::riscv64::sbi::putstr(" parent_pid=");
+    print_decimal(parent_pid);
+    crate::arch::riscv64::sbi::putstr(" parent_cpu=");
+    print_decimal(parent_cpu.logical_id());
+    crate::arch::riscv64::sbi::putstr(" completed_pending=");
+    print_bool_digit(completed_child_record_pending);
+    crate::arch::riscv64::sbi::putstr(" registry_live=");
+    print_decimal(registry_diagnostic.live_slot_count);
+    crate::arch::riscv64::sbi::putstr(" exact_children=");
+    print_decimal(registry_diagnostic.exact_child_count);
+    crate::arch::riscv64::sbi::putstr(" same_parent_ref=");
+    print_decimal(registry_diagnostic.same_parent_ref_count);
+    crate::arch::riscv64::sbi::putstr(" same_parent_pid=");
+    print_decimal(registry_diagnostic.same_parent_pid_count);
+    crate::arch::riscv64::sbi::putstr(" selector_candidates=");
+    print_decimal(registry_diagnostic.selector_candidate_count);
+    crate::arch::riscv64::sbi::putstr(" related_slot=");
+    print_decimal(registry_diagnostic.related_task_ref.slot());
+    crate::arch::riscv64::sbi::putstr(" related_generation=");
+    print_decimal(registry_diagnostic.related_task_ref.generation() as usize);
+    crate::arch::riscv64::sbi::putstr(" related_pid=");
+    print_decimal(registry_diagnostic.related_pid);
+    crate::arch::riscv64::sbi::putstr(" related_parent_slot=");
+    print_decimal(registry_diagnostic.related_parent_task_ref.slot());
+    crate::arch::riscv64::sbi::putstr(" related_parent_generation=");
+    print_decimal(registry_diagnostic.related_parent_task_ref.generation() as usize);
+    crate::arch::riscv64::sbi::putstr(" related_parent_pid=");
+    print_decimal(registry_diagnostic.related_parent_pid);
+    crate::arch::riscv64::sbi::putstr(" related_cpu=");
+    print_decimal(registry_diagnostic.related_cpu_ref.logical_id());
+    crate::arch::riscv64::sbi::putstr(" related_state=");
+    print_user_process_slot_state(registry_diagnostic.related_state);
+    crate::arch::riscv64::sbi::putstr(" related_quiesced=");
+    print_bool_digit(registry_diagnostic.related_scheduler_quiesced);
+    crate::arch::riscv64::sbi::putstr(" legacy_active_slot=");
+    print_decimal(active_ref.slot());
+    crate::arch::riscv64::sbi::putstr(" legacy_active_generation=");
+    print_decimal(active_ref.generation() as usize);
+    crate::arch::riscv64::sbi::putstr(" legacy_parent_slot=");
+    print_decimal(legacy_parent_ref.slot());
+    crate::arch::riscv64::sbi::putstr(" legacy_parent_generation=");
+    print_decimal(legacy_parent_ref.generation() as usize);
+    crate::arch::riscv64::sbi::putstr(" legacy_pid=");
+    print_decimal(child.pid());
+    crate::arch::riscv64::sbi::putstr(" legacy_online=");
+    print_bool_digit(child.active_task_state() == State::Online);
+    crate::arch::riscv64::sbi::putstr(" legacy_enqueued=");
+    print_bool_digit(child.enqueued());
+    crate::arch::riscv64::sbi::putstr(" legacy_continuation_taken=");
+    print_bool_digit(child.child_continuation_taken());
+    crate::arch::riscv64::sbi::putchar(b'\n');
+}
+
+#[cfg(checkpoint_handler_user_syscall_error)]
+fn print_wait4_registry_wait_diagnostic(
+    stage: &str,
+    parent_ref: super::task::TaskRef,
+    parent_pid: usize,
+    parent_cpu: super::cpu::CpuRef,
+    child_selector: super::user_process_registry::UserProcessChildSelector,
+    wfi_return_count: usize,
+    diagnostic: super::user_process_registry::UserProcessWaitDiagnostic,
+) {
+    use super::user_process_registry::UserProcessChildSelector;
+
+    let selector_pid = match child_selector {
+        UserProcessChildSelector::Any => 0,
+        UserProcessChildSelector::ExactPid(pid) => pid,
+    };
+    let related_state = match diagnostic.related_state {
+        super::user_process_registry::UserProcessSlotState::Empty => "empty",
+        super::user_process_registry::UserProcessSlotState::Reserved => "reserved",
+        super::user_process_registry::UserProcessSlotState::Published => "published",
+        super::user_process_registry::UserProcessSlotState::Zombie => "zombie",
+        super::user_process_registry::UserProcessSlotState::Reaping => "reaping",
+    };
+    crate::arch::riscv64::sbi::write_record(format_args!(
+        "wait4 registry stage={} parent_slot={} parent_generation={} parent_pid={} parent_cpu={} selector_pid={} wfi_returns={} live={} exact_children={} same_parent_ref={} same_parent_pid={} selector_candidates={} related_slot={} related_generation={} related_pid={} related_parent_slot={} related_parent_generation={} related_parent_pid={} related_cpu={} related_state={} related_quiesced={} sstatus=0x{:016x} sie=0x{:016x}\n",
+        stage,
+        parent_ref.slot(),
+        parent_ref.generation(),
+        parent_pid,
+        parent_cpu.logical_id(),
+        selector_pid,
+        wfi_return_count,
+        diagnostic.live_slot_count,
+        diagnostic.exact_child_count,
+        diagnostic.same_parent_ref_count,
+        diagnostic.same_parent_pid_count,
+        diagnostic.selector_candidate_count,
+        diagnostic.related_task_ref.slot(),
+        diagnostic.related_task_ref.generation(),
+        diagnostic.related_pid,
+        diagnostic.related_parent_task_ref.slot(),
+        diagnostic.related_parent_task_ref.generation(),
+        diagnostic.related_parent_pid,
+        diagnostic.related_cpu_ref.logical_id(),
+        related_state,
+        diagnostic.related_scheduler_quiesced as u8,
+        crate::arch::riscv64::csr::read_sstatus(),
+        crate::arch::riscv64::csr::read_sie(),
+    ));
+}
+
+#[cfg(not(checkpoint_handler_user_syscall_error))]
+fn print_wait4_smp_legacy_fallthrough_diagnostic(
+    _parent_ref: super::task::TaskRef,
+    _parent_pid: usize,
+    _parent_cpu: super::cpu::CpuRef,
+    _completed_child_record_pending: bool,
+    _child_selector: super::user_process_registry::UserProcessChildSelector,
+) {
+}
+
+#[cfg(checkpoint_handler_user_syscall_error)]
+fn print_user_process_slot_state(state: super::user_process_registry::UserProcessSlotState) {
+    use super::user_process_registry::UserProcessSlotState;
+    crate::arch::riscv64::sbi::putstr(match state {
+        UserProcessSlotState::Empty => "empty",
+        UserProcessSlotState::Reserved => "reserved",
+        UserProcessSlotState::Published => "published",
+        UserProcessSlotState::Zombie => "zombie",
+        UserProcessSlotState::Reaping => "reaping",
+    });
+}
 
 fn print_user_page_fault_diagnostic(frame: &TrapFrame) {
     let cause = frame.scause & !SCAUSE_INTERRUPT_BIT;
@@ -9222,6 +10111,7 @@ fn print_mapping_kind(kind: UserMappingKind, mapped: bool) {
         UserMappingKind::Stack => crate::arch::riscv64::sbi::putstr("stack"),
         UserMappingKind::Heap => crate::arch::riscv64::sbi::putstr("heap"),
         UserMappingKind::AnonymousPrivate => crate::arch::riscv64::sbi::putstr("anon-private"),
+        UserMappingKind::FileShared => crate::arch::riscv64::sbi::putstr("file-shared"),
         UserMappingKind::Empty => crate::arch::riscv64::sbi::putstr("empty"),
     }
 }
@@ -9338,6 +10228,7 @@ fn print_unsupported_syscall_diagnostic_with_clone_stage(frame: &TrapFrame, clon
     print_decimal(frame.reg(17));
     crate::arch::riscv64::sbi::putstr(" mode=");
     print_trap_mode(frame);
+    print_syscall_current_identity();
     print_syscall_arg_registers(frame);
     print_trap_return_address(frame);
     print_trap_saved_registers(frame);
@@ -9347,6 +10238,23 @@ fn print_unsupported_syscall_diagnostic_with_clone_stage(frame: &TrapFrame, clon
     print_hex(frame.stval);
     print_unsupported_syscall_detail(frame, clone_stage);
     crate::arch::riscv64::sbi::putchar(b'\n');
+}
+
+fn print_syscall_current_identity() {
+    let context = crate::context::context_ref();
+    let task_ref = context
+        .current_task_ref()
+        .unwrap_or(super::task::TaskRef::NONE);
+    let cpu_ref = context
+        .current_cpu()
+        .map(|current| current.cpu_ref())
+        .unwrap_or(super::cpu::CpuRef::invalid());
+    crate::arch::riscv64::sbi::putstr(" task_slot=");
+    print_decimal(task_ref.slot());
+    crate::arch::riscv64::sbi::putstr(" task_generation=");
+    print_decimal(task_ref.generation() as usize);
+    crate::arch::riscv64::sbi::putstr(" cpu=");
+    print_decimal(cpu_ref.logical_id());
 }
 
 fn print_unsupported_syscall_detail(frame: &TrapFrame, clone_stage: &str) {
@@ -9525,6 +10433,22 @@ fn print_clone_boundary(frame: &TrapFrame, stage: &str) {
         );
         print_decimal(usize::MAX);
     }
+}
+
+fn print_clone_enqueue_failure(failure: &super::user_boot::MarkEnqueuedFailure) {
+    crate::arch::riscv64::sbi::putstr(" clone enqueue diagnostic first_failed=");
+    crate::arch::riscv64::sbi::putstr(failure.first_failed);
+    crate::arch::riscv64::sbi::putstr(" state_snapshot=");
+    print_decimal(failure.state_snapshot as usize);
+    crate::arch::riscv64::sbi::putstr(" pid=");
+    print_decimal(failure.pid);
+    crate::arch::riscv64::sbi::putstr(" active_record_available=");
+    print_bool_digit(failure.active_task_record_available);
+    crate::arch::riscv64::sbi::putstr(" active_task_slot=");
+    print_decimal(failure.active_task_ref.slot());
+    crate::arch::riscv64::sbi::putstr(" active_task_generation=");
+    print_decimal(failure.active_task_ref.generation() as usize);
+    crate::arch::riscv64::sbi::putstr("\n");
 }
 
 fn clone_boundary_kind(
@@ -10332,6 +11256,7 @@ fn print_syscall_error_diagnostic(frame: &TrapFrame, errno: usize) {
     print_decimal(errno);
     crate::arch::riscv64::sbi::putstr(" mode=");
     print_trap_mode(frame);
+    print_syscall_current_identity();
     print_syscall_arg_registers(frame);
     crate::arch::riscv64::sbi::putstr(" sepc=0x");
     print_hex(frame.sepc);
@@ -10361,9 +11286,15 @@ fn syscall_name(nr: usize) -> &'static str {
         SYSCALL_DUP3 => "dup3",
         SYSCALL_FCNTL => "fcntl",
         SYSCALL_IOCTL => "ioctl",
+        SYSCALL_MKDIRAT => "mkdirat",
+        SYSCALL_UNLINKAT => "unlinkat",
+        SYSCALL_STATFS => "statfs",
+        SYSCALL_FTRUNCATE => "ftruncate",
         SYSCALL_FACCESSAT => "faccessat",
         SYSCALL_CHDIR => "chdir",
         SYSCALL_FCHMOD => "fchmod",
+        SYSCALL_FCHMODAT => "fchmodat",
+        SYSCALL_FCHOWNAT => "fchownat",
         SYSCALL_FCHOWN => "fchown",
         SYSCALL_OPENAT => "openat",
         SYSCALL_CLOSE => "close",
@@ -10867,7 +11798,7 @@ fn print_probe_path_copy(path_ptr: usize) {
 
 #[cfg(checkpoint_handler_user_syscall_error)]
 fn print_fd_table_diagnostic(detailed: bool) {
-    let files = &crate::context::context_ref().files_struct;
+    let files = super::user_boot::current_user_files_struct();
     let capacity = files.fd_table_capacity();
     crate::arch::riscv64::sbi::putstr(" fd_open=");
     print_decimal(files.fd_table_open_count());
@@ -10902,6 +11833,14 @@ fn print_fd_table_diagnostic(detailed: bool) {
                 crate::arch::riscv64::sbi::putstr(",pid=");
                 print_decimal(entry.pid);
             }
+            if matches!(
+                entry.ofd,
+                OpenFileDescriptionRef::Regular0 | OpenFileDescriptionRef::Regular1
+            ) {
+                crate::arch::riscv64::sbi::putstr(",path=\"");
+                print_path_bytes(files.filesystem_path_diagnostic(entry.ofd));
+                crate::arch::riscv64::sbi::putchar(b'\"');
+            }
             crate::arch::riscv64::sbi::putchar(b'}');
         }
         fd += 1;
@@ -10916,6 +11855,7 @@ fn print_ofd_name(ofd: OpenFileDescriptionRef) {
         OpenFileDescriptionRef::Stdout => "stdout",
         OpenFileDescriptionRef::Stderr => "stderr",
         OpenFileDescriptionRef::Regular0 => "regular0",
+        OpenFileDescriptionRef::Regular1 => "regular1",
         OpenFileDescriptionRef::Null => "null",
         OpenFileDescriptionRef::Tty0 => "tty0",
         OpenFileDescriptionRef::Pidfd0 => "pidfd0",
@@ -10977,7 +11917,10 @@ fn print_openat_path_error_detail(error: FileError, path: &[u8], flags: usize) {
     crate::arch::riscv64::sbi::putstr(" path=\"");
     print_path_bytes(path);
     crate::arch::riscv64::sbi::putchar(b'"');
-    print_fd_table_diagnostic(error == FileError::TooManyOpenFiles);
+    print_fd_table_diagnostic(matches!(
+        error,
+        FileError::AlreadyOpen | FileError::TooManyOpenFiles
+    ));
     crate::arch::riscv64::sbi::putchar(b'\n');
 }
 
@@ -11002,6 +11945,7 @@ fn print_file_error_name(error: FileError) {
         FileError::NotReady => "NotReady",
         FileError::BadFd => "BadFd",
         FileError::AlreadyOpen => "AlreadyOpen",
+        FileError::AlreadyExists => "AlreadyExists",
         FileError::NotReadable => "NotReadable",
         FileError::NotWritable => "NotWritable",
         FileError::PathUnavailable => "PathUnavailable",
@@ -11016,6 +11960,11 @@ fn print_file_error_name(error: FileError) {
         FileError::TooManySymlinks => "TooManySymlinks",
         FileError::TooManyOpenFiles => "TooManyOpenFiles",
         FileError::NotDirectory => "NotDirectory",
+        FileError::NameTooLong => "NameTooLong",
+        FileError::NoSpace => "NoSpace",
+        FileError::FileTooLarge => "FileTooLarge",
+        FileError::NoDevice => "NoDevice",
+        FileError::ReadOnly => "ReadOnly",
         FileError::BrokenPipe => "BrokenPipe",
     };
     crate::arch::riscv64::sbi::putstr(name);

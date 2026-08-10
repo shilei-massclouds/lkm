@@ -21,6 +21,7 @@ STRESS_CASES ?=
 STRESS_BASELINE ?=
 DIFFTEST_CASE ?= impl/arceos_ex/tests/stress/cases/rc-local-difftest.toml
 DIFFTEST_RUNS ?= 1
+LTP_STRESS_RUNS ?= 30
 
 KERNEL_DIR := impl/$(KERNEL)
 BASIC_TEST_RUNNER ?= $(KERNEL_DIR)/tests/basic/runner.py
@@ -38,7 +39,7 @@ STRESS_BASELINE_ARG := $(if $(STRESS_BASELINE),--baseline "$(STRESS_BASELINE)",)
 
 VERIFY_ARGS := -f $(SPEC) --max-depth all --max-breadth all -o /dev/null
 
-.PHONY: build run disk disk-clean fmt fmt-check clippy-check coding-spec-check charter-lock-check verify checkpoints-inventory checkpoints-map-linux checkpoints-coverage checkpoints-instrumentation-plan checkpoints checkpoints-linux-check test test-charter-lock test-basic test-composite test-verify test-checkpoints test-vm-activation-order test-trap-setup-order test-boot-init-flow-entry test-kunit test-smoke test-stress stress-test difftest-preflight difftest clean
+.PHONY: build run disk disk-clean fmt fmt-check clippy-check coding-spec-check charter-lock-check verify checkpoints-inventory checkpoints-map-linux checkpoints-coverage checkpoints-instrumentation-plan checkpoints checkpoints-linux-check test test-ltp test-ltp-stress test-charter-lock test-basic test-composite test-verify test-checkpoints test-vm-activation-order test-trap-setup-order test-boot-init-flow-entry test-kunit test-smoke test-stress stress-test difftest-preflight difftest clean
 
 build:
 	@if [ -n "$(BASIC_TEST_SELECTION_CONFLICT)" ]; then \
@@ -134,6 +135,18 @@ test:
 	$(MAKE) test-trap-setup-order
 	$(MAKE) test-boot-init-flow-entry
 	@bash tools/test_summary.sh "$(MAKE)" "$(SPEC)" "$(KERNEL_DIR)" "$(KUNIT_APP)" "$(abspath $(KUNIT_HANDLERS))" "$(SMOKE_APP)" "$(TEST_PLIC_PROVIDERS)"
+
+test-ltp:
+	$(MAKE) disk ROOTFS=canonical
+	$(MAKE) run TEST=ltp
+	$(MAKE) run TEST=ltp-lo
+	$(MAKE) run TEST=ltp-linux
+
+test-ltp-stress:
+	$(STRESS_RUNNER) \
+		impl/arceos_ex/tests/stress/cases/ltp-supported-native.toml \
+		impl/arceos_ex/tests/stress/cases/ltp-supported-linux-object.toml \
+		--runs $(LTP_STRESS_RUNS)
 
 test-verify:
 	$(MAKE) verify REPORT=text SPEC="$(SPEC)"

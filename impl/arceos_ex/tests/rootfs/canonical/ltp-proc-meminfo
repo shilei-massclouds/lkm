@@ -1,0 +1,6 @@
+# Static stock-LTP harness fixture; this is not a procfs implementation.
+MemTotal:         131072 kB
+MemFree:           65536 kB
+MemAvailable:      65536 kB
+Cached:                 0 kB
+SwapFree:               0 kB

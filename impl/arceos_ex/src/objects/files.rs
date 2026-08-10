@@ -23,6 +23,7 @@ pub const REGULAR_FILE_BUFFER_SIZE: usize = 64 * 1024;
 pub const PIPE_BUFFER_SIZE: usize = 4096;
 const SHARED_PIPE_COUNT: usize = 32;
 const SHARED_PIPE_WAITER_COUNT: usize = USER_TASK_SLOT_COUNT;
+const SHARED_REGULAR_OFD_COUNT: usize = USER_TASK_SLOT_COUNT * 2;
 pub const LINUX_DIRENT64_HEADER_SIZE: usize = 19;
 pub const TERMIOS_SIZE: usize = 36;
 // Consumed by the user-boot stdin fixture configuration.
@@ -108,6 +109,7 @@ pub enum FileError {
     NotReady,
     BadFd,
     AlreadyOpen,
+    AlreadyExists,
     NotReadable,
     NotWritable,
     PathUnavailable,
@@ -122,6 +124,11 @@ pub enum FileError {
     TooManySymlinks,
     TooManyOpenFiles,
     NotDirectory,
+    NameTooLong,
+    NoSpace,
+    FileTooLarge,
+    NoDevice,
+    ReadOnly,
     BrokenPipe,
 }
 
@@ -133,6 +140,210 @@ enum FilesystemFdKind {
 }
 
 pub type FileResult<T> = Result<T, FileError>;
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+struct SharedRegularOfdRef {
+    slot: u8,
+    generation: u32,
+}
+
+struct SharedRegularOfdSlot {
+    generation: u32,
+    occupied: bool,
+    references: usize,
+    offset: usize,
+}
+
+impl SharedRegularOfdSlot {
+    const fn new() -> Self {
+        Self {
+            generation: 0,
+            occupied: false,
+            references: 0,
+            offset: 0,
+        }
+    }
+
+    fn matches(&self, ofd_ref: SharedRegularOfdRef) -> bool {
+        self.occupied && self.generation == ofd_ref.generation && ofd_ref.generation != 0
+    }
+}
+
+struct SharedRegularOfdRegistry {
+    slots: [SharedRegularOfdSlot; SHARED_REGULAR_OFD_COUNT],
+}
+
+impl SharedRegularOfdRegistry {
+    const fn new() -> Self {
+        Self {
+            slots: [const { SharedRegularOfdSlot::new() }; SHARED_REGULAR_OFD_COUNT],
+        }
+    }
+
+    fn allocate(&mut self) -> Option<SharedRegularOfdRef> {
+        for (index, slot) in self.slots.iter_mut().enumerate() {
+            if slot.occupied {
+                continue;
+            }
+            slot.generation = slot.generation.wrapping_add(1);
+            if slot.generation == 0 {
+                slot.generation = 1;
+            }
+            slot.occupied = true;
+            slot.references = 1;
+            slot.offset = 0;
+            return Some(SharedRegularOfdRef {
+                slot: index as u8,
+                generation: slot.generation,
+            });
+        }
+        None
+    }
+
+    fn acquire(&mut self, ofd_ref: SharedRegularOfdRef, references: usize) -> bool {
+        let Some(slot) = self.slots.get_mut(ofd_ref.slot as usize) else {
+            return false;
+        };
+        if !slot.matches(ofd_ref) || references == 0 {
+            return false;
+        }
+        let Some(next) = slot.references.checked_add(references) else {
+            return false;
+        };
+        slot.references = next;
+        true
+    }
+
+    fn release(&mut self, ofd_ref: SharedRegularOfdRef, references: usize) -> bool {
+        let Some(slot) = self.slots.get_mut(ofd_ref.slot as usize) else {
+            return false;
+        };
+        if !slot.matches(ofd_ref) || references == 0 || slot.references < references {
+            return false;
+        }
+        slot.references -= references;
+        if slot.references == 0 {
+            slot.offset = 0;
+            slot.occupied = false;
+        }
+        true
+    }
+
+    fn offset(&self, ofd_ref: SharedRegularOfdRef) -> FileResult<usize> {
+        self.slots
+            .get(ofd_ref.slot as usize)
+            .filter(|slot| slot.matches(ofd_ref))
+            .map(|slot| slot.offset)
+            .ok_or(FileError::BadFd)
+    }
+
+    fn reserve_read(
+        &mut self,
+        ofd_ref: SharedRegularOfdRef,
+        file_len: usize,
+        requested: usize,
+    ) -> FileResult<(usize, usize)> {
+        let slot = self
+            .slots
+            .get_mut(ofd_ref.slot as usize)
+            .filter(|slot| slot.matches(ofd_ref))
+            .ok_or(FileError::BadFd)?;
+        let start = slot.offset;
+        let read = core::cmp::min(requested, file_len.saturating_sub(start));
+        slot.offset = start.checked_add(read).ok_or(FileError::InvalidArgument)?;
+        Ok((start, read))
+    }
+
+    fn seek(
+        &mut self,
+        ofd_ref: SharedRegularOfdRef,
+        delta: isize,
+        whence: usize,
+        end: usize,
+    ) -> FileResult<usize> {
+        let slot = self
+            .slots
+            .get_mut(ofd_ref.slot as usize)
+            .filter(|slot| slot.matches(ofd_ref))
+            .ok_or(FileError::BadFd)?;
+        let base = match whence {
+            SEEK_SET => 0i128,
+            SEEK_CUR => slot.offset as i128,
+            SEEK_END => end as i128,
+            _ => return Err(FileError::InvalidArgument),
+        };
+        let target = base + delta as i128;
+        if target < 0 || target > usize::MAX as i128 {
+            return Err(FileError::InvalidArgument);
+        }
+        slot.offset = target as usize;
+        Ok(slot.offset)
+    }
+
+    fn set_offset(&mut self, ofd_ref: SharedRegularOfdRef, offset: usize) -> bool {
+        let Some(slot) = self.slots.get_mut(ofd_ref.slot as usize) else {
+            return false;
+        };
+        if !slot.matches(ofd_ref) {
+            return false;
+        }
+        slot.offset = offset;
+        true
+    }
+}
+
+static SHARED_REGULAR_OFD_REGISTRY: IrqSpinLock<SharedRegularOfdRegistry> =
+    IrqSpinLock::new(SharedRegularOfdRegistry::new());
+
+fn allocate_shared_regular_ofd() -> FileResult<SharedRegularOfdRef> {
+    SHARED_REGULAR_OFD_REGISTRY
+        .lock()
+        .allocate()
+        .ok_or(FileError::TooManyOpenFiles)
+}
+
+fn acquire_shared_regular_ofd(ofd_ref: SharedRegularOfdRef, references: usize) -> bool {
+    SHARED_REGULAR_OFD_REGISTRY
+        .lock()
+        .acquire(ofd_ref, references)
+}
+
+fn release_shared_regular_ofd(ofd_ref: SharedRegularOfdRef, references: usize) -> bool {
+    SHARED_REGULAR_OFD_REGISTRY
+        .lock()
+        .release(ofd_ref, references)
+}
+
+fn shared_regular_ofd_offset(ofd_ref: SharedRegularOfdRef) -> FileResult<usize> {
+    SHARED_REGULAR_OFD_REGISTRY.lock().offset(ofd_ref)
+}
+
+fn reserve_shared_regular_read(
+    ofd_ref: SharedRegularOfdRef,
+    file_len: usize,
+    requested: usize,
+) -> FileResult<(usize, usize)> {
+    SHARED_REGULAR_OFD_REGISTRY
+        .lock()
+        .reserve_read(ofd_ref, file_len, requested)
+}
+
+fn seek_shared_regular_ofd(
+    ofd_ref: SharedRegularOfdRef,
+    delta: isize,
+    whence: usize,
+    end: usize,
+) -> FileResult<usize> {
+    SHARED_REGULAR_OFD_REGISTRY
+        .lock()
+        .seek(ofd_ref, delta, whence, end)
+}
+
+fn set_shared_regular_ofd_offset(ofd_ref: SharedRegularOfdRef, offset: usize) -> bool {
+    SHARED_REGULAR_OFD_REGISTRY
+        .lock()
+        .set_offset(ofd_ref, offset)
+}
 
 struct PipeBuffer {
     bytes: [u8; PIPE_BUFFER_SIZE],
@@ -618,7 +829,11 @@ pub fn is_null_path(path: &[u8]) -> bool {
 
 fn vfs_error_to_file_error(error: VfsError) -> FileError {
     match error {
-        VfsError::NotFound => FileError::PathUnavailable,
+        VfsError::InvalidName | VfsError::NotFound => FileError::PathUnavailable,
+        VfsError::NameTooLong => FileError::NameTooLong,
+        VfsError::AlreadyExists => FileError::AlreadyExists,
+        VfsError::NoSpace => FileError::NoSpace,
+        VfsError::ReadOnly => FileError::ReadOnly,
         VfsError::ShortBuffer => FileError::BufferTooSmall,
         VfsError::Backend => FileError::VfsBackendUnavailable,
         VfsError::SymlinkLoop => FileError::TooManySymlinks,
@@ -777,6 +992,7 @@ pub enum OpenFileDescriptionRef {
     Stdout,
     Stderr,
     Regular0,
+    Regular1,
     Null,
     Tty0,
     Pidfd0,
@@ -853,6 +1069,8 @@ impl CloseOnExecReport {
 #[derive(Clone, Copy)]
 pub struct FilesStructSnapshot {
     entries: [Option<FileDescriptorEntry>; FILE_FD_COUNT],
+    regular0_ofd_ref: Option<SharedRegularOfdRef>,
+    regular0_ofd_refs: usize,
     regular0_len: usize,
     regular0_offset: usize,
     regular0_path: [u8; FILE_PATH_MAX],
@@ -861,6 +1079,14 @@ pub struct FilesStructSnapshot {
     directory0_file_ref: Option<FileRef>,
     directory0_offset: usize,
     directory0_last_getdents_len: usize,
+    regular1_ofd_ref: Option<SharedRegularOfdRef>,
+    regular1_ofd_refs: usize,
+    regular1_len: usize,
+    regular1_offset: usize,
+    regular1_path: [u8; FILE_PATH_MAX],
+    regular1_path_len: usize,
+    filesystem1_kind: FilesystemFdKind,
+    file1_ref: Option<FileRef>,
     pidfd_fd: usize,
     pidfd_child_pid: usize,
     pidfd_exit_status: usize,
@@ -874,6 +1100,8 @@ impl FilesStructSnapshot {
     pub const fn empty() -> Self {
         Self {
             entries: [None; FILE_FD_COUNT],
+            regular0_ofd_ref: None,
+            regular0_ofd_refs: 0,
             regular0_len: 0,
             regular0_offset: 0,
             regular0_path: [0; FILE_PATH_MAX],
@@ -882,6 +1110,14 @@ impl FilesStructSnapshot {
             directory0_file_ref: None,
             directory0_offset: 0,
             directory0_last_getdents_len: 0,
+            regular1_ofd_ref: None,
+            regular1_ofd_refs: 0,
+            regular1_len: 0,
+            regular1_offset: 0,
+            regular1_path: [0; FILE_PATH_MAX],
+            regular1_path_len: 0,
+            filesystem1_kind: FilesystemFdKind::None,
+            file1_ref: None,
             pidfd_fd: usize::MAX,
             pidfd_child_pid: 0,
             pidfd_exit_status: 0,
@@ -897,6 +1133,8 @@ impl FilesStructSnapshot {
 pub struct FileStat {
     size: usize,
     mode: u32,
+    uid: u32,
+    gid: u32,
 }
 
 impl FileStat {
@@ -907,18 +1145,32 @@ impl FileStat {
             VfsInodeKind::DeviceNode => Self {
                 size,
                 mode: 0o020444,
+                uid: 0,
+                gid: 0,
             },
             VfsInodeKind::Symlink => Self {
                 size,
                 mode: 0o120777,
+                uid: 0,
+                gid: 0,
             },
         }
+    }
+
+    const fn new_owned(size: usize, kind: VfsInodeKind, mode: u32, uid: u32, gid: u32) -> Self {
+        let mut stat = Self::new(size, kind);
+        stat.mode = mode;
+        stat.uid = uid;
+        stat.gid = gid;
+        stat
     }
 
     const fn regular(size: usize) -> Self {
         Self {
             size,
             mode: 0o100444,
+            uid: 0,
+            gid: 0,
         }
     }
 
@@ -926,6 +1178,8 @@ impl FileStat {
         Self {
             size,
             mode: 0o040555,
+            uid: 0,
+            gid: 0,
         }
     }
 
@@ -933,6 +1187,8 @@ impl FileStat {
         Self {
             size,
             mode: 0o140777,
+            uid: 0,
+            gid: 0,
         }
     }
 
@@ -940,6 +1196,8 @@ impl FileStat {
         Self {
             size,
             mode: 0o010600,
+            uid: 0,
+            gid: 0,
         }
     }
 
@@ -951,10 +1209,20 @@ impl FileStat {
         self.mode
     }
 
+    pub const fn uid(&self) -> u32 {
+        self.uid
+    }
+
+    pub const fn gid(&self) -> u32 {
+        self.gid
+    }
+
     const fn with_permission_mode(self, mode: u32) -> Self {
         Self {
             size: self.size,
             mode: (self.mode & 0o170000) | (mode & 0o7777),
+            uid: self.uid,
+            gid: self.gid,
         }
     }
 }
@@ -2069,6 +2337,7 @@ pub struct FilesStruct {
     stdout: OpenFileDescription,
     stderr: OpenFileDescription,
     regular0: OpenFileDescription,
+    regular1: OpenFileDescription,
     null: OpenFileDescription,
     tty0: OpenFileDescription,
     socket0: OpenFileDescription,
@@ -2076,9 +2345,11 @@ pub struct FilesStruct {
     stdout_backend: FileBackend,
     stderr_backend: FileBackend,
     regular0_backend: FileBackend,
+    regular1_backend: FileBackend,
     null_backend: FileBackend,
     tty0_backend: FileBackend,
     socket0_backend: FileBackend,
+    regular0_ofd_ref: Option<SharedRegularOfdRef>,
     regular0_buffer: [u8; REGULAR_FILE_BUFFER_SIZE],
     regular0_len: usize,
     regular0_offset: usize,
@@ -2088,6 +2359,14 @@ pub struct FilesStruct {
     directory0_file_ref: Option<FileRef>,
     directory0_offset: usize,
     directory0_last_getdents_len: usize,
+    regular1_ofd_ref: Option<SharedRegularOfdRef>,
+    regular1_buffer: [u8; REGULAR_FILE_BUFFER_SIZE],
+    regular1_len: usize,
+    regular1_offset: usize,
+    regular1_path: [u8; FILE_PATH_MAX],
+    regular1_path_len: usize,
+    filesystem1_kind: FilesystemFdKind,
+    file1_ref: Option<FileRef>,
     pidfd_fd: usize,
     pidfd_child_pid: usize,
     pidfd_exit_status: usize,
@@ -2168,6 +2447,7 @@ impl FilesStruct {
             stdout: OpenFileDescription::new(),
             stderr: OpenFileDescription::new(),
             regular0: OpenFileDescription::new(),
+            regular1: OpenFileDescription::new(),
             null: OpenFileDescription::new(),
             tty0: OpenFileDescription::new(),
             socket0: OpenFileDescription::new(),
@@ -2175,9 +2455,11 @@ impl FilesStruct {
             stdout_backend: FileBackend::new(FileBackendKind::CharDevice),
             stderr_backend: FileBackend::new(FileBackendKind::CharDevice),
             regular0_backend: FileBackend::new(FileBackendKind::RegularFile),
+            regular1_backend: FileBackend::new(FileBackendKind::RegularFile),
             null_backend: FileBackend::new(FileBackendKind::CharDevice),
             tty0_backend: FileBackend::new(FileBackendKind::CharDevice),
             socket0_backend: FileBackend::new(FileBackendKind::UnixSocket),
+            regular0_ofd_ref: None,
             regular0_buffer: [0; REGULAR_FILE_BUFFER_SIZE],
             regular0_len: 0,
             regular0_offset: 0,
@@ -2187,6 +2469,14 @@ impl FilesStruct {
             directory0_file_ref: None,
             directory0_offset: 0,
             directory0_last_getdents_len: 0,
+            regular1_ofd_ref: None,
+            regular1_buffer: [0; REGULAR_FILE_BUFFER_SIZE],
+            regular1_len: 0,
+            regular1_offset: 0,
+            regular1_path: [0; FILE_PATH_MAX],
+            regular1_path_len: 0,
+            filesystem1_kind: FilesystemFdKind::None,
+            file1_ref: None,
             pidfd_fd: usize::MAX,
             pidfd_child_pid: 0,
             pidfd_exit_status: 0,
@@ -2561,6 +2851,54 @@ impl FilesStruct {
         )
     }
 
+    fn regular_ofd_ref(&self, ofd: OpenFileDescriptionRef) -> Option<SharedRegularOfdRef> {
+        match ofd {
+            OpenFileDescriptionRef::Regular0 => self.regular0_ofd_ref,
+            OpenFileDescriptionRef::Regular1 => self.regular1_ofd_ref,
+            _ => None,
+        }
+    }
+
+    fn regular_ofd_counts(&self) -> (usize, usize) {
+        (
+            self.fd_table
+                .count_for_ofd(OpenFileDescriptionRef::Regular0),
+            self.fd_table
+                .count_for_ofd(OpenFileDescriptionRef::Regular1),
+        )
+    }
+
+    fn free_regular_ofd(&self) -> Option<OpenFileDescriptionRef> {
+        let (regular0_refs, regular1_refs) = self.regular_ofd_counts();
+        if regular0_refs == 0 {
+            Some(OpenFileDescriptionRef::Regular0)
+        } else if regular1_refs == 0 {
+            Some(OpenFileDescriptionRef::Regular1)
+        } else {
+            None
+        }
+    }
+
+    fn acquire_regular_entry(&self, entry: FileDescriptorEntry) -> FileResult<bool> {
+        let Some(ofd_ref) = self.regular_ofd_ref(entry.ofd) else {
+            return Ok(false);
+        };
+        if !acquire_shared_regular_ofd(ofd_ref, 1) {
+            return Err(FileError::BadFd);
+        }
+        Ok(true)
+    }
+
+    fn release_regular_entry(&self, entry: FileDescriptorEntry) -> bool {
+        match self.regular_ofd_ref(entry.ofd) {
+            Some(ofd_ref) => release_shared_regular_ofd(ofd_ref, 1),
+            None => !matches!(
+                entry.ofd,
+                OpenFileDescriptionRef::Regular0 | OpenFileDescriptionRef::Regular1
+            ),
+        }
+    }
+
     fn acquire_pipe_entry(&self, entry: FileDescriptorEntry) -> FileResult<bool> {
         let (readers, writers) = match entry.ofd {
             OpenFileDescriptionRef::PipeRead0 => (1, 0),
@@ -2592,23 +2930,91 @@ impl FilesStruct {
     }
 
     pub fn fork_acquire_shared_resources(&mut self) -> bool {
+        let (regular0_refs, regular1_refs) = self.regular_ofd_counts();
         let (readers, writers) = self.pipe_endpoint_counts();
         self.parent_fd_snapshot_live.store(0, Ordering::Release);
         self.parent_pipe_read_snapshot_live
             .store(0, Ordering::Release);
         self.parent_pipe_write_snapshot_live
             .store(0, Ordering::Release);
+        if regular0_refs == 0 {
+            self.regular0_ofd_ref = None;
+        } else if !self
+            .regular0_ofd_ref
+            .is_some_and(|ofd_ref| acquire_shared_regular_ofd(ofd_ref, regular0_refs))
+        {
+            return false;
+        }
+        if regular1_refs == 0 {
+            self.regular1_ofd_ref = None;
+        } else if !self
+            .regular1_ofd_ref
+            .is_some_and(|ofd_ref| acquire_shared_regular_ofd(ofd_ref, regular1_refs))
+        {
+            if regular0_refs != 0 {
+                assert!(release_shared_regular_ofd(
+                    self.regular0_ofd_ref.expect("acquired Regular0 OFD"),
+                    regular0_refs,
+                ));
+            }
+            return false;
+        }
         if readers == 0 && writers == 0 {
             self.pipe_ref = None;
             return true;
         }
         let Some(pipe_ref) = self.pipe_ref else {
+            if regular1_refs != 0 {
+                assert!(release_shared_regular_ofd(
+                    self.regular1_ofd_ref.expect("acquired Regular1 OFD"),
+                    regular1_refs,
+                ));
+            }
+            if regular0_refs != 0 {
+                assert!(release_shared_regular_ofd(
+                    self.regular0_ofd_ref.expect("acquired Regular0 OFD"),
+                    regular0_refs,
+                ));
+            }
             return false;
         };
-        acquire_shared_pipe(pipe_ref, readers, writers)
+        if acquire_shared_pipe(pipe_ref, readers, writers) {
+            true
+        } else {
+            if regular1_refs != 0 {
+                assert!(release_shared_regular_ofd(
+                    self.regular1_ofd_ref.expect("acquired Regular1 OFD"),
+                    regular1_refs,
+                ));
+            }
+            if regular0_refs != 0 {
+                assert!(release_shared_regular_ofd(
+                    self.regular0_ofd_ref.expect("acquired Regular0 OFD"),
+                    regular0_refs,
+                ));
+            }
+            false
+        }
     }
 
     pub fn release_shared_resources(&mut self) -> bool {
+        let (regular0_refs, regular1_refs) = self.regular_ofd_counts();
+        if regular0_refs != 0
+            && !self
+                .regular0_ofd_ref
+                .is_some_and(|ofd_ref| release_shared_regular_ofd(ofd_ref, regular0_refs))
+        {
+            return false;
+        }
+        if regular1_refs != 0
+            && !self
+                .regular1_ofd_ref
+                .is_some_and(|ofd_ref| release_shared_regular_ofd(ofd_ref, regular1_refs))
+        {
+            return false;
+        }
+        self.regular0_ofd_ref = None;
+        self.regular1_ofd_ref = None;
         let Some(pipe_ref) = self.pipe_ref else {
             return true;
         };
@@ -2665,12 +3071,16 @@ impl FilesStruct {
         self.regular0_len
     }
 
-    pub const fn regular0_offset(&self) -> usize {
-        self.regular0_offset
+    pub fn regular0_offset(&self) -> usize {
+        self.regular0_ofd_ref
+            .and_then(|ofd_ref| shared_regular_ofd_offset(ofd_ref).ok())
+            .unwrap_or(self.regular0_offset)
     }
 
-    pub const fn directory0_offset(&self) -> usize {
-        self.directory0_offset
+    pub fn directory0_offset(&self) -> usize {
+        self.regular0_ofd_ref
+            .and_then(|ofd_ref| shared_regular_ofd_offset(ofd_ref).ok())
+            .unwrap_or(self.directory0_offset)
     }
 
     pub const fn directory0_last_getdents_len(&self) -> usize {
@@ -2693,6 +3103,15 @@ impl FilesStruct {
         self.fd_table.entry_diagnostic(fd)
     }
 
+    #[cfg(checkpoint_handler_user_syscall_error)]
+    pub fn filesystem_path_diagnostic(&self, ofd: OpenFileDescriptionRef) -> &[u8] {
+        match ofd {
+            OpenFileDescriptionRef::Regular0 => &self.regular0_path[..self.regular0_path_len],
+            OpenFileDescriptionRef::Regular1 => &self.regular1_path[..self.regular1_path_len],
+            _ => &[],
+        }
+    }
+
     pub const fn stdin(&self) -> &OpenFileDescription {
         &self.stdin
     }
@@ -2707,6 +3126,10 @@ impl FilesStruct {
 
     pub const fn regular0(&self) -> &OpenFileDescription {
         &self.regular0
+    }
+
+    pub const fn regular1(&self) -> &OpenFileDescription {
+        &self.regular1
     }
 
     pub const fn null(&self) -> &OpenFileDescription {
@@ -2735,6 +3158,10 @@ impl FilesStruct {
 
     pub const fn regular0_backend(&self) -> &FileBackend {
         &self.regular0_backend
+    }
+
+    pub const fn regular1_backend(&self) -> &FileBackend {
+        &self.regular1_backend
     }
 
     pub const fn null_backend(&self) -> &FileBackend {
@@ -2904,15 +3331,18 @@ impl FilesStruct {
         {
             return Err(FileError::NotReady);
         }
-        if self.fd_table.fd_bound(FdRef::Regular0) {
-            return Err(FileError::AlreadyOpen);
-        }
         if open_flags & FILE_O_ACCMODE != FILE_O_RDONLY {
             return Err(FileError::PermissionDenied);
         }
+        let regular_ofd = self.free_regular_ofd().ok_or(FileError::AlreadyOpen)?;
 
         let mut provider = virtio_blk::live_provider(kernel_image);
-        self.regular0_buffer.fill(0);
+        let buffer = match regular_ofd {
+            OpenFileDescriptionRef::Regular0 => &mut self.regular0_buffer,
+            OpenFileDescriptionRef::Regular1 => &mut self.regular1_buffer,
+            _ => unreachable!(),
+        };
+        buffer.fill(0);
         let len = vfs_core
             .read_path(
                 fs_struct,
@@ -2920,35 +3350,65 @@ impl FilesStruct {
                 block_device_registry,
                 &mut provider,
                 path,
-                &mut self.regular0_buffer,
+                buffer,
             )
             .map_err(vfs_error_to_file_error)?;
 
-        if self.regular0_backend.state() == State::Base {
-            self.regular0_backend
+        let (ofd, backend) = match regular_ofd {
+            OpenFileDescriptionRef::Regular0 => (&mut self.regular0, &mut self.regular0_backend),
+            OpenFileDescriptionRef::Regular1 => (&mut self.regular1, &mut self.regular1_backend),
+            _ => unreachable!(),
+        };
+        if backend.state() == State::Base {
+            backend
                 .bind_regular_file()
                 .map_err(|_| FileError::BackendUnavailable)?;
         }
-        if self.regular0.state() == State::Base {
-            self.regular0
-                .setup_regular(&self.regular0_backend)
+        if ofd.state() == State::Base {
+            ofd.setup_regular(backend)
                 .map_err(|_| FileError::BackendUnavailable)?;
         }
 
-        let fd = self.fd_table.install_regular(
-            &self.regular0,
+        let ofd_ref = allocate_shared_regular_ofd()?;
+        let fd = match self.fd_table.install_opened(
+            ofd,
+            regular_ofd,
+            true,
+            false,
             persistent_open_flags(open_flags),
             open_flags & FILE_O_CLOEXEC != 0,
-        )?;
-        self.regular0_len = len;
-        self.regular0_offset = 0;
-        self.filesystem0_kind = FilesystemFdKind::RegularFile;
-        self.directory0_file_ref = None;
-        self.directory0_offset = 0;
-        self.directory0_last_getdents_len = 0;
-        self.regular0_path.fill(0);
-        self.regular0_path[..path.len()].copy_from_slice(path);
-        self.regular0_path_len = path.len();
+        ) {
+            Ok(fd) => fd,
+            Err(error) => {
+                assert!(release_shared_regular_ofd(ofd_ref, 1));
+                return Err(error);
+            }
+        };
+        match regular_ofd {
+            OpenFileDescriptionRef::Regular0 => {
+                self.regular0_ofd_ref = Some(ofd_ref);
+                self.regular0_len = len;
+                self.regular0_offset = 0;
+                self.filesystem0_kind = FilesystemFdKind::RegularFile;
+                self.directory0_file_ref = None;
+                self.directory0_offset = 0;
+                self.directory0_last_getdents_len = 0;
+                self.regular0_path.fill(0);
+                self.regular0_path[..path.len()].copy_from_slice(path);
+                self.regular0_path_len = path.len();
+            }
+            OpenFileDescriptionRef::Regular1 => {
+                self.regular1_ofd_ref = Some(ofd_ref);
+                self.regular1_len = len;
+                self.regular1_offset = 0;
+                self.filesystem1_kind = FilesystemFdKind::RegularFile;
+                self.file1_ref = None;
+                self.regular1_path.fill(0);
+                self.regular1_path[..path.len()].copy_from_slice(path);
+                self.regular1_path_len = path.len();
+            }
+            _ => unreachable!(),
+        }
         self.open_path_routes_to_vfs.fetch_add(1, Ordering::AcqRel);
         self.regular_fd_installed.fetch_add(1, Ordering::AcqRel);
         Ok(fd)
@@ -2974,12 +3434,10 @@ impl FilesStruct {
         {
             return Err(FileError::NotReady);
         }
-        if self.fd_table.fd_bound(FdRef::Regular0) {
-            return Err(FileError::AlreadyOpen);
-        }
         if open_flags & FILE_O_ACCMODE != FILE_O_RDONLY {
             return Err(FileError::PermissionDenied);
         }
+        let regular_ofd = self.free_regular_ofd().ok_or(FileError::AlreadyOpen)?;
 
         let mut provider = virtio_blk::live_provider(kernel_image);
         let (file_ref, kind) = vfs_core
@@ -2995,7 +3453,12 @@ impl FilesStruct {
 
         let regular_len = match kind {
             VfsInodeKind::RegularFile => {
-                self.regular0_buffer.fill(0);
+                let buffer = match regular_ofd {
+                    OpenFileDescriptionRef::Regular0 => &mut self.regular0_buffer,
+                    OpenFileDescriptionRef::Regular1 => &mut self.regular1_buffer,
+                    _ => unreachable!(),
+                };
+                buffer.fill(0);
                 Some(
                     vfs_core
                         .read_opened_file(
@@ -3004,7 +3467,7 @@ impl FilesStruct {
                             &mut provider,
                             file_ref,
                             0,
-                            &mut self.regular0_buffer,
+                            buffer,
                         )
                         .map_err(vfs_error_to_file_error)?,
                 )
@@ -3015,52 +3478,226 @@ impl FilesStruct {
             }
         };
 
-        if self.regular0_backend.state() == State::Base {
-            self.regular0_backend
+        let (ofd, backend) = match regular_ofd {
+            OpenFileDescriptionRef::Regular0 => (&mut self.regular0, &mut self.regular0_backend),
+            OpenFileDescriptionRef::Regular1 => (&mut self.regular1, &mut self.regular1_backend),
+            _ => unreachable!(),
+        };
+        if backend.state() == State::Base {
+            backend
                 .bind_regular_file()
                 .map_err(|_| FileError::BackendUnavailable)?;
         }
-        if self.regular0.state() == State::Base {
-            self.regular0
-                .setup_regular(&self.regular0_backend)
+        if ofd.state() == State::Base {
+            ofd.setup_regular(backend)
                 .map_err(|_| FileError::BackendUnavailable)?;
         }
 
-        let fd = self.fd_table.install_regular(
-            &self.regular0,
+        let ofd_ref = allocate_shared_regular_ofd()?;
+        let fd = match self.fd_table.install_opened(
+            ofd,
+            regular_ofd,
+            true,
+            false,
             persistent_open_flags(open_flags),
             open_flags & FILE_O_CLOEXEC != 0,
-        )?;
-        self.regular0_path.fill(0);
-        self.regular0_path[..path.len()].copy_from_slice(path);
-        self.regular0_path_len = path.len();
+        ) {
+            Ok(fd) => fd,
+            Err(error) => {
+                assert!(release_shared_regular_ofd(ofd_ref, 1));
+                return Err(error);
+            }
+        };
         self.open_path_routes_to_vfs.fetch_add(1, Ordering::AcqRel);
 
-        match kind {
-            VfsInodeKind::RegularFile => {
-                let len = regular_len.ok_or(FileError::BackendUnavailable)?;
+        let filesystem_kind = match kind {
+            VfsInodeKind::RegularFile => FilesystemFdKind::RegularFile,
+            VfsInodeKind::Directory => FilesystemFdKind::Directory,
+            VfsInodeKind::DeviceNode | VfsInodeKind::Symlink => unreachable!(),
+        };
+        let len = regular_len.unwrap_or(0);
+        match regular_ofd {
+            OpenFileDescriptionRef::Regular0 => {
+                self.regular0_ofd_ref = Some(ofd_ref);
                 self.regular0_len = len;
                 self.regular0_offset = 0;
-                self.filesystem0_kind = FilesystemFdKind::RegularFile;
-                self.directory0_file_ref = None;
-                self.directory0_offset = 0;
-                self.directory0_last_getdents_len = 0;
-                self.regular_fd_installed.fetch_add(1, Ordering::AcqRel);
-            }
-            VfsInodeKind::Directory => {
-                self.regular0_len = 0;
-                self.regular0_offset = 0;
-                self.filesystem0_kind = FilesystemFdKind::Directory;
+                self.filesystem0_kind = filesystem_kind;
                 self.directory0_file_ref = Some(file_ref);
                 self.directory0_offset = 0;
                 self.directory0_last_getdents_len = 0;
+                self.regular0_path.fill(0);
+                self.regular0_path[..path.len()].copy_from_slice(path);
+                self.regular0_path_len = path.len();
+            }
+            OpenFileDescriptionRef::Regular1 => {
+                self.regular1_ofd_ref = Some(ofd_ref);
+                self.regular1_len = len;
+                self.regular1_offset = 0;
+                self.filesystem1_kind = filesystem_kind;
+                self.file1_ref = Some(file_ref);
+                self.regular1_path.fill(0);
+                self.regular1_path[..path.len()].copy_from_slice(path);
+                self.regular1_path_len = path.len();
+            }
+            _ => unreachable!(),
+        }
+        match kind {
+            VfsInodeKind::RegularFile => {
+                self.regular_fd_installed.fetch_add(1, Ordering::AcqRel);
+            }
+            VfsInodeKind::Directory => {
                 self.directory_fd_installed.fetch_add(1, Ordering::AcqRel);
             }
-            VfsInodeKind::DeviceNode | VfsInodeKind::Symlink => {
-                return Err(FileError::BackendUnavailable);
-            }
+            VfsInodeKind::DeviceNode | VfsInodeKind::Symlink => unreachable!(),
         }
 
+        Ok(fd)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_exclusive_regular_path(
+        &mut self,
+        fs_struct: &FsStruct,
+        vfs_core: &mut VfsCore,
+        ext2_filesystem: &mut Ext2FileSystem,
+        block_device_registry: &mut BlockDeviceRegistry,
+        kernel_image: &KernelImage,
+        path: &[u8],
+        open_flags: u32,
+        mode: u32,
+        uid: u32,
+        gid: u32,
+    ) -> FileResult<usize> {
+        if self.lifecycle.state() != State::Ready
+            || !self.fd_table_bound
+            || !self.regular_file_slot_ready
+            || path.is_empty()
+            || path.len() > FILE_PATH_MAX
+        {
+            return Err(FileError::NotReady);
+        }
+        if open_flags & FILE_O_ACCMODE != FILE_O_RDWR {
+            return Err(FileError::PermissionDenied);
+        }
+        let regular_ofd = if self
+            .fd_table
+            .first_fd_for_ofd(OpenFileDescriptionRef::Regular0)
+            .is_none()
+        {
+            OpenFileDescriptionRef::Regular0
+        } else if self
+            .fd_table
+            .first_fd_for_ofd(OpenFileDescriptionRef::Regular1)
+            .is_none()
+        {
+            OpenFileDescriptionRef::Regular1
+        } else {
+            return Err(FileError::AlreadyOpen);
+        };
+        let fd = self
+            .fd_table
+            .lowest_free_fd_from(0)
+            .ok_or(FileError::TooManyOpenFiles)?;
+
+        match regular_ofd {
+            OpenFileDescriptionRef::Regular0 => {
+                if self.regular0_backend.state() == State::Base {
+                    self.regular0_backend
+                        .bind_regular_file()
+                        .map_err(|_| FileError::BackendUnavailable)?;
+                }
+                if self.regular0.state() == State::Base {
+                    self.regular0
+                        .setup_regular(&self.regular0_backend)
+                        .map_err(|_| FileError::BackendUnavailable)?;
+                }
+                if self.regular0_backend.state() != State::Ready
+                    || self.regular0.state() != State::Ready
+                {
+                    return Err(FileError::BackendUnavailable);
+                }
+            }
+            OpenFileDescriptionRef::Regular1 => {
+                if self.regular1_backend.state() == State::Base {
+                    self.regular1_backend
+                        .bind_regular_file()
+                        .map_err(|_| FileError::BackendUnavailable)?;
+                }
+                if self.regular1.state() == State::Base {
+                    self.regular1
+                        .setup_regular(&self.regular1_backend)
+                        .map_err(|_| FileError::BackendUnavailable)?;
+                }
+                if self.regular1_backend.state() != State::Ready
+                    || self.regular1.state() != State::Ready
+                {
+                    return Err(FileError::BackendUnavailable);
+                }
+            }
+            _ => unreachable!(),
+        }
+
+        let ofd_ref = allocate_shared_regular_ofd()?;
+        let mut provider = virtio_blk::live_provider(kernel_image);
+        let file_ref = match vfs_core
+            .create_regular_file_path(
+                fs_struct,
+                ext2_filesystem,
+                block_device_registry,
+                &mut provider,
+                path,
+                mode,
+                uid,
+                gid,
+            )
+            .map_err(vfs_error_to_file_error)
+        {
+            Ok(file_ref) => file_ref,
+            Err(error) => {
+                assert!(release_shared_regular_ofd(ofd_ref, 1));
+                return Err(error);
+            }
+        };
+
+        self.fd_table.install_new_fd_entry(
+            fd,
+            FileDescriptorEntry::opened(
+                regular_ofd,
+                true,
+                true,
+                persistent_open_flags(open_flags),
+                open_flags & FILE_O_CLOEXEC != 0,
+            ),
+        );
+        match regular_ofd {
+            OpenFileDescriptionRef::Regular0 => {
+                self.regular0_ofd_ref = Some(ofd_ref);
+                self.regular0_buffer.fill(0);
+                self.regular0_len = 0;
+                self.regular0_offset = 0;
+                self.filesystem0_kind = FilesystemFdKind::RegularFile;
+                self.directory0_file_ref = Some(file_ref);
+                self.directory0_offset = 0;
+                self.directory0_last_getdents_len = 0;
+                self.regular0_path.fill(0);
+                self.regular0_path[..path.len()].copy_from_slice(path);
+                self.regular0_path_len = path.len();
+            }
+            OpenFileDescriptionRef::Regular1 => {
+                self.regular1_ofd_ref = Some(ofd_ref);
+                self.regular1_buffer.fill(0);
+                self.regular1_len = 0;
+                self.regular1_offset = 0;
+                self.filesystem1_kind = FilesystemFdKind::RegularFile;
+                self.file1_ref = Some(file_ref);
+                self.regular1_path.fill(0);
+                self.regular1_path[..path.len()].copy_from_slice(path);
+                self.regular1_path_len = path.len();
+            }
+            _ => unreachable!(),
+        }
+        self.open_path_routes_to_vfs.fetch_add(1, Ordering::AcqRel);
+        self.regular_fd_installed.fetch_add(1, Ordering::AcqRel);
         Ok(fd)
     }
 
@@ -3084,12 +3721,10 @@ impl FilesStruct {
         {
             return Err(FileError::NotReady);
         }
-        if self.fd_table.fd_bound(FdRef::Regular0) {
-            return Err(FileError::AlreadyOpen);
-        }
         if open_flags & FILE_O_ACCMODE != FILE_O_RDONLY {
             return Err(FileError::PermissionDenied);
         }
+        let regular_ofd = self.free_regular_ofd().ok_or(FileError::AlreadyOpen)?;
 
         let mut provider = virtio_blk::live_provider(kernel_image);
         let file_ref = vfs_core
@@ -3102,31 +3737,61 @@ impl FilesStruct {
             )
             .map_err(vfs_error_to_file_error)?;
 
-        if self.regular0_backend.state() == State::Base {
-            self.regular0_backend
+        let (ofd, backend) = match regular_ofd {
+            OpenFileDescriptionRef::Regular0 => (&mut self.regular0, &mut self.regular0_backend),
+            OpenFileDescriptionRef::Regular1 => (&mut self.regular1, &mut self.regular1_backend),
+            _ => unreachable!(),
+        };
+        if backend.state() == State::Base {
+            backend
                 .bind_regular_file()
                 .map_err(|_| FileError::BackendUnavailable)?;
         }
-        if self.regular0.state() == State::Base {
-            self.regular0
-                .setup_regular(&self.regular0_backend)
+        if ofd.state() == State::Base {
+            ofd.setup_regular(backend)
                 .map_err(|_| FileError::BackendUnavailable)?;
         }
 
-        let fd = self.fd_table.install_regular(
-            &self.regular0,
+        let ofd_ref = allocate_shared_regular_ofd()?;
+        let fd = match self.fd_table.install_opened(
+            ofd,
+            regular_ofd,
+            true,
+            false,
             persistent_open_flags(open_flags) | FILE_O_DIRECTORY,
             open_flags & FILE_O_CLOEXEC != 0,
-        )?;
-        self.regular0_len = 0;
-        self.regular0_offset = 0;
-        self.filesystem0_kind = FilesystemFdKind::Directory;
-        self.directory0_file_ref = Some(file_ref);
-        self.directory0_offset = 0;
-        self.directory0_last_getdents_len = 0;
-        self.regular0_path.fill(0);
-        self.regular0_path[..path.len()].copy_from_slice(path);
-        self.regular0_path_len = path.len();
+        ) {
+            Ok(fd) => fd,
+            Err(error) => {
+                assert!(release_shared_regular_ofd(ofd_ref, 1));
+                return Err(error);
+            }
+        };
+        match regular_ofd {
+            OpenFileDescriptionRef::Regular0 => {
+                self.regular0_ofd_ref = Some(ofd_ref);
+                self.regular0_len = 0;
+                self.regular0_offset = 0;
+                self.filesystem0_kind = FilesystemFdKind::Directory;
+                self.directory0_file_ref = Some(file_ref);
+                self.directory0_offset = 0;
+                self.directory0_last_getdents_len = 0;
+                self.regular0_path.fill(0);
+                self.regular0_path[..path.len()].copy_from_slice(path);
+                self.regular0_path_len = path.len();
+            }
+            OpenFileDescriptionRef::Regular1 => {
+                self.regular1_ofd_ref = Some(ofd_ref);
+                self.regular1_len = 0;
+                self.regular1_offset = 0;
+                self.filesystem1_kind = FilesystemFdKind::Directory;
+                self.file1_ref = Some(file_ref);
+                self.regular1_path.fill(0);
+                self.regular1_path[..path.len()].copy_from_slice(path);
+                self.regular1_path_len = path.len();
+            }
+            _ => unreachable!(),
+        }
         self.open_path_routes_to_vfs.fetch_add(1, Ordering::AcqRel);
         self.directory_fd_installed.fetch_add(1, Ordering::AcqRel);
         Ok(fd)
@@ -3344,6 +4009,25 @@ impl FilesStruct {
                 }
                 Ok(read)
             }
+            OpenFileDescriptionRef::Regular1 => {
+                if self.filesystem1_kind != FilesystemFdKind::RegularFile {
+                    return Err(FileError::NotReadable);
+                }
+                let (start, len) = reserve_shared_regular_read(
+                    self.regular1_ofd_ref.ok_or(FileError::BadFd)?,
+                    self.regular1_len,
+                    buffer.len(),
+                )?;
+                let end = start + len;
+                buffer[..len].copy_from_slice(&self.regular1_buffer[start..end]);
+                self.regular1_offset = end;
+                let read = self.regular1.read(&self.regular1_backend, len)?;
+                if read != 0 {
+                    self.regular_file_read_observed
+                        .fetch_add(1, Ordering::AcqRel);
+                }
+                Ok(read)
+            }
             OpenFileDescriptionRef::Tty0 => {
                 let canonical = self.tty_canonical_mode();
                 let read = self
@@ -3358,10 +4042,13 @@ impl FilesStruct {
                 if self.filesystem0_kind != FilesystemFdKind::RegularFile {
                     return Err(FileError::NotReadable);
                 }
-                let available = self.regular0_len.saturating_sub(self.regular0_offset);
-                let len = core::cmp::min(buffer.len(), available);
-                let end = self.regular0_offset + len;
-                buffer[..len].copy_from_slice(&self.regular0_buffer[self.regular0_offset..end]);
+                let (start, len) = reserve_shared_regular_read(
+                    self.regular0_ofd_ref.ok_or(FileError::BadFd)?,
+                    self.regular0_len,
+                    buffer.len(),
+                )?;
+                let end = start + len;
+                buffer[..len].copy_from_slice(&self.regular0_buffer[start..end]);
                 self.regular0_offset = end;
                 let read = self.regular0.read(&self.regular0_backend, len)?;
                 if read != 0 {
@@ -3400,6 +4087,12 @@ impl FilesStruct {
         if entry.readable {
             match entry.ofd {
                 OpenFileDescriptionRef::Regular0 => match self.filesystem0_kind {
+                    FilesystemFdKind::RegularFile | FilesystemFdKind::Directory => {
+                        ready |= FILE_POLLIN | FILE_POLLRDNORM;
+                    }
+                    FilesystemFdKind::None => return Err(FileError::BadFd),
+                },
+                OpenFileDescriptionRef::Regular1 => match self.filesystem1_kind {
                     FilesystemFdKind::RegularFile | FilesystemFdKind::Directory => {
                         ready |= FILE_POLLIN | FILE_POLLRDNORM;
                     }
@@ -3447,6 +4140,7 @@ impl FilesStruct {
                 }
                 OpenFileDescriptionRef::Stdin
                 | OpenFileDescriptionRef::Regular0
+                | OpenFileDescriptionRef::Regular1
                 | OpenFileDescriptionRef::Null
                 | OpenFileDescriptionRef::Pidfd0
                 | OpenFileDescriptionRef::PipeRead0 => {}
@@ -3548,29 +4242,54 @@ impl FilesStruct {
 
         let entry = self.fd_table.lookup(fd)?;
         self.read_fd_routes_to_table.fetch_add(1, Ordering::AcqRel);
-        if !entry.readable || entry.ofd != OpenFileDescriptionRef::Regular0 {
+        if !entry.readable
+            || !matches!(
+                entry.ofd,
+                OpenFileDescriptionRef::Regular0 | OpenFileDescriptionRef::Regular1
+            )
+        {
             return Err(FileError::NotReadable);
         }
-        if self.filesystem0_kind != FilesystemFdKind::Directory {
+        let (filesystem_kind, file_ref, ofd_ref) = match entry.ofd {
+            OpenFileDescriptionRef::Regular0 => (
+                self.filesystem0_kind,
+                self.directory0_file_ref,
+                self.regular0_ofd_ref,
+            ),
+            OpenFileDescriptionRef::Regular1 => {
+                (self.filesystem1_kind, self.file1_ref, self.regular1_ofd_ref)
+            }
+            _ => unreachable!(),
+        };
+        if filesystem_kind != FilesystemFdKind::Directory {
             return Err(FileError::NotReadable);
         }
-        let file_ref = self.directory0_file_ref.ok_or(FileError::BadFd)?;
+        let file_ref = file_ref.ok_or(FileError::BadFd)?;
         let mut provider = virtio_blk::live_provider(kernel_image);
+        let ofd_ref = ofd_ref.ok_or(FileError::BadFd)?;
+        let current_offset = shared_regular_ofd_offset(ofd_ref)?;
         let entries = vfs_core
             .read_ext2_dir(
                 ext2_filesystem,
                 block_device_registry,
                 &mut provider,
                 file_ref,
-                self.directory0_offset,
+                current_offset,
             )
             .map_err(vfs_error_to_file_error)?;
         let (written, next_offset) =
-            serialize_linux_dirents64(entries.iter(), self.directory0_offset, buffer)?;
+            serialize_linux_dirents64(entries.iter(), current_offset, buffer)?;
         if written == 0 {
             return Ok(0);
         }
-        self.directory0_offset = next_offset;
+        if !set_shared_regular_ofd_offset(ofd_ref, next_offset) {
+            return Err(FileError::BadFd);
+        }
+        match entry.ofd {
+            OpenFileDescriptionRef::Regular0 => self.directory0_offset = next_offset,
+            OpenFileDescriptionRef::Regular1 => self.regular1_offset = next_offset,
+            _ => unreachable!(),
+        }
         self.directory0_last_getdents_len = written;
         self.directory_getdents_observed
             .fetch_add(1, Ordering::AcqRel);
@@ -3589,6 +4308,12 @@ impl FilesStruct {
     }
 
     fn finish_closed_entry(&mut self, fd: usize, entry: FileDescriptorEntry) {
+        if matches!(
+            entry.ofd,
+            OpenFileDescriptionRef::Regular0 | OpenFileDescriptionRef::Regular1
+        ) {
+            assert!(self.release_regular_entry(entry));
+        }
         if entry.ofd == OpenFileDescriptionRef::Regular0
             && self
                 .fd_table
@@ -3599,6 +4324,18 @@ impl FilesStruct {
             self.directory0_offset = 0;
             self.directory0_file_ref = None;
             self.filesystem0_kind = FilesystemFdKind::None;
+            self.regular0_ofd_ref = None;
+        }
+        if entry.ofd == OpenFileDescriptionRef::Regular1
+            && self
+                .fd_table
+                .first_fd_for_ofd(OpenFileDescriptionRef::Regular1)
+                .is_none()
+        {
+            self.regular1_offset = 0;
+            self.file1_ref = None;
+            self.filesystem1_kind = FilesystemFdKind::None;
+            self.regular1_ofd_ref = None;
         }
         if entry.ofd == OpenFileDescriptionRef::Pidfd0 {
             self.pidfd_fd = usize::MAX;
@@ -3641,7 +4378,10 @@ impl FilesStruct {
         if matches!(fd, STDIN_FD | STDOUT_FD | STDERR_FD) {
             self.stdio_fd_closed.fetch_add(1, Ordering::AcqRel);
         }
-        if entry.ofd == OpenFileDescriptionRef::Regular0 {
+        if matches!(
+            entry.ofd,
+            OpenFileDescriptionRef::Regular0 | OpenFileDescriptionRef::Regular1
+        ) {
             self.regular_file_closed.fetch_add(1, Ordering::AcqRel);
         }
     }
@@ -3699,24 +4439,85 @@ impl FilesStruct {
         }
 
         let entries = self.fd_table.snapshot_entries()?;
+        let (regular0_ofd_refs, regular1_ofd_refs) = self.regular_ofd_counts();
+        let regular0_ofd_ref = self.regular0_ofd_ref;
+        let regular1_ofd_ref = self.regular1_ofd_ref;
+        if regular0_ofd_refs != 0
+            && !regular0_ofd_ref
+                .is_some_and(|ofd_ref| acquire_shared_regular_ofd(ofd_ref, regular0_ofd_refs))
+        {
+            return Err(FileError::BadFd);
+        }
+        if regular1_ofd_refs != 0
+            && !regular1_ofd_ref
+                .is_some_and(|ofd_ref| acquire_shared_regular_ofd(ofd_ref, regular1_ofd_refs))
+        {
+            if regular0_ofd_refs != 0 {
+                assert!(release_shared_regular_ofd(
+                    regular0_ofd_ref.expect("saved Regular0 OFD"),
+                    regular0_ofd_refs,
+                ));
+            }
+            return Err(FileError::BadFd);
+        }
         let (pipe_read_refs, pipe_write_refs) = self.pipe_endpoint_counts();
         let pipe_ref = self.pipe_ref;
         if pipe_read_refs != 0 || pipe_write_refs != 0 {
-            let pipe_ref = pipe_ref.ok_or(FileError::BadFd)?;
+            let Some(pipe_ref) = pipe_ref else {
+                if regular1_ofd_refs != 0 {
+                    assert!(release_shared_regular_ofd(
+                        regular1_ofd_ref.expect("saved Regular1 OFD"),
+                        regular1_ofd_refs,
+                    ));
+                }
+                if regular0_ofd_refs != 0 {
+                    assert!(release_shared_regular_ofd(
+                        regular0_ofd_ref.expect("saved Regular0 OFD"),
+                        regular0_ofd_refs,
+                    ));
+                }
+                return Err(FileError::BadFd);
+            };
             if !acquire_shared_pipe(pipe_ref, pipe_read_refs, pipe_write_refs) {
+                if regular1_ofd_refs != 0 {
+                    assert!(release_shared_regular_ofd(
+                        regular1_ofd_ref.expect("saved Regular1 OFD"),
+                        regular1_ofd_refs,
+                    ));
+                }
+                if regular0_ofd_refs != 0 {
+                    assert!(release_shared_regular_ofd(
+                        regular0_ofd_ref.expect("saved Regular0 OFD"),
+                        regular0_ofd_refs,
+                    ));
+                }
                 return Err(FileError::BadFd);
             }
         }
         let snapshot = FilesStructSnapshot {
             entries,
+            regular0_ofd_ref,
+            regular0_ofd_refs,
             regular0_len: self.regular0_len,
-            regular0_offset: self.regular0_offset,
+            regular0_offset: regular0_ofd_ref
+                .and_then(|ofd_ref| shared_regular_ofd_offset(ofd_ref).ok())
+                .unwrap_or(0),
             regular0_path: self.regular0_path,
             regular0_path_len: self.regular0_path_len,
             filesystem0_kind: self.filesystem0_kind,
             directory0_file_ref: self.directory0_file_ref,
             directory0_offset: self.directory0_offset,
             directory0_last_getdents_len: self.directory0_last_getdents_len,
+            regular1_ofd_ref,
+            regular1_ofd_refs,
+            regular1_len: self.regular1_len,
+            regular1_offset: regular1_ofd_ref
+                .and_then(|ofd_ref| shared_regular_ofd_offset(ofd_ref).ok())
+                .unwrap_or(0),
+            regular1_path: self.regular1_path,
+            regular1_path_len: self.regular1_path_len,
+            filesystem1_kind: self.filesystem1_kind,
+            file1_ref: self.file1_ref,
             pidfd_fd: self.pidfd_fd,
             pidfd_child_pid: self.pidfd_child_pid,
             pidfd_exit_status: self.pidfd_exit_status,
@@ -3751,6 +4552,37 @@ impl FilesStruct {
         {
             return Err(FileError::BadFd);
         }
+        if snapshot.regular0_ofd_refs != 0
+            && snapshot
+                .regular0_ofd_ref
+                .and_then(|ofd_ref| shared_regular_ofd_offset(ofd_ref).ok())
+                .is_none()
+        {
+            return Err(FileError::BadFd);
+        }
+        if snapshot.regular1_ofd_refs != 0
+            && snapshot
+                .regular1_ofd_ref
+                .and_then(|ofd_ref| shared_regular_ofd_offset(ofd_ref).ok())
+                .is_none()
+        {
+            return Err(FileError::BadFd);
+        }
+        let (current_regular0_refs, current_regular1_refs) = self.regular_ofd_counts();
+        if current_regular0_refs != 0
+            && !self
+                .regular0_ofd_ref
+                .is_some_and(|ofd_ref| release_shared_regular_ofd(ofd_ref, current_regular0_refs))
+        {
+            return Err(FileError::BadFd);
+        }
+        if current_regular1_refs != 0
+            && !self
+                .regular1_ofd_ref
+                .is_some_and(|ofd_ref| release_shared_regular_ofd(ofd_ref, current_regular1_refs))
+        {
+            return Err(FileError::BadFd);
+        }
         let (current_readers, current_writers) = self.pipe_endpoint_counts();
         if current_readers != 0 || current_writers != 0 {
             let pipe_ref = self.pipe_ref.ok_or(FileError::BadFd)?;
@@ -3766,14 +4598,31 @@ impl FilesStruct {
         }
         self.fd_table.restore_entries(snapshot.entries)?;
         self.pipe_ref = snapshot.pipe_ref;
+        self.regular0_ofd_ref = snapshot.regular0_ofd_ref;
         self.regular0_len = snapshot.regular0_len;
-        self.regular0_offset = snapshot.regular0_offset;
+        self.regular0_offset = snapshot
+            .regular0_ofd_ref
+            .and_then(|ofd_ref| shared_regular_ofd_offset(ofd_ref).ok())
+            .unwrap_or(snapshot.regular0_offset);
         self.regular0_path = snapshot.regular0_path;
         self.regular0_path_len = snapshot.regular0_path_len;
         self.filesystem0_kind = snapshot.filesystem0_kind;
         self.directory0_file_ref = snapshot.directory0_file_ref;
-        self.directory0_offset = snapshot.directory0_offset;
+        self.directory0_offset = snapshot
+            .regular0_ofd_ref
+            .and_then(|ofd_ref| shared_regular_ofd_offset(ofd_ref).ok())
+            .unwrap_or(snapshot.directory0_offset);
         self.directory0_last_getdents_len = snapshot.directory0_last_getdents_len;
+        self.regular1_ofd_ref = snapshot.regular1_ofd_ref;
+        self.regular1_len = snapshot.regular1_len;
+        self.regular1_offset = snapshot
+            .regular1_ofd_ref
+            .and_then(|ofd_ref| shared_regular_ofd_offset(ofd_ref).ok())
+            .unwrap_or(snapshot.regular1_offset);
+        self.regular1_path = snapshot.regular1_path;
+        self.regular1_path_len = snapshot.regular1_path_len;
+        self.filesystem1_kind = snapshot.filesystem1_kind;
+        self.file1_ref = snapshot.file1_ref;
         self.pidfd_fd = snapshot.pidfd_fd;
         self.pidfd_child_pid = snapshot.pidfd_child_pid;
         self.pidfd_exit_status = snapshot.pidfd_exit_status;
@@ -3801,6 +4650,18 @@ impl FilesStruct {
     pub fn discard_parent_fd_snapshot(&self, snapshot: &FilesStructSnapshot) {
         if self.parent_fd_snapshot_live.load(Ordering::Acquire) == 0 {
             return;
+        }
+        if snapshot.regular0_ofd_refs != 0 {
+            assert!(release_shared_regular_ofd(
+                snapshot.regular0_ofd_ref.expect("saved Regular0 OFD"),
+                snapshot.regular0_ofd_refs,
+            ));
+        }
+        if snapshot.regular1_ofd_refs != 0 {
+            assert!(release_shared_regular_ofd(
+                snapshot.regular1_ofd_ref.expect("saved Regular1 OFD"),
+                snapshot.regular1_ofd_refs,
+            ));
         }
         if let Some(pipe_ref) = snapshot.pipe_ref {
             assert!(release_shared_pipe(
@@ -3879,12 +4740,24 @@ impl FilesStruct {
         }
 
         let source = self.fd_table.lookup(fd)?;
-        let acquired_pipe = self.acquire_pipe_entry(source)?;
+        let acquired_regular = self.acquire_regular_entry(source)?;
+        let acquired_pipe = match self.acquire_pipe_entry(source) {
+            Ok(acquired) => acquired,
+            Err(error) => {
+                if acquired_regular {
+                    assert!(self.release_regular_entry(source));
+                }
+                return Err(error);
+            }
+        };
         match self.fd_table.dup_fd(fd, min_fd, close_on_exec) {
             Ok(newfd) => Ok(newfd),
             Err(error) => {
                 if acquired_pipe {
                     assert!(self.release_pipe_entry(source));
+                }
+                if acquired_regular {
+                    assert!(self.release_regular_entry(source));
                 }
                 Err(error)
             }
@@ -3902,12 +4775,24 @@ impl FilesStruct {
         }
 
         let source = self.fd_table.lookup(oldfd)?;
-        let acquired_pipe = self.acquire_pipe_entry(source)?;
+        let acquired_regular = self.acquire_regular_entry(source)?;
+        let acquired_pipe = match self.acquire_pipe_entry(source) {
+            Ok(acquired) => acquired,
+            Err(error) => {
+                if acquired_regular {
+                    assert!(self.release_regular_entry(source));
+                }
+                return Err(error);
+            }
+        };
         let (fd, replaced) = match self.fd_table.dup3_fd(oldfd, newfd, close_on_exec) {
             Ok(result) => result,
             Err(error) => {
                 if acquired_pipe {
                     assert!(self.release_pipe_entry(source));
+                }
+                if acquired_regular {
+                    assert!(self.release_regular_entry(source));
                 }
                 return Err(error);
             }
@@ -3944,6 +4829,104 @@ impl FilesStruct {
         Ok(())
     }
 
+    pub fn ftruncate_fd(
+        &mut self,
+        fd: usize,
+        length: usize,
+        vfs_core: &mut VfsCore,
+    ) -> FileResult<()> {
+        if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
+            return Err(FileError::NotReady);
+        }
+        if length > REGULAR_FILE_BUFFER_SIZE {
+            return Err(FileError::FileTooLarge);
+        }
+
+        let entry = self.fd_table.lookup(fd)?;
+        if !entry.writable {
+            return Err(FileError::InvalidArgument);
+        }
+
+        let file_ref = match entry.ofd {
+            OpenFileDescriptionRef::Regular0
+                if self.filesystem0_kind == FilesystemFdKind::RegularFile =>
+            {
+                self.directory0_file_ref.ok_or(FileError::InvalidArgument)?
+            }
+            OpenFileDescriptionRef::Regular1
+                if self.filesystem1_kind == FilesystemFdKind::RegularFile =>
+            {
+                self.file1_ref.ok_or(FileError::InvalidArgument)?
+            }
+            _ => return Err(FileError::InvalidArgument),
+        };
+
+        vfs_core
+            .truncate_file(file_ref, length)
+            .map_err(vfs_error_to_file_error)?;
+        match entry.ofd {
+            OpenFileDescriptionRef::Regular0 => {
+                if length < self.regular0_len {
+                    self.regular0_buffer[length..self.regular0_len].fill(0);
+                }
+                self.regular0_len = length;
+            }
+            OpenFileDescriptionRef::Regular1 => {
+                if length < self.regular1_len {
+                    self.regular1_buffer[length..self.regular1_len].fill(0);
+                }
+                self.regular1_len = length;
+            }
+            _ => unreachable!(),
+        }
+        Ok(())
+    }
+
+    pub fn read_shared_mmap_fd(
+        &self,
+        fd: usize,
+        writable: bool,
+        offset: usize,
+        buffer: &mut [u8],
+        vfs_core: &VfsCore,
+    ) -> FileResult<()> {
+        if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
+            return Err(FileError::NotReady);
+        }
+        let entry = self.fd_table.lookup(fd)?;
+        if !entry.readable || (writable && !entry.writable) {
+            return Err(FileError::PermissionDenied);
+        }
+        let file_ref = match entry.ofd {
+            OpenFileDescriptionRef::Regular0
+                if self.filesystem0_kind == FilesystemFdKind::RegularFile =>
+            {
+                self.directory0_file_ref.ok_or(FileError::NoDevice)?
+            }
+            OpenFileDescriptionRef::Regular1
+                if self.filesystem1_kind == FilesystemFdKind::RegularFile =>
+            {
+                self.file1_ref.ok_or(FileError::NoDevice)?
+            }
+            _ => return Err(FileError::NoDevice),
+        };
+        let stat = vfs_core
+            .file_stat(file_ref)
+            .map_err(vfs_error_to_file_error)?;
+        if stat.kind() != VfsInodeKind::RegularFile
+            || offset
+                .checked_add(buffer.len())
+                .filter(|end| *end <= stat.size())
+                .is_none()
+        {
+            return Err(FileError::InvalidArgument);
+        }
+        vfs_core
+            .read_file_range(file_ref, offset, buffer)
+            .map_err(vfs_error_to_file_error)?;
+        Ok(())
+    }
+
     pub fn ioctl_validate_fd(&self, fd: usize) -> FileResult<()> {
         if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
             return Err(FileError::NotReady);
@@ -3968,6 +4951,7 @@ impl FilesStruct {
             OpenFileDescriptionRef::Stdout => &self.stdout_backend,
             OpenFileDescriptionRef::Stderr => &self.stderr_backend,
             OpenFileDescriptionRef::Regular0 => &self.regular0_backend,
+            OpenFileDescriptionRef::Regular1 => &self.regular1_backend,
             OpenFileDescriptionRef::Tty0 => &self.tty0_backend,
             OpenFileDescriptionRef::Null => {
                 self.null_device_tty_ioctl_enotty
@@ -4045,33 +5029,52 @@ impl FilesStruct {
         }
 
         let entry = self.fd_table.lookup(fd)?;
-        if entry.ofd != OpenFileDescriptionRef::Regular0 {
+        if !matches!(
+            entry.ofd,
+            OpenFileDescriptionRef::Regular0 | OpenFileDescriptionRef::Regular1
+        ) {
             return Err(FileError::IllegalSeek);
         }
 
-        let (current, end) = match self.filesystem0_kind {
-            FilesystemFdKind::RegularFile => (self.regular0_offset, self.regular0_len),
+        if entry.ofd == OpenFileDescriptionRef::Regular1 {
+            let end = match self.filesystem1_kind {
+                FilesystemFdKind::RegularFile => self.regular1_len,
+                FilesystemFdKind::Directory => {
+                    let file_ref = self.file1_ref.ok_or(FileError::BadFd)?;
+                    vfs_core
+                        .file_stat(file_ref)
+                        .map_err(vfs_error_to_file_error)?
+                        .size()
+                }
+                FilesystemFdKind::None => return Err(FileError::BadFd),
+            };
+            let target = seek_shared_regular_ofd(
+                self.regular1_ofd_ref.ok_or(FileError::BadFd)?,
+                offset,
+                whence,
+                end,
+            )?;
+            self.regular1_offset = target;
+            return Ok(target);
+        }
+
+        let end = match self.filesystem0_kind {
+            FilesystemFdKind::RegularFile => self.regular0_len,
             FilesystemFdKind::Directory => {
                 let file_ref = self.directory0_file_ref.ok_or(FileError::BadFd)?;
                 let stat = vfs_core
                     .file_stat(file_ref)
                     .map_err(vfs_error_to_file_error)?;
-                (self.directory0_offset, stat.size())
+                stat.size()
             }
             FilesystemFdKind::None => return Err(FileError::BadFd),
         };
-        let base = match whence {
-            SEEK_SET => 0i128,
-            SEEK_CUR => current as i128,
-            SEEK_END => end as i128,
-            _ => return Err(FileError::InvalidArgument),
-        };
-        let target = base + offset as i128;
-        if target < 0 || target > usize::MAX as i128 {
-            return Err(FileError::InvalidArgument);
-        }
-
-        let target = target as usize;
+        let target = seek_shared_regular_ofd(
+            self.regular0_ofd_ref.ok_or(FileError::BadFd)?,
+            offset,
+            whence,
+            end,
+        )?;
         match self.filesystem0_kind {
             FilesystemFdKind::RegularFile => self.regular0_offset = target,
             FilesystemFdKind::Directory => self.directory0_offset = target,
@@ -4119,7 +5122,13 @@ impl FilesStruct {
         }
         let stat = self
             .regular0_backend
-            .stat_regular_file(FileStat::new(vfs_stat.size(), vfs_stat.kind()))?;
+            .stat_regular_file(FileStat::new_owned(
+                vfs_stat.size(),
+                vfs_stat.kind(),
+                vfs_stat.mode(),
+                vfs_stat.uid(),
+                vfs_stat.gid(),
+            ))?;
         self.stat_path_routes_to_vfs.fetch_add(1, Ordering::AcqRel);
         if stat.mode() & 0o170000 == 0o100000 {
             self.regular_file_stat_observed
@@ -4138,13 +5147,34 @@ impl FilesStruct {
         let stat = match entry.ofd {
             OpenFileDescriptionRef::Regular0 => {
                 let stat = match self.filesystem0_kind {
-                    FilesystemFdKind::RegularFile => FileStat::regular(self.regular0_len),
+                    FilesystemFdKind::RegularFile => {
+                        if let Some(file_ref) = self.directory0_file_ref {
+                            let vfs_stat = vfs_core
+                                .file_stat(file_ref)
+                                .map_err(vfs_error_to_file_error)?;
+                            FileStat::new_owned(
+                                vfs_stat.size(),
+                                vfs_stat.kind(),
+                                vfs_stat.mode(),
+                                vfs_stat.uid(),
+                                vfs_stat.gid(),
+                            )
+                        } else {
+                            FileStat::regular(self.regular0_len)
+                        }
+                    }
                     FilesystemFdKind::Directory => {
                         let file_ref = self.directory0_file_ref.ok_or(FileError::BadFd)?;
                         let vfs_stat = vfs_core
                             .file_stat(file_ref)
                             .map_err(vfs_error_to_file_error)?;
-                        FileStat::new(vfs_stat.size(), vfs_stat.kind())
+                        FileStat::new_owned(
+                            vfs_stat.size(),
+                            vfs_stat.kind(),
+                            vfs_stat.mode(),
+                            vfs_stat.uid(),
+                            vfs_stat.gid(),
+                        )
                     }
                     FilesystemFdKind::None => return Err(FileError::BadFd),
                 };
@@ -4158,6 +5188,33 @@ impl FilesStruct {
                     self.regular_file_stat_observed
                         .fetch_add(1, Ordering::AcqRel);
                 }
+                stat
+            }
+            OpenFileDescriptionRef::Regular1 => {
+                let stat = if let Some(file_ref) = self.file1_ref {
+                    let vfs_stat = vfs_core
+                        .file_stat(file_ref)
+                        .map_err(vfs_error_to_file_error)?;
+                    FileStat::new_owned(
+                        vfs_stat.size(),
+                        vfs_stat.kind(),
+                        vfs_stat.mode(),
+                        vfs_stat.uid(),
+                        vfs_stat.gid(),
+                    )
+                } else if self.filesystem1_kind == FilesystemFdKind::RegularFile {
+                    FileStat::regular(self.regular1_len)
+                } else {
+                    return Err(FileError::BadFd);
+                };
+                if self.regular1_backend.state() == State::Base {
+                    self.regular1_backend
+                        .bind_regular_file()
+                        .map_err(|_| FileError::BackendUnavailable)?;
+                }
+                let stat = self.regular1_backend.stat_regular_file(stat)?;
+                self.regular_file_stat_observed
+                    .fetch_add(1, Ordering::AcqRel);
                 stat
             }
             OpenFileDescriptionRef::Pidfd0 => FileStat::new(0, VfsInodeKind::DeviceNode),
@@ -4205,6 +5262,7 @@ impl FilesStruct {
             OpenFileDescriptionRef::Stdout => self.stdout.write(&self.stdout_backend, bytes),
             OpenFileDescriptionRef::Stderr => self.stderr.write(&self.stderr_backend, bytes),
             OpenFileDescriptionRef::Regular0 => Err(FileError::NotWritable),
+            OpenFileDescriptionRef::Regular1 => Err(FileError::NotWritable),
             OpenFileDescriptionRef::Null => {
                 let written = self.null.write_null_device(&self.null_backend, bytes)?;
                 self.null_device_write_discard_observed

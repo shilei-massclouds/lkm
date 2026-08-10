@@ -1385,6 +1385,7 @@ pub struct SecondaryCpuOnlineAck {
     ap_local_irq_enable_observed: bool,
     ap_cache_tlb_flush_summary_observed: bool,
     ap_ipi_enable_observed: bool,
+    boot_cpu_ipi_enable_observed: bool,
     ap_hotplug_thread_mb_pair_deferred: bool,
 }
 
@@ -1398,6 +1399,7 @@ impl SecondaryCpuOnlineAck {
             ap_local_irq_enable_observed: false,
             ap_cache_tlb_flush_summary_observed: false,
             ap_ipi_enable_observed: false,
+            boot_cpu_ipi_enable_observed: false,
             ap_hotplug_thread_mb_pair_deferred: true,
         }
     }
@@ -1428,6 +1430,10 @@ impl SecondaryCpuOnlineAck {
 
     pub const fn ap_ipi_enable_observed(&self) -> bool {
         self.ap_ipi_enable_observed
+    }
+
+    pub const fn boot_cpu_ipi_enable_observed(&self) -> bool {
+        self.boot_cpu_ipi_enable_observed
     }
 
     pub const fn ap_hotplug_thread_mb_pair_deferred(&self) -> bool {
@@ -1465,6 +1471,10 @@ impl SecondaryCpuOnlineAck {
             };
             sync.observe_done_up(done_up_wait_lock, local_interrupt, scheduler)?;
         }
+        let Some(boot_interrupt) = cpu_group.boot_cpu_interrupt_mut() else {
+            return self.failed_setup();
+        };
+        boot_interrupt.enable_reschedule_ipi_source()?;
         cpu_group.mark_secondary_cpus_online_after_ap_ack()?;
         self.acknowledged = true;
         self.online_after_ap_ack = true;
@@ -1472,6 +1482,7 @@ impl SecondaryCpuOnlineAck {
         self.ap_local_irq_enable_observed = true;
         self.ap_cache_tlb_flush_summary_observed = true;
         self.ap_ipi_enable_observed = true;
+        self.boot_cpu_ipi_enable_observed = true;
         self.ap_hotplug_thread_mb_pair_deferred = true;
         crate::checkpoint::checkpoint(Checkpoint::SecondaryCpuApLocalSyncSummary);
         self.lifecycle.transition(
@@ -1634,6 +1645,7 @@ pub fn smp_bringup_runtime_ready(
         && online_ack.ap_local_irq_enable_observed()
         && online_ack.ap_cache_tlb_flush_summary_observed()
         && online_ack.ap_ipi_enable_observed()
+        && online_ack.boot_cpu_ipi_enable_observed()
         && online_ack.ap_hotplug_thread_mb_pair_deferred()
         && boundary.state() == State::Ready
         && boundary.smp_cpus_done_trimmed()

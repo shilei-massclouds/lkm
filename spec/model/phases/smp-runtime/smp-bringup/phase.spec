@@ -962,6 +962,7 @@ object SecondaryCpuOnlineAck: HardwareObject {
                 }
 
                 drives {
+                    CurrentCPU.trap.interrupt.Action::EnableRescheduleIpiSource;
                     Cpu1Scheduler.Transition::Enable;
                     Cpu2Scheduler.Transition::Enable;
                     Cpu3Scheduler.Transition::Enable;
@@ -983,6 +984,9 @@ object SecondaryCpuOnlineAck: HardwareObject {
                     Cpu5Scheduler.state == State::Online;
                     Cpu6Scheduler.state == State::Online;
                     Cpu7Scheduler.state == State::Online;
+                    interrupt_reschedule_ipi_source_gate_open(
+                        CurrentCPU.trap.interrupt
+                    );
                     smp_concurrency_open(CpuGroup);
                     ap_idle_entry_detail_deferred(CpuGroup);
                     done_up_wait_lock_guard_used(CpuHotplugSyncSet, DoneUpWaitLock);
@@ -1007,6 +1011,7 @@ object SecondaryCpuOnlineAck: HardwareObject {
             ap_local_irq_enable_observed(ApOnlineIdlePhase);
             ap_cache_tlb_flush_summary_observed(ApSmpCallinPhase);
             ap_ipi_enable_observed(ApSmpCallinPhase);
+            interrupt_reschedule_ipi_source_gate_open(CurrentCPU.trap.interrupt);
             ap_hotplug_thread_memory_barrier_pair_deferred(SecondaryCpuOnlineAck);
         }
     }

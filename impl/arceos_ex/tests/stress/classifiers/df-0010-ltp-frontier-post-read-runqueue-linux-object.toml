@@ -1,0 +1,37 @@
+[[rules]]
+id = "df-0010-child-runqueue-publish-detailed"
+result = "failure"
+contains = [
+  "declared child runqueue publish invariant failed",
+  "failure_diagnostic phase=Scheduler step=Enqueue.Publish object=TaskRunqueue",
+]
+description = "The post-frontier child failed a scheduler enqueue predicate with the long-term structured diagnostic."
+
+[[rules]]
+id = "df-0010-child-runqueue-publish"
+result = "failure"
+contains = ["declared child runqueue publish invariant failed"]
+description = "The post-frontier command child terminated at runqueue publication."
+
+[[rules]]
+id = "df-0010-stock-harness-syntax-error"
+result = "failure"
+contains = ["/opt/ltp/run-syscalls.sh: line 203: syntax error: unterminated quoted string"]
+description = "The unchanged stock harness still failed while resuming its input after the four test children."
+
+[[rules]]
+id = "panic"
+result = "failure"
+contains = ["arceos_ex panic"]
+description = "Kernel panic was printed."
+
+[[rules]]
+id = "df-0010-ltp-frontier-post-read-success"
+result = "success"
+contains = [
+  "Summary: TOTAL=4 PASS=4 FAIL=0 BROK=0 WARN=0 CONF=0",
+  "lkm-ltp-post-read: before-second-hash",
+  "c79278919640c1881a0bfe433c00a6e5d06eeec8d16f3dd212c86f363c0a53e7  /opt/ltp/run-syscalls.sh",
+  "lkm-ltp-post-read: complete",
+]
+description = "The exact frontier passed, and the parent shell launched and completed the post-frontier stock-script read."

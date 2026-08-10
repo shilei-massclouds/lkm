@@ -12,9 +12,11 @@ Task, Flow, CpuRef and stack-range identity and occurs before opening interrupts
 clean real AP continuation; restoring AP idle and restoring a dynamic kernel or user Task both use the generic contextual Enter path.
 
 When all target CPUs have published Online, the BP freezes an array of online CpuRefs in ascending logical-id
-order. It then enables the per-CPU inbox and `SchedulerClockevent` on every element before admitting user fork
-publication. PID 1 stays on CPU0. Ordinary fork selects `online_cpus[child_pid % cpu_count]`; vfork/CLONE_VM selects
-the parent CPU. Every user Task thereafter resolves its registry lease and SATP only on that CPU.
+order. At the `SecondaryCpuOnlineAck` boundary it opens and reads back the boot CPU's SSIE gate through that CPU's
+owned `InterruptType`, then publishes SMP concurrency and enables the per-CPU inbox and `SchedulerClockevent` on
+every element before admitting user fork publication. PID 1 stays on CPU0. Ordinary fork selects
+`online_cpus[child_pid % cpu_count]`; vfork/CLONE_VM selects the parent CPU. Every user Task thereafter resolves its
+registry lease and SATP only on that CPU.
 
 Each AP opens SSIE and its timer source only after the corresponding inbox, runqueue, CurrentTask binding and
 clockevent are initialized. Timer hardirq coalesces `need_resched`; dispatch occurs only at the common user-return

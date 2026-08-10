@@ -1,0 +1,17 @@
+schema_version = 2
+name = "df-0009-user-smoke-preempt-linux-object"
+description = "Repeat the canonical linux-object user smoke acceptance to capture its intermittent preemption pipe-read timeout after both children finish writing."
+mode = "stress"
+test = "user-smoke-linux-object"
+runs = 100
+classifier = "../classifiers/df-0009-user-smoke-preempt-linux-object.toml"
+
+[metadata]
+defect = "DF-0009"
+observation_mode = "user-smoke-preempt-pipe-timeout-forensics"
+ordinary_path_required = true
+default_suite = true
+rootfs_profile = "canonical"
+payload = "canonical linux-object user-smoke preempt case with coordinator and two compute children sharing the result pipe"
+first_observation = "20260805T191932.622566Z-df-0008-user-smoke-fork-enqueue-linux-object/run-0013"
+scope_note = "Capture the intermittent state where both child write-complete markers are present but the coordinator never prints bytes-collected; successful samples do not close the defect, and this timeout does not replace the distinct DF-0008 enqueue failure."
