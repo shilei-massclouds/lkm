@@ -11,6 +11,15 @@ use super::{
 };
 use crate::arch::riscv64::task_switch::TaskSwitchContext;
 
+#[derive(Clone, Copy)]
+pub(crate) struct SchedulerTaskStateDiagnostic {
+    pub(crate) running: bool,
+    pub(crate) on_cpu: bool,
+    pub(crate) runqueue_published: bool,
+    pub(crate) sleep_declared: bool,
+    pub(crate) pending_wake: bool,
+}
+
 /// Stable, generation-carrying result of the next-task preflight. Scheduler
 /// stores this value across the physical stack switch and must dispatch the
 /// exact Task/Flow pair recorded here.
@@ -286,6 +295,28 @@ impl<'a> SchedulerTaskAccess<'a> {
         }
     }
 
+    pub(crate) fn scheduler_task_state_diagnostic(
+        &self,
+        task_ref: TaskRef,
+    ) -> Option<SchedulerTaskStateDiagnostic> {
+        let task = self.current_task_candidate(task_ref)?.task;
+        Some(SchedulerTaskStateDiagnostic {
+            running: task.running(),
+            on_cpu: task.on_cpu(),
+            runqueue_published: task.runqueue_published(),
+            sleep_declared: task.scheduler_sleep_declared(),
+            pending_wake: task.pending_wake_signal(),
+        })
+    }
+
+    pub(crate) fn inbound_wake_coalesces(&self, task_ref: TaskRef, cpu_ref: CpuRef) -> bool {
+        self.current_task_candidate(task_ref)
+            .is_some_and(|candidate| {
+                candidate.task.flow_cpu_ref() == Some(cpu_ref)
+                    && candidate.task.scheduler_runnable_wake_coalesces()
+            })
+    }
+
     pub(crate) fn wake_for_inbound(&mut self, task_ref: TaskRef) -> Option<EventResult> {
         match task_ref {
             TaskRef::KERNEL_INIT => Some(
@@ -396,6 +427,14 @@ impl<'a> SchedulerTaskAccess<'a> {
             ),
             _ => None,
         }
+    }
+
+    pub fn prepare_terminal_prev_blocked(&mut self, task_ref: TaskRef) -> Option<bool> {
+        if !self.terminal_schedule_sender_matches(task_ref, CpuRef::new(self.owner_cpu)) {
+            return None;
+        }
+        self.user_task_mut(task_ref)
+            .map(Task::prepare_terminal_prev_blocked)
     }
 
     pub fn deactivate(&mut self, task_ref: TaskRef) -> Option<EventResult> {
@@ -928,6 +967,24 @@ impl<'a> SchedulerTaskAccess<'a> {
     pub fn switch_context_ptr(&self, task_ref: TaskRef) -> Option<*const TaskSwitchContext> {
         let candidate = self.current_task_candidate(task_ref)?;
         Some(candidate.task.switch_context())
+    }
+
+    pub(crate) fn post_pending_wake_for_inbound(
+        &mut self,
+        task_ref: TaskRef,
+    ) -> Option<EventResult> {
+        match task_ref {
+            TaskRef::KERNEL_INIT => Some(
+                self.kernel_init_task
+                    .as_deref_mut()?
+                    .task_mut()
+                    .post_pending_wake_signal(),
+            ),
+            _ if task_ref.is_user() => self
+                .user_task_mut(task_ref)
+                .map(Task::post_pending_wake_signal),
+            _ => None,
+        }
     }
 }
 

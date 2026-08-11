@@ -118,6 +118,10 @@ predicate scheduler_task_declares_sleeping<T: TaskRef>(task_ref: T) -> bool;
 predicate scheduler_task_pending_wake_signal_matches<T: TaskRef>(task_ref: T) -> bool;
 predicate scheduler_task_has_no_pending_wake_signal<T: TaskRef>(task_ref: T) -> bool;
 predicate scheduler_pending_wake_signal_consumed_once<T: TaskRef>(task_ref: T) -> bool;
+predicate scheduler_terminal_sender_is_zombie<T: TaskRef>(task_ref: T) -> bool;
+predicate scheduler_terminal_pending_wake_discarded<T: TaskRef>(task_ref: T) -> bool;
+predicate scheduler_terminal_prev_deactivated_before_pick<S, T: TaskRef>(scheduler: S, task_ref: T) -> bool;
+predicate scheduler_terminal_switch_is_nonidentity<S, T: TaskRef>(scheduler: S, task_ref: T) -> bool;
 predicate scheduler_inbox_wake_current_sleep_becomes_pending<S, T: TaskRef>(scheduler: S, task_ref: T) -> bool;
 predicate scheduler_inbox_wake_blocked_task_enqueued<S, T: TaskRef>(scheduler: S, task_ref: T) -> bool;
 predicate scheduler_inbox_obsolete_wake_consumed_without_enqueue<S, T: TaskRef>(scheduler: S, task_ref: T) -> bool;
@@ -518,6 +522,24 @@ type Scheduler: ResourceObject {
             }
         }
 
+        Action::PrepareTerminalPrev(prev_ref: TaskRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Online;
+                scheduler_terminal_sender_is_zombie(prev_ref);
+                scheduler_task_declares_sleeping(prev_ref);
+            }
+            drives {
+                self.Action::DeactivateTask(prev_ref);
+            }
+            ensures {
+                scheduler_terminal_pending_wake_discarded(prev_ref);
+                scheduler_prepare_prev_result_is(self, prev_ref, PrevDisposition::Blocked);
+                scheduler_terminal_prev_deactivated_before_pick(self, prev_ref);
+                scheduler_blocked_prev_not_reenqueued_by_put_prev(self, prev_ref);
+            }
+        }
+
         Action::PickNextTask(prev_ref: TaskRef) {
             state_effect: StateEffect::None;
             depends_on {
@@ -603,6 +625,24 @@ type Scheduler: ResourceObject {
                 scheduler_schedule_rejects_cross_cpu_stale_or_wrong_binding(self);
                 scheduler_schedule_request_preserves_task_lifecycle(self, self.curr);
                 scheduler_prepare_prev_precedes_pick_next(self, self.curr);
+            }
+        }
+
+        Action::ScheduleTerminal {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Online;
+                scheduler_terminal_sender_is_zombie(self.curr);
+            }
+            drives {
+                self.Action::PrepareTerminalPrev(self.curr);
+                self.Action::PickNextTask(self.curr);
+                self.Action::SwitchTo(self.curr, self.selected_next);
+            }
+            ensures {
+                scheduler_terminal_pending_wake_discarded(self.curr);
+                scheduler_terminal_prev_deactivated_before_pick(self, self.curr);
+                scheduler_terminal_switch_is_nonidentity(self, self.curr);
             }
         }
 

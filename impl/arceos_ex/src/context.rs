@@ -736,6 +736,11 @@ impl Context {
             .is_some_and(|task| task.record_segmentation_fault_terminal(code, address))
     }
 
+    pub(crate) fn record_task_signal(&mut self, task_ref: TaskRef, signal: usize) -> bool {
+        self.task_mut_for_ref(task_ref)
+            .is_some_and(|task| task.record_signal_terminal(signal))
+    }
+
     pub(crate) fn task_segmentation_fault_info(
         &self,
         task_ref: TaskRef,
@@ -2333,6 +2338,13 @@ pub fn context_ref() -> &'static Context {
     // SAFETY: read-only access is used for boundary checks before the mutable
     // phase path starts mutating the context.
     unsafe { &*core::ptr::addr_of!(CONTEXT) }
+}
+
+pub(crate) fn pid1_user_signal_state_ptr() -> *mut crate::objects::user_boot::KernelInitTaskUserState
+{
+    let context = core::ptr::addr_of_mut!(CONTEXT);
+    // The caller may dereference only while holding the user signal lock.
+    unsafe { core::ptr::addr_of_mut!((*context).kernel_init_user_state) }
 }
 
 pub(crate) fn user_memory_resource_ptrs() -> (

@@ -10,6 +10,10 @@
 #define SYS_getsid 156
 #endif
 
+#ifndef SYS_sched_getaffinity
+#define SYS_sched_getaffinity 123
+#endif
+
 #ifndef TIOCSCTTY
 #define TIOCSCTTY 0x540e
 #endif
@@ -27,6 +31,7 @@ static int say(const char *message, size_t len)
 
 int smoke_process_identity(void)
 {
+	unsigned long affinity[2] = { 0, 0xa5a5a5a5a5a5a5a5UL };
 	int pgrp;
 	int sid;
 	long rc;
@@ -45,6 +50,35 @@ int smoke_process_identity(void)
 	}
 	if (SAY_LITERAL("syscall getppid ok\n") < 0) {
 		return 76;
+	}
+
+	rc = syscall(SYS_sched_getaffinity, 0, sizeof(affinity), affinity);
+	if (rc != (long)sizeof(affinity[0]) || affinity[0] != 0xffUL ||
+	    affinity[1] != 0xa5a5a5a5a5a5a5a5UL) {
+		return 98;
+	}
+	affinity[0] = 0;
+	rc = syscall(SYS_sched_getaffinity, 1, sizeof(affinity[0]), affinity);
+	if (rc != (long)sizeof(affinity[0]) || affinity[0] != 0xffUL) {
+		return 99;
+	}
+	errno = 0;
+	rc = syscall(SYS_sched_getaffinity, 0, 4, affinity);
+	if (rc != -1 || errno != EINVAL) {
+		return 100;
+	}
+	errno = 0;
+	rc = syscall(SYS_sched_getaffinity, 999, sizeof(affinity[0]), affinity);
+	if (rc != -1 || errno != ESRCH) {
+		return 101;
+	}
+	errno = 0;
+	rc = syscall(SYS_sched_getaffinity, 0, sizeof(affinity[0]), (void *)1);
+	if (rc != -1 || errno != EFAULT) {
+		return 102;
+	}
+	if (SAY_LITERAL("syscall sched_getaffinity ok\n") < 0) {
+		return 103;
 	}
 
 	rc = syscall(SYS_getpgid, 0);

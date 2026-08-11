@@ -62,6 +62,11 @@ failure path.
   lookup uses one read-only runtime reference.
 - A bounded per-CPU atomic observation records root/interrupt/exception/SSIP completions, token consumption,
   leaf-switch resume and last generation. It is diagnostic state, not a checkpoint provider.
+- Before formal Rust entry initializes the stack-local `TrapExecutionRecord`, it snapshots the raw root
+  `TrapFlowRef` published in `TrapEntryContext`. A terminal trap-occurrence lifecycle diagnostic emits that
+  pre-initialization identity together with the failing Task root, the new record root, record bounds, CPU/Task/
+  TaskFlow identities and architectural cause in one bounded record. The snapshot is identity evidence only: the
+  diagnostic must not dereference a potentially stale root or change trap lifecycle behavior.
 
 Mapping: charter [`trap-type.md`](../../charter/objects/trap-type.md), model
 [`trap_type.spec`](../../model/objects/trap_type.spec), implementation

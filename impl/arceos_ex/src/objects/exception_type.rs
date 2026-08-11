@@ -29,8 +29,9 @@ use super::{
         USER_SIGNAL_COUNT, USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE,
         USER_SUPPLEMENTARY_GROUP_MAX, USER_WAIT4_ALL_CHILDREN, USER_WAIT4_WUNTRACED,
         UserFaultAccess, UserFaultClass, UserFaultMappingDiagnostic, UserFaultRequest,
-        UserFaultResolution, UserFaultResult, UserMappingKind, UserMmapError,
+        UserFaultResolution, UserFaultResult, UserMappingKind, UserMmapError, UserMsyncError,
         UserProcessGroupLookup, UserProcessGroupUpdate, UserRtSigtimedwaitResult, UserSignalAction,
+        UserSignalDelivery,
     },
     user_process_registry::UserProcessChildSelector,
 };
@@ -107,10 +108,14 @@ const SYSCALL_EXIT: usize = 93;
 const SYSCALL_EXIT_GROUP: usize = 94;
 const SYSCALL_SET_TID_ADDRESS: usize = 96;
 const SYSCALL_NANOSLEEP: usize = 101;
+const SYSCALL_SETITIMER: usize = 103;
 const SYSCALL_CLOCK_GETTIME: usize = 113;
+const SYSCALL_SCHED_GETAFFINITY: usize = 123;
+const SYSCALL_KILL: usize = 129;
 const SYSCALL_RT_SIGACTION: usize = 134;
 const SYSCALL_RT_SIGPROCMASK: usize = 135;
 const SYSCALL_RT_SIGTIMEDWAIT: usize = 137;
+const SYSCALL_RT_SIGRETURN: usize = 139;
 const SYSCALL_REBOOT: usize = 142;
 const SYSCALL_SETGID: usize = 144;
 const SYSCALL_SETUID: usize = 146;
@@ -141,6 +146,7 @@ const SYSCALL_CLONE: usize = 220;
 const SYSCALL_EXECVE: usize = 221;
 const SYSCALL_MMAP: usize = 222;
 const SYSCALL_MPROTECT: usize = 226;
+const SYSCALL_MSYNC: usize = 227;
 const SYSCALL_WAIT4: usize = 260;
 const SYSCALL_GETRANDOM: usize = 278;
 const LINUX_REBOOT_MAGIC1: usize = 0xfee1_dead;
@@ -252,6 +258,7 @@ const O_TRUNC: usize = 0o1000;
 const O_NONBLOCK: usize = 0o4000;
 const O_LARGEFILE: usize = 0o100000;
 const O_DIRECTORY: usize = 0o200000;
+const O_NOFOLLOW: usize = 0o400000;
 const O_CLOEXEC: usize = 0o2000000;
 const AF_UNIX: usize = 1;
 const SOCKADDR_STORAGE_SIZE: usize = 128;
@@ -307,6 +314,7 @@ const SIGKILL: usize = 9;
 const SIGSTOP: usize = 19;
 const UNBLOCKABLE_SIGNAL_MASK: usize = (1usize << (SIGKILL - 1)) | (1usize << (SIGSTOP - 1));
 const UAPI_SA_FLAGS: usize = 0xd800_0807;
+const SA_RESTART: usize = 0x1000_0000;
 const WAIT4_WNOHANG: usize = 0x0000_0001;
 const WAIT4_WCONTINUED: usize = 0x0000_0008;
 const WAIT4_WNOTHREAD: usize = 0x2000_0000;
@@ -799,6 +807,7 @@ pub struct SyscallTable {
     dup3_supported: bool,
     pipe2_supported: bool,
     getrandom_supported: bool,
+    sched_getaffinity_supported: bool,
     getcwd_supported: bool,
     getpid_supported: bool,
     getpgid_supported: bool,
@@ -820,6 +829,9 @@ pub struct SyscallTable {
     rt_sigprocmask_supported: bool,
     rt_sigaction_supported: bool,
     rt_sigtimedwait_supported: bool,
+    setitimer_supported: bool,
+    kill_supported: bool,
+    rt_sigreturn_supported: bool,
     clock_gettime_supported: bool,
     gettimeofday_supported: bool,
     nanosleep_supported: bool,
@@ -835,6 +847,7 @@ pub struct SyscallTable {
     lseek_supported: bool,
     brk_supported: bool,
     mmap_supported: bool,
+    msync_supported: bool,
     mprotect_supported: bool,
     munmap_supported: bool,
     set_tid_address_supported: bool,
@@ -853,8 +866,11 @@ pub struct SyscallTable {
     path_usercopy_ready: bool,
     stat_usercopy_ready: bool,
     getrandom_usercopy_ready: bool,
+    sched_getaffinity_usercopy_ready: bool,
     signal_mask_usercopy_ready: bool,
     signal_action_usercopy_ready: bool,
+    setitimer_usercopy_ready: bool,
+    signal_frame_usercopy_ready: bool,
     time_usercopy_ready: bool,
     nanosleep_usercopy_ready: bool,
     credentials_usercopy_ready: bool,
@@ -896,6 +912,10 @@ pub struct SyscallTable {
     getrandom_not_vfs_or_devfs_path: bool,
     getrandom_flags_first_slice_bound: bool,
     getrandom_full_random_core_deferred: bool,
+    sched_getaffinity_linux_6_12_layout_and_errno_bound: bool,
+    sched_getaffinity_current_process_first_slice: bool,
+    sched_getaffinity_reads_active_cpu_mask: bool,
+    sched_getaffinity_has_no_scheduler_side_effect: bool,
     getcwd_routes_to_kernel_init_user_state: bool,
     getcwd_root_first_slice_bound: bool,
     getpid_routes_to_kernel_init_user_state: bool,
@@ -940,6 +960,14 @@ pub struct SyscallTable {
     rt_sigtimedwait_waitqueue_sleep_first_slice: bool,
     rt_sigtimedwait_sigchld_pending_first_slice: bool,
     rt_sigtimedwait_return_signal_first_slice: bool,
+    signal_routes_to_current_aggregate: bool,
+    setitimer_itimer_real_linux_6_12_bound: bool,
+    setitimer_routes_to_signal_runtime_and_clockevent: bool,
+    kill_positive_pid_signal_zero_and_permission_bound: bool,
+    kill_pending_publish_generation_checked: bool,
+    kill_wake_has_no_lost_sleep_window: bool,
+    rt_sigreturn_linux_riscv_frame_bound: bool,
+    rt_sigreturn_restores_current_aggregate: bool,
     signal_delivery_deferred: bool,
     clock_gettime_routes_to_timer_provider: bool,
     gettimeofday_routes_to_timer_provider: bool,
@@ -1014,6 +1042,7 @@ pub struct SyscallTable {
     dup3_observed: AtomicU8,
     pipe2_observed: AtomicU8,
     getrandom_observed: AtomicU8,
+    sched_getaffinity_observed: AtomicU8,
     getcwd_observed: AtomicU8,
     getpid_observed: AtomicU8,
     getpgid_observed: AtomicU8,
@@ -1035,6 +1064,9 @@ pub struct SyscallTable {
     rt_sigprocmask_observed: AtomicU8,
     rt_sigaction_observed: AtomicU8,
     rt_sigtimedwait_observed: AtomicU8,
+    setitimer_observed: AtomicU8,
+    kill_observed: AtomicU8,
+    rt_sigreturn_observed: AtomicU8,
     clock_gettime_observed: AtomicU8,
     gettimeofday_observed: AtomicU8,
     nanosleep_observed: AtomicU8,
@@ -1079,6 +1111,7 @@ impl SyscallTable {
             dup3_supported: false,
             pipe2_supported: false,
             getrandom_supported: false,
+            sched_getaffinity_supported: false,
             getcwd_supported: false,
             getpid_supported: false,
             getpgid_supported: false,
@@ -1100,6 +1133,9 @@ impl SyscallTable {
             rt_sigprocmask_supported: false,
             rt_sigaction_supported: false,
             rt_sigtimedwait_supported: false,
+            setitimer_supported: false,
+            kill_supported: false,
+            rt_sigreturn_supported: false,
             clock_gettime_supported: false,
             gettimeofday_supported: false,
             nanosleep_supported: false,
@@ -1115,6 +1151,7 @@ impl SyscallTable {
             lseek_supported: false,
             brk_supported: false,
             mmap_supported: false,
+            msync_supported: false,
             mprotect_supported: false,
             munmap_supported: false,
             set_tid_address_supported: false,
@@ -1133,8 +1170,11 @@ impl SyscallTable {
             path_usercopy_ready: false,
             stat_usercopy_ready: false,
             getrandom_usercopy_ready: false,
+            sched_getaffinity_usercopy_ready: false,
             signal_mask_usercopy_ready: false,
             signal_action_usercopy_ready: false,
+            setitimer_usercopy_ready: false,
+            signal_frame_usercopy_ready: false,
             time_usercopy_ready: false,
             nanosleep_usercopy_ready: false,
             credentials_usercopy_ready: false,
@@ -1176,6 +1216,10 @@ impl SyscallTable {
             getrandom_not_vfs_or_devfs_path: false,
             getrandom_flags_first_slice_bound: false,
             getrandom_full_random_core_deferred: false,
+            sched_getaffinity_linux_6_12_layout_and_errno_bound: false,
+            sched_getaffinity_current_process_first_slice: false,
+            sched_getaffinity_reads_active_cpu_mask: false,
+            sched_getaffinity_has_no_scheduler_side_effect: false,
             getcwd_routes_to_kernel_init_user_state: false,
             getcwd_root_first_slice_bound: false,
             getpid_routes_to_kernel_init_user_state: false,
@@ -1220,6 +1264,14 @@ impl SyscallTable {
             rt_sigtimedwait_waitqueue_sleep_first_slice: false,
             rt_sigtimedwait_sigchld_pending_first_slice: false,
             rt_sigtimedwait_return_signal_first_slice: false,
+            signal_routes_to_current_aggregate: false,
+            setitimer_itimer_real_linux_6_12_bound: false,
+            setitimer_routes_to_signal_runtime_and_clockevent: false,
+            kill_positive_pid_signal_zero_and_permission_bound: false,
+            kill_pending_publish_generation_checked: false,
+            kill_wake_has_no_lost_sleep_window: false,
+            rt_sigreturn_linux_riscv_frame_bound: false,
+            rt_sigreturn_restores_current_aggregate: false,
             signal_delivery_deferred: false,
             clock_gettime_routes_to_timer_provider: false,
             gettimeofday_routes_to_timer_provider: false,
@@ -1294,6 +1346,7 @@ impl SyscallTable {
             dup3_observed: AtomicU8::new(0),
             pipe2_observed: AtomicU8::new(0),
             getrandom_observed: AtomicU8::new(0),
+            sched_getaffinity_observed: AtomicU8::new(0),
             getcwd_observed: AtomicU8::new(0),
             getpid_observed: AtomicU8::new(0),
             getpgid_observed: AtomicU8::new(0),
@@ -1315,6 +1368,9 @@ impl SyscallTable {
             rt_sigprocmask_observed: AtomicU8::new(0),
             rt_sigaction_observed: AtomicU8::new(0),
             rt_sigtimedwait_observed: AtomicU8::new(0),
+            setitimer_observed: AtomicU8::new(0),
+            kill_observed: AtomicU8::new(0),
+            rt_sigreturn_observed: AtomicU8::new(0),
             clock_gettime_observed: AtomicU8::new(0),
             gettimeofday_observed: AtomicU8::new(0),
             nanosleep_observed: AtomicU8::new(0),
@@ -1466,6 +1522,21 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub const fn setitimer_supported(&self) -> bool {
+        self.setitimer_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn kill_supported(&self) -> bool {
+        self.kill_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn rt_sigreturn_supported(&self) -> bool {
+        self.rt_sigreturn_supported
+    }
+
+    #[allow(dead_code)]
     pub const fn clock_gettime_supported(&self) -> bool {
         self.clock_gettime_supported
     }
@@ -1543,6 +1614,11 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn mmap_supported(&self) -> bool {
         self.mmap_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn msync_supported(&self) -> bool {
+        self.msync_supported
     }
 
     #[allow(dead_code)]
@@ -2211,6 +2287,21 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub fn setitimer_observed(&self) -> bool {
+        self.setitimer_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
+    pub fn kill_observed(&self) -> bool {
+        self.kill_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
+    pub fn rt_sigreturn_observed(&self) -> bool {
+        self.rt_sigreturn_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
     pub fn clock_gettime_observed(&self) -> bool {
         self.clock_gettime_observed.load(Ordering::Acquire) != 0
     }
@@ -2325,6 +2416,7 @@ impl SyscallTable {
         self.dup3_supported = true;
         self.pipe2_supported = true;
         self.getrandom_supported = true;
+        self.sched_getaffinity_supported = true;
         self.getcwd_supported = true;
         self.getpid_supported = true;
         self.getpgid_supported = true;
@@ -2346,6 +2438,9 @@ impl SyscallTable {
         self.rt_sigprocmask_supported = true;
         self.rt_sigaction_supported = true;
         self.rt_sigtimedwait_supported = true;
+        self.setitimer_supported = true;
+        self.kill_supported = true;
+        self.rt_sigreturn_supported = true;
         self.clock_gettime_supported = true;
         self.gettimeofday_supported = true;
         self.nanosleep_supported = true;
@@ -2361,6 +2456,7 @@ impl SyscallTable {
         self.lseek_supported = true;
         self.brk_supported = true;
         self.mmap_supported = true;
+        self.msync_supported = true;
         self.mprotect_supported = true;
         self.munmap_supported = true;
         self.set_tid_address_supported = true;
@@ -2379,8 +2475,11 @@ impl SyscallTable {
         self.path_usercopy_ready = true;
         self.stat_usercopy_ready = true;
         self.getrandom_usercopy_ready = true;
+        self.sched_getaffinity_usercopy_ready = true;
         self.signal_mask_usercopy_ready = true;
         self.signal_action_usercopy_ready = true;
+        self.setitimer_usercopy_ready = true;
+        self.signal_frame_usercopy_ready = true;
         self.time_usercopy_ready = true;
         self.nanosleep_usercopy_ready = true;
         self.credentials_usercopy_ready = true;
@@ -2422,6 +2521,10 @@ impl SyscallTable {
         self.getrandom_not_vfs_or_devfs_path = true;
         self.getrandom_flags_first_slice_bound = true;
         self.getrandom_full_random_core_deferred = true;
+        self.sched_getaffinity_linux_6_12_layout_and_errno_bound = true;
+        self.sched_getaffinity_current_process_first_slice = true;
+        self.sched_getaffinity_reads_active_cpu_mask = true;
+        self.sched_getaffinity_has_no_scheduler_side_effect = true;
         self.getcwd_routes_to_kernel_init_user_state = true;
         self.getcwd_root_first_slice_bound = true;
         self.getpid_routes_to_kernel_init_user_state = true;
@@ -2466,6 +2569,14 @@ impl SyscallTable {
         self.rt_sigtimedwait_waitqueue_sleep_first_slice = true;
         self.rt_sigtimedwait_sigchld_pending_first_slice = true;
         self.rt_sigtimedwait_return_signal_first_slice = true;
+        self.signal_routes_to_current_aggregate = true;
+        self.setitimer_itimer_real_linux_6_12_bound = true;
+        self.setitimer_routes_to_signal_runtime_and_clockevent = true;
+        self.kill_positive_pid_signal_zero_and_permission_bound = true;
+        self.kill_pending_publish_generation_checked = true;
+        self.kill_wake_has_no_lost_sleep_window = true;
+        self.rt_sigreturn_linux_riscv_frame_bound = true;
+        self.rt_sigreturn_restores_current_aggregate = true;
         self.signal_delivery_deferred = true;
         self.clock_gettime_routes_to_timer_provider = true;
         self.gettimeofday_routes_to_timer_provider = true;
@@ -2696,6 +2807,14 @@ impl SyscallTable {
         syscall_table_mmap(frame);
     }
 
+    pub fn msync(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready || !self.msync_supported {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+        syscall_table_msync(frame);
+    }
+
     pub fn mprotect(&self, frame: &mut TrapFrame) {
         if self.lifecycle.state() != State::Ready || !self.mprotect_supported {
             complete_unsupported_syscall(frame);
@@ -2848,6 +2967,22 @@ impl SyscallTable {
         }
 
         syscall_table_getrandom(self, frame);
+    }
+
+    pub fn sched_getaffinity(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.sched_getaffinity_supported
+            || !self.sched_getaffinity_usercopy_ready
+            || !self.sched_getaffinity_linux_6_12_layout_and_errno_bound
+            || !self.sched_getaffinity_current_process_first_slice
+            || !self.sched_getaffinity_reads_active_cpu_mask
+            || !self.sched_getaffinity_has_no_scheduler_side_effect
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_sched_getaffinity(self, frame);
     }
 
     pub fn getcwd(&self, frame: &mut TrapFrame) {
@@ -3138,6 +3273,51 @@ impl SyscallTable {
         }
 
         syscall_table_rt_sigtimedwait(self, frame);
+    }
+
+    pub fn setitimer(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.setitimer_supported
+            || !self.setitimer_usercopy_ready
+            || !self.signal_routes_to_current_aggregate
+            || !self.setitimer_itimer_real_linux_6_12_bound
+            || !self.setitimer_routes_to_signal_runtime_and_clockevent
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_setitimer(self, frame);
+    }
+
+    pub fn kill(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.kill_supported
+            || !self.signal_routes_to_current_aggregate
+            || !self.kill_positive_pid_signal_zero_and_permission_bound
+            || !self.kill_pending_publish_generation_checked
+            || !self.kill_wake_has_no_lost_sleep_window
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_kill(self, frame);
+    }
+
+    pub fn rt_sigreturn(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.rt_sigreturn_supported
+            || !self.signal_frame_usercopy_ready
+            || !self.signal_routes_to_current_aggregate
+            || !self.rt_sigreturn_linux_riscv_frame_bound
+            || !self.rt_sigreturn_restores_current_aggregate
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_rt_sigreturn(self, frame);
     }
 
     pub fn clock_gettime(&self, frame: &mut TrapFrame) {
@@ -3981,10 +4161,14 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
         SYSCALL_SYNC => table.sync(frame),
         SYSCALL_SET_TID_ADDRESS => table.set_tid_address(frame),
         SYSCALL_NANOSLEEP => table.nanosleep(frame),
+        SYSCALL_SETITIMER => table.setitimer(frame),
         SYSCALL_CLOCK_GETTIME => table.clock_gettime(frame),
+        SYSCALL_SCHED_GETAFFINITY => table.sched_getaffinity(frame),
+        SYSCALL_KILL => table.kill(frame),
         SYSCALL_RT_SIGACTION => table.rt_sigaction(frame),
         SYSCALL_RT_SIGPROCMASK => table.rt_sigprocmask(frame),
         SYSCALL_RT_SIGTIMEDWAIT => table.rt_sigtimedwait(frame),
+        SYSCALL_RT_SIGRETURN => table.rt_sigreturn(frame),
         SYSCALL_REBOOT => table.reboot(frame),
         SYSCALL_SETGID => table.setgid(frame),
         SYSCALL_SETUID => table.setuid(frame),
@@ -4008,6 +4192,7 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
         SYSCALL_CLONE => table.clone(frame),
         SYSCALL_MMAP => table.mmap(frame),
         SYSCALL_MPROTECT => table.mprotect(frame),
+        SYSCALL_MSYNC => table.msync(frame),
         SYSCALL_MUNMAP => table.munmap(frame),
         SYSCALL_WAIT4 => table.wait4(frame),
         #[cfg(app_user_boot)]
@@ -4430,8 +4615,15 @@ fn syscall_table_openat(table: &SyscallTable, frame: &mut TrapFrame) {
     let path_ptr = frame.reg(11);
     let flags = frame.reg(12);
     let mode = frame.reg(13) as u32;
-    let supported_flags =
-        O_NONBLOCK | O_LARGEFILE | O_DIRECTORY | O_CLOEXEC | O_CREAT | O_EXCL | O_TRUNC | O_ACCMODE;
+    let supported_flags = O_NONBLOCK
+        | O_LARGEFILE
+        | O_DIRECTORY
+        | O_NOFOLLOW
+        | O_CLOEXEC
+        | O_CREAT
+        | O_EXCL
+        | O_TRUNC
+        | O_ACCMODE;
     if dirfd != AT_FDCWD || flags & !supported_flags != 0 {
         print_openat_reject_detail(dirfd, path_ptr, flags, supported_flags);
         complete_error_syscall(frame, EINVAL);
@@ -4447,7 +4639,7 @@ fn syscall_table_openat(table: &SyscallTable, frame: &mut TrapFrame) {
     let exclusive_regular_create = flags & O_CREAT != 0
         && flags & O_EXCL != 0
         && flags & O_ACCMODE == 2
-        && flags & (O_TRUNC | O_NONBLOCK | O_DIRECTORY) == 0;
+        && flags & (O_TRUNC | O_NONBLOCK | O_DIRECTORY | O_NOFOLLOW) == 0;
     let create_identity = if exclusive_regular_create {
         let Some(identity) = super::user_boot::current_user_fs_identity() else {
             complete_unsupported_syscall(frame);
@@ -5474,6 +5666,65 @@ fn syscall_table_getrandom(table: &SyscallTable, frame: &mut TrapFrame) {
     complete_successful_syscall(frame, read);
 }
 
+fn syscall_table_sched_getaffinity(table: &SyscallTable, frame: &mut TrapFrame) {
+    const MASK_SIZE: usize = core::mem::size_of::<usize>();
+    const _: () = assert!(crate::objects::cpu::MAX_CPUS <= usize::BITS as usize);
+
+    let pid = frame.reg(10) as u32 as i32;
+    let len = frame.reg(11) as u32 as usize;
+    let user_mask_ptr = frame.reg(12);
+    let cpu_group = &crate::context::context_ref().cpu_group;
+    let possible_cpu_count = cpu_group.possible_cpu_count();
+    if possible_cpu_count == 0 || possible_cpu_count > crate::objects::cpu::MAX_CPUS {
+        complete_unsupported_syscall(frame);
+        return;
+    }
+    if len < possible_cpu_count.div_ceil(8) || !len.is_multiple_of(MASK_SIZE) {
+        table.sched_getaffinity_observed.store(1, Ordering::Release);
+        complete_error_syscall(frame, EINVAL);
+        return;
+    }
+
+    let Some((task_ref, cpu_ref)) = super::user_boot::current_user_process_identity() else {
+        complete_unsupported_syscall(frame);
+        return;
+    };
+    let registry = super::user_process_registry::global_registry();
+    let Some(current_pid) = registry.pid(task_ref) else {
+        table.sched_getaffinity_observed.store(1, Ordering::Release);
+        complete_error_syscall(frame, ESRCH);
+        return;
+    };
+    if pid < 0 || (pid != 0 && pid as usize != current_pid) {
+        table.sched_getaffinity_observed.store(1, Ordering::Release);
+        complete_error_syscall(frame, ESRCH);
+        return;
+    }
+    let Some(_lease) = registry.acquire(task_ref, cpu_ref) else {
+        table.sched_getaffinity_observed.store(1, Ordering::Release);
+        complete_error_syscall(frame, ESRCH);
+        return;
+    };
+
+    let mut mask = 0usize;
+    let mut logical_id = 0usize;
+    while logical_id < crate::objects::cpu::MAX_CPUS {
+        if cpu_group.active_contains(super::cpu::CpuRef::new(logical_id)) {
+            mask |= 1usize << logical_id;
+        }
+        logical_id += 1;
+    }
+    let retlen = len.min(MASK_SIZE);
+    if !copy_to_user(user_mask_ptr, &mask.to_le_bytes()[..retlen]) {
+        table.sched_getaffinity_observed.store(1, Ordering::Release);
+        complete_error_syscall(frame, EFAULT);
+        return;
+    }
+
+    table.sched_getaffinity_observed.store(1, Ordering::Release);
+    complete_successful_syscall(frame, retlen);
+}
+
 fn syscall_table_getcwd(table: &SyscallTable, frame: &mut TrapFrame) {
     let user_ptr = frame.reg(10);
     let size = frame.reg(11);
@@ -5967,46 +6218,33 @@ fn syscall_table_rt_sigprocmask(table: &SyscallTable, frame: &mut TrapFrame) {
         return;
     }
 
-    let old_mask = crate::context::context_ref()
-        .kernel_init_user_state
-        .blocked_signal_mask();
-    if new_set_ptr != 0 {
+    let update = if new_set_ptr != 0 {
         let Some(mut new_mask) = read_user_usize(new_set_ptr) else {
             complete_error_syscall(frame, EFAULT);
             return;
         };
         new_mask &= !UNBLOCKABLE_SIGNAL_MASK;
-
-        let current_mask = crate::context::context_ref()
-            .kernel_init_user_state
-            .blocked_signal_mask();
-        let next_mask = match how {
-            SIG_BLOCK => current_mask | new_mask,
-            SIG_UNBLOCK => current_mask & !new_mask,
-            SIG_SETMASK => new_mask,
+        let how = match how {
+            SIG_BLOCK => super::user_boot::UserSignalMaskHow::Block,
+            SIG_UNBLOCK => super::user_boot::UserSignalMaskHow::Unblock,
+            SIG_SETMASK => super::user_boot::UserSignalMaskHow::Set,
             _ => {
                 complete_error_syscall(frame, EINVAL);
                 return;
             }
         };
-        if !crate::context::context()
-            .kernel_init_user_state
-            .set_blocked_signal_mask(next_mask)
-        {
-            complete_unsupported_syscall(frame);
-            return;
-        }
-    }
+        Some((how, new_mask))
+    } else {
+        None
+    };
+
+    let Some(old_mask) = super::user_boot::current_user_rt_sigprocmask(update) else {
+        complete_unsupported_syscall(frame);
+        return;
+    };
 
     if old_set_ptr != 0 && !write_user_usize(old_set_ptr, old_mask) {
         complete_error_syscall(frame, EFAULT);
-        return;
-    }
-    if !crate::context::context()
-        .kernel_init_user_state
-        .observe_rt_sigprocmask()
-    {
-        complete_unsupported_syscall(frame);
         return;
     }
 
@@ -6039,39 +6277,21 @@ fn syscall_table_rt_sigaction(table: &SyscallTable, frame: &mut TrapFrame) {
         return;
     }
 
-    let Some(old_action) = crate::context::context_ref()
-        .kernel_init_user_state
-        .read_signal_action(signal)
+    let stored_action = new_action.map(|action| {
+        UserSignalAction::new(
+            action.handler(),
+            action.flags() & UAPI_SA_FLAGS,
+            action.mask() & !UNBLOCKABLE_SIGNAL_MASK,
+        )
+    });
+    let Some(old_action) = super::user_boot::current_user_rt_sigaction(signal, stored_action)
     else {
         complete_unsupported_syscall(frame);
         return;
     };
 
-    if let Some(action) = new_action {
-        let stored_action = UserSignalAction::new(
-            action.handler(),
-            action.flags() & UAPI_SA_FLAGS,
-            action.mask() & !UNBLOCKABLE_SIGNAL_MASK,
-        );
-        if !crate::context::context()
-            .kernel_init_user_state
-            .set_signal_action(signal, stored_action)
-        {
-            complete_unsupported_syscall(frame);
-            return;
-        }
-    }
-
     if old_action_ptr != 0 && !write_user_signal_action(old_action_ptr, old_action) {
         complete_error_syscall(frame, EFAULT);
-        return;
-    }
-
-    if !crate::context::context()
-        .kernel_init_user_state
-        .observe_rt_sigaction()
-    {
-        complete_unsupported_syscall(frame);
         return;
     }
 
@@ -6130,6 +6350,330 @@ fn syscall_table_rt_sigtimedwait(table: &SyscallTable, frame: &mut TrapFrame) {
         }
         UserRtSigtimedwaitResult::Unsupported => {}
     }
+}
+
+fn syscall_table_setitimer(table: &SyscallTable, frame: &mut TrapFrame) {
+    const ITIMER_REAL: i32 = 0;
+
+    let which = frame.reg(10) as u32 as i32;
+    let new_value_ptr = frame.reg(11);
+    let old_value_ptr = frame.reg(12);
+    if which != ITIMER_REAL {
+        table.setitimer_observed.store(1, Ordering::Release);
+        complete_error_syscall(frame, EINVAL);
+        return;
+    }
+
+    let timebase_hz = super::irq_time::registered_timebase_hz();
+    if timebase_hz == 0 {
+        complete_unsupported_syscall(frame);
+        return;
+    }
+    let new_value = if new_value_ptr == 0 {
+        None
+    } else {
+        let mut bytes = [0u8; 32];
+        if !copy_from_user(new_value_ptr, &mut bytes) {
+            table.setitimer_observed.store(1, Ordering::Release);
+            complete_error_syscall(frame, EFAULT);
+            return;
+        }
+        let interval_sec = i64::from_le_bytes(bytes[0..8].try_into().unwrap());
+        let interval_usec = i64::from_le_bytes(bytes[8..16].try_into().unwrap());
+        let value_sec = i64::from_le_bytes(bytes[16..24].try_into().unwrap());
+        let value_usec = i64::from_le_bytes(bytes[24..32].try_into().unwrap());
+        let Some(interval_ticks) = timeval_to_ticks(interval_sec, interval_usec, timebase_hz)
+        else {
+            table.setitimer_observed.store(1, Ordering::Release);
+            complete_error_syscall(frame, EINVAL);
+            return;
+        };
+        let Some(value_ticks) = timeval_to_ticks(value_sec, value_usec, timebase_hz) else {
+            table.setitimer_observed.store(1, Ordering::Release);
+            complete_error_syscall(frame, EINVAL);
+            return;
+        };
+        Some((interval_ticks, value_ticks))
+    };
+
+    let Some((_, cpu_ref)) = super::user_boot::current_user_process_identity() else {
+        complete_unsupported_syscall(frame);
+        return;
+    };
+    let now = crate::arch::riscv64::sbi::read_time();
+    let Some(old_value) = super::user_boot::current_user_setitimer_real(now, new_value) else {
+        complete_unsupported_syscall(frame);
+        return;
+    };
+    super::irq_time::reprogram_clockevent_mux(cpu_ref.logical_id());
+
+    if old_value_ptr != 0 {
+        let mut bytes = [0u8; 32];
+        let (interval_sec, interval_usec) = ticks_to_timeval(old_value.interval_ticks, timebase_hz);
+        let (value_sec, value_usec) = ticks_to_timeval(old_value.remaining_ticks, timebase_hz);
+        bytes[0..8].copy_from_slice(&interval_sec.to_le_bytes());
+        bytes[8..16].copy_from_slice(&interval_usec.to_le_bytes());
+        bytes[16..24].copy_from_slice(&value_sec.to_le_bytes());
+        bytes[24..32].copy_from_slice(&value_usec.to_le_bytes());
+        if !copy_to_user(old_value_ptr, &bytes) {
+            table.setitimer_observed.store(1, Ordering::Release);
+            complete_error_syscall(frame, EFAULT);
+            return;
+        }
+    }
+
+    table.setitimer_observed.store(1, Ordering::Release);
+    complete_successful_syscall(frame, 0);
+}
+
+fn syscall_table_kill(table: &SyscallTable, frame: &mut TrapFrame) {
+    let pid = frame.reg(10) as u32 as i32;
+    let signal = frame.reg(11) as u32 as i32;
+    if pid <= 0 || !(0..=USER_SIGNAL_COUNT as i32).contains(&signal) {
+        table.kill_observed.store(1, Ordering::Release);
+        complete_error_syscall(frame, EINVAL);
+        return;
+    }
+
+    let registry = super::user_process_registry::global_registry();
+    let Some((target_ref, target_cpu)) = registry.lookup_published_pid(pid as usize) else {
+        table.kill_observed.store(1, Ordering::Release);
+        complete_error_syscall(frame, ESRCH);
+        return;
+    };
+    let Some(_target_lease) = registry.acquire(target_ref, target_cpu) else {
+        table.kill_observed.store(1, Ordering::Release);
+        complete_error_syscall(frame, ESRCH);
+        return;
+    };
+    let Some(euid) = super::user_boot::current_user_euid() else {
+        complete_unsupported_syscall(frame);
+        return;
+    };
+    if euid != 0 {
+        table.kill_observed.store(1, Ordering::Release);
+        complete_error_syscall(frame, EPERM);
+        return;
+    }
+    if signal == 0 {
+        table.kill_observed.store(1, Ordering::Release);
+        complete_successful_syscall(frame, 0);
+        return;
+    }
+
+    let Some((_, producer_cpu)) = super::user_boot::current_user_process_identity() else {
+        complete_unsupported_syscall(frame);
+        return;
+    };
+    let reservation = match super::kernel_task::reserve_inbound(
+        target_ref,
+        target_cpu,
+        super::kernel_task::InboundKind::Wake,
+        super::kernel_task::next_inbound_ordinal(),
+    ) {
+        Ok(reservation) => reservation,
+        Err(_) => {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+    };
+    if !super::user_boot::merge_pending_signal(target_ref, target_cpu, signal as usize) {
+        let _ = super::kernel_task::rollback_reserved(reservation);
+        table.kill_observed.store(1, Ordering::Release);
+        complete_error_syscall(frame, ESRCH);
+        return;
+    }
+    let Some(target_hartid) = registry.hartid_for_cpu(target_cpu) else {
+        panic_dispatch("kill target CPU has no hart mapping\n");
+    };
+    if super::kernel_task::publish_reserved_and_signal_from(
+        reservation,
+        target_hartid,
+        producer_cpu,
+    )
+    .is_err()
+    {
+        panic_dispatch("kill pending signal wake publication failed\n");
+    }
+
+    table.kill_observed.store(1, Ordering::Release);
+    complete_successful_syscall(frame, 0);
+}
+
+fn syscall_table_rt_sigreturn(table: &SyscallTable, frame: &mut TrapFrame) {
+    const SIGMASK_OFFSET: usize = 168;
+    const MCONTEXT_OFFSET: usize = 304;
+    const USER_VA_LIMIT: usize = 0x4000_0000;
+
+    let frame_base = frame.reg(2);
+    if super::user_boot::current_user_active_signal_frame_base() != Some(frame_base)
+        || frame_base == 0
+        || !frame_base.is_multiple_of(16)
+    {
+        complete_bad_signal_frame(frame);
+        return;
+    }
+    let mut bytes = [0u8; super::user_boot::USER_RT_SIGFRAME_SIZE];
+    if !copy_from_user(frame_base, &mut bytes) {
+        complete_bad_signal_frame(frame);
+        return;
+    }
+    let restored_mask = u64::from_le_bytes(
+        bytes[SIGMASK_OFFSET..SIGMASK_OFFSET + 8]
+            .try_into()
+            .unwrap(),
+    ) as usize;
+    let restored_pc = u64::from_le_bytes(
+        bytes[MCONTEXT_OFFSET..MCONTEXT_OFFSET + 8]
+            .try_into()
+            .unwrap(),
+    ) as usize;
+    let restored_sp_offset = MCONTEXT_OFFSET + 2 * 8;
+    let restored_sp = u64::from_le_bytes(
+        bytes[restored_sp_offset..restored_sp_offset + 8]
+            .try_into()
+            .unwrap(),
+    ) as usize;
+    if restored_pc >= USER_VA_LIMIT
+        || restored_pc & 1 != 0
+        || restored_sp == 0
+        || restored_sp >= USER_VA_LIMIT
+        || !restored_sp.is_multiple_of(16)
+        || !super::user_boot::current_user_commit_rt_sigreturn(frame_base, restored_mask)
+    {
+        complete_bad_signal_frame(frame);
+        return;
+    }
+
+    frame.sepc = restored_pc;
+    let mut register = 1usize;
+    while register < 32 {
+        let offset = MCONTEXT_OFFSET + register * 8;
+        let value = u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap()) as usize;
+        frame.set_reg(register, value);
+        register += 1;
+    }
+    table.rt_sigreturn_observed.store(1, Ordering::Release);
+}
+
+pub(crate) fn deliver_pending_user_signal(frame: &mut TrapFrame, blocking_wait: bool) -> bool {
+    let delivery = super::user_boot::prepare_current_user_signal_delivery(frame.reg(2));
+    match delivery {
+        UserSignalDelivery::None => false,
+        UserSignalDelivery::Consumed => {
+            let _ = super::user_boot::consume_current_pending_wake_signal();
+            false
+        }
+        UserSignalDelivery::DefaultTerminal(signal) => {
+            let _ = super::user_boot::consume_current_pending_wake_signal();
+            complete_current_user_signal_terminal(frame, signal);
+            true
+        }
+        UserSignalDelivery::BadFrame => {
+            let _ = super::user_boot::consume_current_pending_wake_signal();
+            complete_bad_signal_frame(frame);
+            true
+        }
+        UserSignalDelivery::Handler(plan) => {
+            const SIGINFO_SIZE: usize = 128;
+            const UCONTEXT_OFFSET: usize = SIGINFO_SIZE;
+            const SIGMASK_OFFSET: usize = 168;
+            const MCONTEXT_OFFSET: usize = 304;
+            const USER_VA_LIMIT: usize = 0x4000_0000;
+
+            if plan.action.handler() >= USER_VA_LIMIT || plan.action.handler() & 1 != 0 {
+                complete_bad_signal_frame(frame);
+                return true;
+            }
+            let mut saved = *frame;
+            if blocking_wait && plan.action.flags() & SA_RESTART == 0 {
+                saved.set_reg(10, 0usize.wrapping_sub(4));
+                saved.sepc = saved.sepc.wrapping_add(4);
+            }
+            let mut bytes = [0u8; super::user_boot::USER_RT_SIGFRAME_SIZE];
+            bytes[0..4].copy_from_slice(&(plan.signal as u32).to_le_bytes());
+            write_u64(&mut bytes, SIGMASK_OFFSET, plan.old_mask as u64);
+            write_u64(&mut bytes, MCONTEXT_OFFSET, saved.sepc as u64);
+            let mut register = 1usize;
+            while register < 32 {
+                write_u64(
+                    &mut bytes,
+                    MCONTEXT_OFFSET + register * 8,
+                    saved.reg(register) as u64,
+                );
+                register += 1;
+            }
+            if !copy_to_user(plan.frame_base, &bytes) {
+                complete_bad_signal_frame(frame);
+                return true;
+            }
+            frame.set_reg(1, super::user_boot::USER_SIGNAL_TRAMPOLINE_VA);
+            frame.set_reg(2, plan.frame_base);
+            frame.set_reg(10, plan.signal);
+            frame.set_reg(11, plan.frame_base);
+            frame.set_reg(12, plan.frame_base + UCONTEXT_OFFSET);
+            frame.sepc = plan.action.handler();
+            let _ = super::user_boot::consume_current_pending_wake_signal();
+            true
+        }
+    }
+}
+
+fn complete_bad_signal_frame(frame: &mut TrapFrame) {
+    complete_current_user_signal_terminal(frame, 11);
+}
+
+fn complete_current_user_signal_terminal(frame: &mut TrapFrame, signal: usize) {
+    let Some((task_ref, _)) = super::user_boot::current_user_process_identity() else {
+        panic_dispatch_frame("signal terminal has no current user occurrence", frame);
+    };
+    if super::user_boot::current_smp_user_task().is_some() {
+        if !super::user_boot::record_current_smp_user_signal(task_ref, signal) {
+            panic_dispatch_frame("SMP user signal terminal record", frame);
+        }
+        super::user_boot::exit_current_smp_user_task(0);
+    }
+    if !crate::context::context().record_task_signal(task_ref, signal) {
+        panic_dispatch_frame("user signal terminal record", frame);
+    }
+    if let Some(table) = syscall_table_ref()
+        && complete_observed_child_exit_to_parent_wait(table, frame, 0)
+    {
+        return;
+    }
+    if complete_child_exit_to_parent_wait(frame, 0) {
+        return;
+    }
+    crate::arch::riscv64::sbi::putstr("user signal terminal without wait parent\n");
+    if !cleanup_current_task_for_shutdown() {
+        crate::arch::riscv64::sbi::putstr("current Task/TaskFlow signal cleanup failed\n");
+    }
+    crate::arch::riscv64::sbi::system_shutdown()
+}
+
+fn timeval_to_ticks(sec: i64, usec: i64, timebase_hz: u64) -> Option<u64> {
+    if sec < 0 || !(0..1_000_000).contains(&usec) || timebase_hz == 0 {
+        return None;
+    }
+    let seconds = (sec as u128).saturating_mul(timebase_hz as u128);
+    let subsecond = (usec as u128)
+        .saturating_mul(timebase_hz as u128)
+        .div_ceil(1_000_000);
+    let ticks = seconds.saturating_add(subsecond);
+    Some(core::cmp::min(ticks, u64::MAX as u128) as u64)
+}
+
+fn ticks_to_timeval(ticks: u64, timebase_hz: u64) -> (i64, i64) {
+    if ticks == 0 || timebase_hz == 0 {
+        return (0, 0);
+    }
+    let seconds = ticks / timebase_hz;
+    let remainder = ticks % timebase_hz;
+    let mut usec = ((remainder as u128 * 1_000_000) / timebase_hz as u128) as u64;
+    if seconds == 0 && usec == 0 {
+        usec = 1;
+    }
+    (core::cmp::min(seconds, i64::MAX as u64) as i64, usec as i64)
 }
 
 fn enter_rt_sigtimedwait_wait_boundary(frame: &mut TrapFrame) {
@@ -6834,6 +7378,18 @@ fn syscall_table_mmap(frame: &mut TrapFrame) {
         }
     };
     complete_successful_syscall(frame, mapped);
+}
+
+fn syscall_table_msync(frame: &mut TrapFrame) {
+    let start = frame.reg(10);
+    let len = frame.reg(11);
+    let flags = frame.reg(12);
+    match super::user_boot::current_user_msync(start, len, flags) {
+        Ok(()) => complete_successful_syscall(frame, 0),
+        Err(UserMsyncError::Invalid) => complete_error_syscall(frame, EINVAL),
+        Err(UserMsyncError::NoMemory) => complete_error_syscall(frame, ENOMEM),
+        Err(UserMsyncError::Io) => complete_error_syscall(frame, EIO),
+    }
 }
 
 fn syscall_table_mprotect(frame: &mut TrapFrame) {
@@ -8067,6 +8623,10 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
         #[cfg(checkpoint_handler_user_syscall_error)]
         let mut zombie_selected_reported = false;
         loop {
+            crate::arch::riscv64::csr::enable_supervisor_interrupts();
+            if deliver_pending_user_signal(frame, true) {
+                return;
+            }
             // Keep the global gate closed from the registry recheck through
             // WFI. With SSIE enabled, a remote wake remains pending and wakes
             // WFI instead of being handled and cleared immediately before the
@@ -10108,6 +10668,7 @@ fn print_mapping_kind(kind: UserMappingKind, mapped: bool) {
     }
     match kind {
         UserMappingKind::ElfSegment => crate::arch::riscv64::sbi::putstr("elf"),
+        UserMappingKind::SignalTrampoline => crate::arch::riscv64::sbi::putstr("signal-trampoline"),
         UserMappingKind::Stack => crate::arch::riscv64::sbi::putstr("stack"),
         UserMappingKind::Heap => crate::arch::riscv64::sbi::putstr("heap"),
         UserMappingKind::AnonymousPrivate => crate::arch::riscv64::sbi::putstr("anon-private"),
@@ -11311,10 +11872,14 @@ fn syscall_name(nr: usize) -> &'static str {
         SYSCALL_SYNC => "sync",
         SYSCALL_SET_TID_ADDRESS => "set_tid_address",
         SYSCALL_NANOSLEEP => "nanosleep",
+        SYSCALL_SETITIMER => "setitimer",
         SYSCALL_CLOCK_GETTIME => "clock_gettime",
+        SYSCALL_SCHED_GETAFFINITY => "sched_getaffinity",
+        SYSCALL_KILL => "kill",
         SYSCALL_RT_SIGACTION => "rt_sigaction",
         SYSCALL_RT_SIGPROCMASK => "rt_sigprocmask",
         SYSCALL_RT_SIGTIMEDWAIT => "rt_sigtimedwait",
+        SYSCALL_RT_SIGRETURN => "rt_sigreturn",
         SYSCALL_REBOOT => "reboot",
         SYSCALL_SETGID => "setgid",
         SYSCALL_SETUID => "setuid",
@@ -11343,6 +11908,7 @@ fn syscall_name(nr: usize) -> &'static str {
         SYSCALL_EXECVE => "execve",
         SYSCALL_MMAP => "mmap",
         SYSCALL_MPROTECT => "mprotect",
+        SYSCALL_MSYNC => "msync",
         SYSCALL_WAIT4 => "wait4",
         SYSCALL_GETRANDOM => "getrandom",
         SYSCALL_EXIT => "exit",

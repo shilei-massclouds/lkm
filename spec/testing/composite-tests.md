@@ -39,22 +39,32 @@ child 都打印 write-complete 后停止，coordinator 没有打印 bytes-collec
 artifact 与 QMP snapshot。DF-0001 对同一 basic identity 的旧 ELF-read 分类不能替代这个新边界，且后续
 成功样本不能抵消或关闭 DF-0006。
 
-`df-0007-ltp-frontier-child-wait-native` 是默认 suite 中独立的 native LTP frontier 调度失败观察项，
+`df-0007-ltp-frontier-child-wait-native` 是默认 suite 中独立的第一批 native LTP supported 调度失败观察项，
 `df-0007-ltp-frontier-child-wait-linux-object` 是同一 defect 的非默认第二 provider 入口。两者只重复正式
-basic identity，日常 case-local 样本均为 50；仅在概率问题尚未定位时按证据把专项批次扩到
+`ltp`/`ltp-lo` basic identity；case 名保留历史 frontier 来源，但不得跟随可移动 frontier。日常
+case-local 样本均为 50；仅在概率问题尚未定位时按证据把专项批次扩到
 100/200/300/500。两者不修改 stock LTP harness、frontier 精确名单、300 秒 timeout、
 8 CPU、provider、canonical rootfs 或完成 marker。首次两侧样本都在 `uname01` 已打印两条 TPASS 后，
 把当前 SMP wait/reap 错送入 PID1 legacy simulated dispatch。单变量负对照恢复旧路由后首次运行即恢复
 相同 TaskRef/generation 形状和 `live-sp-in-user-carrier-stack` 首失败；当前实现把 generation-checked SMP
 父进程严格绑定到自己的 registry child。修复前后保留两个 provider 压力入口。
 
-`df-0015-ltp-frontier-console-record-interleave-native` 是默认 suite 中独立的 native LTP frontier
-console record 原子性观察项。它只重复正式 `ltp-frontier` basic identity，日常 case-local 样本为
+`df-0015-ltp-frontier-console-record-interleave-native` 是默认 suite 中独立的第一批 native LTP supported
+console record 原子性观察项。它只重复正式 `ltp` basic identity，历史 case 名不改变其冻结名单，日常 case-local 样本为
 50 轮，不修改 stock harness、四项精确名单、8 CPU、native provider、rootfs、timeout 或 marker。
 成功必须同时看到四条从行首到行尾精确匹配的 stock runner PASS 记录、精确 clean summary 和完成
 marker；任何 PASS 被拼接到 `wait4 registry` 诊断中的历史形状必须单独分类为 DF-0015，不能因 LTP
 内部 TPASS 已出现而算作成功。100/200/300/500 只在该概率问题仍未定位或将来以相同 class 复发时
 用于逐档定位，修复后的常规压力门禁仍为 50；Linux/native 横向差分最多 10 轮。
+
+`df-0016-ltp-trap-root-stale-linux-object` 是默认 suite 中独立的 linux-object LTP supported
+trap-root 生命周期回归项。它只重复正式 `ltp-lo` basic identity，不修改 stock harness、四项精确
+supported 名单、8 CPU、provider、canonical rootfs、timeout 或 marker。首次真实样本在
+`geteuid01` 并发阶段由 SSIP 的 `TrapOccurrence.BindRoot` 报告 `installed_root_stale`；随后冻结的
+调查批次为 100/100。该证据按阶段决策进入常规 50 轮回归，但不删除首次失败或宣称因果修复。
+failure classification 必须同时包含 lifecycle failure 与 `installed_root_stale`；success 必须包含
+四条精确 PASS、clean summary 和完整 marker 协议。仅在同 class 复发时恢复
+100/200/300/500 定位阶梯，差分仍最多 10 轮。
 
 `df-0008-user-smoke-fork-enqueue-linux-object` 是默认 suite 中独立的 linux-object user-smoke fork
 publication 失败观察项。它只重复正式 `user-smoke-linux-object` basic identity，case-local 深采样轮次为
@@ -71,12 +81,12 @@ write-complete，但 coordinator 未打印 bytes-collected，QMP 捕获时 VM �
 DF-0006 相同，但 provider 与长期入口独立；它也不得替代不同边界的 DF-0008 enqueue failure。
 修复前后均保留，后续成功样本不能抵消或关闭 DF-0009。
 
-`df-0010-ltp-frontier-post-read-runqueue-linux-object` 是默认 suite 中独立的 linux-object LTP
-frontier 后续 child runqueue-publication 失败观察项。它只重复 diagnostic basic identity
-`ltp-frontier-post-read-lo`，case-local 深采样轮次为 50：先原样重放首次样本的长度检查、带三个
+`df-0010-ltp-frontier-post-read-runqueue-linux-object` 是默认 suite 中独立的 linux-object 第一批 LTP
+supported 后续 child runqueue-publication 失败观察项。它只重复 diagnostic basic identity
+`ltp-supported-post-read-lo`，case-local 深采样轮次为 50：先原样重放首次样本的长度检查、带三个
 不存在参数的失败 hash child、由 Ctrl-C 中断的未完成命令，再核对 stock `run-syscalls.sh` 的固定
 SHA-256 并执行 `sh -n`；之后通过原项目 selector 运行未修改的 frontier 精确名单，最后由同一父
-shell 启动第二次 SHA-256 读取。首次样本在四项 TPASS 及 stock harness
+shell 启动第二次 SHA-256 读取。该 identity 固定 supported，不得跟随下一批 frontier。首次样本在四项 TPASS 及 stock harness
 第 203 行 parse error 后，第二个 hash child 终止于 `declared child runqueue publish invariant failed`。
 classifier 必须把带 `Scheduler/Enqueue.Publish/TaskRunqueue` 首失败诊断的样本与早先的 harness parse
 error、unsupported syscall、TWARN 和 DF-0007/DF-0008 分开保存。不得更换 provider、SMP、rootfs、

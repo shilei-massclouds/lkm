@@ -73,6 +73,12 @@ If it is already runnable/on-rq, the wake is a coalesced no-op. The user-return 
 records before deciding whether to schedule, so a wake published between sleep declaration and Suspend reaches
 one of these two commits without a producer-side Task mutation.
 
+Terminal scheduling is a disjoint `PrepareTerminalPrev` path. After the exact current user occurrence is registry
+`Zombie` and its Runtime/Flow are Destroyed, this path must not call ordinary `prepare_prev_runnable`: it clears any
+stale pending-wake flag while preserving the declared-sleep/non-running state, deactivates the previous Task under
+the owner runqueue lock before `PickNext`, and requires a non-identity switch. This is the local representation of
+Linux `TASK_DEAD`; a late or coalesced ordinary wake cannot resurrect or requeue the terminal Task.
+
 `schedule_current()` resolves the owner Scheduler from the current fixed Flow's CpuRef; it is not a CPU0 alias.
 The same implementation accepts BootTask, keyed AP idle Tasks and dynamic kernel Tasks. AP idle binding is the
 owner Scheduler's keyed `idle` TaskRef, and secondary enable prepares the same preemption/runqueue protocol before

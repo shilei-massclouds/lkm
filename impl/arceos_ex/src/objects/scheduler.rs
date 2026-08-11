@@ -8,7 +8,7 @@ use super::{
     init_mm::InitMm,
     interrupt_type::InterruptType,
     per_cpu_storage::PerCpuStorage,
-    scheduler_task_access::{NextDispatch, SchedulerTaskAccess},
+    scheduler_task_access::{NextDispatch, SchedulerTaskAccess, SchedulerTaskStateDiagnostic},
     state::{
         EventError, EventErrorCode, EventResult, FailureDiagnostic, Lifecycle, LifecycleEvent,
         State, failed_condition,
@@ -1160,8 +1160,11 @@ impl Scheduler {
                     .wrapping_add(1);
                 self.scheduler_rq_clock_update_count =
                     self.scheduler_rq_clock_update_count.wrapping_add(1);
+                let terminal_prev_before = terminal
+                    .then(|| task_access.scheduler_task_state_diagnostic(prev_ref))
+                    .flatten();
                 let disposition = self
-                    .prepare_prev(prev_ref, task_access)
+                    .prepare_prev(prev_ref, terminal, task_access)
                     .map_err(|error| schedule_stage(error, "PreparePrev"))?;
                 next_ref = self
                     .pick_next_task(current_scheduler_ref, prev_ref, disposition)
@@ -1176,6 +1179,13 @@ impl Scheduler {
                     switch_preflight =
                         Some(self.switch_to(prev_ref, next_ref, current_task_ref, task_access)?);
                 } else if terminal {
+                    self.trace_terminal_identity_pick(
+                        prev_ref,
+                        next_ref,
+                        disposition,
+                        terminal_prev_before,
+                        task_access.scheduler_task_state_diagnostic(prev_ref),
+                    );
                     return Err(self.failed_schedule_entry("terminal-switch-is-nonidentity"));
                 } else {
                     self.identity_switch_passes = self.identity_switch_passes.wrapping_add(1);
@@ -1336,15 +1346,26 @@ impl Scheduler {
     fn prepare_prev(
         &mut self,
         prev_ref: TaskRef,
+        terminal: bool,
         task_access: &mut SchedulerTaskAccess<'_>,
     ) -> Result<PrevDisposition, EventError> {
         crate::checkpoint::checkpoint(Checkpoint::SchedulerPreparePrevEntry);
         self.pick_task_sequence = 0;
         self.put_prev_task_sequence = 0;
         self.set_next_task_sequence = 0;
-        let runnable = task_access
-            .prepare_prev_runnable(prev_ref)
-            .ok_or_else(|| self.failed_schedule_condition())?;
+        let runnable = if terminal {
+            let blocked = task_access
+                .prepare_terminal_prev_blocked(prev_ref)
+                .ok_or_else(|| self.failed_schedule_condition())?;
+            if !blocked {
+                return Err(self.failed_schedule_condition());
+            }
+            false
+        } else {
+            task_access
+                .prepare_prev_runnable(prev_ref)
+                .ok_or_else(|| self.failed_schedule_condition())?
+        };
 
         let disposition = if runnable {
             PrevDisposition::Runnable
@@ -2042,6 +2063,50 @@ impl Scheduler {
         crate::arch::riscv64::sbi::putchar(b'\n');
     }
 
+    fn trace_terminal_identity_pick(
+        &self,
+        prev_ref: TaskRef,
+        next_ref: TaskRef,
+        disposition: PrevDisposition,
+        before: Option<SchedulerTaskStateDiagnostic>,
+        after: Option<SchedulerTaskStateDiagnostic>,
+    ) {
+        crate::arch::riscv64::sbi::putstr("scheduler terminal identity pick cpu=");
+        print_scheduler_hex(self.cpu_id());
+        crate::arch::riscv64::sbi::putstr(" prev=");
+        print_scheduler_task_ref(prev_ref);
+        crate::arch::riscv64::sbi::putstr(" next=");
+        print_scheduler_task_ref(next_ref);
+        crate::arch::riscv64::sbi::putstr(" idle=");
+        print_scheduler_task_ref(self.idle_ref());
+        crate::arch::riscv64::sbi::putstr(" curr=");
+        print_scheduler_task_ref(self.curr_ref());
+        crate::arch::riscv64::sbi::putstr(" disposition=");
+        crate::arch::riscv64::sbi::putstr(match disposition {
+            PrevDisposition::Runnable => "runnable",
+            PrevDisposition::Blocked => "blocked",
+        });
+        crate::arch::riscv64::sbi::putstr(" queues={stop:");
+        print_scheduler_hex(self.stop_queue.len());
+        crate::arch::riscv64::sbi::putstr(",deadline:");
+        print_scheduler_hex(self.deadline_queue.len());
+        crate::arch::riscv64::sbi::putstr(",realtime:");
+        print_scheduler_hex(self.realtime_queue.len());
+        crate::arch::riscv64::sbi::putstr(",fair:");
+        print_scheduler_hex(self.fair_queue.len());
+        crate::arch::riscv64::sbi::putstr(",idle:");
+        print_scheduler_hex(self.idle_queue.len());
+        crate::arch::riscv64::sbi::putstr("} membership={fair_prev:");
+        print_scheduler_hex(self.fair_queue.contains_ref(prev_ref) as usize);
+        crate::arch::riscv64::sbi::putstr(",idle_prev:");
+        print_scheduler_hex(self.idle_queue.contains_ref(prev_ref) as usize);
+        crate::arch::riscv64::sbi::putstr("} before=");
+        print_scheduler_task_state(before);
+        crate::arch::riscv64::sbi::putstr(" after=");
+        print_scheduler_task_state(after);
+        crate::arch::riscv64::sbi::putchar(b'\n');
+    }
+
     fn failed_switch_commit(&self, first_failed: &'static str) -> EventError {
         self.failed_schedule_condition()
             .with_diagnostic(FailureDiagnostic::new(
@@ -2286,6 +2351,30 @@ fn print_scheduler_hex(value: usize) {
             b'a' + digit - 10
         });
     }
+}
+
+fn print_scheduler_task_ref(task_ref: TaskRef) {
+    print_scheduler_hex(task_ref.slot());
+    crate::arch::riscv64::sbi::putstr(":");
+    print_scheduler_hex(task_ref.generation() as usize);
+}
+
+fn print_scheduler_task_state(state: Option<SchedulerTaskStateDiagnostic>) {
+    let Some(state) = state else {
+        crate::arch::riscv64::sbi::putstr("none");
+        return;
+    };
+    crate::arch::riscv64::sbi::putstr("{running:");
+    print_scheduler_hex(state.running as usize);
+    crate::arch::riscv64::sbi::putstr(",on_cpu:");
+    print_scheduler_hex(state.on_cpu as usize);
+    crate::arch::riscv64::sbi::putstr(",on_rq:");
+    print_scheduler_hex(state.runqueue_published as usize);
+    crate::arch::riscv64::sbi::putstr(",sleep:");
+    print_scheduler_hex(state.sleep_declared as usize);
+    crate::arch::riscv64::sbi::putstr(",pending_wake:");
+    print_scheduler_hex(state.pending_wake as usize);
+    crate::arch::riscv64::sbi::putstr("}");
 }
 
 fn schedule_stage(error: EventError, first_failed: &'static str) -> EventError {
@@ -3181,15 +3270,48 @@ impl Scheduler {
             || (!task_ref.is_user() && task_id_for_current_task_ref(task_ref) != Some(task_id))
             || (task_ref.is_user()
                 && super::user_process_registry::global_registry().pid(task_ref) != Some(task_id))
-            || self.contains_task(task_id)
-            || self.contains_task_ref(task_ref)
-            || self.fair_queue.len() == SCHED_CLASS_QUEUE_CAPACITY
         {
             return self.failed_setup();
         }
         let task = task_access
             .current_task_candidate(task_ref)
             .map(|candidate| candidate.task);
+        let contains_id = self.contains_task(task_id);
+        let contains_ref = self.contains_task_ref(task_ref);
+        if kind == super::kernel_task::InboundKind::Wake {
+            if self.curr_ref().same_identity(task_ref) {
+                let current_sleeping = task.is_some_and(|task| {
+                    task.flow_cpu_ref() == Some(self.cpu_ref())
+                        && task.state() == State::OnCpu
+                        && task.scheduler_sleep_declared()
+                        && !task.running()
+                });
+                if current_sleeping {
+                    return task_access
+                        .post_pending_wake_for_inbound(task_ref)
+                        .ok_or_else(|| self.failed_setup_error())?;
+                }
+                if task_access.inbound_wake_coalesces(task_ref, self.cpu_ref())
+                    && contains_id
+                    && contains_ref
+                {
+                    return Ok(());
+                }
+                return self.failed_setup();
+            }
+            if contains_id || contains_ref {
+                if contains_id
+                    && contains_ref
+                    && task_access.inbound_wake_coalesces(task_ref, self.cpu_ref())
+                {
+                    return Ok(());
+                }
+                return self.failed_setup();
+            }
+        }
+        if contains_id || contains_ref || self.fair_queue.len() == SCHED_CLASS_QUEUE_CAPACITY {
+            return self.failed_setup();
+        }
         let task_preflight = task.is_some_and(|task| {
             task.flow_cpu_ref() == Some(self.cpu_ref())
                 && match kind {

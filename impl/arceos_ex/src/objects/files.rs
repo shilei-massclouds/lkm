@@ -49,6 +49,7 @@ const FILE_O_ACCMODE: u32 = 0o3;
 const FILE_O_NONBLOCK: u32 = 0o4000;
 const FILE_O_LARGEFILE: u32 = 0o100000;
 const FILE_O_DIRECTORY: u32 = 0o200000;
+const FILE_O_NOFOLLOW: u32 = 0o400000;
 const FILE_O_CLOEXEC: u32 = 0o2000000;
 const FILE_FD_CLOEXEC: u32 = 1;
 const TERMIOS_ICRNL: u32 = 0x100;
@@ -3448,6 +3449,7 @@ impl FilesStruct {
                 &mut provider,
                 path,
                 open_flags & FILE_O_DIRECTORY != 0,
+                open_flags & FILE_O_NOFOLLOW != 0,
             )
             .map_err(vfs_error_to_file_error)?;
 
@@ -3807,7 +3809,7 @@ impl FilesStruct {
         {
             return Err(FileError::PathUnavailable);
         }
-        if open_flags & FILE_O_DIRECTORY != 0 {
+        if open_flags & (FILE_O_DIRECTORY | FILE_O_NOFOLLOW) != 0 {
             return Err(FileError::InvalidArgument);
         }
         if open_flags & FILE_O_ACCMODE != FILE_O_RDWR {
@@ -3837,6 +3839,9 @@ impl FilesStruct {
         }
         if open_flags & FILE_O_DIRECTORY != 0 {
             return Err(FileError::NotDirectory);
+        }
+        if open_flags & FILE_O_NOFOLLOW != 0 {
+            return Err(FileError::InvalidArgument);
         }
 
         let access_mode = open_flags & FILE_O_ACCMODE;
@@ -4889,7 +4894,7 @@ impl FilesStruct {
         offset: usize,
         buffer: &mut [u8],
         vfs_core: &VfsCore,
-    ) -> FileResult<()> {
+    ) -> FileResult<FileRef> {
         if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
             return Err(FileError::NotReady);
         }
@@ -4924,7 +4929,7 @@ impl FilesStruct {
         vfs_core
             .read_file_range(file_ref, offset, buffer)
             .map_err(vfs_error_to_file_error)?;
-        Ok(())
+        Ok(file_ref)
     }
 
     pub fn ioctl_validate_fd(&self, fd: usize) -> FileResult<()> {

@@ -427,6 +427,15 @@ class BasicRunnerConfigTests(unittest.TestCase):
             supported_counts["Summary: TOTAL=4 PASS=4 FAIL=0 BROK=0 WARN=0 CONF=0"],
             1,
         )
+        selection_dir = repo_root / "impl" / "arceos_ex" / "tests" / "rootfs" / "canonical"
+        self.assertEqual(
+            (selection_dir / "ltp-supported").read_text().splitlines(),
+            ["uname01", "uname02", "getuid01", "geteuid01"],
+        )
+        self.assertEqual(
+            (selection_dir / "ltp-frontier").read_text().splitlines(),
+            ["getgid03", "getegid02", "getresuid01", "getresgid01"],
+        )
 
     def test_default_automation_pins_user_smoke_and_df0001_to_explicit_test_names(self) -> None:
         repo_root = Path(__file__).resolve().parents[4]

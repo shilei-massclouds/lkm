@@ -35,6 +35,31 @@ generation-checked 链接直接引用仍存活的有效 mm owner，而不是占�
 失败返回 `EAGAIN`（slot/PID/inbox 容量）或 `ENOMEM`（内存资源），且不得留下 PID、PTE、frame ref、
 registry 条目或消息。
 
+## signal、ITIMER_REAL 与跨 CPU wake
+
+每个 aggregate 的 `SignalRuntime` 独占 action table、blocked/pending set、一个 `ITIMER_REAL` 和 active
+signal-frame 状态。普通 fork 只复制 action table 与 blocked mask；child 的 pending set、timer 和 active
+frame 必须为空。exec 对 disposition 的完整 Linux 变换、线程组共享 pending 和实时信号排队后续展开，
+但任何已实现的 `rt_sigaction`、`rt_sigprocmask`、`setitimer`、`kill` 与 `rt_sigreturn` 都必须经当前或目标
+occurrence lease 解析到该 aggregate，不得继续读写 PID 1 的全局 carrier。
+
+远程 producer 不获得目标 CPU 独占的 aggregate 写引用。它只在目标 lease 存活且持有独立 IRQ-safe
+signal mailbox lock 时合并 pending bit，然后向目标固定 CPU 发布 generation-checked wake。wake 若先于
+目标实际 sleep 到达，必须成为该 Task 的一次 pending wake；若目标已经 blocked，则恢复其 runqueue
+资格；若目标仍在用户 syscall 的 WFI 等待段，则 IPI 必须使其重检 pending set。action/mask/frame/timer
+的 owner-side 更新与远程 pending publication 使用同一 signal lock 排序，且不得在持锁时调用 Scheduler。
+
+当前 `ITIMER_REAL` 以 `RiscvTimerProvider` 的 monotonic tick 建模相对 wall-clock deadline；安装、查询、
+取消、周期重装和到期发布 `SIGALRM` 都是实际副作用。clockevent mux 必须同时考虑 scheduler deadline
+和本 CPU aggregate timer 的最早 deadline。长度、timeval 合法性、`EFAULT`/`EINVAL`、返回旧值以及
+copyout 失败时已经提交的新 timer，遵循 Linux 6.12 `do_setitimer()` 的顺序。
+
+从用户态或阻塞 syscall 返回前，目标 CPU 只递送未屏蔽 pending signal。当前 RISC-V frame 使用 Linux
+`siginfo_t` 128 字节和 `ucontext_t` 960 字节布局，保存整数寄存器、原 blocked mask 和 restart 决策；
+handler 的 `ra` 指向 `UserAddressSpace` 内 RX/NW 的 signal-return trampoline，用户栈保持 RW/NX。
+`rt_sigreturn` 必须验证当前 active frame 并从该 frame 恢复 mask 和整数现场。当前只允许一个 active
+frame；嵌套递送在其返回前保持 pending，不能覆盖 frame 或伪造成功。
+
 vfork 在 publish 前完成 child activation 和 parent completion/wake 两个 inbox reservation，以及除
 独立 mm 内容外的全部 child aggregate 资源；两者中任一失败都按 fork 失败规则完整回滚。child publish
 并在 parent 固定 CPU 入队后，parent 才可声明 scheduler sleep。child exec 在 point-of-no-return 把
@@ -65,6 +90,10 @@ wake。该 wake 不得早于 wait4 实际可消费的完整完成条件；若 Ta
 后续条件，则 wake 必须在该条件 release 发布后发出，或者以持久 pending 状态覆盖 parent 重检条件到
 实际睡眠的窗口，不能只在较早的 zombie publication 时产生一次可丢失 IPI。vfork completion 是独立的
 parent-blocking handoff，仍按其 immediate-parent reservation 发布，不替代稍后的 wait/reap wake。
+一旦当前 Task 已发布 zombie 并进入单向 terminal Scheduler handoff，它的运行资格必须等价于 Linux
+`TASK_DEAD`：此前合并但尚未消费的 wake 以及随后到达的 wake 都不得令该 Task 恢复 runnable 或重新入队。
+terminal handoff 必须在选择 next 前丢弃该 Task 的旧 pending wake、撤销其 runqueue 资格并完成一次
+non-identity switch；这些 obsolete wake 不得影响 parent 自己的 wait/reap wake。
 wait4 的 PID `-1` 匹配当前 parent 的任一 child，正 PID 只匹配当前 parent 的该 PID child；不属于
 当前 parent 的同 PID 进程不可成为等待、handoff 或 reap 目标。在匹配集合内，wait4 对一个 zombie 取得
 独占 reap 权；复制 status 失败不得消费 zombie，成功后才清除调度引用并回收条目。exec 保持
@@ -81,8 +110,14 @@ registry 元数据、每个 aggregate 和共享 files/VFS/console 分别使用 I
 
 ## 能力边界
 
-首轮不导出 sched affinity ABI，不执行运行期 CPU hotplug、任务迁移、自动负载均衡、共享 mm 跨核、
-ASID 或远程 TLB shootdown。online CpuRef 序列在 SMP bringup 完成后冻结。
+首轮只导出只读 `sched_getaffinity` ABI：它在 generation/CPU-checked 当前进程 lease 存活期间，
+把进程当前允许集合读取为 `CpuGroup` 的 active CpuRef 集合。PID `0` 与当前进程的正 PID 可选择
+当前 occurrence；其它 PID 在本轮不跨 aggregate 查询。长度、machine-word 对齐、用户地址错误和
+返回的 copyout 长度遵循 Linux 6.12，且只写返回长度覆盖的字节。该读取不改变 Task 的固定 CpuRef，
+也不把“当前实现不迁移”伪装成 singleton affinity policy。
+
+`sched_setaffinity`、运行期 CPU hotplug、任务迁移、自动负载均衡、共享 mm 跨核、ASID 和远程 TLB
+shootdown 仍不表示。online CpuRef 序列在 SMP bringup 完成后冻结。
 
 ## Mapping
 

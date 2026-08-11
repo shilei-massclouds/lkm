@@ -31,10 +31,14 @@ post-first-read child-return timeout without creating a second defect.
 DF-0014 independently repeats `rc-local-native` and classifies the frozen
 post-`Kernel.Online` cross-CPU checkpoint-consumer overlap; it is distinct from
 DF-0012's pre-runtime direct-setup shutdown and DF-0004's timeout.
-DF-0015 repeats the native LTP frontier and requires all four stock-harness PASS
+DF-0015 repeats the frozen first-batch native LTP supported identity and requires all four stock-harness PASS
 records to remain standalone while wait4 diagnostics are emitted concurrently.
+DF-0016 repeats the linux-object supported LTP identity as a routine 50-run
+regression for the frozen SSIP `installed_root_stale` trap-root failure. Its
+accepted investigation sample completed 100/100 without erasing the first
+failure or claiming a causal repair.
 The root Make entry defaults to `STRESS_RUNS=10`, so the normal default sample
-is 10 runs per case (150 QEMU runs total). `STRESS_RUNS=N` overrides the
+is 10 runs per case (160 QEMU runs total). `STRESS_RUNS=N` overrides the
 configured run count for each selected case. `STRESS_RUNS=0` validates every
 selected composite TOML, classifier, and referenced basic TOML without building
 a disk or running QEMU.
@@ -103,6 +107,10 @@ make test-stress \
   STRESS_RUNS=50
 
 make test-stress \
+  STRESS_CASES=impl/arceos_ex/tests/stress/cases/df-0016-ltp-trap-root-stale-linux-object.toml \
+  STRESS_RUNS=50
+
+make test-stress \
   STRESS_CASES=impl/arceos_ex/tests/stress/cases/rc-local-native-timeout-focused.toml \
   STRESS_RUNS=100
 ```
@@ -110,6 +118,8 @@ make test-stress \
 The focused commands run DF-0005, DF-0006, both provider identities for the
 scheduling-sensitive DF-0007, DF-0008, DF-0009, DF-0010, DF-0011, DF-0012,
 DF-0013, DF-0014, DF-0015, and DF-0004 at their declared focused sample sizes.
+DF-0016 remains in the same routine set at 50 runs after its accepted 100-run
+investigation sample.
 The 100/200/300/500 staircase is reserved for an unresolved probabilistic
 investigation; it is not a mechanical post-fix gate. Each case keeps every
 standalone artifact and, on a timeout, the basic runner freezes

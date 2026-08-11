@@ -44,6 +44,9 @@ DEFAULT_SUITE = (
     STRESS_DIR
     / "cases"
     / "df-0015-ltp-frontier-console-record-interleave-native.toml",
+    STRESS_DIR
+    / "cases"
+    / "df-0016-ltp-trap-root-stale-linux-object.toml",
 )
 DEFAULT_OUT_ROOT = STRESS_DIR / "out"
 BASIC_DIR = STRESS_DIR.parent / "basic"

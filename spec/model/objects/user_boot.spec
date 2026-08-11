@@ -199,6 +199,9 @@ predicate user_address_space_mmap_shared_regular_frame_eager<T>(space: T) -> boo
 predicate user_address_space_mmap_shared_regular_survives_fd_close_and_unlink<T>(space: T) -> bool;
 predicate user_address_space_mmap_shared_regular_fork_shares_writable_frame<T>(space: T) -> bool;
 predicate user_address_space_mmap_shared_regular_failure_atomic<T>(space: T) -> bool;
+predicate user_address_space_msync_validates_and_covers_range<T>(space: T) -> bool;
+predicate user_address_space_msync_shared_file_flushes_backing<T, V>(space: T, vfs: V) -> bool;
+predicate user_address_space_msync_nonfile_mapping_has_no_file_side_effect<T>(space: T) -> bool;
 predicate user_address_space_mprotect_accepts_mapped_user_range<T>(space: T) -> bool;
 predicate user_address_space_munmap_accepts_mapped_user_range<T>(space: T) -> bool;
 predicate user_address_space_munmap_anonymous_private_whole_vma<T>(space: T) -> bool;
@@ -278,6 +281,7 @@ predicate syscall_table_fchmod_supported<T>(table: T) -> bool;
 predicate syscall_table_fcntl_supported<T>(table: T) -> bool;
 predicate syscall_table_ioctl_supported<T>(table: T) -> bool;
 predicate syscall_table_getrandom_supported<T>(table: T) -> bool;
+predicate syscall_table_sched_getaffinity_supported<T>(table: T) -> bool;
 predicate syscall_table_getuid_supported<T>(table: T) -> bool;
 predicate syscall_table_getgid_supported<T>(table: T) -> bool;
 predicate syscall_table_getpgid_supported<T>(table: T) -> bool;
@@ -291,11 +295,15 @@ predicate syscall_table_setgroups_supported<T>(table: T) -> bool;
 predicate syscall_table_rt_sigprocmask_supported<T>(table: T) -> bool;
 predicate syscall_table_rt_sigaction_supported<T>(table: T) -> bool;
 predicate syscall_table_rt_sigtimedwait_supported<T>(table: T) -> bool;
+predicate syscall_table_setitimer_supported<T>(table: T) -> bool;
+predicate syscall_table_kill_supported<T>(table: T) -> bool;
+predicate syscall_table_rt_sigreturn_supported<T>(table: T) -> bool;
 predicate syscall_table_clock_gettime_supported<T>(table: T) -> bool;
 predicate syscall_table_gettimeofday_supported<T>(table: T) -> bool;
 predicate syscall_table_nanosleep_supported<T>(table: T) -> bool;
 predicate syscall_table_brk_supported<T>(table: T) -> bool;
 predicate syscall_table_mmap_supported<T>(table: T) -> bool;
+predicate syscall_table_msync_supported<T>(table: T) -> bool;
 predicate syscall_table_mprotect_supported<T>(table: T) -> bool;
 predicate syscall_table_munmap_supported<T>(table: T) -> bool;
 predicate syscall_table_set_tid_address_supported<T>(table: T) -> bool;
@@ -308,9 +316,16 @@ predicate syscall_write_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_writev_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_read_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_fixed_usercopy_checks_mapping_permissions<T, A>(table: T, address_space: A) -> bool;
+predicate syscall_sched_getaffinity_usercopy_ready<T>(table: T) -> bool;
+predicate syscall_sched_getaffinity_linux_6_12_layout_and_errno_bound<T>(table: T) -> bool;
+predicate syscall_sched_getaffinity_current_process_first_slice<T, R>(table: T, registry: R) -> bool;
+predicate syscall_sched_getaffinity_reads_active_cpu_mask<T, C>(table: T, cpus: C) -> bool;
+predicate syscall_sched_getaffinity_has_no_scheduler_side_effect<T>(table: T) -> bool;
 predicate syscall_getrandom_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_signal_mask_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_signal_action_usercopy_ready<T>(table: T) -> bool;
+predicate syscall_signal_frame_usercopy_ready<T>(table: T) -> bool;
+predicate syscall_setitimer_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_time_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_path_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_stat_usercopy_ready<T>(table: T) -> bool;
@@ -442,7 +457,16 @@ predicate syscall_rt_sigtimedwait_empty_pending_wait_boundary<T>(table: T) -> bo
 predicate syscall_rt_sigtimedwait_waitqueue_sleep_first_slice<T>(table: T) -> bool;
 predicate syscall_rt_sigtimedwait_sigchld_pending_first_slice<T>(table: T) -> bool;
 predicate syscall_rt_sigtimedwait_return_signal_first_slice<T>(table: T) -> bool;
-predicate syscall_signal_delivery_deferred<T>(table: T) -> bool;
+predicate syscall_signal_routes_to_current_aggregate<T, R>(table: T, registry: R) -> bool;
+predicate syscall_setitimer_itimer_real_linux_6_12_bound<T>(table: T) -> bool;
+predicate syscall_setitimer_routes_to_signal_runtime_and_clockevent<T, P>(table: T, provider: P) -> bool;
+predicate syscall_kill_positive_pid_signal_zero_and_permission_bound<T>(table: T) -> bool;
+predicate syscall_kill_pending_publish_generation_checked<T, R>(table: T, registry: R) -> bool;
+predicate syscall_kill_wake_has_no_lost_sleep_window<T>(table: T) -> bool;
+predicate syscall_rt_sigreturn_linux_riscv_frame_bound<T>(table: T) -> bool;
+predicate syscall_rt_sigreturn_restores_integer_context_and_mask<T>(table: T) -> bool;
+predicate syscall_signal_delivery_single_active_frame_first_slice<T>(table: T) -> bool;
+predicate syscall_signal_delivery_action_mask_and_restart_bound<T>(table: T) -> bool;
 predicate syscall_clock_gettime_routes_to_timer_provider<T, P>(table: T, provider: P) -> bool;
 predicate syscall_gettimeofday_routes_to_timer_provider<T, P>(table: T, provider: P) -> bool;
 predicate syscall_nanosleep_routes_to_timer_provider<T, P>(table: T, provider: P) -> bool;
@@ -460,6 +484,9 @@ predicate syscall_mmap_shared_regular_routes_to_current_files_and_vfs<T, F, V>(t
 predicate syscall_mmap_shared_regular_linux_6_12_validation_bound<T>(table: T) -> bool;
 predicate syscall_mmap_shared_regular_preserves_file_position<T>(table: T) -> bool;
 predicate syscall_mmap_full_vma_model_deferred<T>(table: T) -> bool;
+predicate syscall_msync_routes_to_user_address_space_and_vfs<T, A, V>(table: T, space: A, vfs: V) -> bool;
+predicate syscall_msync_linux_6_12_flags_alignment_overflow_errno_bound<T>(table: T) -> bool;
+predicate syscall_msync_shared_file_preserves_open_position<T>(table: T) -> bool;
 predicate syscall_mprotect_routes_to_user_address_space<T, A>(table: T, space: A) -> bool;
 predicate syscall_munmap_routes_to_user_address_space<T, A>(table: T, space: A) -> bool;
 predicate syscall_set_tid_address_routes_to_user_task<T, P>(table: T, process: P) -> bool;
@@ -573,6 +600,7 @@ predicate syscall_table_fchmod_observed<T>(table: T) -> bool;
 predicate syscall_table_fcntl_observed<T>(table: T) -> bool;
 predicate syscall_table_ioctl_observed<T>(table: T) -> bool;
 predicate syscall_table_getrandom_observed<T>(table: T) -> bool;
+predicate syscall_table_sched_getaffinity_observed<T>(table: T) -> bool;
 predicate syscall_table_getuid_observed<T>(table: T) -> bool;
 predicate syscall_table_getgid_observed<T>(table: T) -> bool;
 predicate syscall_table_getpgid_observed<T>(table: T) -> bool;
@@ -586,6 +614,9 @@ predicate syscall_table_setgroups_observed<T>(table: T) -> bool;
 predicate syscall_table_rt_sigprocmask_observed<T>(table: T) -> bool;
 predicate syscall_table_rt_sigaction_observed<T>(table: T) -> bool;
 predicate syscall_table_rt_sigtimedwait_observed<T>(table: T) -> bool;
+predicate syscall_table_setitimer_observed<T>(table: T) -> bool;
+predicate syscall_table_kill_observed<T>(table: T) -> bool;
+predicate syscall_table_rt_sigreturn_observed<T>(table: T) -> bool;
 predicate syscall_table_clock_gettime_observed<T>(table: T) -> bool;
 predicate syscall_table_gettimeofday_observed<T>(table: T) -> bool;
 predicate syscall_table_nanosleep_observed<T>(table: T) -> bool;
@@ -618,12 +649,15 @@ predicate user_task_credentials_capability_model_deferred<T>(process: T) -> bool
 predicate user_task_signal_state_inherited<T, K>(process: T, task: K) -> bool;
 predicate user_task_signal_runtime_bound<T>(process: T) -> bool;
 predicate user_task_thread_signal_state_bound<T>(process: T) -> bool;
-predicate user_task_process_signal_state_deferred<T>(process: T) -> bool;
+predicate user_task_process_signal_state_bound<T>(process: T) -> bool;
 predicate user_task_signal_action_table_bound<T>(process: T) -> bool;
 predicate user_task_signal_action_table_layout_bound<T>(process: T) -> bool;
 predicate user_task_blocked_signal_mask_bound<T>(process: T) -> bool;
-predicate user_task_pending_signal_set_empty_first_slice<T>(process: T) -> bool;
-predicate user_task_signal_delivery_deferred<T>(process: T) -> bool;
+predicate user_task_pending_signal_set_bound<T>(process: T) -> bool;
+predicate user_task_itimer_real_bound<T>(process: T) -> bool;
+predicate user_task_linux_riscv_signal_frame_bound<T>(process: T) -> bool;
+predicate user_task_signal_return_trampoline_rx_nw<T>(process: T) -> bool;
+predicate user_task_signal_fork_copy_excludes_pending_timer_frame<T>(process: T) -> bool;
 predicate user_task_clear_child_tid_bound<T>(process: T) -> bool;
 predicate user_task_session_leader_first_slice<T>(process: T) -> bool;
 predicate user_task_process_group_leader_first_slice<T>(process: T) -> bool;
@@ -1211,6 +1245,14 @@ object UserAddressSpace: ResourceObject {
                 }
             }
 
+            on Action::Msync {
+                ensures {
+                    user_address_space_msync_validates_and_covers_range(self);
+                    user_address_space_msync_shared_file_flushes_backing(self, VfsCore);
+                    user_address_space_msync_nonfile_mapping_has_no_file_side_effect(self);
+                }
+            }
+
             on Action::Mprotect {
                 ensures {
                     user_address_space_mprotect_accepts_mapped_user_range(self);
@@ -1352,6 +1394,7 @@ object SyscallTable: ResourceObject {
                     syscall_table_fcntl_supported(self);
                     syscall_table_ioctl_supported(self);
                     syscall_table_getrandom_supported(self);
+                    syscall_table_sched_getaffinity_supported(self);
                     syscall_table_getuid_supported(self);
                     syscall_table_getgid_supported(self);
                     syscall_table_getpgid_supported(self);
@@ -1365,11 +1408,15 @@ object SyscallTable: ResourceObject {
                     syscall_table_rt_sigprocmask_supported(self);
                     syscall_table_rt_sigaction_supported(self);
                     syscall_table_rt_sigtimedwait_supported(self);
+                    syscall_table_setitimer_supported(self);
+                    syscall_table_kill_supported(self);
+                    syscall_table_rt_sigreturn_supported(self);
                     syscall_table_clock_gettime_supported(self);
                     syscall_table_gettimeofday_supported(self);
                     syscall_table_nanosleep_supported(self);
                     syscall_table_brk_supported(self);
                     syscall_table_mmap_supported(self);
+                    syscall_table_msync_supported(self);
                     syscall_table_mprotect_supported(self);
                     syscall_table_munmap_supported(self);
                     syscall_table_set_tid_address_supported(self);
@@ -1382,10 +1429,17 @@ object SyscallTable: ResourceObject {
                     syscall_writev_usercopy_ready(self);
                     syscall_read_usercopy_ready(self);
                     syscall_fixed_usercopy_checks_mapping_permissions(self, UserAddressSpace);
+                    syscall_sched_getaffinity_usercopy_ready(self);
+                    syscall_sched_getaffinity_linux_6_12_layout_and_errno_bound(self);
+                    syscall_sched_getaffinity_current_process_first_slice(self, UserProcessRegistry);
+                    syscall_sched_getaffinity_reads_active_cpu_mask(self, CpuGroup);
+                    syscall_sched_getaffinity_has_no_scheduler_side_effect(self);
                     syscall_ppoll_pollfd_usercopy_ready(self);
                     syscall_getrandom_usercopy_ready(self);
                     syscall_signal_mask_usercopy_ready(self);
                     syscall_signal_action_usercopy_ready(self);
+                    syscall_signal_frame_usercopy_ready(self);
+                    syscall_setitimer_usercopy_ready(self);
                     syscall_time_usercopy_ready(self);
                     syscall_nanosleep_usercopy_ready(self);
                     syscall_ioctl_usercopy_ready(self);
@@ -1541,6 +1595,7 @@ object SyscallTable: ResourceObject {
             syscall_table_fcntl_supported(self);
             syscall_table_ioctl_supported(self);
             syscall_table_getrandom_supported(self);
+            syscall_table_sched_getaffinity_supported(self);
             syscall_table_getuid_supported(self);
             syscall_table_getgid_supported(self);
             syscall_table_getpgid_supported(self);
@@ -1554,11 +1609,15 @@ object SyscallTable: ResourceObject {
             syscall_table_rt_sigprocmask_supported(self);
             syscall_table_rt_sigaction_supported(self);
             syscall_table_rt_sigtimedwait_supported(self);
+            syscall_table_setitimer_supported(self);
+            syscall_table_kill_supported(self);
+            syscall_table_rt_sigreturn_supported(self);
             syscall_table_clock_gettime_supported(self);
             syscall_table_gettimeofday_supported(self);
             syscall_table_nanosleep_supported(self);
             syscall_table_brk_supported(self);
             syscall_table_mmap_supported(self);
+            syscall_table_msync_supported(self);
             syscall_table_mprotect_supported(self);
             syscall_table_munmap_supported(self);
             syscall_table_set_tid_address_supported(self);
@@ -1571,10 +1630,17 @@ object SyscallTable: ResourceObject {
             syscall_writev_usercopy_ready(self);
             syscall_read_usercopy_ready(self);
             syscall_fixed_usercopy_checks_mapping_permissions(self, UserAddressSpace);
+            syscall_sched_getaffinity_usercopy_ready(self);
+            syscall_sched_getaffinity_linux_6_12_layout_and_errno_bound(self);
+            syscall_sched_getaffinity_current_process_first_slice(self, UserProcessRegistry);
+            syscall_sched_getaffinity_reads_active_cpu_mask(self, CpuGroup);
+            syscall_sched_getaffinity_has_no_scheduler_side_effect(self);
             syscall_ppoll_pollfd_usercopy_ready(self);
             syscall_getrandom_usercopy_ready(self);
             syscall_signal_mask_usercopy_ready(self);
             syscall_signal_action_usercopy_ready(self);
+            syscall_signal_frame_usercopy_ready(self);
+            syscall_setitimer_usercopy_ready(self);
             syscall_time_usercopy_ready(self);
             syscall_nanosleep_usercopy_ready(self);
             syscall_ioctl_usercopy_ready(self);
@@ -1793,10 +1859,12 @@ object SyscallTable: ResourceObject {
                  * and other create shapes remain rejected. If
                  * O_DIRECTORY is present and the resolved non-TTY target is
                  * not a directory, including /dev/null, the syscall must fail
-                 * with ENOTDIR. O_NONBLOCK is consumed only by accepted TTY and
+                 * with ENOTDIR. A read-only ordinary-path O_NOFOLLOW open
+                 * follows intermediate symlinks but does not follow the final
+                 * component; a final symlink fails with ELOOP. O_NONBLOCK is consumed only by accepted TTY and
                  * /dev/null opens in this slice; regular and directory opens do
                  * not gain nonblocking read/write semantics. General writable regular-file data,
-                 * O_PATH, O_TMPFILE, nofollow, permissions, LSM hooks, mount
+                 * O_PATH, O_TMPFILE, magic-link semantics, permissions, LSM hooks, mount
                  * namespaces, real VT/devtmpfs, a generic char-device registry
                  * and full errno detail remain trimmed.
                  */
@@ -2499,6 +2567,34 @@ object SyscallTable: ResourceObject {
                 }
             }
 
+            on Action::SchedGetAffinity {
+                /*
+                 * Linux 6.12 RISC-V exposes sched_getaffinity(2) as syscall
+                 * number 123. The bounded read-only slice accepts PID 0 or
+                 * the positive PID of the exact current occurrence, holds
+                 * its generation/CPU-checked process lease, and snapshots
+                 * CpuGroup.active into one native-word cpumask. Linux length
+                 * and word-alignment checks precede process lookup; copyout
+                 * failure returns EFAULT and success returns the number of
+                 * bytes copied. No Task CpuRef or scheduler state changes.
+                 */
+                depends_on {
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
+                    UserProcessRegistry.state == State::Ready;
+                    CpuGroup.state == State::Ready;
+                    UserAddressSpace.state == State::Online;
+                }
+
+                ensures {
+                    syscall_sched_getaffinity_usercopy_ready(self);
+                    syscall_sched_getaffinity_linux_6_12_layout_and_errno_bound(self);
+                    syscall_sched_getaffinity_current_process_first_slice(self, UserProcessRegistry);
+                    syscall_sched_getaffinity_reads_active_cpu_mask(self, CpuGroup);
+                    syscall_sched_getaffinity_has_no_scheduler_side_effect(self);
+                    syscall_table_sched_getaffinity_observed(self);
+                }
+            }
+
             on Action::GetUid {
                 /*
                  * Linux 6.12 RISC-V exposes getuid(2) as syscall number 174
@@ -2967,25 +3063,25 @@ object SyscallTable: ResourceObject {
                  * and finally copies the old mask to user memory when oset is
                  * non-null.
                  *
-                 * The current slice stores the blocked mask on KernelInitTask
-                 * because the PID1 task is the exec-transformed
-                 * KernelInitTask. Full signal delivery, shared sighand,
-                 * pending queues, restart, thread-group semantics and
-                 * siglock/IRQ locking are deferred.
+                 * The current single-thread process slice resolves the exact
+                 * current occurrence through UserProcessRegistry and updates
+                 * that aggregate's SignalRuntime under the signal lock. PID1
+                 * follows the same route through its own aggregate. Complete
+                 * thread-group sharing and realtime-signal queuing remain
+                 * deferred.
                  */
                 depends_on {
                     CurrentCPU.trap.exception.syscall.state == State::Online;
-                    KernelInitTask.state == State::Online;
+                    UserProcessRegistry.state == State::Ready;
                     syscall_signal_mask_usercopy_ready(self);
                 }
 
 
                 ensures {
-                    syscall_rt_sigprocmask_routes_to_user_task(self, KernelInitTask);
+                    syscall_signal_routes_to_current_aggregate(self, UserProcessRegistry);
                     syscall_rt_sigprocmask_sigsetsize_bound(self);
                     syscall_rt_sigprocmask_unblockable_signals_cleared(self);
-                    syscall_signal_delivery_deferred(self);
-                    user_task_rt_sigprocmask_observed(KernelInitTask);
+                    user_task_process_signal_state_bound(UserProcessRegistry);
                     syscall_table_rt_sigprocmask_observed(self);
                 }
             }
@@ -3005,30 +3101,111 @@ object SyscallTable: ResourceObject {
                  * userspace flags and removes SIGKILL/SIGSTOP from the stored
                  * action mask before updating sighand->action[sig - 1].
                  *
-                 * The current slice models this as Task -> SignalRuntime ->
-                 * SignalActionTable, folded into the current KernelInitTask
-                 * implementation for single PID1/single-thread execution.
-                 * ProcessSignalState shared pending queues, ThreadSignalState
-                 * pending delivery, siglock/RCU, restart handling, signal
-                 * frame construction and rt_sigreturn remain deferred.
+                 * The current slice resolves the exact current occurrence
+                 * through UserProcessRegistry and updates that aggregate's
+                 * SignalRuntime action table under the signal lock. PID1 uses
+                 * its own aggregate rather than a global carrier. Complete
+                 * thread-group sharing, realtime queues and siglock/RCU
+                 * scalability remain deferred.
                  */
                 depends_on {
                     CurrentCPU.trap.exception.syscall.state == State::Online;
-                    KernelInitTask.state == State::Online;
+                    UserProcessRegistry.state == State::Ready;
                     syscall_signal_action_usercopy_ready(self);
                 }
 
 
                 ensures {
-                    syscall_rt_sigaction_routes_to_user_task(self, KernelInitTask);
-                    syscall_rt_sigaction_routes_to_signal_action_table(self, KernelInitTask);
+                    syscall_signal_routes_to_current_aggregate(self, UserProcessRegistry);
+                    syscall_rt_sigaction_routes_to_signal_action_table(self, UserProcessRegistry);
                     syscall_rt_sigaction_sigsetsize_bound(self);
                     syscall_rt_sigaction_layout_bound(self);
                     syscall_rt_sigaction_unblockable_signals_cleared(self);
                     syscall_rt_sigaction_kernel_only_signals_rejected(self);
-                    syscall_signal_delivery_deferred(self);
-                    user_task_rt_sigaction_observed(KernelInitTask);
+                    user_task_signal_action_table_bound(UserProcessRegistry);
                     syscall_table_rt_sigaction_observed(self);
+                }
+            }
+
+            on Action::Setitimer {
+                /*
+                 * Linux 6.12 RISC-V syscall 103 accepts ITIMER_REAL in this
+                 * bounded slice. It first copies and validates a 32-byte
+                 * itimerval, commits query/install/cancel against the exact
+                 * current aggregate's SignalRuntime, then copies the old value
+                 * when requested. A committed new timer is not rolled back if
+                 * that final copyout faults. The clockevent mux observes the
+                 * earliest per-CPU aggregate deadline; expiration publishes
+                 * SIGALRM and periodic timers re-arm from the stored interval.
+                 */
+                depends_on {
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
+                    UserProcessRegistry.state == State::Ready;
+                    RiscvTimerProvider.state == State::Ready;
+                    syscall_setitimer_usercopy_ready(self);
+                }
+
+                drives {
+                    RiscvTimerProvider.Action::ReadTime;
+                }
+
+                ensures {
+                    syscall_signal_routes_to_current_aggregate(self, UserProcessRegistry);
+                    syscall_setitimer_itimer_real_linux_6_12_bound(self);
+                    syscall_setitimer_routes_to_signal_runtime_and_clockevent(self, RiscvTimerProvider);
+                    user_task_itimer_real_bound(UserProcessRegistry);
+                    syscall_table_setitimer_observed(self);
+                }
+            }
+
+            on Action::Kill {
+                /*
+                 * Linux 6.12 RISC-V syscall 129 supports signal 0 probes and
+                 * real positive-PID publication in this slice. Invalid signals
+                 * return EINVAL, an absent occurrence returns ESRCH, and root
+                 * credentials satisfy the permission gate. A successful
+                 * nonzero send merges one pending bit while the target lease is
+                 * live, releases the signal lock, and publishes a generation-
+                 * checked wake to the target CPU. A wake arriving before sleep
+                 * remains pending and cannot be lost.
+                 */
+                depends_on {
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
+                    UserProcessRegistry.state == State::Ready;
+                }
+
+                ensures {
+                    syscall_kill_positive_pid_signal_zero_and_permission_bound(self);
+                    syscall_kill_pending_publish_generation_checked(self, UserProcessRegistry);
+                    syscall_kill_wake_has_no_lost_sleep_window(self);
+                    syscall_table_kill_observed(self);
+                }
+            }
+
+            on Action::RtSigreturn {
+                /*
+                 * Linux 6.12 RISC-V syscall 139 is entered only through the
+                 * per-address-space RX/NW return trampoline. It validates the
+                 * exact current aggregate's one active 1088-byte Linux-shaped
+                 * siginfo+ucontext frame, restores the saved blocked mask and
+                 * integer pc/x1..x31 context, clears active-frame ownership and
+                 * resumes without the ordinary syscall-result/sepc advance.
+                 */
+                depends_on {
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
+                    UserProcessRegistry.state == State::Ready;
+                    UserAddressSpace.state == State::Online;
+                    syscall_signal_frame_usercopy_ready(self);
+                }
+
+                ensures {
+                    syscall_signal_routes_to_current_aggregate(self, UserProcessRegistry);
+                    syscall_rt_sigreturn_linux_riscv_frame_bound(self);
+                    syscall_rt_sigreturn_restores_integer_context_and_mask(self);
+                    syscall_signal_delivery_single_active_frame_first_slice(self);
+                    user_task_linux_riscv_signal_frame_bound(UserProcessRegistry);
+                    user_task_signal_return_trampoline_rx_nw(UserAddressSpace);
+                    syscall_table_rt_sigreturn_observed(self);
                 }
             }
 
@@ -3064,13 +3241,13 @@ object SyscallTable: ResourceObject {
                  */
                 depends_on {
                     CurrentCPU.trap.exception.syscall.state == State::Online;
-                    KernelInitTask.state == State::Online;
+                    UserProcessRegistry.state == State::Ready;
                     syscall_signal_mask_usercopy_ready(self);
                 }
 
 
                 ensures {
-                    syscall_rt_sigtimedwait_routes_to_user_task(self, KernelInitTask);
+                    syscall_signal_routes_to_current_aggregate(self, UserProcessRegistry);
                     syscall_rt_sigtimedwait_sigsetsize_bound(self);
                     syscall_rt_sigtimedwait_copies_wait_mask(self);
                     syscall_rt_sigtimedwait_uinfo_null_no_copyout_first_slice(self);
@@ -3079,14 +3256,14 @@ object SyscallTable: ResourceObject {
                     syscall_rt_sigtimedwait_waitqueue_sleep_first_slice(self);
                     syscall_rt_sigtimedwait_sigchld_pending_first_slice(self);
                     syscall_rt_sigtimedwait_return_signal_first_slice(self);
-                    user_task_rt_sigtimedwait_observed(KernelInitTask);
-                    user_task_rt_sigtimedwait_pending_match_empty(KernelInitTask);
-                    user_task_rt_sigtimedwait_infinite_wait(KernelInitTask);
-                    user_task_pending_sigchld_first_slice(KernelInitTask);
-                    user_task_rt_sigtimedwait_waiter_enqueued(KernelInitTask);
-                    user_task_rt_sigtimedwait_sleep_reason_bound(KernelInitTask);
-                    user_task_rt_sigtimedwait_woken_by_sigchld(KernelInitTask);
-                    user_task_rt_sigtimedwait_dequeued_sigchld(KernelInitTask);
+                    user_task_rt_sigtimedwait_observed(UserProcessRegistry);
+                    user_task_rt_sigtimedwait_pending_match_empty(UserProcessRegistry);
+                    user_task_rt_sigtimedwait_infinite_wait(UserProcessRegistry);
+                    user_task_pending_sigchld_first_slice(UserProcessRegistry);
+                    user_task_rt_sigtimedwait_waiter_enqueued(UserProcessRegistry);
+                    user_task_rt_sigtimedwait_sleep_reason_bound(UserProcessRegistry);
+                    user_task_rt_sigtimedwait_woken_by_sigchld(UserProcessRegistry);
+                    user_task_rt_sigtimedwait_dequeued_sigchld(UserProcessRegistry);
                     syscall_table_rt_sigtimedwait_observed(self);
                 }
             }
@@ -3238,6 +3415,30 @@ object SyscallTable: ResourceObject {
                     syscall_mmap_shared_regular_linux_6_12_validation_bound(self);
                     syscall_mmap_shared_regular_preserves_file_position(self);
                     syscall_mmap_full_vma_model_deferred(self);
+                }
+            }
+
+            on Action::Msync {
+                depends_on {
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
+                    UserAddressSpace.state == State::Online;
+                    VfsCore.state == State::Ready;
+                }
+
+                drives {
+                    UserAddressSpace.Action::Msync;
+                    VfsCore.Action::WriteFileRange(file: File);
+                }
+
+                ensures {
+                    syscall_table_msync_supported(self);
+                    syscall_msync_routes_to_user_address_space_and_vfs(
+                        self,
+                        UserAddressSpace,
+                        VfsCore
+                    );
+                    syscall_msync_linux_6_12_flags_alignment_overflow_errno_bound(self);
+                    syscall_msync_shared_file_preserves_open_position(self);
                 }
             }
 

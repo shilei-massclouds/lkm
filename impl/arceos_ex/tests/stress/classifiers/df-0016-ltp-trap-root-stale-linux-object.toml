@@ -1,0 +1,34 @@
+[[rules]]
+id = "panic"
+result = "failure"
+contains = ["arceos_ex panic"]
+description = "Kernel panic was printed."
+
+[[rules]]
+id = "df-0016-trap-root-installed-stale"
+result = "failure"
+contains = [
+  "trap occurrence lifecycle failure",
+  "installed_root_stale",
+]
+description = "An SSIP TrapOccurrence found a generation-stale installed root TrapFlowRef while binding its stack-local root."
+
+[[rules]]
+id = "allocation-error"
+result = "failure"
+contains = ["memory allocation of"]
+description = "The stable no_std allocation failure message was printed."
+
+[[rules]]
+id = "df-0016-ltp-supported-success"
+result = "success"
+contains = [
+  "--- uname01: PASS (exit 0)",
+  "--- uname02: PASS (exit 0)",
+  "--- getuid01: PASS (exit 0)",
+  "--- geteuid01: PASS (exit 0)",
+  "Summary: TOTAL=4 PASS=4 FAIL=0 BROK=0 WARN=0 CONF=0",
+  "lkm-ltp: selection=supported status=0",
+  "lkm-ltp: complete",
+]
+description = "The unchanged linux-object supported batch completed all four stock LTP entries cleanly."

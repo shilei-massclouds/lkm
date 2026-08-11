@@ -1,8 +1,8 @@
 schema_version = 2
 name = "df-0007-ltp-frontier-child-wait-native"
-description = "Repeat the canonical native LTP frontier identity to preserve the SMP wait/reap legacy-carrier routing failure observed while reaping uname01."
+description = "Repeat the frozen first-batch native LTP supported identity to preserve the SMP wait/reap legacy-carrier routing failure observed while reaping uname01."
 mode = "stress"
-test = "ltp-frontier"
+test = "ltp"
 runs = 50
 classifier = "../classifiers/df-0007-ltp-frontier-child-wait-native.toml"
 
@@ -12,7 +12,7 @@ observation_mode = "ltp-frontier-child-wait-dispatch-preflight-forensics"
 ordinary_path_required = true
 default_suite = true
 rootfs_profile = "canonical"
-payload = "stock LTP frontier list through the unchanged run-syscalls.sh harness on the native provider"
+payload = "stock LTP first-batch supported list through the unchanged run-syscalls.sh harness on the native provider"
 first_observation = "20260805T183141.572743Z-ltp-frontier-565601"
 linux_object_confirmation = "20260805T183242.824997Z-ltp-frontier-lo-565852"
-scope_note = "Preserve the exact child wait handoff preflight failure after its registry-only routing fix without changing the frontier list, provider, CPU count, harness, timeout, or marker."
+scope_note = "Preserve the exact child wait handoff preflight failure after its registry-only routing fix without following the movable frontier or changing the frozen supported list, provider, CPU count, harness, timeout, or marker."

@@ -6,7 +6,7 @@ timeout_seconds = 300
 [kernel]
 app = "user-boot"
 provider = "native"
-probe = ["user-syscall-trace", "user-syscall-error"]
+probe = ["user-syscall-error"]
 profile = "release"
 
 [disk]

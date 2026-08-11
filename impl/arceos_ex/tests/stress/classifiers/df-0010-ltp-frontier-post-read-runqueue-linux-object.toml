@@ -5,13 +5,13 @@ contains = [
   "declared child runqueue publish invariant failed",
   "failure_diagnostic phase=Scheduler step=Enqueue.Publish object=TaskRunqueue",
 ]
-description = "The post-frontier child failed a scheduler enqueue predicate with the long-term structured diagnostic."
+description = "The post-supported-batch child failed a scheduler enqueue predicate with the long-term structured diagnostic."
 
 [[rules]]
 id = "df-0010-child-runqueue-publish"
 result = "failure"
 contains = ["declared child runqueue publish invariant failed"]
-description = "The post-frontier command child terminated at runqueue publication."
+description = "The post-supported-batch command child terminated at runqueue publication."
 
 [[rules]]
 id = "df-0010-stock-harness-syntax-error"
@@ -34,4 +34,4 @@ contains = [
   "c79278919640c1881a0bfe433c00a6e5d06eeec8d16f3dd212c86f363c0a53e7  /opt/ltp/run-syscalls.sh",
   "lkm-ltp-post-read: complete",
 ]
-description = "The exact frontier passed, and the parent shell launched and completed the post-frontier stock-script read."
+description = "The exact frozen supported batch passed, and the parent shell launched and completed the post-batch stock-script read."

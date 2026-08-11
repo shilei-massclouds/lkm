@@ -7548,17 +7548,17 @@ pub fn registered_timebase_hz() -> u64 {
 
 fn program_clockevent_mux(logical_id: usize) {
     let scheduler_deadline = super::scheduler_clockevent::next_deadline(logical_id);
+    let user_signal_deadline = super::user_boot::next_user_signal_deadline(logical_id);
     let oneshot_deadline = if logical_id == 0 && ONESHOT_CALLBACK.load(Ordering::Acquire) != 0 {
         let deadline = ONESHOT_DEADLINE.load(Ordering::Acquire);
         (deadline != 0).then_some(deadline)
     } else {
         None
     };
-    let next = match (scheduler_deadline, oneshot_deadline) {
-        (Some(scheduler), Some(oneshot)) => Some(core::cmp::min(scheduler, oneshot)),
-        (Some(deadline), None) | (None, Some(deadline)) => Some(deadline),
-        (None, None) => None,
-    };
+    let next = [scheduler_deadline, user_signal_deadline, oneshot_deadline]
+        .into_iter()
+        .flatten()
+        .min();
     if let Some(deadline) = next {
         riscv64::sbi::set_timer(deadline);
         riscv64::csr::enable_supervisor_timer_interrupt();
@@ -7572,6 +7572,7 @@ pub fn handle_timer_interrupt(logical_id: usize) {
     TIMER_INTERRUPT_COUNT.fetch_add(1, Ordering::Relaxed);
     let now = riscv64::sbi::read_time();
     let scheduler_due = super::scheduler_clockevent::handle_timer(logical_id, now);
+    let user_signal_due = super::user_boot::handle_user_signal_timers(logical_id, now);
     let oneshot_due = logical_id == 0
         && ONESHOT_CALLBACK.load(Ordering::Acquire) != 0
         && ONESHOT_DEADLINE.load(Ordering::Acquire) <= now;
@@ -7589,6 +7590,11 @@ pub fn handle_timer_interrupt(logical_id: usize) {
         callback(deadline);
     }
     let _ = scheduler_due;
+    let _ = user_signal_due;
+}
+
+pub(crate) fn reprogram_clockevent_mux(logical_id: usize) {
+    program_clockevent_mux(logical_id);
 }
 
 fn read_timebase_frequency(device_tree: &DeviceTree) -> Option<u64> {

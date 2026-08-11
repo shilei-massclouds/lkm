@@ -21,10 +21,10 @@ use crate::{
             ElfObjectRole, USER_BOOT_READ_MAX, USER_CHILD_PID, USER_CLONE_SIGCHLD,
             USER_COMPLETED_CHILD_RECORD_CAPACITY, USER_HEAP_BASE, USER_HEAP_SIZE,
             USER_INIT_EXPECTED_MESSAGE, USER_PAGE_SIZE, USER_SIGCHLD_MASK,
-            USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE, USER_STACK_TOP,
-            USER_WAIT4_ALL_CHILDREN, UserFaultAccess, UserFaultClass, UserFaultRequest,
-            UserFaultResult, UserMappingKind, UserProcessGroupLookup, UserProcessGroupUpdate,
-            UserRtSigtimedwaitResult,
+            USER_SIGNAL_TRAMPOLINE_VA, USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE,
+            USER_STACK_TOP, USER_WAIT4_ALL_CHILDREN, UserFaultAccess, UserFaultClass,
+            UserFaultRequest, UserFaultResult, UserMappingKind, UserProcessGroupLookup,
+            UserProcessGroupUpdate, UserRtSigtimedwaitResult,
         },
         virtio_blk,
     },
@@ -520,7 +520,7 @@ impl SmokeScenario for UserBootElfScenario {
                 && space.mapping_count()
                     == elf.load_segment_count()
                         + interpreter_ref.map_or(0, |i| i.load_segment_count())
-                        + 2,
+                        + 3,
         );
 
         let Some(first_mapping) = space.mapping(0) else {
@@ -721,7 +721,24 @@ impl SmokeScenario for UserBootElfScenario {
                 && stack_mapping.backing_page_count() == 0
                 && stack_mapping.stack_ownership_token() == stack.top(),
         );
-        let Some(heap_mapping) = space.mapping(space.segment_mapping_count() + 1) else {
+        let Some(signal_trampoline) = space.mapping(space.segment_mapping_count()) else {
+            assertions.assert("signal trampoline mapping", false);
+            return;
+        };
+        assertions.assert(
+            "signal trampoline mapping facts",
+            signal_trampoline.kind() == UserMappingKind::SignalTrampoline
+                && signal_trampoline.vaddr() == USER_SIGNAL_TRAMPOLINE_VA
+                && signal_trampoline.memsz() == USER_PAGE_SIZE
+                && signal_trampoline.filesz() == 8
+                && signal_trampoline.readable()
+                && !signal_trampoline.writable()
+                && signal_trampoline.executable()
+                && signal_trampoline.user_accessible()
+                && signal_trampoline.backing_page_count() == 1
+                && signal_trampoline.page_table_entry_bound(),
+        );
+        let Some(heap_mapping) = space.mapping(space.segment_mapping_count() + 2) else {
             assertions.assert("heap mapping", false);
             return;
         };

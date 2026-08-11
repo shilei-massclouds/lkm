@@ -19,7 +19,7 @@ use super::{
     task_flow::TaskFlowRef,
     trap_flow_type::{
         TRAP_RETURN_TOKEN_MAGIC, TrapCauseClass, TrapEntrySnapshot, TrapExecutionRecord,
-        TrapFlowType,
+        TrapFlowRef, TrapFlowType,
     },
     vm::Vm,
 };
@@ -966,9 +966,11 @@ extern "C" fn formal_event_entry_rust(
             .add(TRAP_FRAME_SIZE)
             .cast::<TrapExecutionRecord>()
     };
+    let entry_root_before_record_write = entry_context.root_flow_ref();
     unsafe { record_ptr.write(TrapExecutionRecord::new()) };
     let record = unsafe { &mut *record_ptr };
-    let entry = capture_entry_authority(frame, record, entry_context);
+    let entry =
+        capture_entry_authority(frame, record, entry_context, entry_root_before_record_write);
     match dispatch_trap_occurrence(record, frame, entry) {
         Ok(token) => token,
         Err(error) => trap_occurrence_failed(frame, record, entry, error),
@@ -1324,6 +1326,7 @@ struct TrapEntryAuthority {
     cpu_ref: CpuRef,
     generation: u32,
     context_epoch: u64,
+    entry_root_before_record_write: TrapFlowRef,
     nested_trap: bool,
     hardirq_context: bool,
     trap_state: State,
@@ -1353,6 +1356,7 @@ fn capture_entry_authority(
     frame: &TrapFrame,
     record: &TrapExecutionRecord,
     entry_context: &TrapEntryContext,
+    entry_root_before_record_write: TrapFlowRef,
 ) -> TrapEntryAuthority {
     let runtime = crate::context::TrapRuntimeLease::open(entry_context)
         .unwrap_or_else(|reason| trap_runtime_lease_failed(frame, record, reason));
@@ -1406,6 +1410,7 @@ fn capture_entry_authority(
         cpu_ref,
         generation: trap.allocate_occurrence_generation(),
         context_epoch,
+        entry_root_before_record_write,
         nested_trap,
         hardirq_context,
         trap_state: trap.state(),
@@ -1554,6 +1559,7 @@ fn dispatch_interrupt_occurrence(
     record.interrupt.disable()?;
     if frame.sstatus & csr::SSTATUS_SPP == 0 {
         schedule_from_user_return_boundary(record.root.flow_ref(), entry)?;
+        crate::objects::exception_type::deliver_pending_user_signal(frame, false);
     }
     record.interrupt.cleanup()?;
     if let Some(observation) = TRAP_OBSERVATIONS.get(entry.cpu_ref.logical_id()) {
@@ -1633,6 +1639,7 @@ fn dispatch_exception_occurrence(
             record.page_fault.disable()?;
             if from_user {
                 schedule_from_user_return_boundary(record.root.flow_ref(), entry)?;
+                crate::objects::exception_type::deliver_pending_user_signal(frame, false);
             }
             record.page_fault.cleanup()?;
             child_ref
@@ -1654,6 +1661,7 @@ fn dispatch_exception_occurrence(
             record.syscall.disable()?;
             if from_user {
                 schedule_from_user_return_boundary(record.root.flow_ref(), entry)?;
+                crate::objects::exception_type::deliver_pending_user_signal(frame, false);
             }
             record.syscall.cleanup()?;
             child_ref
@@ -1675,6 +1683,7 @@ fn dispatch_exception_occurrence(
             record.breakpoint.disable()?;
             if from_user {
                 schedule_from_user_return_boundary(record.root.flow_ref(), entry)?;
+                crate::objects::exception_type::deliver_pending_user_signal(frame, false);
             }
             record.breakpoint.cleanup()?;
             child_ref
@@ -1696,6 +1705,7 @@ fn dispatch_exception_occurrence(
             record.unexpected.disable()?;
             if from_user {
                 schedule_from_user_return_boundary(record.root.flow_ref(), entry)?;
+                crate::objects::exception_type::deliver_pending_user_signal(frame, false);
             }
             record.unexpected.cleanup()?;
             child_ref
@@ -2108,28 +2118,80 @@ fn trap_occurrence_failed(
     entry: TrapEntryAuthority,
     error: EventError,
 ) -> ! {
-    crate::arch::riscv64::sbi::putstr("trap occurrence lifecycle failure event=");
-    sbi_put_hex(error.event_code() as usize);
-    crate::arch::riscv64::sbi::putstr(" code=");
-    sbi_put_hex(error.error_code() as usize);
-    if let Some(diagnostic) = error.diagnostic() {
-        crate::arch::riscv64::sbi::putstr(" stage=");
-        crate::arch::riscv64::sbi::putstr(diagnostic.step);
-        crate::arch::riscv64::sbi::putstr(" first_failed=");
-        crate::arch::riscv64::sbi::putstr(diagnostic.first_failed);
+    #[cfg(any(
+        checkpoint_handler_announce,
+        checkpoint_handler_user_scheduler_trace,
+        checkpoint_handler_user_syscall_error,
+        checkpoint_handler_user_syscall_trace
+    ))]
+    {
+        let stored_root = entry.runtime.task_access().root_trap_flow_ref();
+        let current_root = record.root.flow_ref();
+        let (stage, first_failed) = error
+            .diagnostic()
+            .map(|diagnostic| (diagnostic.step, diagnostic.first_failed))
+            .unwrap_or(("unknown", "event_error_without_diagnostic"));
+        crate::arch::riscv64::sbi::write_record(format_args!(
+            "trap occurrence lifecycle failure event={} code={} stage={} first_failed={} entry_root={:x}:{:x} stored_root={:x}:{:x} current_root={:x}:{:x} record=[{:x},{:x}) cpu={} task={}:{} task_flow={}:{} scause={:x} sepc={:x} nested={} hardirq={}\n",
+            error.event_code() as char,
+            error.error_code() as char,
+            stage,
+            first_failed,
+            entry.entry_root_before_record_write.address(),
+            entry.entry_root_before_record_write.generation(),
+            stored_root.address(),
+            stored_root.generation(),
+            current_root.address(),
+            current_root.generation(),
+            frame as *const TrapFrame as usize,
+            frame as *const TrapFrame as usize + TRAP_STACK_RECORD_SIZE,
+            entry.cpu_ref.logical_id(),
+            entry.task_ref.slot(),
+            entry.task_ref.generation(),
+            entry.task_flow_ref.slot(),
+            entry.task_flow_ref.generation(),
+            frame.scause,
+            frame.sepc,
+            entry.nested_trap as usize,
+            entry.hardirq_context as usize,
+        ));
+        crate::arch::riscv64::sbi::system_shutdown()
     }
-    let stored_root = entry.runtime.task_access().root_trap_flow_ref();
-    crate::arch::riscv64::sbi::putstr(" stored_root=");
-    sbi_put_hex(stored_root.address());
-    crate::arch::riscv64::sbi::putstr(":");
-    sbi_put_hex(stored_root.generation() as usize);
-    print_trap_identity(
-        frame,
-        record,
-        entry.task_ref,
-        entry.task_flow_ref,
-        entry.cpu_ref,
-    )
+
+    #[cfg(not(any(
+        checkpoint_handler_announce,
+        checkpoint_handler_user_scheduler_trace,
+        checkpoint_handler_user_syscall_error,
+        checkpoint_handler_user_syscall_trace
+    )))]
+    {
+        crate::arch::riscv64::sbi::putstr("trap occurrence lifecycle failure event=");
+        sbi_put_hex(error.event_code() as usize);
+        crate::arch::riscv64::sbi::putstr(" code=");
+        sbi_put_hex(error.error_code() as usize);
+        if let Some(diagnostic) = error.diagnostic() {
+            crate::arch::riscv64::sbi::putstr(" stage=");
+            crate::arch::riscv64::sbi::putstr(diagnostic.step);
+            crate::arch::riscv64::sbi::putstr(" first_failed=");
+            crate::arch::riscv64::sbi::putstr(diagnostic.first_failed);
+        }
+        let stored_root = entry.runtime.task_access().root_trap_flow_ref();
+        crate::arch::riscv64::sbi::putstr(" entry_root=");
+        sbi_put_hex(entry.entry_root_before_record_write.address());
+        crate::arch::riscv64::sbi::putstr(":");
+        sbi_put_hex(entry.entry_root_before_record_write.generation() as usize);
+        crate::arch::riscv64::sbi::putstr(" stored_root=");
+        sbi_put_hex(stored_root.address());
+        crate::arch::riscv64::sbi::putstr(":");
+        sbi_put_hex(stored_root.generation() as usize);
+        print_trap_identity(
+            frame,
+            record,
+            entry.task_ref,
+            entry.task_flow_ref,
+            entry.cpu_ref,
+        )
+    }
 }
 
 fn print_trap_identity(

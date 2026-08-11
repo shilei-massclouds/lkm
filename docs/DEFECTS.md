@@ -4,6 +4,14 @@
 
 ## 待解决
 
+### DF-0016: SSIP 进入 TrapOccurrence 时观察到已发布但失效的 root
+
+- 状态：2026-08-11 按阶段稳定性决策通过。首次真实失败仍作为未解释的概率性样本保留；加入长期诊断后，同一 linux-object、8 CPU、canonical rootfs 和四项 stock LTP supported 名单完成 100/100，阶段接受该样本但不宣称因果实现修复。
+- 首次失败：`impl/arceos_ex/tests/stress/out/20260810T152908.926203Z-ltp-supported-linux-object/runs/run-0032/`。QEMU 正常退出但 LTP 完成 marker 缺失；通用诊断记录 SSIP、`TrapOccurrence.BindRoot`、`first_failed=installed_root_stale`、TaskRef/generation/CPU、root refs、`scause` 与 `sepc`，不是 timeout、栈溢出或 guard failure。
+- 稳定性证据：`impl/arceos_ex/tests/stress/out/20260810T155305.234196Z-df-0016-ltp-trap-root-stale-linux-object/report.md` 为 100/100；每轮四条精确 PASS 和 `TOTAL=4 PASS=4 FAIL=0 BROK=0 WARN=0 CONF=0` 均完整出现，未再观察 lifecycle failure、panic 或 overflow。
+- 当前边界：Impl 的 root cleanup 先于 Task/entry-context 解除发布，历史 SSIP 的 `sepc` 与解除路径中的 TaskRef 解析相符；Linux 6.12 的 exit-to-user/irqentry 路径在 entry teardown 前关闭本地中断。这是后续若复发时的最高优先级定位方向，但现有 100/100 本身不能把该推断升级为已证明根因。
+- 长期入口：`df-0016-ltp-trap-root-stale-linux-object` 保留相同 basic identity 和精确 classifier，常规轮数固定为 50。只有同一 class 再次复发时才恢复 100/200/300/500 定位阶梯；差分最多 10 轮。
+
 ### DF-0015: wait4 分片诊断与 stock LTP PASS 记录间歇拼接
 
 - 状态：2026-08-10 已用冻结的 10 组 Linux/native 差分精确复现并修正，保留独立 native 长期 stress。修复前 native 的 LTP 语义结果和汇总均通过，但第 2、4、7 组的 `uname02` standalone PASS 记录被插入 `wait4 registry` 分片诊断，横向结果为 7/10；这不是 syscall、harness 或 DF-0007 child-wait 语义失败。
@@ -77,7 +85,7 @@
 - 状态：2026-08-05 在保持 guest 交互会话、完成四项 frontier 后再次执行 `sha256sum /opt/ltp/run-syscalls.sh` 时，内核终止于 `declared child runqueue publish invariant failed`；已建立独立 basic diagnostic identity 和默认 stress 项，根因尚未明确。
 - 首次记录日期：2026-08-05。
 - 首次 artifact：`impl/arceos_ex/tests/basic/out/20260805T194115.149428Z-shell-lo-595228/`。同一会话先观察到脚本长度 3606、SHA-256 `c79278919640c1881a0bfe433c00a6e5d06eeec8d16f3dd212c86f363c0a53e7` 与 host/staging 完全一致，且 `/bin/sh -n` 成功；随后四个精确 entry 均打印 TPASS，stock harness 报第 203 行 parse error；父 shell 再启动 hash child 时进入新的 runqueue-publication 终止边界。
-- 长期入口：`ltp-frontier-post-read-lo` 固定首次样本的完整 child 历史：长度检查、带三个不存在参数的失败 `sha256sum` child、由 Ctrl-C 中断的未完成 `tail`、成功 hash、`sh -n`、原 frontier selector 和第二次 hash；`df-0010-ltp-frontier-post-read-runqueue-linux-object` 原样重复该 identity 50 轮并进入默认 stress suite。classifier 优先识别结构化 `Scheduler/Enqueue.Publish/TaskRunqueue` 诊断，再识别旧终止 marker 与独立 harness parse error。
+- 长期入口：`ltp-supported-post-read-lo` 固定首次样本的完整 child 历史：长度检查、带三个不存在参数的失败 `sha256sum` child、由 Ctrl-C 中断的未完成 `tail`、成功 hash、`sh -n`、冻结的第一批 supported selector 和第二次 hash；`df-0010-ltp-frontier-post-read-runqueue-linux-object` 原样重复该 identity 50 轮并进入默认 stress suite。历史 case 名保留首次 frontier artifact 的来源，但 current identity 不得跟随下一批 frontier。classifier 优先识别结构化 `Scheduler/Enqueue.Publish/TaskRunqueue` 诊断，再识别旧终止 marker 与独立 harness parse error。
 
 当前判断与后续要求：
 
@@ -117,7 +125,7 @@
 - 首次记录日期：2026-08-05。
 - native 失败 artifact：`impl/arceos_ex/tests/basic/out/20260805T183141.572743Z-ltp-frontier-565601/`。最后对象边界为 `prev=TaskRef(35:3)`、`next=TaskRef(32:1)`、`tp_ref=TaskRef(35:3)`、`rq_curr=TaskRef(2:1)`，`first_failed=simulated-next-dispatch-preflight`，随后打印 `child wait handoff dispatch invariant failed`。
 - linux-object 对照 artifact：`impl/arceos_ex/tests/basic/out/20260805T183242.824997Z-ltp-frontier-lo-565852/`。它在相同测试阶段、相同 TaskRef/generation 形状和相同 preflight 条件失败，因此当前证据不支持把问题归于任一 PLIC provider。
-- 长期入口：`df-0007-ltp-frontier-child-wait-native` 原样重复 canonical native `ltp-frontier` identity 并进入默认 suite；`df-0007-ltp-frontier-child-wait-linux-object` 是同一 defect 的非默认第二 provider 入口。两侧日常 case-local 样本均为 50 轮；100/200/300/500 逐档扩样只用于尚未定位的概率问题，不作为修复后的机械门禁。classifier 固定识别三条现有通用诊断，不改写 LTP 结果或 basic gate。
+- 长期入口：`df-0007-ltp-frontier-child-wait-native` 的历史名称保留首次 frontier artifact 来源，但当前原样重复 canonical native `ltp` supported identity 并进入默认 suite；`df-0007-ltp-frontier-child-wait-linux-object` 同理固定 `ltp-lo`，是同一 defect 的非默认第二 provider 入口，不得跟随下一批 frontier。两侧日常 case-local 样本均为 50 轮；100/200/300/500 逐档扩样只用于尚未定位的概率问题，不作为修复后的机械门禁。classifier 固定识别三条现有通用诊断，不改写 LTP 结果或 basic gate。
 
 当前判断与后续要求：
 

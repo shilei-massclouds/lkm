@@ -190,6 +190,7 @@ pub enum TaskTerminalReason {
     None,
     OutOfMemory,
     SegmentationFault,
+    Signal(usize),
 }
 
 pub const TASK_SIGNAL_SEGMENTATION_FAULT: usize = 11;
@@ -656,6 +657,7 @@ impl Task {
         match self.terminal_reason {
             TaskTerminalReason::OutOfMemory => 9,
             TaskTerminalReason::SegmentationFault => TASK_SIGNAL_SEGMENTATION_FAULT,
+            TaskTerminalReason::Signal(signal) => signal & 0x7f,
             TaskTerminalReason::None => (exit_status & 0xff) << 8,
         }
     }
@@ -688,12 +690,32 @@ impl Task {
         true
     }
 
+    pub fn record_signal_terminal(&mut self, signal: usize) -> bool {
+        if self.lifecycle.state() != State::OnCpu
+            || self.execution_authority != TaskExecutionAuthority::Live
+            || self.terminal_reason != TaskTerminalReason::None
+            || signal == 0
+            || signal > 64
+        {
+            return false;
+        }
+        self.terminal_reason = TaskTerminalReason::Signal(signal);
+        true
+    }
+
     pub const fn scheduler_sleep_declared(&self) -> bool {
         self.scheduler_sleep_declared
     }
 
     pub const fn pending_wake_signal(&self) -> bool {
         self.pending_wake_signal
+    }
+
+    pub(crate) fn scheduler_runnable_wake_coalesces(&self) -> bool {
+        matches!(self.lifecycle.state(), State::Online | State::OnCpu)
+            && self.running
+            && self.runqueue_published
+            && !self.scheduler_sleep_declared
     }
 
     /// Publish the task state consumed by the next non-preemptive
@@ -715,7 +737,7 @@ impl Task {
     /// Record a matching wake signal. `PreparePrev` consumes it exactly once.
     #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub(crate) fn post_pending_wake_signal(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::OnCpu || self.pending_wake_signal {
+        if self.lifecycle.state() != State::OnCpu {
             return failed_condition(
                 LifecycleEvent::Dispatch,
                 self.state(),
@@ -723,8 +745,19 @@ impl Task {
                 State::OnCpu,
             );
         }
+        // Wake records are level-triggered for a Task occurrence. Multiple
+        // pending signal bits may coalesce before the owner reaches its next
+        // return/sleep boundary, so an already-recorded wake is success.
         self.pending_wake_signal = true;
         Ok(())
+    }
+
+    pub(crate) fn consume_pending_wake_signal(&mut self) -> bool {
+        if self.lifecycle.state() != State::OnCpu {
+            return false;
+        }
+        self.pending_wake_signal = false;
+        true
     }
 
     /// Returns true when `prev` must retain runnable eligibility.
@@ -739,6 +772,21 @@ impl Task {
             return true;
         }
         false
+    }
+
+    /// Prepare a one-way terminal switch without allowing an earlier wake to
+    /// restore runnable eligibility. Registry/Runtime/Flow terminal identity
+    /// is validated by SchedulerTaskAccess before this Task-local mutation.
+    pub(crate) fn prepare_terminal_prev_blocked(&mut self) -> bool {
+        if self.lifecycle.state() != State::OnCpu
+            || !self.on_cpu
+            || !self.scheduler_sleep_declared
+            || self.running
+        {
+            return false;
+        }
+        self.pending_wake_signal = false;
+        true
     }
 
     pub(crate) fn deactivate_from_scheduler(&mut self) -> EventResult {

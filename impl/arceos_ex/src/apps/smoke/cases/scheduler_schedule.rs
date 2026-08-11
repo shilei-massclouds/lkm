@@ -390,6 +390,7 @@ fn task_breakpoint_contract_smoke() -> bool {
         || !task.breakpoint_matches(flow_ref)
         || task.breakpoint_matches(stale_flow)
         || !task.switch_in_ready()
+        || !task.scheduler_runnable_wake_coalesces()
         || !task.dispatch_rejected_for_test(
             stale_flow,
             task.context_epoch(),
@@ -425,7 +426,11 @@ fn task_breakpoint_contract_smoke() -> bool {
 
     if task.breakpoint_state() != TaskBreakpointState::Invalid
         || task.declare_scheduler_sleep().is_err()
-        || task.prepare_prev_runnable()
+        || task.post_pending_wake_signal().is_err()
+        || !task.prepare_terminal_prev_blocked()
+        || !task.scheduler_sleep_declared()
+        || task.pending_wake_signal()
+        || task.running()
         || task.deactivate_from_scheduler().is_err()
         || task.suspend_from_cpu().is_err()
         || task.breakpoint_state() != TaskBreakpointState::Valid

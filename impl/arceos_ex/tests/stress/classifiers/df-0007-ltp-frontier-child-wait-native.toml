@@ -40,4 +40,4 @@ contains = [
   "--- geteuid01: PASS (exit 0)",
   "lkm-ltp: complete",
 ]
-description = "The frozen native frontier identity completed all four exact entries and reached its marker."
+description = "The frozen first-batch native supported identity completed all four exact entries and reached its marker."

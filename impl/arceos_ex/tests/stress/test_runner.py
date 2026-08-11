@@ -121,6 +121,7 @@ class CompositeConfigTests(unittest.TestCase):
                 "df-0013-fork-ofd-offset-child-return-native",
                 "df-0014-checkpoint-cross-cpu-reentry-native",
                 "df-0015-ltp-frontier-console-record-interleave-native",
+                "df-0016-ltp-trap-root-stale-linux-object",
             ],
         )
         path = Path("impl/arceos_ex/tests/stress/cases/df-0001-user-boot.toml")
@@ -141,7 +142,7 @@ class CompositeConfigTests(unittest.TestCase):
             self.assertNotIn("qemu-system", path.read_text())
             self.assertNotIn("openrc", path.name.lower())
             loaded.append(runner._load_case(path, self.repo_root))
-        self.assertEqual(len(loaded), 26)
+        self.assertEqual(len(loaded), 27)
         self.assertTrue(all(case["mode"] in {"stress", "difftest"} for case in loaded))
 
     def test_checked_in_difftest_scopes_use_exact_linux_mappings(self) -> None:
@@ -395,7 +396,7 @@ class CompositeConfigTests(unittest.TestCase):
             / "df-0007-ltp-frontier-child-wait-native.toml"
         )
         case = runner._load_case(path, self.repo_root)
-        self.assertEqual(case["test"], "ltp-frontier")
+        self.assertEqual(case["test"], "ltp")
         self.assertEqual(case["runs"], 50)
         self.assertEqual(case["metadata"]["defect"], "DF-0007")
         self.assertTrue(case["metadata"]["default_suite"])
@@ -426,7 +427,7 @@ class CompositeConfigTests(unittest.TestCase):
             "df-0007-ltp-frontier-child-wait-linux-object.toml"
         )
         linux_object_case = runner._load_case(linux_object_path, self.repo_root)
-        self.assertEqual(linux_object_case["test"], "ltp-frontier-lo")
+        self.assertEqual(linux_object_case["test"], "ltp-lo")
         self.assertEqual(linux_object_case["runs"], 50)
         self.assertEqual(linux_object_case["metadata"]["defect"], "DF-0007")
         self.assertEqual(linux_object_case["metadata"]["provider"], "linux-object")
@@ -511,7 +512,7 @@ class CompositeConfigTests(unittest.TestCase):
             "df-0009-user-smoke-preempt-success",
         )
 
-    def test_df0010_is_default_and_uses_post_frontier_read_diagnostic(self) -> None:
+    def test_df0010_is_default_and_uses_frozen_supported_post_read_diagnostic(self) -> None:
         path = (
             self.repo_root
             / "impl"
@@ -522,7 +523,7 @@ class CompositeConfigTests(unittest.TestCase):
             / "df-0010-ltp-frontier-post-read-runqueue-linux-object.toml"
         )
         case = runner._load_case(path, self.repo_root)
-        self.assertEqual(case["test"], "ltp-frontier-post-read-lo")
+        self.assertEqual(case["test"], "ltp-supported-post-read-lo")
         self.assertEqual(case["runs"], 50)
         self.assertEqual(case["metadata"]["defect"], "DF-0010")
         self.assertTrue(case["metadata"]["default_suite"])
@@ -739,7 +740,7 @@ class CompositeConfigTests(unittest.TestCase):
             / "df-0015-ltp-frontier-console-record-interleave-native.toml"
         )
         case = runner._load_case(path, self.repo_root)
-        self.assertEqual(case["test"], "ltp-frontier")
+        self.assertEqual(case["test"], "ltp")
         self.assertEqual(case["runs"], 50)
         self.assertEqual(case["metadata"]["defect"], "DF-0015")
         self.assertTrue(case["metadata"]["default_suite"])
@@ -777,6 +778,56 @@ class CompositeConfigTests(unittest.TestCase):
         self.assertNotEqual(
             runner._classify(corrupted, 0, False, case["rules"])["id"],
             "df-0015-ltp-frontier-records-atomic",
+        )
+
+    def test_df0016_is_default_and_preserves_trap_root_stale(self) -> None:
+        path = (
+            self.repo_root
+            / "impl"
+            / "arceos_ex"
+            / "tests"
+            / "stress"
+            / "cases"
+            / "df-0016-ltp-trap-root-stale-linux-object.toml"
+        )
+        case = runner._load_case(path, self.repo_root)
+        self.assertEqual(case["test"], "ltp-lo")
+        self.assertEqual(case["runs"], 50)
+        self.assertEqual(case["metadata"]["defect"], "DF-0016")
+        self.assertTrue(case["metadata"]["default_suite"])
+        self.assertIn(path.resolve(), runner._selected_case_paths([]))
+
+        historical_failure = "\n".join(
+            (
+                "trap occurrence lifecycle failure event=TrapOccurrence.BindRoot",
+                "stage=bind_root first_failed=installed_root_stale",
+            )
+        )
+        self.assertEqual(
+            runner._classify(historical_failure, 1, False, case["rules"])["id"],
+            "df-0016-trap-root-installed-stale",
+        )
+
+        complete = "\n".join(
+            (
+                "--- uname01: PASS (exit 0)",
+                "--- uname02: PASS (exit 0)",
+                "--- getuid01: PASS (exit 0)",
+                "--- geteuid01: PASS (exit 0)",
+                "Summary: TOTAL=4 PASS=4 FAIL=0 BROK=0 WARN=0 CONF=0",
+                "lkm-ltp: selection=supported status=0",
+                "lkm-ltp: complete",
+            )
+        )
+        self.assertEqual(
+            runner._classify(complete, 0, False, case["rules"])["id"],
+            "df-0016-ltp-supported-success",
+        )
+
+        incomplete = complete.replace("--- geteuid01: PASS (exit 0)\n", "")
+        self.assertNotEqual(
+            runner._classify(incomplete, 0, False, case["rules"])["id"],
+            "df-0016-ltp-supported-success",
         )
 
     def test_nonzero_suite_prepares_disk_exactly_once(self) -> None:

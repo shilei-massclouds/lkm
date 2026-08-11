@@ -86,6 +86,12 @@ copies the available inode bytes, and zero-fills the caller's remaining range.
 Validation failure has no VFS side effect. This does not introduce a general
 page cache or make ext2 mappings writable.
 
+`VfsCore::write_file_range` is its positioned write counterpart for shared
+mapping synchronization. It validates the same stable `FileRef`, checks offset
+addition before mutation, writes the requested bytes to the transient inode,
+extends its size when needed, and preserves `File.position`. A validation or
+capacity failure leaves inode data, size and file position unchanged.
+
 `VfsCore::remove_path` resolves the parent and final component while the caller
 holds the shared files/fs/VFS IRQ-safe resource lock. It admits only a live
 transient memory-backed inode. File removal rejects a directory as
@@ -114,7 +120,11 @@ The current implementation slice may limit the backend to read-only
 ext2 fast symlinks whose target lives in raw i_block bytes and is
 truncated by inode size. readlinkat is the separate no-follow final
 symlink operation and may use the same fast-symlink target source
-while preserving the Linux 6.12 copy/truncate contract. The current
+while preserving the Linux 6.12 copy/truncate contract. The current read-only
+open path may use that same parent-walk/final-lookup split for `O_NOFOLLOW`:
+intermediate symlinks retain ordinary restart semantics, while a final symlink
+is returned to the open boundary and classified as `ELOOP` instead of being
+followed or opened. The current
 cwd-relative slice also supports FsStruct.pwd starts for ".", single
 relative components, and "./component"; newfstatat must accept
 AT_SYMLINK_NOFOLLOW for the final component and return fast symlink

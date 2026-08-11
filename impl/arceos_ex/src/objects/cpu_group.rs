@@ -240,6 +240,12 @@ impl CpuGroup {
             .unwrap_or(false)
     }
 
+    pub fn active_contains(&self, cpu_ref: CpuRef) -> bool {
+        self.dereference(cpu_ref)
+            .map(Cpu::is_active)
+            .unwrap_or(false)
+    }
+
     pub fn boot_cpu_index_zero(&self) -> bool {
         self.boot_cpu()
             .map(|cpu| cpu.role() == CpuRole::Boot && cpu.logical_id() == BOOT_CPU_LOGICAL_ID)

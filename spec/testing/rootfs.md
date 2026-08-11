@@ -144,20 +144,33 @@ timeout first frozen after both compute children printed their write-complete ma
 printed bytes-collected. It preserves the unchanged 8-CPU basic identity and timeout/QMP artifacts; the historical
 DF-0001 classifier for ELF-read failure does not subsume this scheduler/pipe observation.
 
-The DF-0007 default stress case separately repeats the unchanged native `ltp-frontier` basic identity for the
+The DF-0007 default stress case separately repeats the frozen first-batch native `ltp` supported identity for the
 child wait/reap routing failure first observed after `uname01` printed both TPASS records; an explicit non-default
-case repeats `ltp-frontier-lo` for the independently observed linux-object side. Each provider identity has a
+case repeats `ltp-lo` for the independently observed linux-object side. Historical DF case names retain
+`frontier` to identify their first artifacts, but their current basic references must not follow the movable
+frontier. Each provider identity has a
 routine sample of 50 runs; 100/200/300/500-run expansion is reserved for an unresolved probabilistic investigation.
 The stock LTP harness, exact list, 8-CPU topology, canonical rootfs, provider
 and completion marker remain owned by the referenced basic cases; stress classification may preserve the failure
 but may not alter those inputs.
 
-The DF-0015 default stress case independently repeats that native `ltp-frontier` identity to preserve the
+The DF-0015 default stress case independently repeats that frozen native `ltp` supported identity to preserve the
 console-record boundary first observed when a stock runner PASS line was inserted into a fragmented `wait4
 registry` diagnostic. Its routine sample is 50 runs. Classification requires each of the four exact PASS records
 and the clean four-entry summary to occupy standalone lines; it cannot infer success from LTP-internal TPASS text.
 The 100/200/300/500-run staircase is only for an unresolved probabilistic recurrence, while a Linux/native
 horizontal comparison remains capped at ten runs.
+
+The DF-0016 default stress case repeats the unchanged linux-object `ltp-lo` supported identity for the
+generation-stale root `TrapFlowRef` first observed during `geteuid01` when an SSIP entered
+`TrapOccurrence.BindRoot`. The first supported acceptance stress batch reproduced once within 39 classified
+linux-object samples; the subsequent frozen investigation completed 100/100 without recurrence. That accepted
+sample moves the checked-in case to the routine 50-run regression size without erasing the first failure or claiming
+a causal implementation repair. Classification requires both the formal trap-occurrence failure and
+`installed_root_stale`; success requires all four exact PASS records, the clean summary and completion protocol.
+The stock harness, exact four-entry supported list, canonical rootfs, eight CPUs, provider, timeout and marker
+protocol remain unchanged. Expansion to 100/200/300/500 resumes only if the same class recurs and requires renewed
+location work; it is not routine acceptance or differential testing.
 
 The DF-0008 default stress case separately repeats the unchanged `user-smoke-linux-object` basic identity for
 the intermittent plain-fork child enqueue failure observed during the repeated COW fork cycle. Its case-local
@@ -173,13 +186,14 @@ remain owned by the referenced basic case. This observation has the same termina
 DF-0006 but retains an independent provider-specific entry, and it does not replace the distinct DF-0008
 plain-fork enqueue failure.
 
-The DF-0010 default stress case repeats `ltp-frontier-post-read-lo`: the initial shell reproduces the first
+The DF-0010 default stress case repeats `ltp-supported-post-read-lo`: the initial shell reproduces the first
 observation's complete child history (length check, failed multi-operand hash child, interrupted partial command,
-then the successful stock-script hash and `sh -n`), invokes the ordinary frontier selector unchanged, and finally
-launches a second hash child from that same shell. This diagnostic identity preserves the post-frontier
+then the successful stock-script hash and `sh -n`), invokes the frozen first-batch supported selector unchanged,
+and finally launches a second hash child from that same shell. This diagnostic identity preserves the post-batch
 runqueue-publication failure independently from the stock harness parse error and cleanup/unsupported-syscall
-boundaries. It must retain the canonical rootfs, eight CPUs, linux-object provider, exact frontier selection,
-command order, completion marker, and full basic artifacts; it is not an LTP acceptance identity.
+boundaries. It must retain the canonical rootfs, eight CPUs, linux-object provider, exact four-entry supported
+selection, command order, completion marker, and full basic artifacts; it is not an LTP acceptance identity and
+must not follow the movable frontier.
 
 The DF-0011 default stress case separately repeats the unchanged `user-smoke-linux-object` basic identity for
 the intermittent timeout after pipe bytes were collected, both compute children were reaped, and the A-B-A
@@ -218,9 +232,10 @@ mapping. They consume only the `frontier` list and never enter an acceptance or 
 move into the cumulative supported list only after its stock LTP run passes on all three targets and both
 arceos_ex providers satisfy the required stress count.
 
-The two arceos_ex frontier identities enable the error-only syscall probe. Full per-syscall tracing is excluded:
-the stock runner scans its runtest file through byte-oriented reads, so tracing every successful read perturbs
-the diagnostic run enough to hide the first semantic boundary it is intended to locate.
+All arceos_ex LTP identities enable only the error-only syscall probe. Full per-syscall tracing is excluded from
+both frontier diagnostics and supported acceptance: the stock runner scans its runtest file through byte-oriented
+reads, so tracing every successful read perturbs the run enough to hide the first semantic boundary or exhaust the
+acceptance timeout before the unchanged harness completes.
 
 Canonical construction validates every line in both lists as one nonempty exact runtest entry name, rejects
 duplicates within either list, and requires the name to occur exactly once in sibling LTP's `runtest/syscalls`.

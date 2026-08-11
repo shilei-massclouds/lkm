@@ -1,4 +1,4 @@
-uname01
-uname02
-getuid01
-geteuid01
+getgid03
+getegid02
+getresuid01
+getresgid01

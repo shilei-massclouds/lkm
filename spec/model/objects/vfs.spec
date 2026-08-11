@@ -86,6 +86,8 @@ predicate vfs_readlink_returns_symlink_target<T, D>(core: T, dentry: D) -> bool;
 predicate vfs_readlink_truncates_to_user_buffer<T>(core: T) -> bool;
 predicate vfs_stat_final_symlink_nofollow_supported<T, D>(core: T, dentry: D) -> bool;
 predicate vfs_stat_follows_final_symlink_by_default<T, D>(core: T, dentry: D) -> bool;
+predicate vfs_open_final_symlink_nofollow_returns_eloop<T, D>(core: T, dentry: D) -> bool;
+predicate vfs_open_nofollow_preserves_intermediate_symlink_follow<T>(core: T) -> bool;
 predicate vfs_open_path_allocates_file<T, F>(core: T, file: F) -> bool;
 predicate vfs_read_path_returns_data<T, F>(core: T, file: F) -> bool;
 predicate vfs_path_read_start_checkpoint<T, P>(core: T, path: P) -> bool;
@@ -104,6 +106,9 @@ predicate vfs_transient_file_truncate_capacity_bound<T>(core: T) -> bool;
 predicate vfs_transient_file_range_read_preserves_position<T, F>(core: T, file: F) -> bool;
 predicate vfs_transient_file_range_read_zero_fills_tail<T, F>(core: T, file: F) -> bool;
 predicate vfs_transient_file_range_read_failure_has_no_side_effect<T, F>(core: T, file: F) -> bool;
+predicate vfs_transient_file_range_write_preserves_position<T, F>(core: T, file: F) -> bool;
+predicate vfs_transient_file_range_write_updates_inode_bytes<T, F>(core: T, file: F) -> bool;
+predicate vfs_transient_file_range_write_failure_has_no_side_effect<T, F>(core: T, file: F) -> bool;
 predicate vfs_transient_remove_path_type_checked<T>(core: T) -> bool;
 predicate vfs_transient_remove_path_failure_atomic<T>(core: T) -> bool;
 predicate vfs_transient_remove_path_rejects_read_only_backing<T>(core: T) -> bool;
@@ -481,6 +486,26 @@ object VfsCore: ResourceObject {
                 }
             }
 
+            Action::OpenPathNoFollow(path: Path, fs: FsStruct) {
+                state_effect: StateEffect::None;
+                depends_on {
+                    VfsCore.state == State::Ready;
+                    FsStruct.state == State::Ready;
+                    fs_struct_root_dentry_set(fs, Dentry);
+                    fs_struct_pwd_dentry_set(fs, Dentry);
+                    dentry_positive(Dentry);
+                    vfs_path_components_bound(path);
+                }
+                drives {
+                    VfsCore.Action::Lookup;
+                    VfsCore.Action::FollowMount(mount_point: Dentry);
+                }
+                ensures {
+                    vfs_open_final_symlink_nofollow_returns_eloop(VfsCore, Dentry);
+                    vfs_open_nofollow_preserves_intermediate_symlink_follow(VfsCore);
+                }
+            }
+
             Action::FollowSymlink(link: Dentry) {
                 state_effect: StateEffect::None;
                 depends_on {
@@ -646,6 +671,22 @@ object VfsCore: ResourceObject {
                     vfs_transient_file_range_read_preserves_position(VfsCore, file);
                     vfs_transient_file_range_read_zero_fills_tail(VfsCore, file);
                     vfs_transient_file_range_read_failure_has_no_side_effect(VfsCore, file);
+                }
+            }
+
+            Action::WriteFileRange(file: File) {
+                state_effect: StateEffect::None;
+                depends_on {
+                    VfsCore.state == State::Ready;
+                    file_allocated(file);
+                    file_inode_bound(file, Inode);
+                    inode_kind_is(Inode, VfsInodeKind::RegularFile);
+                    inode_transient_memory_backed(Inode);
+                }
+                ensures {
+                    vfs_transient_file_range_write_preserves_position(VfsCore, file);
+                    vfs_transient_file_range_write_updates_inode_bytes(VfsCore, file);
+                    vfs_transient_file_range_write_failure_has_no_side_effect(VfsCore, file);
                 }
             }
 

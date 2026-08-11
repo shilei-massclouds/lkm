@@ -27,4 +27,4 @@ regex = [
   "(?m)^--- geteuid01: PASS \\(exit 0\\)$",
   "(?m)^Summary: TOTAL=4 PASS=4 FAIL=0 BROK=0 WARN=0 CONF=0$",
 ]
-description = "All four stock-harness PASS records and the exact aggregate summary remained standalone and the frontier completed."
+description = "All four stock-harness PASS records and the exact aggregate summary remained standalone and the frozen supported batch completed."

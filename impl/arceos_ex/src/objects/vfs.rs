@@ -1753,6 +1753,7 @@ impl VfsCore {
         Ok(file_ref)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn open_existing_path<P: BlockDeviceProvider>(
         &mut self,
         fs_struct: &FsStruct,
@@ -1761,8 +1762,13 @@ impl VfsCore {
         provider: &mut P,
         path: &[u8],
         must_be_directory: bool,
+        nofollow_final_symlink: bool,
     ) -> Result<(FileRef, VfsInodeKind), VfsError> {
-        let dentry_ref = self.walk_path(fs_struct, fs, registry, provider, path)?;
+        let dentry_ref = if nofollow_final_symlink {
+            self.walk_path_no_follow_final(fs_struct, fs, registry, provider, path)?
+        } else {
+            self.walk_path(fs_struct, fs, registry, provider, path)?
+        };
         let kind = {
             let dentry = self.positive_dentry(dentry_ref)?;
             let inode = self.inode(dentry.inode_ref()).ok_or(VfsError::InvalidRef)?;
@@ -1777,6 +1783,9 @@ impl VfsCore {
         let file_ref = match kind {
             VfsInodeKind::RegularFile => self.open_file(dentry_ref)?,
             VfsInodeKind::Directory => self.open_directory(dentry_ref)?,
+            VfsInodeKind::Symlink if nofollow_final_symlink => {
+                return Err(VfsError::SymlinkLoop);
+            }
             VfsInodeKind::DeviceNode | VfsInodeKind::Symlink => {
                 return Err(VfsError::UnsupportedPath);
             }
@@ -2144,6 +2153,39 @@ impl VfsCore {
         let copied = core::cmp::min(buffer.len(), inode.data.len() - offset);
         buffer[..copied].copy_from_slice(&inode.data[offset..offset + copied]);
         Ok(copied)
+    }
+
+    pub fn write_file_range(
+        &mut self,
+        file_ref: FileRef,
+        offset: usize,
+        data: &[u8],
+    ) -> Result<usize, VfsError> {
+        let inode_ref = self.file(file_ref).ok_or(VfsError::InvalidRef)?.inode_ref();
+        let end = offset.checked_add(data.len()).ok_or(VfsError::NoSpace)?;
+        let inode = self.inode(inode_ref).ok_or(VfsError::InvalidRef)?;
+        if inode.read_only_backed() {
+            return Err(VfsError::ReadOnly);
+        }
+        if !inode.is_file() {
+            return Err(VfsError::NotFile);
+        }
+
+        let additional = end.saturating_sub(inode.data.len());
+        if additional != 0 {
+            self.inode_mut(inode_ref)
+                .ok_or(VfsError::InvalidRef)?
+                .data
+                .try_reserve(additional)
+                .map_err(|_| VfsError::NoSpace)?;
+        }
+        let inode = self.inode_mut(inode_ref).ok_or(VfsError::InvalidRef)?;
+        if inode.data.len() < end {
+            inode.data.resize(end, 0);
+        }
+        inode.data[offset..end].copy_from_slice(data);
+        inode.size = inode.data.len();
+        Ok(data.len())
     }
 
     pub fn write_file(

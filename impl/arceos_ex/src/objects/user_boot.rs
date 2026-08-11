@@ -47,7 +47,7 @@ use super::{
     task_flow::{TaskFlow, TaskFlowRef},
     trap_type::TrapFrame,
     user_process_registry::{UserProcessChildSelector, UserProcessSlotState, global_registry},
-    vfs::{FsStruct, FsStructSnapshot},
+    vfs::{FileRef, FsStruct, FsStructSnapshot, VfsCore},
 };
 
 #[cfg(app_smoke)]
@@ -64,6 +64,18 @@ pub const USER_BIN_SH_PATH: &[u8] = b"/bin/sh";
 #[allow(dead_code)]
 const USER_SMOKE_STDIN_MARKER: &[u8] = b"user-smoke: begin";
 pub const USER_SIGNAL_COUNT: usize = 64;
+#[allow(dead_code)]
+pub const USER_SIGALRM: usize = 14;
+#[allow(dead_code)]
+pub const USER_SIGUSR1: usize = 10;
+#[allow(dead_code)]
+pub const USER_SIGNAL_TRAMPOLINE_VA: usize = 0x3e00_0000;
+#[allow(dead_code)]
+pub const USER_RT_SIGFRAME_SIZE: usize = 1088;
+const USER_SIGNAL_TRAMPOLINE_BYTES: [u8; 8] = [
+    0x93, 0x08, 0xb0, 0x08, // addi a7, zero, 139
+    0x73, 0x00, 0x00, 0x00, // ecall
+];
 pub const USER_CHILD_PID: usize = 3;
 pub const USER_CLONE_SIGCHLD: usize = 17;
 pub const USER_SIGCHLD_MASK: usize = 1usize << (USER_CLONE_SIGCHLD - 1);
@@ -183,6 +195,103 @@ impl UserSignalAction {
     }
 }
 
+#[derive(Clone, Copy)]
+#[allow(dead_code)]
+struct UserSignalRuntime {
+    actions: [UserSignalAction; USER_SIGNAL_COUNT],
+    blocked_mask: usize,
+    pending_mask: usize,
+    itimer_deadline: u64,
+    itimer_interval: u64,
+    active_frame_base: usize,
+    rt_sigprocmask_observed: bool,
+    rt_sigaction_observed: bool,
+}
+
+impl UserSignalRuntime {
+    const fn empty() -> Self {
+        Self {
+            actions: [UserSignalAction::default(); USER_SIGNAL_COUNT],
+            blocked_mask: 0,
+            pending_mask: 0,
+            itimer_deadline: 0,
+            itimer_interval: 0,
+            active_frame_base: 0,
+            rt_sigprocmask_observed: false,
+            rt_sigaction_observed: false,
+        }
+    }
+
+    fn fork_child(self) -> Self {
+        Self {
+            actions: self.actions,
+            blocked_mask: self.blocked_mask,
+            ..Self::empty()
+        }
+    }
+
+    fn from_pid1(state: &KernelInitTaskUserState) -> Option<Self> {
+        state.signal_action_syscall_ready().then_some(Self {
+            actions: state.signal_actions,
+            blocked_mask: state.blocked_signal_mask,
+            pending_mask: state.pending_signal_mask
+                | if state.pending_sigchld {
+                    USER_SIGCHLD_MASK
+                } else {
+                    0
+                },
+            itimer_deadline: state.itimer_deadline,
+            itimer_interval: state.itimer_interval,
+            active_frame_base: state.active_signal_frame_base,
+            rt_sigprocmask_observed: state.rt_sigprocmask_observed,
+            rt_sigaction_observed: state.rt_sigaction_observed,
+        })
+    }
+
+    fn store_pid1(self, state: &mut KernelInitTaskUserState) {
+        state.signal_actions = self.actions;
+        state.blocked_signal_mask = self.blocked_mask;
+        state.pending_signal_mask = self.pending_mask & !USER_SIGCHLD_MASK;
+        state.pending_sigchld = self.pending_mask & USER_SIGCHLD_MASK != 0;
+        state.itimer_deadline = self.itimer_deadline;
+        state.itimer_interval = self.itimer_interval;
+        state.active_signal_frame_base = self.active_frame_base;
+        state.rt_sigprocmask_observed = self.rt_sigprocmask_observed;
+        state.rt_sigaction_observed = self.rt_sigaction_observed;
+    }
+}
+
+#[derive(Clone, Copy)]
+pub enum UserSignalMaskHow {
+    Block,
+    Unblock,
+    Set,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct UserSignalDeliveryPlan {
+    pub signal: usize,
+    pub action: UserSignalAction,
+    pub old_mask: usize,
+    pub frame_base: usize,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum UserSignalDelivery {
+    None,
+    Consumed,
+    Handler(UserSignalDeliveryPlan),
+    DefaultTerminal(usize),
+    BadFrame,
+}
+
+#[derive(Clone, Copy)]
+#[allow(dead_code)]
+pub(crate) struct UserItimerRealState {
+    pub interval_ticks: u64,
+    pub remaining_ticks: u64,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UserRtSigtimedwaitResult {
     ReturnSignal(usize),
@@ -258,6 +367,13 @@ pub enum UserMmapError {
     BadFd,
     AccessDenied,
     NoDevice,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UserMsyncError {
+    Invalid,
+    NoMemory,
+    Io,
 }
 
 fn pid_t_arg(value: usize) -> i32 {
@@ -439,6 +555,8 @@ struct UserTaskStorageSlot {
     process_resources_present: bool,
     credentials: UserCredentials,
     credentials_present: bool,
+    signal_runtime: UserSignalRuntime,
+    signal_runtime_present: bool,
     mm_present: bool,
     shared_mm_owner_ref: TaskRef,
     vfork_parent_ref: TaskRef,
@@ -514,6 +632,8 @@ impl UserTaskStorageCell {
             core::ptr::addr_of_mut!((*slot).process_resources_present).write(false);
             core::ptr::addr_of_mut!((*slot).credentials).write(UserCredentials::root());
             core::ptr::addr_of_mut!((*slot).credentials_present).write(false);
+            core::ptr::addr_of_mut!((*slot).signal_runtime).write(UserSignalRuntime::empty());
+            core::ptr::addr_of_mut!((*slot).signal_runtime_present).write(false);
             core::ptr::addr_of_mut!((*slot).mm_present).write(false);
             core::ptr::addr_of_mut!((*slot).shared_mm_owner_ref).write(TaskRef::NONE);
             core::ptr::addr_of_mut!((*slot).vfork_parent_ref).write(TaskRef::NONE);
@@ -558,6 +678,8 @@ static USER_FILES_STATE_LOCK: super::irq_spinlock::IrqSpinLock<()> =
     super::irq_spinlock::IrqSpinLock::new(());
 static USER_CREDENTIALS_STATE_LOCK: super::irq_spinlock::IrqSpinLock<()> =
     super::irq_spinlock::IrqSpinLock::new(());
+static USER_SIGNAL_STATE_LOCK: super::irq_spinlock::IrqSpinLock<()> =
+    super::irq_spinlock::IrqSpinLock::new(());
 
 pub(crate) fn lock_user_memory_state() -> super::irq_spinlock::IrqSpinLockGuard<'static, ()> {
     USER_MEMORY_STATE_LOCK.lock()
@@ -569,6 +691,10 @@ pub(crate) fn lock_user_files_state() -> super::irq_spinlock::IrqSpinLockGuard<'
 
 pub(crate) fn lock_user_credentials_state() -> super::irq_spinlock::IrqSpinLockGuard<'static, ()> {
     USER_CREDENTIALS_STATE_LOCK.lock()
+}
+
+pub(crate) fn lock_user_signal_state() -> super::irq_spinlock::IrqSpinLockGuard<'static, ()> {
+    USER_SIGNAL_STATE_LOCK.lock()
 }
 
 struct UserTaskStorageHandle;
@@ -861,7 +987,7 @@ pub(crate) fn current_smp_user_task() -> Option<(TaskRef, super::cpu::CpuRef)> {
     None
 }
 
-fn current_user_credentials_identity() -> Option<(TaskRef, super::cpu::CpuRef)> {
+pub(crate) fn current_user_process_identity() -> Option<(TaskRef, super::cpu::CpuRef)> {
     if let Some(identity) = current_smp_user_task() {
         return Some(identity);
     }
@@ -875,7 +1001,7 @@ fn with_current_user_credentials<R>(
     pid1: impl FnOnce(&mut KernelInitTaskUserState) -> Option<R>,
     dynamic: impl FnOnce(&mut UserCredentials) -> Option<R>,
 ) -> Option<R> {
-    let (task_ref, cpu_ref) = current_user_credentials_identity()?;
+    let (task_ref, cpu_ref) = current_user_process_identity()?;
     let _lease = global_registry().acquire(task_ref, cpu_ref)?;
     let _credentials_guard = lock_user_credentials_state();
     if task_ref.same_identity(TaskRef::KERNEL_INIT) {
@@ -980,6 +1106,321 @@ pub(crate) fn current_user_set_supplementary_groups_root_slice(
     ) == Some(true)
 }
 
+fn with_current_user_signal_runtime<R>(
+    access: impl FnOnce(&mut UserSignalRuntime) -> Option<R>,
+) -> Option<R> {
+    let (task_ref, cpu_ref) = current_user_process_identity()?;
+    let _lease = global_registry().acquire(task_ref, cpu_ref)?;
+    let _signal_guard = lock_user_signal_state();
+    if task_ref.same_identity(TaskRef::KERNEL_INIT) {
+        let state = &mut crate::context::context().kernel_init_user_state;
+        let mut runtime = UserSignalRuntime::from_pid1(state)?;
+        let result = access(&mut runtime)?;
+        runtime.store_pid1(state);
+        return Some(result);
+    }
+    let slot = USER_TASK_STORAGE.get(task_ref.user_slot()?)?.get_mut()?;
+    if !slot.occupied
+        || !slot.signal_runtime_present
+        || !slot.task_ref().same_identity(task_ref)
+        || slot.task.flow_cpu_ref() != Some(cpu_ref)
+    {
+        return None;
+    }
+    access(&mut slot.signal_runtime)
+}
+
+pub(crate) fn current_user_rt_sigprocmask(
+    update: Option<(UserSignalMaskHow, usize)>,
+) -> Option<usize> {
+    with_current_user_signal_runtime(|runtime| {
+        let old_mask = runtime.blocked_mask;
+        if let Some((how, mask)) = update {
+            runtime.blocked_mask = match how {
+                UserSignalMaskHow::Block => old_mask | mask,
+                UserSignalMaskHow::Unblock => old_mask & !mask,
+                UserSignalMaskHow::Set => mask,
+            };
+        }
+        runtime.rt_sigprocmask_observed = true;
+        Some(old_mask)
+    })
+}
+
+pub(crate) fn current_user_rt_sigaction(
+    signal: usize,
+    new_action: Option<UserSignalAction>,
+) -> Option<UserSignalAction> {
+    with_current_user_signal_runtime(|runtime| {
+        if signal == 0 || signal > USER_SIGNAL_COUNT {
+            return None;
+        }
+        let action = &mut runtime.actions[signal - 1];
+        let old_action = *action;
+        if let Some(new_action) = new_action {
+            *action = new_action;
+        }
+        runtime.rt_sigaction_observed = true;
+        Some(old_action)
+    })
+}
+
+pub(crate) fn current_user_setitimer_real(
+    now: u64,
+    new_value: Option<(u64, u64)>,
+) -> Option<UserItimerRealState> {
+    with_current_user_signal_runtime(|runtime| {
+        let old = UserItimerRealState {
+            interval_ticks: runtime.itimer_interval,
+            remaining_ticks: if runtime.itimer_deadline == 0 {
+                0
+            } else {
+                runtime.itimer_deadline.saturating_sub(now).max(1)
+            },
+        };
+        if let Some((interval_ticks, value_ticks)) = new_value {
+            runtime.itimer_interval = if value_ticks == 0 { 0 } else { interval_ticks };
+            runtime.itimer_deadline = if value_ticks == 0 {
+                0
+            } else {
+                now.saturating_add(value_ticks).max(now.saturating_add(1))
+            };
+        }
+        Some(old)
+    })
+}
+
+pub(crate) fn merge_pending_signal(task_ref: TaskRef, cpu_ref: CpuRef, signal: usize) -> bool {
+    if signal == 0
+        || signal > USER_SIGNAL_COUNT
+        || !global_registry().live_target_valid(task_ref, cpu_ref)
+    {
+        return false;
+    }
+    let signal_bit = 1usize << (signal - 1);
+    let _signal_guard = lock_user_signal_state();
+    if task_ref.same_identity(TaskRef::KERNEL_INIT) {
+        if !cpu_ref.is_boot_cpu() {
+            return false;
+        }
+        let state = crate::context::pid1_user_signal_state_ptr();
+        // SAFETY: this is the field-specific PID1 capability; the signal lock
+        // serializes owner updates and remote pending-bit publication.
+        let state = unsafe { &mut *state };
+        let Some(mut runtime) = UserSignalRuntime::from_pid1(state) else {
+            return false;
+        };
+        runtime.pending_mask |= signal_bit;
+        runtime.store_pid1(state);
+        return true;
+    }
+    let Some(slot) = task_ref
+        .user_slot()
+        .and_then(|index| USER_TASK_STORAGE.get(index))
+        .and_then(UserTaskStorageCell::get_mut)
+    else {
+        return false;
+    };
+    if !slot.occupied
+        || !slot.signal_runtime_present
+        || !slot.task_ref().same_identity(task_ref)
+        || slot.task.flow_cpu_ref() != Some(cpu_ref)
+    {
+        return false;
+    }
+    slot.signal_runtime.pending_mask |= signal_bit;
+    true
+}
+
+const USER_SA_NODEFER: usize = 0x4000_0000;
+const USER_SA_RESETHAND: usize = 0x8000_0000;
+const USER_SIGNAL_IGNORED_HANDLER: usize = 1;
+const USER_VA_LIMIT: usize = 0x4000_0000;
+
+const fn default_signal_ignored(signal: usize) -> bool {
+    matches!(signal, USER_CLONE_SIGCHLD | 18 | 23 | 28)
+}
+
+pub(crate) fn prepare_current_user_signal_delivery(sp: usize) -> UserSignalDelivery {
+    with_current_user_signal_runtime(|runtime| {
+        if runtime.active_frame_base != 0 {
+            return Some(UserSignalDelivery::None);
+        }
+        let mut consumed = false;
+        loop {
+            let deliverable = runtime.pending_mask & !runtime.blocked_mask;
+            if deliverable == 0 {
+                return Some(if consumed {
+                    UserSignalDelivery::Consumed
+                } else {
+                    UserSignalDelivery::None
+                });
+            }
+            let signal = deliverable.trailing_zeros() as usize + 1;
+            let signal_bit = 1usize << (signal - 1);
+            let action = runtime.actions[signal - 1];
+            runtime.pending_mask &= !signal_bit;
+            consumed = true;
+            if action.handler == USER_SIGNAL_IGNORED_HANDLER
+                || (action.handler == 0 && default_signal_ignored(signal))
+            {
+                continue;
+            }
+            if action.handler == 0 {
+                return Some(UserSignalDelivery::DefaultTerminal(signal));
+            }
+            let Some(unrounded_base) = sp.checked_sub(USER_RT_SIGFRAME_SIZE) else {
+                return Some(UserSignalDelivery::BadFrame);
+            };
+            let frame_base = unrounded_base & !0xf;
+            if frame_base == 0
+                || frame_base >= USER_VA_LIMIT
+                || frame_base
+                    .checked_add(USER_RT_SIGFRAME_SIZE)
+                    .is_none_or(|end| end > USER_VA_LIMIT)
+            {
+                return Some(UserSignalDelivery::BadFrame);
+            }
+            let old_mask = runtime.blocked_mask;
+            runtime.blocked_mask |= action.mask;
+            if action.flags & USER_SA_NODEFER == 0 {
+                runtime.blocked_mask |= signal_bit;
+            }
+            if action.flags & USER_SA_RESETHAND != 0 {
+                runtime.actions[signal - 1] = UserSignalAction::default();
+            }
+            runtime.active_frame_base = frame_base;
+            return Some(UserSignalDelivery::Handler(UserSignalDeliveryPlan {
+                signal,
+                action,
+                old_mask,
+                frame_base,
+            }));
+        }
+    })
+    .unwrap_or(UserSignalDelivery::BadFrame)
+}
+
+pub(crate) fn current_user_active_signal_frame_base() -> Option<usize> {
+    with_current_user_signal_runtime(|runtime| Some(runtime.active_frame_base))
+}
+
+pub(crate) fn current_user_commit_rt_sigreturn(frame_base: usize, restored_mask: usize) -> bool {
+    with_current_user_signal_runtime(|runtime| {
+        if frame_base == 0 || runtime.active_frame_base != frame_base {
+            return None;
+        }
+        runtime.blocked_mask = restored_mask & !((1usize << 8) | (1usize << 18));
+        runtime.active_frame_base = 0;
+        Some(())
+    })
+    .is_some()
+}
+
+pub(crate) fn consume_current_pending_wake_signal() -> bool {
+    if let Some((task_ref, cpu_ref)) = current_smp_user_task() {
+        return smp_task_mut_by_ref_on_cpu(task_ref, cpu_ref.logical_id())
+            .is_some_and(Task::consume_pending_wake_signal);
+    }
+    let Some((task_ref, cpu_ref)) = current_user_process_identity() else {
+        return false;
+    };
+    if !task_ref.same_identity(TaskRef::KERNEL_INIT) || !cpu_ref.is_boot_cpu() {
+        return false;
+    }
+    crate::context::context()
+        .kernel_init_task
+        .task_mut()
+        .consume_pending_wake_signal()
+}
+
+pub(crate) fn record_current_smp_user_signal(task_ref: TaskRef, signal: usize) -> bool {
+    let Some((current_ref, cpu_ref)) = current_smp_user_task() else {
+        return false;
+    };
+    current_ref.same_identity(task_ref)
+        && smp_task_mut_by_ref_on_cpu(task_ref, cpu_ref.logical_id())
+            .is_some_and(|task| task.record_signal_terminal(signal))
+}
+
+pub(crate) fn next_user_signal_deadline(logical_id: usize) -> Option<u64> {
+    let _signal_guard = lock_user_signal_state();
+    let mut next = None;
+    if logical_id == 0 {
+        let state = &crate::context::context_ref().kernel_init_user_state;
+        if state.signal_action_syscall_ready() && state.itimer_deadline != 0 {
+            next = Some(state.itimer_deadline);
+        }
+    }
+    let cpu_ref = CpuRef::new(logical_id);
+    let mut index = 0usize;
+    while index < USER_TASK_SLOT_COUNT {
+        if let Some(slot) = USER_TASK_STORAGE[index].get()
+            && slot.occupied
+            && slot.signal_runtime_present
+            && slot.task.flow_cpu_ref() == Some(cpu_ref)
+            && global_registry().live_target_valid(slot.task_ref(), cpu_ref)
+            && slot.signal_runtime.itimer_deadline != 0
+        {
+            next = Some(match next {
+                Some(deadline) => core::cmp::min(deadline, slot.signal_runtime.itimer_deadline),
+                None => slot.signal_runtime.itimer_deadline,
+            });
+        }
+        index += 1;
+    }
+    next
+}
+
+fn expire_signal_runtime_timer(runtime: &mut UserSignalRuntime, now: u64) -> bool {
+    if runtime.itimer_deadline == 0 || runtime.itimer_deadline > now {
+        return false;
+    }
+    runtime.pending_mask |= 1usize << (USER_SIGALRM - 1);
+    if runtime.itimer_interval == 0 {
+        runtime.itimer_deadline = 0;
+    } else {
+        let elapsed = now.saturating_sub(runtime.itimer_deadline);
+        let periods = elapsed
+            .checked_div(runtime.itimer_interval)
+            .and_then(|periods| periods.checked_add(1))
+            .unwrap_or(u64::MAX);
+        runtime.itimer_deadline = runtime
+            .itimer_deadline
+            .saturating_add(runtime.itimer_interval.saturating_mul(periods));
+        if runtime.itimer_deadline <= now {
+            runtime.itimer_deadline = now.saturating_add(1);
+        }
+    }
+    true
+}
+
+pub(crate) fn handle_user_signal_timers(logical_id: usize, now: u64) -> bool {
+    let _signal_guard = lock_user_signal_state();
+    let mut expired = false;
+    if logical_id == 0 {
+        let state = &mut crate::context::context().kernel_init_user_state;
+        if let Some(mut runtime) = UserSignalRuntime::from_pid1(state) {
+            expired |= expire_signal_runtime_timer(&mut runtime, now);
+            runtime.store_pid1(state);
+        }
+    }
+    let cpu_ref = CpuRef::new(logical_id);
+    let mut index = 0usize;
+    while index < USER_TASK_SLOT_COUNT {
+        if let Some(slot) = USER_TASK_STORAGE[index].get_mut()
+            && slot.occupied
+            && slot.signal_runtime_present
+            && slot.task.flow_cpu_ref() == Some(cpu_ref)
+            && global_registry().live_target_valid(slot.task_ref(), cpu_ref)
+        {
+            expired |= expire_signal_runtime_timer(&mut slot.signal_runtime, now);
+        }
+        index += 1;
+    }
+    expired
+}
+
 pub(crate) fn current_smp_user_mm_task() -> Option<(TaskRef, super::cpu::CpuRef)> {
     let binding = current_smp_effective_mm_binding()?;
     Some((binding.current_ref, binding.cpu_ref))
@@ -1055,6 +1496,25 @@ fn prepare_reserved_process_resources(
     let Some(parent_credentials) = parent_credentials else {
         return false;
     };
+    let parent_signal_runtime = {
+        let _signal_guard = lock_user_signal_state();
+        if parent_ref.same_identity(TaskRef::KERNEL_INIT) {
+            UserSignalRuntime::from_pid1(&crate::context::context_ref().kernel_init_user_state)
+        } else {
+            parent_ref.user_slot().and_then(|index| {
+                USER_TASK_STORAGE.get(index)?.get().and_then(|parent| {
+                    (parent.occupied
+                        && parent.signal_runtime_present
+                        && parent.task_ref().same_identity(parent_ref)
+                        && parent.task.flow_cpu_ref() == Some(parent_cpu))
+                    .then_some(parent.signal_runtime.fork_child())
+                })
+            })
+        }
+    };
+    let Some(parent_signal_runtime) = parent_signal_runtime else {
+        return false;
+    };
     let Some(slot) = task_ref
         .user_slot()
         .and_then(|index| USER_TASK_STORAGE[index].get_mut())
@@ -1065,6 +1525,7 @@ fn prepare_reserved_process_resources(
         || slot.occupied
         || slot.process_resources_present
         || slot.credentials_present
+        || slot.signal_runtime_present
         || !slot.task_ref().same_identity(task_ref)
         || parent_files.state() != State::Ready
         || parent_fs.state() != State::Ready
@@ -1086,6 +1547,8 @@ fn prepare_reserved_process_resources(
     }
     slot.credentials = parent_credentials;
     slot.credentials_present = true;
+    slot.signal_runtime = parent_signal_runtime.fork_child();
+    slot.signal_runtime_present = true;
     slot.process_resources_present = true;
     true
 }
@@ -1110,6 +1573,8 @@ fn clear_slot_process_resources(slot: &mut UserTaskStorageSlot) -> bool {
     slot.process_resources_present = false;
     slot.credentials = UserCredentials::root();
     slot.credentials_present = false;
+    slot.signal_runtime = UserSignalRuntime::empty();
+    slot.signal_runtime_present = false;
     true
 }
 
@@ -1150,6 +1615,7 @@ fn reserve_current_smp_fork_task(
         || slot.occupied
         || slot.mm_present
         || slot.credentials_present
+        || slot.signal_runtime_present
         || slot.shared_mm_owner_ref.is_valid()
         || slot.vfork_parent_ref.is_valid()
         || slot.vfork_parent_wake_reservation.is_some()
@@ -1170,6 +1636,8 @@ fn reserve_current_smp_fork_task(
     slot.process_resources_present = false;
     slot.credentials = UserCredentials::root();
     slot.credentials_present = false;
+    slot.signal_runtime = UserSignalRuntime::empty();
+    slot.signal_runtime_present = false;
     slot.shared_mm_owner_ref = TaskRef::NONE;
     slot.vfork_parent_ref = TaskRef::NONE;
     slot.vfork_parent_wake_reservation = None;
@@ -1329,6 +1797,7 @@ fn current_smp_fork_publish_ready(
         && mm_ready
         && slot.process_resources_present
         && slot.credentials_present
+        && slot.signal_runtime_present
         && slot.inbox_reservation.is_some()
         && global_registry().slot_state(task_ref) == Some(UserProcessSlotState::Reserved)
         && global_registry().cpu_ref(task_ref) == candidate.task.flow_cpu_ref()
@@ -1412,6 +1881,7 @@ pub(crate) fn fork_current_smp_user(
                     .same_identity(parent.task.flow_ref())
                 || !parent.process_resources_present
                 || !parent.credentials_present
+                || !parent.signal_runtime_present
             {
                 trace_current_smp_fork_parent_failure("task_runtime_state");
                 return Err(CurrentSmpForkError::InvalidParent);
@@ -1818,6 +2288,7 @@ pub(crate) fn vfork_current_smp_user(
             || !parent.runtime.task_ref_owner().same_identity(parent_ref)
             || !parent.process_resources_present
             || !parent.credentials_present
+            || !parent.signal_runtime_present
         {
             if let Some(fd) = pidfd_fd {
                 let _ = unsafe { parent.files_struct.assume_init_mut() }.close_fd(fd);
@@ -2279,7 +2750,7 @@ pub(crate) fn current_user_mmap_shared_regular(
     let files_struct = current_user_files_struct();
     let mut file_bytes = [0u8; USER_PAGE_SIZE];
     let ctx = crate::context::context();
-    files_struct
+    let file_ref = files_struct
         .read_shared_mmap_fd(fd, prot & 0x2 != 0, offset, &mut file_bytes, &ctx.vfs_core)
         .map_err(|error| match error {
             FileError::BadFd => UserMmapError::BadFd,
@@ -2298,10 +2769,33 @@ pub(crate) fn current_user_mmap_shared_regular(
             prot,
             flags,
             offset,
+            file_ref,
             &file_bytes,
             &mut ctx.page_allocator,
             &ctx.page_metadata_map,
         )
+    }
+}
+
+pub(crate) fn current_user_msync(
+    start: usize,
+    len: usize,
+    flags: usize,
+) -> Result<(), UserMsyncError> {
+    let _memory_guard = lock_user_memory_state();
+    let address_space = if let Some(binding) = current_smp_effective_mm_binding() {
+        smp_effective_mm_resource_ptrs(binding)
+            .map(|(address_space, _)| address_space)
+            .ok_or(UserMsyncError::NoMemory)?
+    } else {
+        &mut crate::context::context().user_address_space as *mut UserAddressSpace
+    };
+    let _files_guard = lock_user_files_state();
+    let ctx = crate::context::context();
+    // SAFETY: the memory lock owns the generation/CPU-checked current mm;
+    // the files lock owns the positioned VFS synchronization boundary.
+    unsafe {
+        (&*address_space).user_msync(start, len, flags, &mut ctx.vfs_core, &ctx.page_metadata_map)
     }
 }
 
@@ -3034,6 +3528,7 @@ static USER_INIT_RUNTIME_ENTERED: AtomicU8 = AtomicU8::new(0);
 pub enum UserMappingKind {
     Empty,
     ElfSegment,
+    SignalTrampoline,
     Stack,
     Heap,
     AnonymousPrivate,
@@ -3402,6 +3897,7 @@ pub struct UserMapping {
     page_offset: usize,
     file_offset: usize,
     filesz: usize,
+    file_ref: Option<FileRef>,
     readable: bool,
     writable: bool,
     executable: bool,
@@ -3425,6 +3921,7 @@ impl UserMapping {
             page_offset: 0,
             file_offset: 0,
             filesz: 0,
+            file_ref: None,
             readable: false,
             writable: false,
             executable: false,
@@ -3447,6 +3944,7 @@ impl UserMapping {
         self.page_offset = 0;
         self.file_offset = 0;
         self.filesz = 0;
+        self.file_ref = None;
         self.readable = false;
         self.writable = false;
         self.executable = false;
@@ -3498,6 +3996,18 @@ impl UserMapping {
         self.stack_ownership_token = stack.top();
     }
 
+    fn init_signal_trampoline(&mut self) {
+        self.reset_empty();
+        self.kind = UserMappingKind::SignalTrampoline;
+        self.vaddr = USER_SIGNAL_TRAMPOLINE_VA;
+        self.memsz = USER_PAGE_SIZE;
+        self.filesz = USER_SIGNAL_TRAMPOLINE_BYTES.len();
+        self.readable = true;
+        self.executable = true;
+        self.user_accessible = true;
+        self.bss_zero_bytes = USER_PAGE_SIZE - self.filesz;
+    }
+
     fn init_heap(&mut self) {
         self.reset_empty();
         self.kind = UserMappingKind::Heap;
@@ -3534,18 +4044,19 @@ impl UserMapping {
         &mut self,
         vaddr: usize,
         memsz: usize,
-        readable: bool,
-        writable: bool,
-        executable: bool,
+        file_ref: FileRef,
+        file_offset: usize,
     ) {
         self.reset_empty();
         self.kind = UserMappingKind::FileShared;
         self.vaddr = vaddr;
         self.memsz = memsz;
+        self.file_offset = file_offset;
         self.filesz = memsz;
-        self.readable = readable;
-        self.writable = writable;
-        self.executable = executable;
+        self.file_ref = Some(file_ref);
+        self.readable = true;
+        self.writable = true;
+        self.executable = false;
         self.user_accessible = true;
         self.page_table_entry_bound = true;
     }
@@ -3568,6 +4079,10 @@ impl UserMapping {
 
     pub const fn file_offset(&self) -> usize {
         self.file_offset
+    }
+
+    pub const fn file_ref(&self) -> Option<FileRef> {
+        self.file_ref
     }
 
     pub const fn filesz(&self) -> usize {
@@ -4402,6 +4917,27 @@ impl UserAddressSpace {
         if self.mapping_count >= MAX_USER_MAPPINGS {
             return Err(ElfError::TooManyMappings);
         }
+        self.mappings[self.mapping_count].init_signal_trampoline();
+        if let Err(error) = materialize_mapping(
+            &mut self.mappings[self.mapping_count],
+            &USER_SIGNAL_TRAMPOLINE_BYTES,
+            page_allocator,
+            page_metadata_map,
+        ) {
+            release_mappings(
+                &mut self.mappings,
+                self.mapping_count,
+                page_allocator,
+                page_metadata_map,
+            );
+            self.mapping_count = 0;
+            self.segment_mapping_count = 0;
+            return Err(error);
+        }
+        self.mapping_count += 1;
+        if self.mapping_count >= MAX_USER_MAPPINGS {
+            return Err(ElfError::TooManyMappings);
+        }
         self.stack_mapping_index = self.mapping_count;
         self.mappings[self.mapping_count].init_stack(stack);
         self.mapping_count += 1;
@@ -4610,6 +5146,7 @@ impl UserAddressSpace {
         prot: usize,
         flags: usize,
         offset: usize,
+        file_ref: FileRef,
         file_bytes: &[u8],
         page_allocator: &mut PageAllocator,
         page_metadata_map: &PageMetadataMap,
@@ -4674,7 +5211,7 @@ impl UserAddressSpace {
         }
 
         let mapping = &mut self.mappings[mapping_index];
-        mapping.init_file_shared(base, len, true, true, false);
+        mapping.init_file_shared(base, len, file_ref, offset);
         mapping.backing_pages[0] = Some(frame);
         mapping.backing_vaddrs[0] = base;
         mapping.backing_page_count = 1;
@@ -4687,6 +5224,107 @@ impl UserAddressSpace {
         }
         crate::arch::riscv64::csr::sfence_vma_addr(base);
         Ok(base)
+    }
+
+    pub fn user_msync(
+        &self,
+        start: usize,
+        len: usize,
+        flags: usize,
+        vfs_core: &mut VfsCore,
+        page_metadata_map: &PageMetadataMap,
+    ) -> Result<(), UserMsyncError> {
+        const MS_ASYNC: usize = 0x1;
+        const MS_INVALIDATE: usize = 0x2;
+        const MS_SYNC: usize = 0x4;
+        const SUPPORTED_FLAGS: usize = MS_ASYNC | MS_INVALIDATE | MS_SYNC;
+
+        if flags & !SUPPORTED_FLAGS != 0
+            || flags & MS_ASYNC != 0 && flags & MS_SYNC != 0
+            || !start.is_multiple_of(USER_PAGE_SIZE)
+        {
+            return Err(UserMsyncError::Invalid);
+        }
+        if self.lifecycle.state() != State::Online {
+            return Err(UserMsyncError::NoMemory);
+        }
+        if len == 0 {
+            return Ok(());
+        }
+        let len = align_up_checked(len, USER_PAGE_SIZE).ok_or(UserMsyncError::NoMemory)?;
+        let end = start.checked_add(len).ok_or(UserMsyncError::NoMemory)?;
+
+        let mut cursor = start;
+        while cursor < end {
+            let mut covering_end = None;
+            let mut index = 0usize;
+            while index < self.mapping_count {
+                let mapping = &self.mappings[index];
+                if mapping.kind() != UserMappingKind::Empty
+                    && let (Some(mapping_start), Some(mapping_end)) =
+                        (mapping.mapped_start(), mapping.mapped_end())
+                    && cursor >= mapping_start
+                    && cursor < mapping_end
+                {
+                    covering_end = Some(mapping_end.min(end));
+                    break;
+                }
+                index += 1;
+            }
+            let next = covering_end.ok_or(UserMsyncError::NoMemory)?;
+            if next <= cursor {
+                return Err(UserMsyncError::NoMemory);
+            }
+            cursor = next;
+        }
+
+        if flags & MS_SYNC == 0 {
+            return Ok(());
+        }
+
+        let mut index = 0usize;
+        while index < self.mapping_count {
+            let mapping = &self.mappings[index];
+            if mapping.kind() != UserMappingKind::FileShared {
+                index += 1;
+                continue;
+            }
+            let mapping_start = mapping.mapped_start().ok_or(UserMsyncError::Io)?;
+            let mapping_end = mapping.mapped_end().ok_or(UserMsyncError::Io)?;
+            let sync_start = start.max(mapping_start);
+            let sync_end = end.min(mapping_end);
+            if sync_start >= sync_end {
+                index += 1;
+                continue;
+            }
+            let file_ref = mapping.file_ref().ok_or(UserMsyncError::Io)?;
+            let page = mapping.backing_page(0).ok_or(UserMsyncError::Io)?;
+            if mapping.backing_page_count() != 1
+                || mapping.backing_page_vaddr(0) != Some(mapping_start)
+            {
+                return Err(UserMsyncError::Io);
+            }
+            let linear = page_metadata_map
+                .page_address(page)
+                .ok_or(UserMsyncError::Io)?;
+            let page_offset = sync_start - mapping_start;
+            let sync_len = sync_end - sync_start;
+            let file_offset = mapping
+                .file_offset()
+                .checked_add(page_offset)
+                .ok_or(UserMsyncError::Io)?;
+            // SAFETY: the mapping owns one page at mapping_start, the
+            // prevalidated overlap stays inside that page, and the memory
+            // resource lock prevents backing replacement during this copy.
+            let bytes = unsafe {
+                core::slice::from_raw_parts((linear + page_offset) as *const u8, sync_len)
+            };
+            vfs_core
+                .write_file_range(file_ref, file_offset, bytes)
+                .map_err(|_| UserMsyncError::Io)?;
+            index += 1;
+        }
+        Ok(())
     }
 
     pub fn user_mprotect(&self, addr: usize, len: usize) -> bool {
@@ -5642,9 +6280,37 @@ impl UserAddressSpace {
                     self.discard_cow_duplicate(child_stack, page_allocator, page_metadata_map);
                     return false;
                 };
-                let Some(frame) = parent_frame.acquire(page_metadata_map) else {
-                    self.discard_cow_duplicate(child_stack, page_allocator, page_metadata_map);
-                    return false;
+                let frame = if parent_mapping.kind() == UserMappingKind::SignalTrampoline {
+                    let Some(frame) =
+                        page_allocator.alloc_user_frame(GfpFlags::kernel(), page_metadata_map)
+                    else {
+                        self.discard_cow_duplicate(child_stack, page_allocator, page_metadata_map);
+                        return false;
+                    };
+                    let (Some(src), Some(dst)) = (
+                        page_metadata_map.page_address(parent_frame.page()),
+                        page_metadata_map.page_address(frame.page()),
+                    ) else {
+                        assert!(frame.release(page_allocator, page_metadata_map));
+                        self.discard_cow_duplicate(child_stack, page_allocator, page_metadata_map);
+                        return false;
+                    };
+                    // SAFETY: both addresses name distinct full user-frame
+                    // allocations held by live references during the copy.
+                    unsafe {
+                        core::ptr::copy_nonoverlapping(
+                            src as *const u8,
+                            dst as *mut u8,
+                            USER_PAGE_SIZE,
+                        );
+                    }
+                    frame
+                } else {
+                    let Some(frame) = parent_frame.acquire(page_metadata_map) else {
+                        self.discard_cow_duplicate(child_stack, page_allocator, page_metadata_map);
+                        return false;
+                    };
+                    frame
                 };
                 let slot = self.mappings[mapping_index].backing_page_count;
                 self.mappings[mapping_index].backing_pages[slot] = Some(frame);
@@ -7070,6 +7736,10 @@ pub struct KernelInitTaskUserState {
     pending_signal_set_empty_first_slice: bool,
     blocked_signal_mask: usize,
     signal_actions: [UserSignalAction; USER_SIGNAL_COUNT],
+    pending_signal_mask: usize,
+    itimer_deadline: u64,
+    itimer_interval: u64,
+    active_signal_frame_base: usize,
     rt_sigprocmask_observed: bool,
     rt_sigaction_observed: bool,
     rt_sigtimedwait_observed: bool,
@@ -8143,6 +8813,7 @@ impl UserTaskSet {
             || slot.occupied
             || slot.mm_present
             || slot.credentials_present
+            || slot.signal_runtime_present
             || slot.inactive_address_space.state() != State::Base
             || slot.inactive_stack.state() != State::Base
         {
@@ -8159,6 +8830,8 @@ impl UserTaskSet {
         slot.process_resources_present = false;
         slot.credentials = UserCredentials::root();
         slot.credentials_present = false;
+        slot.signal_runtime = UserSignalRuntime::empty();
+        slot.signal_runtime_present = false;
         slot.initial_trap_frame = None;
         let reservation = match super::kernel_task::reserve_inbound(
             task_ref,
@@ -8295,6 +8968,7 @@ impl UserTaskSet {
             && slot.mm_present
             && slot.process_resources_present
             && slot.credentials_present
+            && slot.signal_runtime_present
             && slot.inbox_reservation.is_some()
             && candidate.task.task_ref().same_identity(task_ref)
             && global_registry().slot_state(task_ref) == Some(UserProcessSlotState::Reserved)
@@ -11932,10 +12606,11 @@ fn user_mapping_kind_index(kind: UserMappingKind) -> usize {
     match kind {
         UserMappingKind::Empty => 0,
         UserMappingKind::ElfSegment => 1,
-        UserMappingKind::Stack => 2,
-        UserMappingKind::Heap => 3,
-        UserMappingKind::AnonymousPrivate => 4,
-        UserMappingKind::FileShared => 5,
+        UserMappingKind::SignalTrampoline => 2,
+        UserMappingKind::Stack => 3,
+        UserMappingKind::Heap => 4,
+        UserMappingKind::AnonymousPrivate => 5,
+        UserMappingKind::FileShared => 6,
     }
 }
 
@@ -12120,6 +12795,10 @@ impl KernelInitTaskUserState {
             pending_signal_set_empty_first_slice: false,
             blocked_signal_mask: 0,
             signal_actions: [UserSignalAction::default(); USER_SIGNAL_COUNT],
+            pending_signal_mask: 0,
+            itimer_deadline: 0,
+            itimer_interval: 0,
+            active_signal_frame_base: 0,
             rt_sigprocmask_observed: false,
             rt_sigaction_observed: false,
             rt_sigtimedwait_observed: false,
@@ -12735,6 +13414,10 @@ impl KernelInitTaskUserState {
         self.pending_signal_set_empty_first_slice = true;
         self.blocked_signal_mask = 0;
         self.signal_actions = [UserSignalAction::default(); USER_SIGNAL_COUNT];
+        self.pending_signal_mask = 0;
+        self.itimer_deadline = 0;
+        self.itimer_interval = 0;
+        self.active_signal_frame_base = 0;
         self.pending_sigchld = false;
         self.rt_sigtimedwait_sleeping = false;
         self.rt_sigtimedwait_wait_queue = UserSignalWaitQueue::new();

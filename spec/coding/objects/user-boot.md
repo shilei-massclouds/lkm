@@ -40,6 +40,70 @@ aggregate; no current child may read
 or mutate `Context.kernel_init_user_state` as a global credential carrier. UID/GID getters, res-id getters,
 `getgroups`, and the bounded root-euid setters all use this route.
 
+Signal syscalls use the same occurrence resolution rule but a distinct IRQ-safe signal lock. Every published
+aggregate owns one `SignalRuntime` containing 64 three-word RISC-V `rt_sigaction` entries, a 64-bit blocked mask,
+a 64-bit pending mask, one `ITIMER_REAL { deadline_ticks, interval_ticks }`, and one active-frame record. PID 1
+stores the same value in its stable registry aggregate; no dynamic process may read or mutate the legacy
+`Context.kernel_init_user_state` signal fields. Ordinary fork copies only the action table and blocked mask while
+the child is still private; its pending mask, timer and active-frame record start empty. Remote pending-bit
+publication holds a live target `UserProcessLease` and the signal lock, but never an owner-CPU aggregate write
+capability. The lock order is registry lease, signal lock, then—only after dropping the signal lock—scheduler inbox
+publication. Calling Scheduler or sending an IPI while the signal lock is held is forbidden.
+
+RISC-V syscalls 134 and 135 retain their existing 24-byte kernel action and 8-byte kernel sigset layouts,
+respectively, but route all reads and commits to that current aggregate. The RISC-V kernel action words are
+`handler, flags, mask`; unlike obsolete-restorer architectures, RISC-V does not expose a restorer word in this
+kernel ABI. Signal bits use `1 << (signal - 1)`; `SIGKILL` 9 and `SIGSTOP` 19 are removed from masks and reject
+installed handlers. Delivery implements `SA_SIGINFO=0x4`, `SA_RESTART=0x10000000`,
+`SA_NODEFER=0x40000000` and `SA_RESETHAND=0x80000000`; other Linux-accepted disposition flags may be retained but
+have no effect outside their represented semantics. Unsupported flag bits are cleared before storing the action,
+matching the bounded Linux `do_sigaction()` route.
+
+RISC-V syscall 103 decodes `setitimer(which, new_value, old_value)`. Only signed `which == ITIMER_REAL(0)` is
+accepted; other values return `EINVAL`. `new_value`, when non-null, imports exactly 32 bytes as four signed i64
+fields in `{ interval_sec, interval_usec, value_sec, value_usec }` order. Seconds must be nonnegative and each
+microsecond field must be in `0..1_000_000`; bad values return `EINVAL`, address failure returns `EFAULT`, and
+tick conversion rounds a nonzero duration up so it cannot become an immediate zero interval. Under the signal
+lock, snapshot the old remaining/interval value against the current monotonic tick, then atomically install,
+replace or cancel the timer. A null `new_value` is query-only. Copy the staged old value to `old_value`, when
+non-null, only after the new state is committed; an `EFAULT` from that copyout does not roll the new timer back.
+Reprogram the local clockevent mux after releasing the signal lock. Expiration merges `SIGALRM` bit 14, advances a
+periodic deadline by enough whole intervals to lie in the future, or clears a one-shot timer.
+
+RISC-V syscall 129 decodes `kill(pid, signal)` as signed 32-bit values. This slice accepts a positive PID naming an
+exact published occurrence; absent or stale occurrences return `ESRCH`, signal outside `0..64` returns `EINVAL`,
+and the root-effective-UID permission check succeeds. Signal zero performs only existence and permission checks.
+A successful nonzero send merges the target pending bit while the target lease remains live, then publishes a
+generation-checked `Wake` record to its immutable CpuRef and requests that CPU's IPI after dropping the signal
+lock. Inbox consumption records a pending wake when the target is still `OnCpu` or has merely declared sleep, and
+enqueues exactly once when it is already blocked `Online`; `PreparePrev` consumes a matching earlier wake instead
+of sleeping. Thus the final pending-mask recheck and sleep transition have no lost-wake window.
+
+Every address space maps one private page at fixed VA `0x3e00_0000`, outside ELF/interpreter, heap/mmap and the
+minimum randomized stack/guard range. The mapping kind is `SignalTrampoline`; it owns one frame, is user-readable
+and executable but not writable (RX/NW), and contains little-endian instructions `0x08b00893` (`addi a7,zero,139`)
+and `0x00000073` (`ecall`) followed by zeroes. Setup, fork COW duplication, exec replacement, failure rollback and
+teardown must account for that frame exactly once. It is never made COW/writable, and the user stack remains RW/NX.
+
+Before a user return, delivery selects the lowest unblocked pending signal under the signal lock. `SIG_IGN`
+dequeues it; a default-terminal action records the signal-form wait status and uses the existing terminal handoff.
+For a handler, delivery requires no active frame, snapshots the action and old mask, applies the action mask plus
+the delivered signal unless `SA_NODEFER`, resets the action when `SA_RESETHAND`, and reserves a 16-byte-aligned
+1088-byte frame below the current user SP. Nested deliverable signals remain pending until that frame returns.
+The frame layout is Linux RISC-V `rt_sigframe`: 128-byte `siginfo_t` at offset 0 and 960-byte `ucontext_t` at
+offset 128; `uc_sigmask` is at absolute offset 168 and `uc_mcontext` at absolute offset 304. The mcontext begins
+with 32 little-endian u64 integer values in `pc, x1, ..., x31` order. Delivery checks and writes the whole range,
+sets `sp` to the frame base, `a0` to the signal, `a1` to the siginfo address, `a2` to the ucontext address, `ra` to
+`0x3e00_0000`, and `sepc` to the handler. A signal interrupting the bounded blocking wait4 restores the same ecall
+PC and original argument registers when its action has `SA_RESTART`; otherwise the saved continuation returns
+`-EINTR`. No generic restart block is represented.
+
+RISC-V syscall 139 is accepted only while the exact current aggregate owns an active frame whose recorded base
+equals the current frame base. It imports the saved mask and integer context from that 1088-byte user frame,
+clears `SIGKILL`/`SIGSTOP` from the restored mask, validates a user `sepc` and aligned user `sp`, clears the active
+record, and restores `pc` plus x1..x31 without ordinary syscall-result assignment or four-byte `sepc` advance.
+An invalid/missing frame follows the Linux bad-frame terminal path rather than returning forged success.
+
 `fchownat(AT_FDCWD, path, uid, gid, flags)` first performs checked path usercopy, validates the bounded flags and
 relative-dirfd slice, then snapshots the current aggregate credentials through that lease/lock route. Only the
 root-euid proxy may mutate ownership. Under the files/fs guard it resolves the path and updates the transient
@@ -64,6 +128,14 @@ overlong, non-directory, symlink-loop and backend path failures retain their dis
 resolution precedes output-pointer validation as in Linux 6.12 `user_statfs()`/`do_statfs_native()`. The complete
 result is staged in kernel memory and copied only after successful resolution, so `EFAULT` never publishes a
 partially constructed result. Other filesystem kinds and live ext2 free-space accounting remain unsupported.
+
+For an existing read-only ordinary pathname, `openat(AT_FDCWD, ...)` accepts
+`O_NOFOLLOW` together with the already admitted `O_DIRECTORY`, `O_LARGEFILE`
+and `O_CLOEXEC` bits. The flag is carried explicitly into the VFS lookup: all
+parent components use the ordinary symlink-follow walk, while the final
+component is looked up without following it. A final symlink maps to `ELOOP`;
+`O_DIRECTORY` still maps a resolved non-directory to `ENOTDIR`. `O_NOFOLLOW`
+does not widen the bounded create, TTY or `/dev/null` flag shapes.
 
 For an ordinary pathname, the first writable `openat` slice accepts only
 `AT_FDCWD` plus `O_CREAT|O_EXCL|O_RDWR`, with optional `O_LARGEFILE` and
@@ -279,7 +351,9 @@ wake at this point. The ordinary wait/reap wake is not emitted yet: the exit lea
 terminal Scheduler handoff using the exact current TaskRef and owner CpuRef. This handoff is not the fixed Flow's
 ordinary resumable Schedule signal: it requires the registry zombie, Destroyed Runtime and Destroyed fixed Flow,
 keeps the Task breakpoint invalid, and commits `Task.OnCpu -> Task.Offline` without publishing a resumable context.
-The ordinary Flow-sender Schedule entry and all of its sender validation remain unchanged.
+Its terminal prepare step discards any stale pending wake and deactivates the Task before next-task selection, so
+the zombie cannot regain runnable eligibility. The ordinary Flow-sender Schedule entry and all of its sender
+validation remain unchanged.
 
 Before zombie publication, exit holds the aggregate files-resource lock and releases every live inherited
 open-file-description/pipe endpoint reference exactly once. A successful release must clear the aggregate's
@@ -322,8 +396,17 @@ Scheduler; a dynamic parent must never substitute PID1, `KernelInitTask`, CPU0 o
 
 SMP online freezes the ordered online CpuRef array by logical id. Ordinary fork selects
 `online_cpus[child_pid % cpu_count]`; that CpuRef is immutable for the child's lifetime. vfork/CLONE_VM selects the
-parent CpuRef and blocks the parent until child exec/exit completes. No affinity ABI, migration, runtime hotplug,
-automatic balancing or concurrent shared-mm cross-CPU execution is represented.
+parent CpuRef and blocks the parent until child exec/exit completes. RISC-V syscall 123 provides only the read-only
+`sched_getaffinity(pid, len, mask)` slice required to observe the current process. Decode `pid` as signed 32-bit and
+`len` as unsigned 32-bit. Validate that `len * 8` covers the runtime `possible_cpu_count` and that `len` is aligned
+to an 8-byte RISC-V `unsigned long` before resolving a process; either failure returns `EINVAL`. PID 0 and the
+positive PID of the exact current registry occurrence select that occurrence; a negative or other PID returns
+`ESRCH` in this bounded slice. Hold its generation/CPU-checked `UserProcessLease` while snapshotting the
+`CpuGroup` active bits by logical ID. Because `MAX_CPUS <= 64`, the exported cpumask is one zero-initialized 8-byte
+native word; copy exactly `min(len, 8)` bytes, return that byte count, and leave any trailing user buffer untouched.
+An inaccessible output range returns `EFAULT`. The action neither rewrites the Task's fixed CpuRef nor calls the
+Scheduler. `sched_setaffinity`, migration, runtime hotplug, automatic balancing and concurrent shared-mm cross-CPU
+execution remain unrepresented.
 
 Syscall and user-mode traps are effective-flow children above the lifetime TaskFlow. They may schedule;
 on return, the scheduler restores the saved trap leaf from TaskThreadContext before resuming the
@@ -365,12 +448,27 @@ the open description. Mapping prepare allocates and zeroes one `UserFrameRef`,
 copies the file range into it, prepares any required L0 table, installs the
 leaf PTE, and only then publishes the VMA; failure releases staged ownership
 and leaves the prior fd, VFS and address space unchanged. The VMA owns the
-frame independently of the fd and pathname, so close or unlink cannot
-invalidate it. Ordinary fork acquires the same frame reference for this VMA
+frame and stores the stable VFS `FileRef` plus file offset independently of the
+fd and pathname, so close or unlink cannot invalidate it. Ordinary fork copies
+that backing identity, acquires the same frame reference for this VMA,
 and installs a writable non-COW leaf in parent and child. Whole-VMA munmap
 clears the leaf and releases exactly that address-space reference. Full page
 cache coherence, partial mappings, offsets beyond EOF and additional mapping
 flag combinations remain deferred.
+
+RISC-V syscall 227 implements the Linux 6.12 `msync(start, len, flags)` boundary.
+It accepts only `MS_ASYNC|MS_INVALIDATE|MS_SYNC`, rejects simultaneous ASYNC and
+SYNC and an unaligned start with `EINVAL`, rounds a nonzero length upward with
+checked arithmetic, returns success for zero length, and returns `ENOMEM` if any
+part of the rounded range is outside a current VMA. Hold the user-memory lock
+while validating the current generation/CPU-checked address space, then the
+files/VFS lock while syncing file-backed ranges. `MS_SYNC` on the bounded shared
+file VMA copies its current frame bytes to the VMA's stable `FileRef` at the
+stored file offset through a positioned VFS range write; this survives fd close
+and pathname unlink and must not change `File.position`. Anonymous/private VMA
+ranges and accepted non-SYNC flag combinations have no file side effect.
+Backing lookup or positioned-write failure is reported as `EIO`, never converted
+to success.
 
 The first anonymous-private `munmap` slice accepts exactly one complete, page-aligned anonymous VMA. It
 prevalidates every resident leaf against the VMA backing before mutation, clears those leaves, performs a
@@ -403,5 +501,6 @@ adding or reordering checkpoints.
 
 `InvalidContext` remains a kernel invariant failure and must not be relabeled as SIGSEGV. Syscall usercopy may use
 the same classifier for range preparation, but `SegvMaperr`/`SegvAccerr` there remain a false/EFAULT result because
-no user instruction trap occurred. OOM remains the disjoint signal-9 Task terminal. This slice does not inspect the
-registered action table, create a signal frame, enter a handler, implement `rt_sigreturn`, or write a core image.
+no user instruction trap occurred. OOM remains the disjoint signal-9 Task terminal. The bounded asynchronous
+handler path above does not change the existing synchronous SIGSEGV/OOM terminal classification; user handlers
+for those synchronous faults, core images and alternate signal stacks remain deferred.

@@ -1,5 +1,5 @@
 schema_version = 2
-name = "ltp-frontier-post-read-lo"
+name = "ltp-supported-post-read-lo"
 purpose = "diagnostic"
 timeout_seconds = 300
 
@@ -27,7 +27,7 @@ stdin_steps = [
   { ready_marker = "~ #", payload = "tail -n 8 /opt/lt\u0003" },
   { ready_marker = "~ #", payload = "sha256sum /opt/ltp/run-syscalls.sh\n" },
   { ready_marker = "~ #", payload = "/bin/sh -n /opt/ltp/run-syscalls.sh\n" },
-  { ready_marker = "~ #", payload = "/opt/lkm/tests/ltp-select.sh frontier\n" },
+  { ready_marker = "~ #", payload = "/opt/lkm/tests/ltp-select.sh supported\n" },
   { ready_marker = "~ #", payload = "echo lkm-ltp-post-read: before-second-hash\n" },
   { ready_marker = "~ #", payload = "sha256sum /opt/ltp/run-syscalls.sh\n" },
   { ready_marker = "~ #", payload = "echo lkm-ltp-post-read: complete\n" },

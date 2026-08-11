@@ -1,0 +1,18 @@
+schema_version = 2
+name = "df-0016-ltp-trap-root-stale-linux-object"
+description = "Repeat the canonical linux-object supported LTP batch as a routine regression for the SSIP TrapOccurrence root-binding failure first observed during geteuid01."
+mode = "stress"
+test = "ltp-lo"
+runs = 50
+classifier = "../classifiers/df-0016-ltp-trap-root-stale-linux-object.toml"
+
+[metadata]
+defect = "DF-0016"
+observation_mode = "ltp-trap-root-generation-forensics"
+ordinary_path_required = true
+default_suite = true
+rootfs_profile = "canonical"
+payload = "stock LTP four-entry supported list through the unchanged run-syscalls.sh harness on the linux-object provider"
+first_observation = "impl/arceos_ex/tests/stress/out/20260810T152908.926203Z-ltp-supported-linux-object/runs/run-0032"
+accepted_sample = "impl/arceos_ex/tests/stress/out/20260810T155305.234196Z-df-0016-ltp-trap-root-stale-linux-object"
+scope_note = "Preserve the SSIP bind_root installed_root_stale boundary without changing the supported list, harness, provider, eight-CPU topology, timeout, completion marker, or canonical rootfs; successful samples do not erase the frozen failure."

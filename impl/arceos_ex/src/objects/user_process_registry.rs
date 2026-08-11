@@ -353,6 +353,22 @@ impl UserProcessRegistry {
             .then_some(slot.pid)
     }
 
+    pub fn lookup_published_pid(&self, pid: usize) -> Option<(TaskRef, CpuRef)> {
+        let inner = self.inner.lock();
+        if !inner.ready || pid == 0 {
+            return None;
+        }
+        let mut index = 0usize;
+        while index < USER_PROCESS_SLOT_COUNT {
+            let slot = &inner.slots[index];
+            if slot.state == UserProcessSlotState::Published && slot.pid == pid {
+                return Some((slot.task_ref, slot.cpu_ref));
+            }
+            index += 1;
+        }
+        None
+    }
+
     pub fn parent_pid(&self, task_ref: TaskRef) -> Option<usize> {
         let inner = self.inner.lock();
         let index = registry_slot_for_ref(task_ref)?;
